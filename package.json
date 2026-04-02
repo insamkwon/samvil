@@ -1,0 +1,8 @@
+{
+  "name": "samvil",
+  "version": "0.1.0",
+  "description": "AI vibe-coding harness. One-line input, full web app output.",
+  "author": "insam",
+  "license": "UNLICENSED",
+  "type": "module"
+}

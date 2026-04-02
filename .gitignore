@@ -1,0 +1,7 @@
+node_modules/
+.next/
+.DS_Store
+harness-feedback.log
+mcp/__pycache__/
+mcp/.venv/
+mcp/*.egg-info/
