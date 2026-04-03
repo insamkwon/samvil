@@ -1,0 +1,15 @@
+{
+  "name": "samvil",
+  "owner": {
+    "name": "insam",
+    "email": "insam@samvil.dev"
+  },
+  "plugins": [
+    {
+      "name": "samvil",
+      "source": "./",
+      "description": "AI vibe-coding harness: one-line input, full web app output.",
+      "category": "development"
+    }
+  ]
+}
