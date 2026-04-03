@@ -14,21 +14,40 @@ You are adopting the role of **Scaffolder**. Create a project directory with a v
 
 ## Process
 
-### Step 1: Locate the Template
+### Step 1: Locate and Copy the Template
 
-The template is at this plugin's directory: `templates/nextjs-14/`
-
-Find the plugin directory by checking where this skill file was loaded from. The template is a sibling directory.
-
-### Step 2: Copy Template
+The template is in this plugin's cache. Try these paths in order:
 
 ```bash
-# Copy template files to project directory (project dir already exists from orchestrator)
-cp -r <plugin-dir>/templates/nextjs-14/* ~/dev/<seed.name>/
+# Try to find the template
+TEMPLATE=""
+for dir in \
+  ~/.claude/plugins/cache/samvil/samvil/*/templates/nextjs-14 \
+  ~/dev/samvil/templates/nextjs-14; do
+  if [ -d "$dir" ]; then
+    TEMPLATE="$dir"
+    break
+  fi
+done
+echo "Template: $TEMPLATE"
+```
 
-# Create additional directories
+**If template found:** Copy it to the project directory:
+
+```bash
+cp -r $TEMPLATE/* ~/dev/<seed.name>/
 mkdir -p ~/dev/<seed.name>/components ~/dev/<seed.name>/lib ~/dev/<seed.name>/.samvil
 ```
+
+**If template NOT found (fallback):** Generate the project using `create-next-app`:
+
+```bash
+cd ~/dev
+npx create-next-app@14 <seed.name> --typescript --tailwind --app --src-dir=false --import-alias="@/*" --eslint --use-npm <<< $'No\n'
+mkdir -p ~/dev/<seed.name>/components ~/dev/<seed.name>/lib ~/dev/<seed.name>/.samvil
+```
+
+Then simplify `app/layout.tsx` (replace local fonts with Google Inter) and `app/page.tsx` (replace boilerplate with simple welcome page) as described in Step 3 below.
 
 ### Step 3: Customize
 
