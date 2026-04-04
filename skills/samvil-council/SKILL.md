@@ -32,7 +32,7 @@ If `agent_tier` is `"minimal"`, print:
 [SAMVIL] Council: skipped (minimal tier)
 ```
 
-Then invoke `samvil:scaffold` and return.
+Then invoke `samvil:design` and return.
 
 ## Step 2: Round 1 — Research (if tier ≥ thorough)
 
