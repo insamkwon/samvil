@@ -86,7 +86,28 @@ Then simplify `app/layout.tsx` (replace local fonts with Google Inter) and `app/
    .samvil/
    ```
 
-### Step 4: Install Dependencies (INV-2)
+### Step 4: Initialize shadcn/ui
+
+```bash
+cd ~/dev/<seed.name>
+npx shadcn@latest init -y -d > .samvil/shadcn-init.log 2>&1
+```
+
+This creates: `components.json`, `lib/utils.ts` (cn() utility), updates `tailwind.config.ts` and `globals.css`.
+
+Add commonly needed components:
+```bash
+npx shadcn@latest add button card input dialog -y >> .samvil/shadcn-init.log 2>&1
+```
+
+### Step 4b: Apply Design Preset
+
+Read `interview-summary.md` for design preset (productivity/creative/minimal/playful).
+Read `references/design-presets.md` for the preset's CSS variables.
+
+Update `app/globals.css` CSS variables to match the design preset colors.
+
+### Step 5: Install Dependencies (INV-2)
 
 ```bash
 cd ~/dev/<seed.name>

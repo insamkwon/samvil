@@ -59,12 +59,34 @@ If `project.state.json` already exists when `/samvil` is invoked:
 
 Wait for user response. If resume: skip to the current stage's skill.
 
-### Step 4: Start the Chain
+### Step 4: Select Tier
+
+Before starting interview, ask user to choose tier via AskUserQuestion:
+
+```
+question: "어떤 수준으로 만들까요?"
+header: "Tier"
+options:
+  - label: "빠르게 (minimal)"
+    description: "질문 적게, Council 없이 바로 빌드. 프로토타입용."
+  - label: "일반 (standard)"  
+    description: "기본 검증 + Council 토론. 대부분의 프로젝트에 추천."
+  - label: "꼼꼼하게 (thorough)"
+    description: "깊은 인터뷰 + 디자인 리뷰. 품질 중요할 때."
+  - label: "풀옵션 (full)"
+    description: "모든 에이전트 총동원. 큰 프로젝트용."
+```
+
+선택된 tier를 `project.state.json`에 `selected_tier` 필드로 저장.
+인터뷰 스킬이 이 tier를 읽어서 질문 깊이를 조절.
+
+### Step 5: Start the Chain
 
 Print:
 ```
 [SAMVIL] Starting pipeline for: "<app idea>"
 [SAMVIL] Project: ~/dev/<project-name>/
+[SAMVIL] Tier: <selected tier>
 [SAMVIL] Stage 1/5: Interview...
 ```
 

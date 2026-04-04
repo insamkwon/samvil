@@ -168,15 +168,10 @@ Invoke the Skill tool with skill: `samvil:qa`
 2. **TypeScript strict** — no `any` in business logic. Use proper interfaces.
 3. **PascalCase** components, one component per file
 4. **State management** — follow `seed.tech_stack.state` pattern
-5. **Tailwind only** — utility classes. No inline styles. No CSS modules.
-6. **`cn()` utility** — use `cn()` from `lib/utils.ts` (clsx + tailwind-merge) for all className composition. Create it if it doesn't exist:
-   ```typescript
-   // lib/utils.ts
-   import { clsx, type ClassValue } from 'clsx'
-   import { twMerge } from 'tailwind-merge'
-   export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)) }
-   ```
+5. **shadcn/ui 컴포넌트 우선** — Button, Card, Input, Dialog 등은 `@/components/ui/`의 shadcn 컴포넌트 사용. 직접 만들지 말 것. 필요한 컴포넌트가 없으면 `npx shadcn@latest add <component>` 실행.
+6. **`cn()` utility** — `@/lib/utils`의 `cn()` 사용 (shadcn init이 자동 생성). 모든 className 조합에 사용.
 7. **Responsive** — use `md:`, `lg:` prefixes for layout changes
+8. **Context7 활용** — shadcn/ui 컴포넌트 사용법이 불확실하면 `mcp__plugin_context7_context7__query-docs` 도구로 최신 문서 조회.
 8. **`@/` imports** — absolute imports via the alias
 9. **Real content** — no "Lorem ipsum" or placeholder text
 10. **Empty states** — every list/collection handles zero items
