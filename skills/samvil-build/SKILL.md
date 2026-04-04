@@ -45,57 +45,107 @@ echo "Exit code: $?"
   Build: passing
 ```
 
-## Phase B: Features (Sequential)
+## Phase B: Features
 
 Read `seed.features` sorted by priority (1 first, then 2).
-Respect dependency order: if feature B `depends_on` feature A, build A first.
+Read `seed.agent_tier` to determine build mode.
+
+### Step 1: Classify Features into Batches
+
+Group features by dependency and independence:
+
+```
+Batch 1: All independent=true P1 features (no depends_on)
+  → Can be built in parallel if tier >= standard
+Batch 2: Features that depend on Batch 1 (sequential)
+Batch 3: Independent P2 features (parallel if applicable)
+Batch 4: Dependent P2 features (sequential)
+```
+
+### Step 2: Build Each Batch
+
+#### If tier is `minimal` — Sequential (inline, no spawn)
+
+Build features one at a time (same as v1):
 
 **For each feature:**
 
-### 1. Re-read Context Kernel (INV-1)
-
-Re-read `project.seed.json` + `project.state.json` before every feature.
-Context may have been compressed — files are the truth.
-
-### 2. Plan the feature
-
-What components? What state changes? What routes?
-Keep it minimal — implement exactly what the seed says, nothing more.
-
-### 3. Implement
-
-- Create/modify components in `components/`
-- Create/modify lib files in `lib/`
-- Create new routes in `app/` if needed
-- **Keep existing code working** — don't break what's already built
-
-### 4. Build verify (INV-2)
-
-```bash
-cd ~/dev/<seed.name>
-npm run build > .samvil/build.log 2>&1
-echo "Exit code: $?"
-```
-
-**Circuit Breaker (MAX_RETRIES=2):**
-- Build fails → `tail -30 .samvil/build.log` → analyze → fix → retry
-- 2 failures → mark feature as `failed` in state, **continue to next feature**
-
-### 5. Update state
-
-- Success: add feature name to `completed_features`
-- Failure: add feature name to `failed`
-- Set `in_progress` to `null`
+1. **Re-read Context Kernel (INV-1)** — Re-read `project.seed.json` + `project.state.json` before every feature. Context may have been compressed — files are the truth.
+2. **Plan** — What components? What state changes? What routes? Keep minimal.
+3. **Implement** — Create/modify components, lib, routes. Keep existing code working.
+4. **Build verify (INV-2)**:
+   ```bash
+   cd ~/dev/<seed.name>
+   npm run build > .samvil/build.log 2>&1
+   ```
+   Circuit Breaker: MAX_RETRIES=2. 2 failures → mark as `failed`, continue.
+5. **Update state** — Add to `completed_features` or `failed`.
 
 ```
 [SAMVIL] Feature: <name> ✓  [N/M features complete]
+```
+
+#### If tier is `standard` or higher — Parallel Dispatch (spawn workers)
+
+For batches with 2+ independent features, spawn CC Agent workers **in parallel**:
+
+```
+Agent(
+  description: "SAMVIL Build: <feature-name>",
+  prompt: "You are a feature builder for SAMVIL.
+
+Read your persona:
+<paste content of agents/frontend-dev.md>
+
+## Context
+Project: ~/dev/<seed.name>/
+Seed: <paste seed JSON>
+State: <paste state JSON>
+References: Read ~/dev/samvil/references/web-recipes.md for patterns.
+
+## Your Task
+Build ONLY the feature: <feature-name>
+Description: <feature description from seed>
+
+## Rules
+- Read existing code first to understand current structure
+- Create components in components/<feature-name>/
+- Do NOT modify shared files (layout.tsx, store root) unless absolutely necessary
+- Do NOT touch other features' components
+- Run: cd ~/dev/<seed.name> && npm run build > .samvil/build-<feature>.log 2>&1
+- Report: files created, files modified, build status
+
+## Code Quality
+<paste Code Quality Rules section>",
+  subagent_type: "general-purpose"
+)
+```
+
+**Spawn all independent features in ONE message (parallel).**
+
+After all workers return:
+
+1. **Integration build** — Run `npm run build` to verify no conflicts
+2. **Conflict detection** — If build fails after parallel workers:
+   ```
+   [SAMVIL] Parallel build conflict detected
+     Likely cause: multiple workers modified shared files
+     Resolution: re-building conflicting feature sequentially...
+   ```
+   Re-run the conflicting feature inline (sequential) reading the current state.
+3. **Update state** — Mark each feature as completed or failed.
+
+```
+[SAMVIL] Batch 1 (parallel): auth ✓, task-crud ✓  [2/4]
+[SAMVIL] Batch 2 (sequential): kanban-view ✓      [3/4]
+[SAMVIL] Batch 3: dashboard ✓                      [4/4]
 ```
 
 ### After All Features
 
 ```
 [SAMVIL] Stage 4/5: Build complete
-  Features: N/M passed
+  Features: N/M passed (X parallel, Y sequential)
   Failed: [list or "none"]
   Build: passing
 ```
