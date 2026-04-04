@@ -5,3 +5,6 @@ harness-feedback.log
 mcp/__pycache__/
 mcp/.venv/
 mcp/*.egg-info/
+mcp/samvil_mcp/__pycache__/
+mcp/.pytest_cache/
+mcp/tests/__pycache__/
