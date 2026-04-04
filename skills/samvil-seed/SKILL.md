@@ -79,20 +79,32 @@ If user requests changes: modify the seed and re-present. Do NOT re-interview.
 
 Write the approved seed JSON to `~/dev/<project>/project.seed.json` using the Write tool.
 
-### 2. Update state
+### 2. Update state and chain
+
+Read `seed.agent_tier` to determine next step:
+
+**If tier is `"minimal"` (no council):**
 
 Update `project.state.json`: set `current_stage` to `"scaffold"`.
 
-### 3. Print progress
-
 ```
 [SAMVIL] Stage 2/5: Seed ✓
+[SAMVIL] Council: skipped (minimal tier)
 [SAMVIL] Stage 3/5: Scaffolding project...
 ```
 
-### 4. Chain to next skill
-
 Invoke the Skill tool with skill: `samvil:scaffold`
+
+**If tier is `"standard"` or higher (council runs):**
+
+Update `project.state.json`: set `current_stage` to `"council"`.
+
+```
+[SAMVIL] Stage 2/5: Seed ✓
+[SAMVIL] Running Council Gate A...
+```
+
+Invoke the Skill tool with skill: `samvil:council`
 
 ## Rules
 

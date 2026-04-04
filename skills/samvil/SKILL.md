@@ -10,7 +10,8 @@ You are the SAMVIL orchestrator. Take the user's one-line app idea and guide it 
 ## Pipeline
 
 ```
-[1] Interview → [2] Seed → [3] Scaffold → [4] Build → [5] QA → [Auto] Retro
+[1] Interview → [2] Seed → [Gate A] Council → [3] Scaffold → [4] Build → [5] QA → [Auto] Retro
+                              ↑ skip if minimal tier
 ```
 
 ## How to Run
