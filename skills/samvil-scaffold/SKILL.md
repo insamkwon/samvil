@@ -11,6 +11,9 @@ You are adopting the role of **Scaffolder**. Create a project directory with a v
 
 1. Read `project.seed.json` from the project directory
 2. Read `project.state.json` → confirm `current_stage` is `"scaffold"`
+3. Read `project.blueprint.json` → architecture decisions (if exists, created by Design phase)
+   - Use `key_libraries` to know which npm packages to install
+   - Use `component_structure` to create feature directories
 
 ## Process
 
@@ -54,9 +57,11 @@ Then simplify `app/layout.tsx` (replace local fonts with Google Inter) and `app/
 1. **Update `package.json`**:
    - Set `"name"` to `seed.name`
    - Set `"description"` to `seed.description`
-   - Add dependencies based on `seed.tech_stack`:
+   - Add dependencies based on `seed.tech_stack` AND `blueprint.key_libraries` (if blueprint exists):
      - If `state` = `"zustand"`: add `"zustand": "^4.5.0"` to dependencies
      - If any feature involves drag-and-drop: add `"@hello-pangea/dnd": "^16.6.0"`
+     - If blueprint has `key_libraries`: add each library to dependencies
+     - Always add: `"clsx": "^2.1.0"`, `"tailwind-merge": "^2.2.0"` (for cn() utility)
 
 2. **Update `app/layout.tsx`**:
    - Set `metadata.title` to seed.name (title-cased, spaces for hyphens)

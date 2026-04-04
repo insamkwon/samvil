@@ -59,6 +59,8 @@ Check against schema rules from `references/seed-schema.md`:
 - [ ] `constraints` is not empty
 - [ ] `out_of_scope` is not empty
 - [ ] No feature name appears in both `features` and `out_of_scope`
+- [ ] **CRUD completeness**: data entity를 만드는 feature가 있으면, 해당 entity의 Create/Read/Update/Delete 중 빠진 것이 없는지 확인. 빠진 CRUD가 있으면 AC에 추가하거나 out_of_scope에 명시.
+- [ ] **AC가 모든 P1 feature를 커버**: 각 P1 feature에 대해 최소 1개 AC가 존재하는지 확인. 커버 안 되는 P1 feature가 있으면 AC 추가.
 
 ### Step 4: Present to User
 
