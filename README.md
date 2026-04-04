@@ -24,7 +24,7 @@ Claude Code 플러그인이야. **한 줄**로 앱 아이디어를 말하면, AI
 {
   "extraKnownMarketplaces": {
     "samvil": {
-      "source": { "repo": "insam/samvil", "source": "github" }
+      "source": { "repo": "insamkwon/samvil", "source": "github" }
     }
   },
   "enabledPlugins": {
