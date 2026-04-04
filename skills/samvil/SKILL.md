@@ -85,9 +85,50 @@ Each stage prints:
 [SAMVIL] Stage N/5: <name>... <status>
 ```
 
-### Agent Tier (M2+)
+### Agent Tier Selection
 
-After seed is approved, read `seed.agent_tier` and log active agents:
+After seed is approved (between Step 4 Interview chain start and Scaffold), read `seed.agent_tier` and `seed.agent_overrides` from `project.seed.json`.
+
+**Read `references/tier-definitions.md`** for the full agent list per tier.
+
+#### Tier Resolution
+
 ```
-[SAMVIL] Agent Tier: <tier> (<count> agents active)
+1. Read seed.agent_tier (default: "standard")
+2. Look up tier composition from tier-definitions.md
+3. Apply agent_overrides:
+   - add: include these agents even if not in tier
+   - remove: exclude these agents even if in tier
+4. Log the result
 ```
+
+#### Log Format
+
+```
+[SAMVIL] Agent Tier: standard (20 agents active)
+  Planning:  socratic-interviewer, seed-architect, product-owner, simplifier, scope-guard
+  Design:    ux-designer
+  Dev:       tech-architect, scaffolder, orchestrator-agent, frontend-dev, backend-dev, infra-dev
+  QA:        qa-mechanical, qa-functional, qa-quality, tech-lead, dog-fooder
+  Evolution: wonder-analyst, reflect-proposer, retro-analyst
+```
+
+#### Agent Usage by Stage
+
+Currently (M2), agents are **logged but used as adopted roles** — Claude reads the agent .md and assumes that persona.
+
+In future milestones:
+- **M3+**: Council agents (product-owner, simplifier, scope-guard) are spawned via CC Agent tool for Gate A debate
+- **M4+**: Worker agents (frontend-dev, backend-dev, infra-dev) are spawned for parallel feature builds
+- **M5+**: Gate B design council (ui-designer, ux-researcher, etc.)
+
+#### How to Use Agent Personas (Current)
+
+When a stage needs an agent's perspective, read `agents/<agent-name>.md` and adopt its:
+- Role description
+- Behavior rules
+- Output format
+- Anti-patterns
+
+Example: During seed generation, adopt `agents/seed-architect.md` persona.
+Example: During QA Pass 2, adopt `agents/qa-functional.md` persona.
