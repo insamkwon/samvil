@@ -42,6 +42,19 @@ After getting answers, check these **3 gates** (all must be Y to proceed):
 - Any N and questions < 8 → ask **ONE** targeted follow-up for the N item
 - Any N and questions = 8 → make reasonable assumption for the N item, state it explicitly
 
+### MCP Ambiguity Scoring (when MCP available)
+
+If the `score_ambiguity` MCP tool is available, call it after each Q&A round:
+
+```
+score_ambiguity(interview_state: JSON with target_user, core_problem, 
+  core_experience, features, exclusions, constraints, acceptance_criteria)
+```
+
+Display: `[SAMVIL] Ambiguity: 0.32 → 0.18 → 0.07 → 0.04 ✓ (target: ≤ 0.05)`
+
+If MCP not available, use the 3-gate binary checklist above (fallback).
+
 ### Phase 4: Summary & Checkpoint
 
 Present the interview summary in this exact format:

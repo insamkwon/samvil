@@ -177,6 +177,21 @@ async def get_seed_history(session_id: str) -> str:
     } for v in versions])
 
 
+# ── Ambiguity scoring tools ────────────────────────────────────
+
+
+@mcp.tool()
+async def score_ambiguity(interview_state: str) -> str:
+    """Score interview ambiguity. interview_state is JSON with keys:
+    target_user, core_problem, core_experience, features, exclusions,
+    constraints, acceptance_criteria. Returns ambiguity score (0=clear, 1=ambiguous).
+    Target: ≤ 0.05 to converge."""
+    from .interview_engine import score_ambiguity as _score
+    state = json.loads(interview_state)
+    result = _score(state)
+    return json.dumps(result)
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 
