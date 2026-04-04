@@ -11,8 +11,10 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
 
 1. Read `project.seed.json` → know what to build
 2. Read `project.state.json` → know what's already done (resume support)
-3. Read `references/web-recipes.md` from this plugin directory → patterns to use
-4. Check `completed_features` in state — skip already-built features
+3. Read `project.blueprint.json` → architecture decisions (screens, data model, components, routes)
+4. Read `decisions.log` → binding decisions from Council (if exists, respect them)
+5. Read `references/web-recipes.md` from this plugin directory → patterns to use
+6. Check `completed_features` in state — skip already-built features
 
 ## Phase A: Core Experience
 

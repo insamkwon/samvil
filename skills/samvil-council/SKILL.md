@@ -191,16 +191,15 @@ For each CHALLENGE or REJECT verdict, append to `~/dev/<project>/decisions.log`:
 
 If decisions.log already exists, read it first and append (don't overwrite).
 
-## Step 7: Chain to Scaffold (INV-4)
+## Step 7: Chain to Design (INV-4)
 
-Update `project.state.json`: set `current_stage` to `"scaffold"`.
+Update `project.state.json`: set `current_stage` to `"design"`.
 
 ```
-[SAMVIL] Gate A complete. Proceeding to scaffold...
-[SAMVIL] Stage 3/5: Scaffolding project...
+[SAMVIL] Gate A complete. Proceeding to design...
 ```
 
-Invoke the Skill tool with skill: `samvil:scaffold`
+Invoke the Skill tool with skill: `samvil:design`
 
 ## Rules
 

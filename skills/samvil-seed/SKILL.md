@@ -85,15 +85,14 @@ Read `seed.agent_tier` to determine next step:
 
 **If tier is `"minimal"` (no council):**
 
-Update `project.state.json`: set `current_stage` to `"scaffold"`.
+Update `project.state.json`: set `current_stage` to `"design"`.
 
 ```
 [SAMVIL] Stage 2/5: Seed ✓
 [SAMVIL] Council: skipped (minimal tier)
-[SAMVIL] Stage 3/5: Scaffolding project...
 ```
 
-Invoke the Skill tool with skill: `samvil:scaffold`
+Invoke the Skill tool with skill: `samvil:design`
 
 **If tier is `"standard"` or higher (council runs):**
 
