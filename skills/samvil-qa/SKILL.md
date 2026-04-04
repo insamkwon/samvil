@@ -139,7 +139,9 @@ QA passed, but quality could improve. Want to evolve the seed? (yes / no)
 - **yes**: Update state `current_stage` to `"evolve"`, invoke `samvil:evolve`
 - **no**: Update state `current_stage` to `"retro"`, invoke `samvil:retro`
 
-If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro.
+If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
+  Update `project.state.json`: set `current_stage` to `"retro"`.
+  Invoke the Skill tool with skill: `samvil:retro`
 
 ## On FAIL (after 3 iterations)
 
