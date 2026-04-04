@@ -119,7 +119,7 @@ If verdict is REVISE:
 
 **Convergence check:** Each iteration MUST fix more issues than it introduces. If not converging → FAIL.
 
-## On PASS — Chain to Retro (INV-4)
+## On PASS — Offer Evolve or Chain to Retro (INV-4)
 
 ```
 [SAMVIL] ✓ QA Passed!
@@ -130,9 +130,16 @@ If verdict is REVISE:
   Try it: cd ~/dev/<seed.name> && npm run dev
 ```
 
-Update `project.state.json`: set `current_stage` to `"retro"`.
+If QA Pass 3 noted quality improvements (score < 4/5 on any dimension):
 
-Invoke the Skill tool with skill: `samvil:retro`
+```
+QA passed, but quality could improve. Want to evolve the seed? (yes / no)
+```
+
+- **yes**: Update state `current_stage` to `"evolve"`, invoke `samvil:evolve`
+- **no**: Update state `current_stage` to `"retro"`, invoke `samvil:retro`
+
+If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro.
 
 ## On FAIL (after 3 iterations)
 
@@ -142,13 +149,15 @@ Invoke the Skill tool with skill: `samvil:retro`
     - <issue 1>
     - <issue 2>
 
-  The app is at ~/dev/<seed.name>/ — you can fix these manually.
-  Run: cd ~/dev/<seed.name> && npm run dev
+  Options:
+  1. Evolve seed — the spec might be the problem, not the code
+  2. Skip to retro — end this run, analyze what went wrong
+  3. Fix manually — the app is at ~/dev/<seed.name>/
 ```
 
-Update `project.state.json`: set `current_stage` to `"retro"` (retro runs even on failure).
-
-Invoke the Skill tool with skill: `samvil:retro`
+- **Option 1**: Update state `current_stage` to `"evolve"`, invoke `samvil:evolve`
+- **Option 2**: Update state `current_stage` to `"retro"`, invoke `samvil:retro`
+- **Option 3**: Update state `current_stage` to `"retro"`, invoke `samvil:retro`
 
 ## Rules
 

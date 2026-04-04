@@ -177,6 +177,56 @@ async def get_seed_history(session_id: str) -> str:
     } for v in versions])
 
 
+# ── Evolve tools ──────────────────────────────────────────────
+
+
+@mcp.tool()
+async def compare_seeds(seed_a: str, seed_b: str) -> str:
+    """Compare two seed versions. Returns similarity (0-1) and changes.
+    Similarity ≥ 0.95 = converged."""
+    from .seed_manager import compare_seeds as _compare
+    a = json.loads(seed_a)
+    b = json.loads(seed_b)
+    return json.dumps(_compare(a, b))
+
+
+@mcp.tool()
+async def check_convergence(seed_history: str) -> str:
+    """Check if seed evolution has converged. seed_history is JSON array of seed dicts."""
+    from .seed_manager import check_convergence as _check
+    history = json.loads(seed_history)
+    return json.dumps(_check(history))
+
+
+@mcp.tool()
+async def validate_evolved_seed(original_seed: str, evolved_seed: str) -> str:
+    """Validate that an evolved seed is a legitimate improvement."""
+    from .evolve_loop import validate_evolved_seed as _validate
+    orig = json.loads(original_seed)
+    evolved = json.loads(evolved_seed)
+    return json.dumps(_validate(orig, evolved))
+
+
+@mcp.tool()
+async def get_evolve_context(session_id: str, qa_result: str) -> str:
+    """Generate context for wonder/reflect agents. Includes convergence trend."""
+    from .evolve_loop import generate_evolve_context as _context
+    store = await get_store()
+    session = await store.get_session(session_id)
+    if not session:
+        return json.dumps({"error": "Session not found"})
+
+    # Get seed history
+    versions = await store.get_seed_versions(session_id)
+    seed_history = [json.loads(v.seed_json) for v in versions]
+
+    # Current seed is the latest version
+    current_seed = seed_history[-1] if seed_history else json.loads(qa_result)
+
+    context = _context(current_seed, json.loads(qa_result), seed_history)
+    return json.dumps(context)
+
+
 # ── Ambiguity scoring tools ────────────────────────────────────
 
 
