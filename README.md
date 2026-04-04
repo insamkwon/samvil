@@ -16,49 +16,38 @@ Claude Code 플러그인이야. **한 줄**로 앱 아이디어를 말하면, AI
 
 ## 설치
 
-### 1. Claude Code settings.json에 추가
+Claude Code에서 한 줄이면 끝:
 
-`~/.claude/settings.json`:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "samvil": {
-      "source": { "repo": "insamkwon/samvil", "source": "github" }
-    }
-  },
-  "enabledPlugins": {
-    "samvil@samvil": true
-  }
-}
+```
+/install-plugin insamkwon/samvil
 ```
 
-### 2. Claude Code 재시작
+설치 후 새 세션을 열면 SAMVIL 스킬이 자동 로드됨.
 
-새 세션을 열면 SAMVIL 스킬이 자동 로드됨.
-
-### 3. (선택) MCP 서버 설치
+### (선택) MCP 서버 — 고급 기능
 
 세션 간 상태 유지, 모호도 수치 측정, 시드 진화를 원하면:
 
 ```bash
-cd <samvil-plugin-path>/mcp
+cd ~/.claude/plugins/cache/samvil/samvil/*/mcp
 uv venv .venv && source .venv/bin/activate
 uv pip install -e .
 ```
 
-settings.json에 MCP 등록:
+`~/.claude/settings.json`에 MCP 등록:
 ```json
 {
   "mcpServers": {
     "samvil-mcp": {
-      "command": "<samvil-path>/mcp/.venv/bin/python",
+      "command": "<위 경로>/mcp/.venv/bin/python",
       "args": ["-m", "samvil_mcp.server"],
-      "cwd": "<samvil-path>/mcp"
+      "cwd": "<위 경로>/mcp"
     }
   }
 }
 ```
+
+MCP 없이도 기본 파이프라인은 전부 동작합니다.
 
 ## 사용법
 
