@@ -18,91 +18,129 @@ You are the SAMVIL orchestrator. Take the user's one-line app idea and guide it 
 
 ### Step 0: Health Check
 
-시작 전 환경 점검. 문제 있으면 안내하고 해결 후 진행.
+시작 전 환경 점검. 각 항목을 Bash로 체크하고 결과 표시. 문제 있으면 안내 + 해결 방법 제공.
 
 ```
-[SAMVIL] 환경 점검 중...
+[SAMVIL] 🔍 환경 점검 중...
 ```
 
-**1. MCP 서버 확인**
+아래 항목을 순서대로 체크:
 
-`score_ambiguity` MCP 도구가 사용 가능한지 확인. 사용 가능하면:
-```
-[SAMVIL] ✓ MCP 서버 연결됨 (고급 기능 활성화)
-```
-
-사용 불가능하면:
-```
-[SAMVIL] ⚠️ MCP 서버가 연결되지 않았습니다.
-  고급 기능(모호도 수치, 세션 저장, 시드 진화)은 비활성화됩니다.
-  기본 파이프라인은 문제없이 동작합니다.
-```
-
-AskUserQuestion으로:
-```
-question: "MCP 없이 진행할까요?"
-options:
-  - "MCP 없이 진행" → 계속
-  - "MCP 설치 도움" → 설치 가이드 표시 후 "새 세션에서 다시 시작하세요" 안내
-```
-
-MCP 설치 가이드:
+**1. Node.js**
 ```bash
-# 1. MCP 서버 설치
-cd ~/.claude/plugins/cache/samvil/samvil/*/mcp
-uv venv .venv && source .venv/bin/activate && uv pip install -e .
-
-# 2. settings.json에 등록 (아래 JSON을 mcpServers에 추가)
-"samvil-mcp": {
-  "command": "<위 경로>/mcp/.venv/bin/python",
-  "args": ["-m", "samvil_mcp.server"],
-  "cwd": "<위 경로>/mcp"
-}
-
-# 3. 새 세션 열기
+node --version 2>/dev/null
 ```
+- ✅ 있음 → `[SAMVIL] ✓ Node.js {version}`
+- ❌ 없음 → `[SAMVIL] ✗ Node.js가 필요합니다.` + 설치 안내:
+  ```
+  macOS: brew install node
+  또는: https://nodejs.org 에서 LTS 설치
+  ```
+  **Node.js 없으면 진행 불가 — 설치 후 다시 시작하세요.**
 
-**2. 버전 업데이트 확인**
+**2. npm**
+```bash
+npm --version 2>/dev/null
+```
+- ✅ 있음 → `[SAMVIL] ✓ npm {version}`
+- ❌ 없음 → Node.js 설치하면 함께 설치됨
 
-현재 설치된 SAMVIL 버전 확인:
+**3. Python (MCP 서버용)**
+```bash
+python3 --version 2>/dev/null
+```
+- ✅ 3.12+ → `[SAMVIL] ✓ Python {version}`
+- ⚠️ 3.12 미만 → `[SAMVIL] ⚠️ Python 3.12+ 필요 (현재: {version}). MCP 고급 기능 사용 불가.`
+  ```
+  macOS: brew install python@3.12
+  ```
+- ❌ 없음 → `[SAMVIL] ⚠️ Python 없음. MCP 없이 진행 가능.`
+
+**4. uv (Python 패키지 관리)**
+```bash
+which uv 2>/dev/null || which uvx 2>/dev/null
+```
+- ✅ 있음 → `[SAMVIL] ✓ uv 설치됨`
+- ⚠️ 없음 → `[SAMVIL] ⚠️ uv 없음. MCP 서버 설치 시 필요.`
+  ```
+  설치: curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+**5. GitHub CLI (업데이트 체크용)**
+```bash
+gh --version 2>/dev/null
+```
+- ✅ 있음 → `[SAMVIL] ✓ GitHub CLI 설치됨`
+- ⚠️ 없음 → `[SAMVIL] ⚠️ gh 없음. 자동 업데이트 체크 불가 (수동 업데이트는 가능).`
+
+**6. SAMVIL 버전 + 업데이트 체크**
+
+현재 버전:
 ```bash
 cat ~/.claude/plugins/cache/samvil/samvil/*/.claude-plugin/plugin.json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])" 2>/dev/null
 ```
 
-GitHub 최신 버전 확인:
+GitHub 최신 버전 (gh 있을 때만):
 ```bash
 gh api repos/insamkwon/samvil/contents/.claude-plugin/plugin.json --jq '.content' 2>/dev/null | base64 -d | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])" 2>/dev/null
 ```
 
-- 동일 버전: `[SAMVIL] ✓ 최신 버전 (v0.2.0)`
-- 업데이트 있음:
+- 동일 → `[SAMVIL] ✓ 최신 버전 (v{version})`
+- 업데이트 있음 → AskUserQuestion: "새 버전 v{latest} 있음. 업데이트할까?" → "지금" or "나중에"
+- 확인 실패 → 무시하고 진행
+
+**7. MCP 서버**
+
+`score_ambiguity` MCP 도구 사용 가능 여부 확인.
+
+- ✅ 연결됨 → `[SAMVIL] ✓ MCP 서버 연결됨 (고급 기능 활성화)`
+- ⚠️ 없음 → AskUserQuestion:
   ```
-  [SAMVIL] ⬆️ 새 버전이 있습니다! (현재: v0.2.0 → 최신: v0.3.0)
-  ```
-  AskUserQuestion:
-  ```
-  question: "업데이트할까요?"
+  question: "MCP 서버가 없습니다. 고급 기능(모호도 수치, 세션 저장, 시드 진화) 없이도 기본 파이프라인은 동작합니다."
   options:
-    - "지금 업데이트" → /samvil:update 실행 안내
-    - "나중에" → 현재 버전으로 계속
+    - "MCP 없이 진행" → 계속
+    - "MCP 설치 도움" → 설치 가이드 표시
   ```
-- 확인 실패 (오프라인 등): 무시하고 진행
 
-**3. Node.js 확인**
+**8. 이전 프로젝트 확인**
 
-```bash
-node --version
+같은 이름의 프로젝트가 `~/dev/`에 있는지 → Step 3 (Resume)에서 처리.
+
+### 점검 결과 요약
+
+모든 체크가 끝나면 한눈에 보여줌:
+
 ```
-없으면: "Node.js가 필요합니다. https://nodejs.org 에서 설치해주세요."
-
-**3. 이전 프로젝트 확인**
-
-같은 이름의 프로젝트가 `~/dev/`에 있는지 확인 → Step 3 (Resume)에서 처리.
-
-점검 완료:
+[SAMVIL] 환경 점검 결과
+━━━━━━━━━━━━━━━━━━━━━━
+  ✓ Node.js v20.11.0
+  ✓ npm 10.2.4
+  ✓ Python 3.12.12
+  ✓ uv 설치됨
+  ✓ GitHub CLI 2.45.0
+  ✓ SAMVIL v0.2.1 (최신)
+  ✓ MCP 서버 연결됨
+━━━━━━━━━━━━━━━━━━━━━━
+  준비 완료! 파이프라인을 시작합니다.
 ```
-[SAMVIL] ✓ 환경 점검 완료
+
+또는 문제가 있으면:
 ```
+[SAMVIL] 환경 점검 결과
+━━━━━━━━━━━━━━━━━━━━━━
+  ✓ Node.js v20.11.0
+  ✓ npm 10.2.4
+  ⚠️ Python 3.10.2 (3.12+ 권장)
+  ⚠️ uv 없음
+  ✓ GitHub CLI 2.45.0
+  ✓ SAMVIL v0.2.1 (최신)
+  ⚠️ MCP 서버 없음 (기본 모드)
+━━━━━━━━━━━━━━━━━━━━━━
+  ⚠️ 일부 고급 기능 비활성화. 기본 파이프라인은 정상 동작합니다.
+```
+
+**✗ (빨간) 항목이 있으면 진행 불가 → 해결 방법 안내 후 중단.**
+**⚠️ (노란) 항목만 있으면 → 기본 모드로 진행 가능.**
 
 ### Step 1: Extract the App Idea
 
