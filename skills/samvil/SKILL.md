@@ -142,13 +142,96 @@ gh api repos/insamkwon/samvil/contents/.claude-plugin/plugin.json --jq '.content
 **✗ (빨간) 항목이 있으면 진행 불가 → 해결 방법 안내 후 중단.**
 **⚠️ (노란) 항목만 있으면 → 기본 모드로 진행 가능.**
 
-### Step 1: Extract the App Idea
+### Step 1: Project Mode Selection
+
+Health Check 후 AskUserQuestion으로 프로젝트 모드 선택:
+
+```
+question: "어떤 작업을 할까요?"
+header: "프로젝트 모드"
+options:
+  - label: "새 프로젝트"
+    description: "아이디어부터 시작. 인터뷰 → 설계 → 빌드 → 검증 전체 파이프라인."
+  - label: "기존 프로젝트 개선"
+    description: "이미 있는 코드를 분석하고 개선/확장. 기능 추가, 리팩토링, QA 등."
+  - label: "단일 단계만 실행"
+    description: "특정 단계만 실행 (QA만, 빌드만, 진화만 등)"
+```
+
+#### Mode A: 새 프로젝트 (Greenfield)
+
+기존 흐름 그대로 → Step 2로 진행.
+
+#### Mode B: 기존 프로젝트 개선 (Brownfield)
+
+AskUserQuestion으로 상세 파악:
+
+```
+question: "기존 프로젝트에 대해 알려주세요"
+header: "브라운필드"
+options:
+  - label: "기능 추가"
+    description: "기존 앱에 새 기능 추가. 코드 분석 후 seed에 기능 추가."
+  - label: "리팩토링/개선"
+    description: "기존 코드 품질 개선. QA → 문제 발견 → 수정."
+  - label: "디자인 개선"
+    description: "기존 앱의 UI/UX 개선. shadcn/ui 적용 등."
+  - label: "테스트/검증만"
+    description: "기존 코드에 대해 QA 3-pass만 실행."
+```
+
+**Brownfield 프로세스:**
+
+1. **코드 분석**: 프로젝트 경로 받기 → Glob/Grep으로 구조 파악
+   ```
+   [SAMVIL] 기존 프로젝트 분석 중...
+     경로: ~/dev/<project>/
+     프레임워크: Next.js 14 (감지)
+     컴포넌트: 12개
+     페이지: 3개
+     상태관리: zustand
+   ```
+
+2. **역방향 seed 생성**: 기존 코드에서 seed.json을 역으로 추출
+   - 파일 구조 → features 추출
+   - 기존 컴포넌트 → core_experience 추론
+   - package.json → tech_stack 확인
+   - 유저에게 검토: "기존 프로젝트를 이렇게 이해했는데 맞나요?"
+
+3. **Gap 분석**: 유저가 원하는 것 vs 현재 코드 차이
+   - 추가할 기능 → seed에 추가
+   - 개선할 부분 → AC에 반영
+
+4. **선택적 파이프라인 실행**:
+   - 기능 추가 → build 단계만 (scaffold 스킵)
+   - 리팩토링 → QA로 문제 발견 → 수정
+   - 디자인 → design 단계 + scaffold(shadcn 적용)
+   - 테스트 → QA만
+
+#### Mode C: 단일 단계만 실행
+
+AskUserQuestion으로 어떤 단계:
+```
+question: "어떤 단계를 실행할까요?"
+header: "단계 선택"
+options:
+  - label: "인터뷰" → samvil:interview
+  - label: "QA 검증" → samvil:qa
+  - label: "진화 (Evolve)" → samvil:evolve
+  - label: "회고 (Retro)" → samvil:retro
+```
+
+프로젝트 경로와 seed.json을 물어본 후 해당 스킬만 invoke.
+
+---
+
+### Step 2: Extract the App Idea (Mode A만)
 
 The user invoked `/samvil` with a prompt (e.g., `/samvil "todo app"`). Extract the app idea from the arguments.
 
-If no argument provided, ask: "What app do you want to build? Describe it in one line."
+If no argument provided, ask: "뭘 만들까요? 한 줄로 설명해주세요."
 
-### Step 2: Create Project Directory
+### Step 3: Create Project Directory (Mode A만)
 
 Derive a kebab-case project name from the app idea.
 
@@ -173,7 +256,7 @@ Initialize `project.state.json`:
 
 Write this to `~/dev/<project-name>/project.state.json`.
 
-### Step 3: Check for Resume
+### Step 4: Check for Resume
 
 If `project.state.json` already exists when `/samvil` is invoked:
 
