@@ -1,33 +1,9 @@
 {
   "name": "samvil",
-  "description": "AI vibe-coding harness: Interview → Seed → Council → Design → Scaffold → Build → QA → Retro. One-line input, full web app output.",
+  "description": "AI vibe-coding harness: one-line input, full web app output.",
   "version": "0.2.0",
   "author": {
     "name": "insam"
   },
-  "license": "UNLICENSED",
-  "hooks": {
-    "PreToolCall": [
-      {
-        "matcher": {
-          "tool": ["Write", "Edit"]
-        },
-        "command": "bash hooks/guard-destructive.sh \"$TOOL_INPUT\""
-      },
-      {
-        "matcher": {
-          "tool": ["Bash"]
-        },
-        "command": "bash hooks/guard-destructive.sh \"$TOOL_INPUT\""
-      }
-    ],
-    "PostToolCall": [
-      {
-        "matcher": {
-          "tool": ["Bash"]
-        },
-        "command": "bash hooks/log-build-result.sh \"$TOOL_INPUT\" \"$EXIT_CODE\""
-      }
-    ]
-  }
+  "license": "UNLICENSED"
 }
