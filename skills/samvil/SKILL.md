@@ -182,31 +182,15 @@ options:
 
 **Brownfield 프로세스:**
 
-1. **코드 분석**: 프로젝트 경로 받기 → Glob/Grep으로 구조 파악
-   ```
-   [SAMVIL] 기존 프로젝트 분석 중...
-     경로: ~/dev/<project>/
-     프레임워크: Next.js 14 (감지)
-     컴포넌트: 12개
-     페이지: 3개
-     상태관리: zustand
-   ```
+Invoke the Skill tool with skill: `samvil:analyze`
 
-2. **역방향 seed 생성**: 기존 코드에서 seed.json을 역으로 추출
-   - 파일 구조 → features 추출
-   - 기존 컴포넌트 → core_experience 추론
-   - package.json → tech_stack 확인
-   - 유저에게 검토: "기존 프로젝트를 이렇게 이해했는데 맞나요?"
-
-3. **Gap 분석**: 유저가 원하는 것 vs 현재 코드 차이
-   - 추가할 기능 → seed에 추가
-   - 개선할 부분 → AC에 반영
-
-4. **선택적 파이프라인 실행**:
-   - 기능 추가 → build 단계만 (scaffold 스킵)
-   - 리팩토링 → QA로 문제 발견 → 수정
-   - 디자인 → design 단계 + scaffold(shadcn 적용)
-   - 테스트 → QA만
+analyze 스킬이 전체를 처리:
+1. 프로젝트 경로 확인
+2. 프레임워크/구조/상태관리/UI 자동 감지
+3. 역방향 seed.json 생성
+4. 유저 검토
+5. Gap 분석 (원하는 개선 파악)
+6. 적절한 다음 스킬로 체인 (build/qa/design)
 
 #### Mode C: 단일 단계만 실행
 
