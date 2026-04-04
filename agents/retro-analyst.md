@@ -31,11 +31,15 @@ This is SAMVIL's **self-evolution mechanism**. While the Evolve phase improves t
    - Common error patterns
    - Build time
 
-4. **`interview-summary.md`** — Interview quality
+4. **`.samvil/build-metrics.jsonl`** — Build result log (from hook)
+   - Every `npm run build` timestamped with exit code
+   - Failure frequency and patterns over time
+
+5. **`interview-summary.md`** — Interview quality
    - How many questions were asked?
    - Was the interview too long or too short?
 
-5. **`harness-feedback.log`** — Previous retro feedback
+6. **`harness-feedback.log`** — Previous retro feedback
    - Are the same issues recurring?
    - Were previous suggestions implemented?
 
