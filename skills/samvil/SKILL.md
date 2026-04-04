@@ -16,6 +16,68 @@ You are the SAMVIL orchestrator. Take the user's one-line app idea and guide it 
 
 ## How to Run
 
+### Step 0: Health Check
+
+시작 전 환경 점검. 문제 있으면 안내하고 해결 후 진행.
+
+```
+[SAMVIL] 환경 점검 중...
+```
+
+**1. MCP 서버 확인**
+
+`score_ambiguity` MCP 도구가 사용 가능한지 확인. 사용 가능하면:
+```
+[SAMVIL] ✓ MCP 서버 연결됨 (고급 기능 활성화)
+```
+
+사용 불가능하면:
+```
+[SAMVIL] ⚠️ MCP 서버가 연결되지 않았습니다.
+  고급 기능(모호도 수치, 세션 저장, 시드 진화)은 비활성화됩니다.
+  기본 파이프라인은 문제없이 동작합니다.
+```
+
+AskUserQuestion으로:
+```
+question: "MCP 없이 진행할까요?"
+options:
+  - "MCP 없이 진행" → 계속
+  - "MCP 설치 도움" → 설치 가이드 표시 후 "새 세션에서 다시 시작하세요" 안내
+```
+
+MCP 설치 가이드:
+```bash
+# 1. MCP 서버 설치
+cd ~/.claude/plugins/cache/samvil/samvil/*/mcp
+uv venv .venv && source .venv/bin/activate && uv pip install -e .
+
+# 2. settings.json에 등록 (아래 JSON을 mcpServers에 추가)
+"samvil-mcp": {
+  "command": "<위 경로>/mcp/.venv/bin/python",
+  "args": ["-m", "samvil_mcp.server"],
+  "cwd": "<위 경로>/mcp"
+}
+
+# 3. 새 세션 열기
+```
+
+**2. Node.js 확인**
+
+```bash
+node --version
+```
+없으면: "Node.js가 필요합니다. https://nodejs.org 에서 설치해주세요."
+
+**3. 이전 프로젝트 확인**
+
+같은 이름의 프로젝트가 `~/dev/`에 있는지 확인 → Step 3 (Resume)에서 처리.
+
+점검 완료:
+```
+[SAMVIL] ✓ 환경 점검 완료
+```
+
 ### Step 1: Extract the App Idea
 
 The user invoked `/samvil` with a prompt (e.g., `/samvil "todo app"`). Extract the app idea from the arguments.
