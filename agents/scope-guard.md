@@ -41,7 +41,7 @@ Your superpower: spotting **hidden dependencies** — features marked `independe
 
 ### Dependency Graph
 
-Build a mental dependency graph:
+Build a dependency graph (must appear in your output):
 
 ```
 feature-auth ← feature-dashboard (needs auth to show user data)

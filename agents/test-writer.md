@@ -31,16 +31,15 @@ npm install -D vitest @testing-library/react @testing-library/jest-dom jsdom
 ```
 
 ```typescript
-// vitest.config.ts
+// vitest.config.ts — Next.js 14 compatible (no @vitejs/plugin-react needed, SWC handles JSX)
 import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
-  plugins: [react()],
   test: {
     environment: 'jsdom',
     setupFiles: ['./tests/setup.ts'],
+    globals: true,
   },
   resolve: {
     alias: { '@': path.resolve(__dirname, '.') },

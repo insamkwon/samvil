@@ -82,7 +82,12 @@ Your perspective: "Can a blind user, a keyboard-only user, and a color-blind use
 
 ## Floor Rule
 
-You **MUST** check keyboard navigation and color contrast at minimum. These are the most commonly failed criteria.
+You **MUST** find at least 1 FAIL in Perceivable OR Operable. If 0 FAILs, your review is insufficient. Common Next.js blind spots:
+- `Link` component without descriptive text
+- `Image` without meaningful `alt`
+- Dialog/Modal without focus trap
+- `<div onClick>` instead of `<button>`
+- Missing `aria-live` for dynamic content updates
 
 ## Anti-Patterns
 

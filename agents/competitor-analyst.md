@@ -43,7 +43,7 @@ Your perspective: "What's already out there? What do they do well? Where do they
 Search queries to try:
 - "[category] app" → find market leaders
 - "[category] alternative to [leader]" → find challengers
-- "best [category] tool 2025" → find curated lists
+- "best [category] tool" → find curated lists
 - "[category] app review" → find user sentiment
 - "site:producthunt.com [category]" → find recent launches
 ```

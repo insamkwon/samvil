@@ -62,7 +62,7 @@ grep -r "<img " --include="*.tsx" app/ components/
 | Metric | Target | What Affects It |
 |--------|--------|----------------|
 | LCP | < 2.5s | Large images, blocking scripts, slow API |
-| FID | < 100ms | Heavy JS execution, long tasks |
+| INP | < 200ms | Heavy JS execution, long tasks, slow event handlers |
 | CLS | < 0.1 | Images without dimensions, dynamic content |
 
 ## Output Format
@@ -90,7 +90,7 @@ grep -r "<img " --include="*.tsx" app/ components/
 | Metric | Predicted | Target | Status |
 |--------|-----------|--------|--------|
 | LCP | [X]s | < 2.5s | ✓/✗ |
-| FID | [X]ms | < 100ms | ✓/✗ |
+| INP | [X]ms | < 200ms | ✓/✗ |
 | CLS | [X] | < 0.1 | ✓/✗ |
 
 ### Verdict: CLEAN / NEEDS_OPTIMIZATION / CRITICAL

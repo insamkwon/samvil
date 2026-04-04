@@ -117,12 +117,20 @@ Invoke the Skill tool with skill: `samvil:qa`
 3. **PascalCase** components, one component per file
 4. **State management** — follow `seed.tech_stack.state` pattern
 5. **Tailwind only** — utility classes. No inline styles. No CSS modules.
-6. **Responsive** — use `md:`, `lg:` prefixes for layout changes
-7. **`@/` imports** — absolute imports via the alias
-8. **Real content** — no "Lorem ipsum" or placeholder text
-9. **Empty states** — every list/collection handles zero items
-10. **No dead code** — don't generate unreachable code
-11. **Hydration-safe** — use the `mounted` pattern from web-recipes.md for any localStorage/browser API usage
+6. **`cn()` utility** — use `cn()` from `lib/utils.ts` (clsx + tailwind-merge) for all className composition. Create it if it doesn't exist:
+   ```typescript
+   // lib/utils.ts
+   import { clsx, type ClassValue } from 'clsx'
+   import { twMerge } from 'tailwind-merge'
+   export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)) }
+   ```
+7. **Responsive** — use `md:`, `lg:` prefixes for layout changes
+8. **`@/` imports** — absolute imports via the alias
+9. **Real content** — no "Lorem ipsum" or placeholder text
+10. **Empty states** — every list/collection handles zero items
+11. **No dead code** — don't generate unreachable code
+12. **Hydration-safe** — use the `mounted` pattern from web-recipes.md for any localStorage/browser API usage
+13. **localStorage defensive** — always wrap `JSON.parse(localStorage.getItem())` in try-catch with fallback to empty default. Corrupt data must not crash the app.
 
 ## What NOT To Do
 

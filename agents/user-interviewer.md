@@ -18,8 +18,16 @@ Your perspective: "As the target user, does this seed describe something I actua
 
 ### Simulation Method
 
-1. **Adopt the persona** — Read seed's target user description. Become that person.
-2. **Walk through the journey**:
+1. **Instantiate a concrete persona** (mandatory before any simulation):
+   ```
+   Name: [specific name]
+   Age: [number]
+   Tech literacy: [1-5]
+   Daily tools: [3 apps they use daily]
+   Patience budget: [seconds they'll give this app before abandoning]
+   Abandonment trigger: [what makes them leave]
+   ```
+2. **Walk through the journey as this person**:
    - Discovery: "How do I find this product? What draws me in?"
    - First use: "I open the app. What do I see? What do I do in 30 seconds?"
    - Core loop: "I come back tomorrow. Why? What do I do?"

@@ -88,6 +88,24 @@ theme: {
 }
 ```
 
+### className Utility (Required)
+
+All components MUST use `cn()` for className composition to prevent Tailwind class conflicts:
+
+```typescript
+// lib/utils.ts — create this first
+import { clsx, type ClassValue } from 'clsx'
+import { twMerge } from 'tailwind-merge'
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+// Usage in components:
+<button className={cn(baseStyles, variants[variant], sizes[size], className)} />
+```
+
+Install: `npm install clsx tailwind-merge`
+
 ### Quality Standards
 
 - **Accessible** — all interactive components are keyboard-navigable

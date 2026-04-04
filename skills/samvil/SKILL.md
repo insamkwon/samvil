@@ -113,22 +113,42 @@ After seed is approved (between Step 4 Interview chain start and Scaffold), read
   Evolution: wonder-analyst, reflect-proposer, retro-analyst
 ```
 
+#### Gate A: Planning Council (M3+, 2-Round Structure)
+
+Gate A runs between Seed approval and Scaffold. It uses a **2-round structure**:
+
+```
+Round 1: RESEARCH (parallel, information gathering)
+  ├── competitor-analyst — "What exists in this market?"
+  ├── business-analyst  — "What do the numbers say?"
+  └── user-interviewer  — "What would a real user think?"
+  → Results fed into Round 2
+
+Round 2: REVIEW (parallel, seed quality validation)
+  ├── product-owner  — "Are ACs testable? Stories complete?"
+  ├── simplifier     — "Is scope minimal enough?"
+  ├── scope-guard    — "Are dependencies honest?"
+  └── ceo-advisor    — "Go/No-Go? Strategic risk?"
+  → Synthesis: majority rules, conflicts to user
+```
+
+**Tier determines which rounds run:**
+- minimal: No Gate A (skip to scaffold)
+- standard: Round 2 only (PO + simplifier + scope-guard)
+- thorough: Round 2 + business-analyst from Round 1
+- full: Both rounds complete
+
 #### Agent Usage by Stage
 
-Currently (M2), agents are **logged but used as adopted roles** — Claude reads the agent .md and assumes that persona.
+Currently (M2), agents are **logged but used as adopted roles** — the skill's inline behavior rules define the persona.
 
 In future milestones:
-- **M3+**: Council agents (product-owner, simplifier, scope-guard) are spawned via CC Agent tool for Gate A debate
-- **M4+**: Worker agents (frontend-dev, backend-dev, infra-dev) are spawned for parallel feature builds
+- **M3+**: Council agents are spawned via CC Agent tool. Each receives its `agents/*.md` content as prompt.
+- **M4+**: Worker agents are spawned for parallel feature builds.
 - **M5+**: Gate B design council (ui-designer, ux-researcher, etc.)
 
-#### How to Use Agent Personas (Current)
+#### How to Use Agent Personas (Current — Adopted Roles)
 
-When a stage needs an agent's perspective, read `agents/<agent-name>.md` and adopt its:
-- Role description
-- Behavior rules
-- Output format
-- Anti-patterns
+Each skill has inline behavior rules that define the persona. The `agents/*.md` files contain the **full detailed persona** used when agents are spawned (M3+).
 
-Example: During seed generation, adopt `agents/seed-architect.md` persona.
-Example: During QA Pass 2, adopt `agents/qa-functional.md` persona.
+For adopted roles, the skill's own instructions take precedence.

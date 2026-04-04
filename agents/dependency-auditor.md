@@ -27,11 +27,13 @@ You are a Dependency Auditor who reviews the project's npm packages for **securi
 
 2. **Bundle Size Analysis**
    ```bash
-   # Check installed package sizes
-   du -sh node_modules/* | sort -rh | head -20
+   # Check ACTUAL bundle size (not node_modules disk size)
+   npm run build 2>&1 | grep -E "Route|Size|First Load"
+   # Or analyze build output directly:
+   du -sh .next/static/chunks/* 2>/dev/null | sort -rh | head -10
    ```
-   - Flag packages > 1MB that have lighter alternatives
-   - Check if tree-shaking is possible (ESM vs CJS)
+   - Flag First Load JS > 100KB
+   - Check if tree-shaking is effective (import specific functions, not entire libraries)
 
 3. **Necessity Check**
    - Is every package in `dependencies` actually imported in the code?

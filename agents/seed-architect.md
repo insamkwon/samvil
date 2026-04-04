@@ -42,7 +42,12 @@ Read `interview-summary.md` from the project directory (INV-3). Never rely on co
 
 ### Feature Mapping Rules
 
-- Fewer features = better seed. If user said 10 things, pick the 4-5 most critical.
+**2-pass priority filter:**
+1. Does core_experience REQUIRE this feature to exist? → P1
+2. Does this feature require core_experience to be useful? → P1
+3. Neither? → P2 (or cut)
+Exception: infrastructure features (auth, storage) that enable P1 features are P1.
+
 - Every feature gets `priority: 1` (must-have) or `priority: 2` (nice-to-have)
 - Mark `independent: true` if the feature can be built without other features existing
 - If feature B needs feature A, set `depends_on: "feature-a"`

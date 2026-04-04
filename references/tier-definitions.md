@@ -66,6 +66,32 @@ def get_active_agents(tier: str, overrides: dict) -> list:
 }
 ```
 
+## Gate A: 2-Round Structure (M3+)
+
+Planning Council uses 2 rounds to separate information gathering from evaluation:
+
+```
+Round 1: RESEARCH (parallel spawn, results fed to Round 2)
+  competitor-analyst — market landscape
+  business-analyst   — numbers and unit economics
+  user-interviewer   — simulated user perspective
+
+Round 2: REVIEW (parallel spawn, seed quality validation)
+  product-owner  — AC verifiability, story completeness
+  simplifier     — scope minimality
+  scope-guard    — dependency honesty
+  ceo-advisor    — Go/No-Go strategic decision
+```
+
+**Tier → Round activation:**
+
+| Tier | Round 1 | Round 2 |
+|------|---------|---------|
+| minimal | — | — |
+| standard | — | PO + simplifier + scope-guard |
+| thorough | business-analyst only | PO + simplifier + scope-guard + ceo-advisor |
+| full | All 3 | All 4 |
+
 ## Agent File Format
 
 Each agent `.md` in `agents/` has:

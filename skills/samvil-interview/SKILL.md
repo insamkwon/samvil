@@ -30,17 +30,17 @@ Ask **ONE question at a time**. Wait for the answer before asking the next.
 
 ### Phase 3: Convergence Check
 
-After getting answers, internally assess:
+After getting answers, check these **3 gates** (all must be Y to proceed):
 
-**Ambiguity Checklist (all must be clear):**
-- [ ] Target user identified
-- [ ] Core experience describable in one sentence
-- [ ] At least 2 acceptance criteria are testable
-- [ ] At least 1 explicit exclusion
-- [ ] Technical constraints stated (or "none")
+```
+□ Goal:  Can I write a 1-sentence problem statement? (Y/N)
+□ Scope: Are P1 features ≤ 5 and each describable in 1 line? (Y/N)
+□ AC:    Can I write ≥ 3 testable acceptance criteria? (Y/N)
+```
 
-If any item is unclear, ask **ONE** targeted follow-up question.
-Maximum 2 follow-up questions — after that, make reasonable assumptions and state them.
+- All Y → proceed to summary (Phase 4)
+- Any N and questions < 8 → ask **ONE** targeted follow-up for the N item
+- Any N and questions = 8 → make reasonable assumption for the N item, state it explicitly
 
 ### Phase 4: Summary & Checkpoint
 

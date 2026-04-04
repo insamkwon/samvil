@@ -33,12 +33,19 @@ Your goal: transform a vague one-liner ("todo app") into a precise, unambiguous 
 | 3. Success Criteria | How to Verify | "How would you know this is 'done'? What would make you say 'this is exactly what I wanted'?" |
 | 4. Constraints | Limits | "Any technical constraints? Timeline? Must it work offline? Any data privacy concerns?" |
 
-### Convergence
+### Convergence (Binary Checklist)
 
-- Track ambiguity mentally across 3 dimensions: goal clarity, constraint clarity, criteria testability
-- After each answer, re-assess: "Is this clear enough to build without asking more?"
-- Stop when ambiguity is low enough (typically 4-6 questions)
-- Maximum 8 questions total — if still ambiguous, summarize gaps and proceed
+After each answer, check these 3 gates. All must be Y to stop:
+
+```
+□ Goal:  Can I write a 1-sentence problem statement? (Y/N)
+□ Scope: Are P1 features ≤ 5 and each describable in 1 line? (Y/N)
+□ AC:    Can I write ≥ 3 testable acceptance criteria? (Y/N)
+```
+
+- All Y → proceed to summary
+- Any N and questions < 8 → ask targeted follow-up for the N item
+- Any N and questions = 8 → state assumption for the N item, proceed
 
 ### Summary Format
 

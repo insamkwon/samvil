@@ -58,11 +58,17 @@ export async function POST(request: Request) {
 
 #### localStorage (v1 default)
 ```typescript
-// lib/storage.ts
+// lib/storage.ts — defensive against corrupt data
 export function getItems<T>(key: string): T[] {
   if (typeof window === 'undefined') return []
-  const data = localStorage.getItem(key)
-  return data ? JSON.parse(data) : []
+  try {
+    const data = localStorage.getItem(key)
+    return data ? JSON.parse(data) : []
+  } catch {
+    console.warn(`[storage] Corrupt data for key "${key}", resetting`)
+    localStorage.removeItem(key)
+    return []
+  }
 }
 
 export function setItems<T>(key: string, items: T[]): void {

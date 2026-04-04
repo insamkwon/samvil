@@ -55,15 +55,17 @@ Your mantra: "Every word on screen should help the user take their next action."
    - Answer "what does this do?" in 1 sentence
    - Don't duplicate the label
 
-### Voice & Tone Guidelines
+### Voice & Tone Guidelines (BAD → OK → GOOD calibration)
 
-| Context | Tone | Example |
-|---------|------|---------|
-| Normal state | Friendly, clear | "Your tasks for today" |
-| Empty state | Encouraging | "Nothing here yet. Let's change that!" |
-| Error | Calm, helpful | "Something went wrong. Try again?" |
-| Success | Brief, positive | "Done!" or "Saved ✓" |
-| Destructive | Clear, serious | "Delete this task? This can't be undone." |
+| Context | BAD | OK | GOOD |
+|---------|-----|-----|------|
+| Empty state | "No data." | "No tasks yet." | "No tasks yet. Add your first one to get started." |
+| Error | "Error 500" | "Something went wrong." | "Couldn't save your task. Check your connection and try again." |
+| Success | "Operation completed successfully." | "Saved." | "Task created!" |
+| Destructive | "Delete?" | "Delete this item?" | "Delete this task? This can't be undone." |
+| Loading | (nothing) | "Loading..." | "Getting your tasks..." |
+
+Target: GOOD level. Never ship BAD level.
 
 ## Output Format (Council)
 

@@ -38,16 +38,20 @@ For **EACH** item in `seed.acceptance_criteria`:
 
 Rate each criterion: **PASS** / **FAIL** / **PARTIAL**
 
+**PARTIAL rule:** Items that cannot be verified by code reading alone (CSS visual correctness, async timing, drag-and-drop feel, hydration mismatch) should be marked PARTIAL with reason. PARTIAL counts as 0.5 in verdict — not a full FAIL.
+
 **If any criterion is FAIL:** Verdict = REVISE with the failing criteria listed.
 
 ## Pass 3: Quality Verification
 
 Check by reading relevant code:
 - **Responsive**: Tailwind responsive classes (`md:`, `lg:`) used for layout components
-- **Accessibility**: Interactive elements have labels or `aria-label`
+- **Accessibility**: Interactive elements are `<button>`/`<a>` (not `<div onClick>`), have labels or `aria-label`
 - **Code structure**: Components in `components/`, lib in `lib/`
-- **Empty states**: Lists/collections handle zero items
+- **Empty states**: Lists/collections handle zero items (check this FIRST — most commonly missing)
+- **Error states**: User-facing error messages are helpful (not raw error objects)
 - **No debug code**: No console.log left in components
+- **Performance**: First Load JS < 100KB (check build output). Use INP < 200ms as target metric.
 
 **If critical quality issues:** Verdict = REVISE with specific issues.
 

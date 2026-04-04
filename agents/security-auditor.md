@@ -57,8 +57,15 @@ git ls-files | grep -E "\.env$|\.env\.local$"
 - No sensitive data in client-side code or localStorage
 
 #### 5. CSRF (Cross-Site Request Forgery)
-- State-changing API routes (POST, PUT, DELETE) validate origin
-- Forms use CSRF tokens or SameSite cookies
+- **Server Actions (Next.js 14)**: Built-in CSRF protection via Origin header validation. No manual action needed.
+- **Route Handlers (app/api/)**: Must manually validate Origin header:
+  ```typescript
+  const origin = request.headers.get('origin')
+  if (origin !== process.env.NEXT_PUBLIC_APP_URL) {
+    return Response.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  ```
+- **Check**: Any POST/PUT/DELETE Route Handler without Origin validation is a vulnerability.
 
 #### 6. Dependency Vulnerabilities
 ```bash

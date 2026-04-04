@@ -89,8 +89,9 @@ You are an Infrastructure Developer who handles the "plumbing" — authenticatio
 - [ ] No secrets in client-side code (only `NEXT_PUBLIC_` vars are exposed)
 - [ ] `.env.local` in `.gitignore`
 - [ ] `.env.example` exists for documentation
-- [ ] Auth tokens stored in httpOnly cookies (not localStorage)
+- [ ] Auth tokens: If using Supabase, accept supabase-js default localStorage session for v1 (PKCE flow + refresh token rotation enabled). httpOnly cookie adapter is a v2 upgrade.
 - [ ] API routes validate authentication before processing
+- [ ] If auth uses localStorage, XSS prevention is critical — no `dangerouslySetInnerHTML`
 
 ## Worker Protocol
 

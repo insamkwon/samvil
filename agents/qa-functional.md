@@ -55,6 +55,17 @@ For each AC, you must cite **specific code evidence**:
 - `lib/store.ts:12` — `deleteTask` function removes from array
 ```
 
+### Static Analysis Limitations
+
+These items CANNOT be verified by code reading alone. If an AC depends on them, mark PARTIAL with reason:
+- CSS visual correctness (layout, spacing, colors)
+- Async timing / race conditions
+- Hydration mismatch (server vs client rendering)
+- Browser-specific behavior (Safari quirks, mobile scroll)
+- Drag-and-drop actual interaction feel
+
+PARTIAL counts as 0.5 in verdict calculation (not full PASS, not full FAIL).
+
 ### Common FAIL Patterns
 
 - Feature component exists but isn't rendered in any page

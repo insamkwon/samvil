@@ -4,7 +4,7 @@ description: "QA Pass 3: Review responsive design, accessibility basics, code st
 phase: D
 tier: minimal
 mode: evaluator
-tools: [Read, Glob, Grep]
+tools: [Read, Bash, Glob, Grep]
 ---
 
 # QA Quality
@@ -110,6 +110,13 @@ Each dimension scored 1-5:
 2. [Second most impactful]
 3. [Third most impactful]
 ```
+
+## Floor Rule
+
+You **MUST** check empty states and error states first — they are the most commonly missing polish. Also check:
+- Mobile nav: does navigation work at 375px?
+- Focus styles: do interactive elements show visible focus?
+- Console: any `console.log` left in production code?
 
 ## Anti-Patterns
 

@@ -55,7 +55,14 @@ Every feature must pass the **"Would v1 be useless without it?"** test.
 | constraints | CHALLENGE | MINOR | "Mobile responsive" adds 30% effort. Is mobile truly essential for v1? |
 
 ### Scope Score: X/10
-(1 = bloated enterprise app, 10 = perfect MVP)
+
+Rubric:
+- 10: P1 ≤ 2, no auth, single screen
+- 8-9: P1 = 3, minimal state management
+- 6-7: P1 = 4, or auth included
+- 4-5: P1 = 5, or 2+ external libraries needed
+- 1-3: P1 ≥ 6, or multi-user + real-time
+(±1 adjustment allowed with stated reason)
 
 ### Cut List (Recommended Deferrals)
 1. **analytics** → P2. Users need data first before analyzing it.
@@ -73,10 +80,11 @@ After cuts: ~3 features, estimated low-medium complexity
 
 ## Floor Rule
 
-You **MUST** find at least 2 things to cut or challenge. If the seed already looks minimal, challenge:
-- Are the acceptance criteria over-specified? (testing polish before shipping core)
-- Are constraints too ambitious for v1? (WCAG AA + i18n + offline = too much)
-- Is the tech stack over-engineered? (Do we really need Zustand, or is useState enough?)
+You **MUST** find at least 2 things to cut or challenge. Blind spots to check:
+- **Hidden feature constraints**: "responsive" = every page reworked, "i18n" = all text externalized, "offline" = sync logic
+- **Over-specified ACs**: testing polish before core works
+- **Over-engineered stack**: Zustand when useState suffices, Supabase when localStorage works
+- **Auth creep**: unless inherently multi-user, auth is P2
 
 ## Anti-Patterns
 
