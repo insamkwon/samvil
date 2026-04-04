@@ -62,7 +62,33 @@ uv venv .venv && source .venv/bin/activate && uv pip install -e .
 # 3. 새 세션 열기
 ```
 
-**2. Node.js 확인**
+**2. 버전 업데이트 확인**
+
+현재 설치된 SAMVIL 버전 확인:
+```bash
+cat ~/.claude/plugins/cache/samvil/samvil/*/.claude-plugin/plugin.json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])" 2>/dev/null
+```
+
+GitHub 최신 버전 확인:
+```bash
+gh api repos/insamkwon/samvil/contents/.claude-plugin/plugin.json --jq '.content' 2>/dev/null | base64 -d | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])" 2>/dev/null
+```
+
+- 동일 버전: `[SAMVIL] ✓ 최신 버전 (v0.2.0)`
+- 업데이트 있음:
+  ```
+  [SAMVIL] ⬆️ 새 버전이 있습니다! (현재: v0.2.0 → 최신: v0.3.0)
+  ```
+  AskUserQuestion:
+  ```
+  question: "업데이트할까요?"
+  options:
+    - "지금 업데이트" → /samvil:update 실행 안내
+    - "나중에" → 현재 버전으로 계속
+  ```
+- 확인 실패 (오프라인 등): 무시하고 진행
+
+**3. Node.js 확인**
 
 ```bash
 node --version
