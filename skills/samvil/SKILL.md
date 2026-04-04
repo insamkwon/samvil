@@ -77,7 +77,9 @@ gh --version 2>/dev/null
 
 현재 버전:
 ```bash
-cat ~/.claude/plugins/cache/samvil/samvil/*/.claude-plugin/plugin.json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])" 2>/dev/null
+# 최신 캐시 폴더의 plugin.json만 읽기 (여러 버전 폴더 충돌 방지)
+LATEST_CACHE=$(ls -td ~/.claude/plugins/cache/samvil/samvil/*/ 2>/dev/null | head -1)
+cat "${LATEST_CACHE}.claude-plugin/plugin.json" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])" 2>/dev/null
 ```
 
 GitHub 최신 버전 (gh 있을 때만):
