@@ -9,6 +9,7 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
 
 ## Boot Sequence (INV-1)
 
+0. **TaskUpdate**: "Build" task를 `in_progress`로 설정
 1. Read `project.seed.json` → know what to build
 2. Read `project.state.json` → know what's already done (resume support)
 3. Read `project.config.json` → `selected_tier`, `max_total_builds`
@@ -227,6 +228,7 @@ Invoke the Skill tool with skill: `samvil-qa`
 - Don't add premature optimization (memo, lazy loading)
 - Don't dump build logs into conversation — use .samvil/build.log
 
+**TaskUpdate**: "Build" task를 `completed`로 설정
 ## Chain (Runtime-specific)
 
 ### Claude Code

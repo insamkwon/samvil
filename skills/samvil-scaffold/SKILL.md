@@ -9,6 +9,7 @@ You are adopting the role of **Scaffolder**. Create a project directory with a v
 
 ## Boot Sequence (INV-1)
 
+0. **TaskUpdate**: "Scaffold" task를 `in_progress`로 설정
 1. Read `project.seed.json` from the project directory
 2. Read `project.state.json` → confirm `current_stage` is `"scaffold"`
 3. Read `project.config.json` → `selected_tier`
@@ -167,6 +168,7 @@ Invoke the Skill tool with skill: `samvil-build`
 5. **All build output goes to .samvil/ files.** Never dump npm output into conversation.
 6. **Respect seed.tech_stack.framework.** Don't override user's stack choice.
 
+**TaskUpdate**: "Scaffold" task를 `completed`로 설정
 ## Chain (Runtime-specific)
 
 ### Claude Code

@@ -291,6 +291,21 @@ Write this to `~/dev/<project-name>/project.config.json`.
 
 ### Step 5: Start the Chain
 
+**파이프라인 진행 상황 등록** — TaskCreate 도구로 전체 단계를 생성한다. 사용자가 하단에서 진행 상황을 한눈에 볼 수 있도록:
+
+```
+TaskCreate: "Interview — 요구사항 인터뷰"
+TaskCreate: "Seed — 설계서 생성"
+TaskCreate: "Council — 설계 검토" (minimal이면 생략)
+TaskCreate: "Design — 아키텍처 결정"
+TaskCreate: "Scaffold — 프로젝트 뼈대 생성"
+TaskCreate: "Build — 기능 구현"
+TaskCreate: "QA — 3단계 검증"
+TaskCreate: "Retro — 회고"
+```
+
+각 스킬 시작 시 해당 Task를 `in_progress`로, 완료 시 `completed`로 업데이트한다.
+
 Print:
 ```
 [SAMVIL] Starting pipeline for: "<app idea>"

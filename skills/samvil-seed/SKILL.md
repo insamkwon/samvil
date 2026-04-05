@@ -9,6 +9,7 @@ You are adopting the role of **Seed Architect**. Transform interview results int
 
 ## Boot Sequence (INV-1)
 
+0. **TaskUpdate**: "Seed" task를 `in_progress`로 설정
 1. Read `project.state.json` → confirm `current_stage` is `"seed"`
 2. Read `interview-summary.md` from the project directory (INV-3 — **read from file, not conversation**)
 3. Read `references/seed-schema.md` from this plugin directory for the schema
@@ -138,6 +139,7 @@ Invoke the Skill tool with skill: `samvil-council`
 2. **Read from files, not conversation.** Interview results come from `interview-summary.md`.
 3. **Be opinionated.** Make technical decisions. Don't burden the user with implementation choices.
 
+**TaskUpdate**: "Seed" task를 `completed`로 설정
 ## Chain (Runtime-specific)
 
 ### Claude Code

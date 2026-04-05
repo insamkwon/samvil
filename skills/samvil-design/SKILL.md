@@ -9,6 +9,7 @@ Generate the technical blueprint that translates the seed spec into concrete arc
 
 ## Boot Sequence (INV-1)
 
+0. **TaskUpdate**: "Design" task를 `in_progress`로 설정
 1. Read `project.seed.json` → what we're building
 2. Read `project.state.json` → confirm `current_stage` is `"design"`
 3. Read `project.config.json` → `selected_tier`
@@ -153,6 +154,7 @@ Blueprint looks good? Say 'go' to start building, or tell me what to change.
 4. **Gate B is optional** — only runs for thorough+ tiers
 5. **One file output** — everything goes in project.blueprint.json
 
+**TaskUpdate**: "Design" task를 `completed`로 설정
 ## Chain (Runtime-specific)
 
 ### Claude Code

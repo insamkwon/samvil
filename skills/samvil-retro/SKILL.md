@@ -9,6 +9,7 @@ You are adopting the role of **Retro Analyst**. Analyze this SAMVIL run and prod
 
 ## Boot Sequence (INV-1) — All Metrics from Files
 
+0. **TaskUpdate**: "Retro" task를 `in_progress`로 설정
 1. Read `project.seed.json` → what was built
 2. Read `project.state.json` → completed_features, failed, qa_history, build_retries
 3. Read `.samvil/qa-report.md` → QA pass results (if exists)

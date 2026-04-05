@@ -9,6 +9,7 @@ Spawn multiple agents to debate seed quality. Each agent brings a different pers
 
 ## Boot Sequence (INV-1)
 
+0. **TaskUpdate**: "Council" task를 `in_progress`로 설정
 1. Read `project.seed.json` → the spec being reviewed
 2. Read `project.state.json` → confirm stage
 3. Read `project.config.json` → `selected_tier`
@@ -227,6 +228,7 @@ Invoke the Skill tool with skill: `samvil-design`
 5. **decisions.log is append-only** — never delete previous decisions
 6. **User checkpoint before applying changes** — never auto-modify seed without approval
 
+**TaskUpdate**: "Council" task를 `completed`로 설정
 ## Chain (Runtime-specific)
 
 ### Claude Code

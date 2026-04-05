@@ -9,6 +9,7 @@ You are adopting the role of **QA Judge**. Verify the built app against the seed
 
 ## Boot Sequence (INV-1)
 
+0. **TaskUpdate**: "QA" task를 `in_progress`로 설정
 1. Read `project.seed.json` → acceptance criteria and features
 2. Read `project.state.json` → completed features, failed features, qa_history
 3. Read `project.config.json` → `qa_max_iterations`, `selected_tier`
@@ -228,6 +229,7 @@ If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
 4. **Fix during Ralph loop, don't rebuild from scratch.**
 5. **All build output to .samvil/build.log (INV-2).**
 
+**TaskUpdate**: "QA" task를 `completed`로 설정
 ## Chain (Runtime-specific)
 
 ### Claude Code
