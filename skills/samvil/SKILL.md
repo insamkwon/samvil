@@ -24,54 +24,47 @@ You are the SAMVIL orchestrator. Take the user's one-line app idea and guide it 
 [SAMVIL] 🔍 환경 점검 중...
 ```
 
-아래 항목을 순서대로 체크:
+아래 항목을 순서대로 체크. **없는 도구는 자동 설치를 시도한다.**
 
-**1. Node.js**
+**1. Node.js** (필수 — 없으면 앱을 빌드할 수 없음)
 ```bash
 node --version 2>/dev/null
 ```
 - ✅ 있음 → `[SAMVIL] ✓ Node.js {version}`
-- ❌ 없음 → `[SAMVIL] ✗ Node.js가 필요합니다.` + 설치 안내:
+- ❌ 없음 → 자동 설치 시도:
+  ```bash
+  # macOS: brew 있으면 자동 설치
+  if command -v brew &>/dev/null; then
+    brew install node
+  fi
   ```
-  macOS: brew install node
-  또는: https://nodejs.org 에서 LTS 설치
-  ```
-  **Node.js 없으면 진행 불가 — 설치 후 다시 시작하세요.**
+  brew도 없으면: `[SAMVIL] ✗ Node.js가 필요합니다. https://nodejs.org 에서 LTS를 설치해주세요.` → **진행 불가**
 
-**2. npm**
-```bash
-npm --version 2>/dev/null
-```
-- ✅ 있음 → `[SAMVIL] ✓ npm {version}`
-- ❌ 없음 → Node.js 설치하면 함께 설치됨
+**2. npm** — Node.js 설치하면 함께 설치됨. 별도 체크 불필요.
 
-**3. Python (MCP 서버용)**
+**3. Python** (MCP 서버용)
 ```bash
 python3 --version 2>/dev/null
 ```
-- ✅ 3.12+ → `[SAMVIL] ✓ Python {version}`
-- ⚠️ 3.12 미만 → `[SAMVIL] ⚠️ Python 3.12+ 필요 (현재: {version}). MCP 고급 기능 사용 불가.`
+- ✅ 있음 → `[SAMVIL] ✓ Python {version}`
+- ❌ 없음 → 자동 설치 시도:
+  ```bash
+  if command -v brew &>/dev/null; then
+    brew install python@3.12
+  fi
   ```
-  macOS: brew install python@3.12
-  ```
-- ❌ 없음 → `[SAMVIL] ⚠️ Python 없음. MCP 없이 진행 가능.`
+  실패 시: `[SAMVIL] ⚠️ Python 없음. MCP 없이 진행.` → 멈추지 않고 계속
 
-**4. uv (Python 패키지 관리)**
-```bash
-which uv 2>/dev/null || which uvx 2>/dev/null
-```
+**4. uv** — SessionStart hook (`setup-mcp.sh`)이 자동 설치. Health Check에서는 결과만 표시:
 - ✅ 있음 → `[SAMVIL] ✓ uv 설치됨`
-- ⚠️ 없음 → `[SAMVIL] ⚠️ uv 없음. MCP 서버 설치 시 필요.`
-  ```
-  설치: curl -LsSf https://astral.sh/uv/install.sh | sh
-  ```
+- 없음 → 표시 안 함 (setup-mcp.sh가 처리)
 
-**5. GitHub CLI (업데이트 체크용)**
+**5. GitHub CLI** (선택 — 업데이트 체크용)
 ```bash
 gh --version 2>/dev/null
 ```
 - ✅ 있음 → `[SAMVIL] ✓ GitHub CLI 설치됨`
-- ⚠️ 없음 → `[SAMVIL] ⚠️ gh 없음. 자동 업데이트 체크 불가 (수동 업데이트는 가능).`
+- 없음 → 표시 안 함 (비필수, 없어도 기능에 영향 없음)
 
 **6. SAMVIL 버전 + 업데이트 체크**
 
@@ -91,18 +84,10 @@ gh api repos/insamkwon/samvil/contents/.claude-plugin/plugin.json --jq '.content
 - 업데이트 있음 → AskUserQuestion: "새 버전 v{latest} 있음. 업데이트할까?" → "지금" or "나중에"
 - 확인 실패 → 무시하고 진행
 
-**7. MCP 서버**
-
-`score_ambiguity` MCP 도구 사용 가능 여부 확인.
+**7. MCP 서버** — SessionStart hook이 자동 설치. 여기서는 결과만 확인:
 
 - ✅ 연결됨 → `[SAMVIL] ✓ MCP 서버 연결됨`
-- ⚠️ 없음 → 설치 안내 표시 후 계속 진행:
-  ```
-  [SAMVIL] ⚠️ MCP 서버 없음. 설치하면 모호도 수치, 세션 저장, 시드 진화를 사용할 수 있습니다.
-    설치: README의 "2. MCP 서버 설치" 참고
-    지금은 MCP 없이 진행합니다.
-  ```
-  **MCP 없어도 멈추지 않고 바로 진행한다.** 실제 파이프라인에서 MCP 도구 호출 실패 시에만 fallback 경로 사용.
+- ⚠️ 없음 → `[SAMVIL] ⚠️ MCP 없음 (기본 모드)` → 멈추지 않고 바로 진행
 
 **8. 이전 프로젝트 확인**
 
@@ -126,23 +111,18 @@ gh api repos/insamkwon/samvil/contents/.claude-plugin/plugin.json --jq '.content
   준비 완료! 파이프라인을 시작합니다.
 ```
 
-또는 문제가 있으면:
+또는 자동 설치가 발생한 경우:
 ```
 [SAMVIL] 환경 점검 결과
 ━━━━━━━━━━━━━━━━━━━━━━
-  ✓ Node.js v20.11.0
-  ✓ npm 10.2.4
-  ⚠️ Python 3.10.2 (3.12+ 권장)
-  ⚠️ uv 없음
-  ✓ GitHub CLI 2.45.0
-  ✓ SAMVIL v0.2.1 (최신)
-  ⚠️ MCP 서버 없음 (기본 모드)
+  ✓ Node.js v20.11.0 (자동 설치됨)
+  ✓ Python 3.12.12
+  ✓ MCP 서버 연결됨
+  ✓ SAMVIL v0.7.3 (최신)
 ━━━━━━━━━━━━━━━━━━━━━━
-  ⚠️ 일부 고급 기능 비활성화. 기본 파이프라인은 정상 동작합니다.
 ```
 
-**✗ (빨간) 항목이 있으면 진행 불가 → 해결 방법 안내 후 중단.**
-**⚠️ (노란) 항목만 있으면 → 기본 모드로 진행 가능.**
+**원칙: Node.js만 진짜 필수. 나머지는 없으면 자동 설치하거나 기본 모드로 진행.**
 
 ### Step 1: Project Mode Selection
 
