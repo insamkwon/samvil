@@ -105,7 +105,7 @@ gh api repos/insamkwon/samvil/contents/.claude-plugin/plugin.json --jq '.content
   ✓ Python 3.12.12
   ✓ uv 설치됨
   ✓ GitHub CLI 2.45.0
-  ✓ SAMVIL v0.2.1 (최신)
+  ✓ SAMVIL v0.1.0 (최신)
   ✓ MCP 서버 연결됨
 ━━━━━━━━━━━━━━━━━━━━━━
   준비 완료! 파이프라인을 시작합니다.
@@ -118,7 +118,7 @@ gh api repos/insamkwon/samvil/contents/.claude-plugin/plugin.json --jq '.content
   ✓ Node.js v20.11.0 (자동 설치됨)
   ✓ Python 3.12.12
   ✓ MCP 서버 연결됨
-  ✓ SAMVIL v0.7.3 (최신)
+  ✓ SAMVIL v0.1.0 (최신)
 ━━━━━━━━━━━━━━━━━━━━━━
 ```
 

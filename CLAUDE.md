@@ -60,23 +60,28 @@ Supports multiple stacks (CLI-based scaffold, no template folder):
 
 ## Versioning (필수)
 
-**git push 전에 반드시 버전을 올린다.** `.claude-plugin/plugin.json`의 `version` 필드.
+**git push 전에 반드시 버전을 올린다.** SSOT: `.claude-plugin/plugin.json`의 `version` 필드.
 
-| 변경 유형 | 버전 | 예시 |
-|----------|------|------|
-| **PATCH** (0.0.+1) | 버그 수정, 오타, 프롬프트 미세 조정 | 체인 끊김 수정, Floor Rule 문구 개선 |
-| **MINOR** (0.+1.0) | 기능 추가, 에이전트/프리셋/스킬 추가 | 새 앱 프리셋, 새 디자인 테마 |
-| **MAJOR** (+1.0.0) | 호환 안 되는 변경, 아키텍처 변경 | seed 스키마 변경, INV 규칙 변경 |
+### 판정 기준: "사용자가 차이를 느끼는가?"
 
-Claude가 push 시 커밋 내용 보고 자동 판단 → plugin.json version 증가 → 함께 커밋.
+| 레벨 | 기준 | 예시 |
+|------|------|------|
+| **PATCH** (0.0.+1) | 사용자가 차이를 모름 | 프롬프트 문구 개선, 오타, 버그 수정, 내부 리팩토링, 문서 수정 |
+| **MINOR** (0.+1.0) | 사용자가 새로운 걸 보거나 경험함 | 새 스킬/에이전트/프리셋, 새 단계 추가 (Smoke Run 등), 새 스택 지원, 새 설정 옵션, 수동→자동 전환 |
+| **MAJOR** (+1.0.0) | 기존 프로젝트가 깨질 수 있음 | seed 스키마 변경, INV 규칙 변경, config 필수 필드 변경, 체인 순서 변경 |
 
-현재 버전: plugin.json의 `version` 필드 참조 (SSOT)
+### 판정 테스트
 
-**버전업 체크리스트 (push 전 필수):**
+- PATCH: `/samvil` 실행 시 사용자 경험이 동일
+- MINOR: `/samvil` 실행 시 새로운 출력/질문/옵션이 보임
+- MAJOR: 이전 버전으로 만든 프로젝트에 새 버전 실행 시 에러
+
+### 버전업 체크리스트 (push 전 필수)
+
 1. `plugin.json`의 `version` 올리기 (SSOT)
 2. `README.md` 첫 줄의 `` `vX.Y.Z` `` 동기화
-3. 캐시 동기화: 변경 파일을 `~/.claude/plugins/cache/samvil/samvil/<version>/`에 복사
-4. minor/major 버전업 시 git tag: `git tag v0.X.0 && git push --tags`
+3. 캐시 동기화: 변경 파일을 plugin cache에 복사
+4. minor/major 버전업 시 git tag: `git tag vX.Y.0 && git push --tags`
 
 ## 개발 컨벤션
 
