@@ -38,7 +38,7 @@ Read `seed.tech_stack.framework` to determine which CLI to use:
 cd ~/dev
 npx create-next-app@14 <seed.name> --typescript --tailwind --app --src-dir=false --import-alias="@/*" --eslint --use-npm <<< $'No\n'
 cd ~/dev/<seed.name>
-rm -rf node_modules && npm install
+# create-next-app이 npm install까지 완료함. 추가 패키지만 별도 설치.
 ```
 
 **Next.js 14 + shadcn 호환 설정** (fix-log 패턴):
