@@ -66,6 +66,7 @@ Check against schema rules from `references/seed-schema.md`:
   - "No backend server — client-only with localStorage" (기본)
   - 데이터 손실이 치명적인 앱(이력서, 문서 등)이면 AC에 "데이터가 브라우저 재시작 후에도 유지된다" 추가
 - [ ] **첫 30초 가치 전달**: core_experience에 "사용자가 앱을 열었을 때 즉시 가치를 느끼는가?" 체크. 빈 화면만 나오면 → AC에 "빈 상태에서 다음 행동을 유도하는 가이드가 있다" 추가
+- [ ] **Stub 허용 판정**: AC 중 AI/API 연동이 필요한 항목은 stub으로 대체 가능한지 판정. core_experience에 직결되는 기능은 stub 불허 (QA에서 UNIMPLEMENTED = FAIL 처리됨). out_of_scope에 명시적으로 "v1은 mock 데이터" 등으로 적어야만 stub 허용.
 
 ### Step 4: Present to User with Preview
 

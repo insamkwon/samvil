@@ -89,11 +89,25 @@ For **EACH** item in `seed.acceptance_criteria`:
 2. Verify the implementation is reachable (imported and rendered)
 3. Check edge case: empty state handled?
 
-Rate each criterion: **PASS** / **FAIL** / **PARTIAL**
+Rate each criterion: **PASS** / **FAIL** / **PARTIAL** / **UNIMPLEMENTED**
 
-**PARTIAL rule:** Items that cannot be verified by code reading alone (CSS visual correctness, async timing, drag-and-drop feel, hydration mismatch) should be marked PARTIAL with reason. PARTIAL counts as 0.5 in verdict — not a full FAIL.
+**PARTIAL rule:** 코드가 존재하지만 코드 리딩만으로 검증 불가 (CSS, 드래그앤드롭 느낌, 비동기 타이밍). PARTIAL counts as 0.5.
 
-**If any criterion is FAIL:** Verdict = REVISE with the failing criteria listed.
+**UNIMPLEMENTED rule (v0.3.0 신규):**
+- API/AI 호출이 stub(하드코딩 응답, simulated response)이면 → **UNIMPLEMENTED** (PARTIAL 아님)
+- seed의 core_experience에 언급된 기능이 stub → **자동 FAIL**
+- "expected for v1"으로 면죄부 주지 않음. out_of_scope는 seed에 명시된 것만 인정. QA가 자의적으로 판단하지 않음.
+
+```
+예:
+  AC: "AI가 경력기술서를 STAR 기법으로 작성"
+  구현: hardcoded sample text → UNIMPLEMENTED (= FAIL)
+  
+  AC: "드래그앤드롭으로 카드 이동"
+  구현: @hello-pangea/dnd 적용, 코드 존재 → PARTIAL (실제 터치 검증 불가)
+```
+
+**If any criterion is FAIL or UNIMPLEMENTED:** Verdict = REVISE with the failing criteria listed.
 
 ## Pass 3: Quality Verification
 
@@ -191,12 +205,19 @@ If verdict is REVISE:
 
   Try it: cd ~/dev/<seed.name> && npm run dev
 
-  다음 단계:
-  □ 환경변수 확인 (.env.local 필요 시)
-  □ API 키 설정 (외부 서비스 사용 시)
+  다음 단계 (런칭 준비):
   □ npm run dev 로 실행 확인
+  □ 환경변수 확인 (.env.local 필요 시)
+  □ API 키 발급 + 설정 (외부 서비스 사용 시)
+  □ 스텁→실동작 교체: <UNIMPLEMENTED 항목 목록>
   □ 모바일에서 확인 (반응형)
+  □ 회고 진행 → 다음 개발 우선순위 결정
 ```
+
+**런칭 준비 리포트**: `.samvil/launch-checklist.md`에 저장:
+- UNIMPLEMENTED 항목별 실동작 교체 가이드
+- 필요한 환경변수 목록 (.env.example 기반)
+- 배포 명령어 (Vercel/Netlify 등)
 
 **스킵된 단계 표시**: Evolve를 스킵하는 경우:
 ```
