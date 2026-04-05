@@ -18,6 +18,23 @@ You are adopting the role of **Retro Analyst**. Analyze this SAMVIL run and prod
 
 ## Process
 
+### Step 0: Read History for Pattern Detection
+
+1. Read `harness-feedback.log` from the SAMVIL plugin directory (`~/dev/samvil/harness-feedback.log`)
+   — 이전 실행들의 suggestions를 수집
+2. Read `.samvil/events.jsonl` from the project directory
+   — 이번 실행의 전체 이벤트 이력
+
+이전 suggestions에서 같은 키워드가 **3회 이상** 반복되면 **'반복 패턴'**으로 표시:
+
+```
+[SAMVIL] ⚠️ 반복 패턴 감지:
+  "drag-drop 빌드 실패" — 3회 반복 (run-001, run-003, run-005)
+  → 자동 수정 제안: web-recipes.md에 @hello-pangea/dnd 기본 설정 추가
+```
+
+반복 패턴이 있으면 Step 3의 suggestions에 자동 수정 제안을 포함한다.
+
 ### Step 1: Gather Metrics
 
 From the files above, extract:
@@ -63,6 +80,28 @@ Suggestions:
   2. <specific change>
   3. <specific change>
 ```
+
+### Step 3b: Preset 자동 축적
+
+이 앱의 유형(seed.name 또는 interview에서 매칭된 preset)이 `references/app-presets.md`에 **없으면**:
+
+빌드 경험 기반으로 새 preset 초안을 생성:
+
+```
+[SAMVIL] 새 앱 유형 감지: "<app-type>"
+  이 유형이 app-presets.md에 없습니다.
+  빌드 경험 기반으로 preset 초안을 생성했습니다:
+
+  ## <app-type>
+  기본 기능: [이번에 구현한 features]
+  추천 스택: [이번에 사용한 tech_stack]
+  흔한 함정: [이번에 발생한 에러 패턴 from fix-log.md]
+  Pre-mortem: [QA에서 발견된 주요 이슈]
+
+  app-presets.md에 추가할까요? (yes / no)
+```
+
+사용자 승인 시 `references/app-presets.md`에 append.
 
 ### Step 4: Append to Feedback Log
 

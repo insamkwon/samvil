@@ -17,8 +17,35 @@ Improve the seed based on QA feedback. Spawn wonder + reflect agents, generate a
 
 1. Read `project.seed.json` → current seed
 2. Read `project.state.json` → current stage, qa_history
-3. Read `.samvil/qa-report.md` → QA results
-4. Read `decisions.log` → binding decisions (if exists)
+3. Read `project.config.json` → `evolve_max_cycles`, `evolve_mode`, `max_total_builds`
+4. Read `.samvil/qa-report.md` → QA results
+5. Read `decisions.log` → binding decisions (if exists)
+
+## Step 0: Mode Selection
+
+Read `config.evolve_mode`:
+
+### Mode: `spec-only` (기본값)
+
+명세만 진화. 빌드는 수렴 후 한 번만.
+
+```
+Wonder("뭘 아직 모르나?") → Reflect("seed 어떻게 바꿀까?") → seed 수정
+→ 수렴 체크: seed 변경 없으면 종료
+→ 수렴 후 마지막에 한 번만 Build → QA
+→ max: config.evolve_max_cycles
+```
+
+### Mode: `full`
+
+매 세대마다 빌드 + QA 포함.
+
+```
+Wonder → Reflect → seed 수정 → Build → QA
+→ max: config.evolve_max_cycles
+```
+
+**전체 빌드 횟수 추적**: `state.build_retries`가 `config.max_total_builds`에 도달하면 모드와 무관하게 강제 종료.
 
 ## Step 1: Gather Context
 
@@ -83,6 +110,13 @@ Apply reflect-proposer's recommendations to create seed v(N+1):
 4. If MCP available: `validate_evolved_seed(original, evolved)` — check rules
 5. If validation fails: fix issues, re-validate
 
+## Step 4b: Event Log
+
+Append to `.samvil/events.jsonl`:
+```json
+{"type":"evolve_gen","from_version":<N>,"to_version":<N+1>,"changes_count":<N>,"ts":"<ISO 8601>"}
+```
+
 ## Step 5: User Checkpoint
 
 Present the diff:
@@ -111,19 +145,32 @@ Apply this evolution? (yes / no / edit)
 ## Step 6: Save and Check Convergence
 
 1. Write updated `project.seed.json`
-2. If MCP available:
-   - `save_seed_version(session_id, version, seed_json, change_summary)`
-   - `check_convergence(seed_history)` → converged?
-3. If MCP not available: compare manually (same features? same ACs?)
+2. **수렴 판정**: 새 seed와 이전 seed를 비교.
+   - features, acceptance_criteria, constraints가 **모두 동일**이면 → 수렴
+   - MCP 있으면: `check_convergence(seed_history)` 활용
+   - MCP 없으면: JSON diff로 수동 비교 (features + ACs 기준)
 
-### If Converged (similarity ≥ 0.95)
+### If Converged (seed 변경 없음)
+
+Append to `.samvil/events.jsonl`:
+```json
+{"type":"evolve_converge","final_version":<N+1>,"total_generations":<N>,"ts":"<ISO 8601>"}
+```
 
 ```
 [SAMVIL] Seed converged at v{N+1}. No further evolution needed.
 ```
-Stop evolving. Chain to rebuild if needed.
 
-### If Not Converged and iterations < 30
+**If mode is `spec-only`**: 수렴 후 최종 Build → QA 한 번 실행.
+```
+[SAMVIL] Spec converged. Running final build + QA...
+```
+Update `project.state.json`: set `current_stage` to `"build"`.
+Invoke `samvil:build` → Build 완료 후 자동으로 QA 체인.
+
+**If mode is `full`**: 이미 매 세대마다 빌드했으므로 바로 retro로.
+
+### If Not Converged and iterations < config.evolve_max_cycles
 
 ```
 [SAMVIL] Seed v{N+1} saved. Rebuilding changed features...
@@ -132,7 +179,7 @@ Rebuild only features that changed → re-QA → check results.
 If QA passes: offer another evolve round.
 If QA still fails: another wonder/reflect cycle.
 
-### If Max Iterations (30) Reached
+### If Max Iterations Reached (config.evolve_max_cycles, default 5)
 
 ```
 [SAMVIL] Max evolution iterations reached. Stopping.
@@ -158,4 +205,4 @@ Invoke the Skill tool with skill: `samvil:scaffold`
 3. **Preserve name, mode, core_experience** — evolve around the core, not through it
 4. **User approves every evolution** — no auto-modification
 5. **convergence ≥ 0.95 = stop** — diminishing returns beyond this
-6. **Max 30 iterations** — hard cap to prevent infinite loops
+6. **Max iterations = config.evolve_max_cycles (default 5)** — hard cap to prevent infinite loops

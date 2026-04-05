@@ -29,11 +29,6 @@
   "acceptance_criteria": ["string array — testable statements"],
   "constraints": ["string array"],
   "out_of_scope": ["string array"],
-  "agent_tier": "minimal | standard | thorough | full",
-  "agent_overrides": {
-    "add": [],
-    "remove": []
-  },
   "version": 1
 }
 ```
@@ -48,6 +43,30 @@
 6. `constraints` must have at least 1 item (empty = red flag)
 7. `out_of_scope` must have at least 1 item (empty = scope creep risk)
 8. `version` starts at 1, increments on evolve
+
+## project.config.json (실행 설정)
+
+```json
+{
+  "selected_tier": "minimal | standard | thorough | full",
+  "evolve_max_cycles": 5,
+  "evolve_mode": "spec-only | full",
+  "qa_max_iterations": 5,
+  "max_total_builds": 15,
+  "model_routing": {
+    "interview": "opus",
+    "council": "sonnet",
+    "build_worker": "sonnet",
+    "qa": "sonnet",
+    "evolve": "opus",
+    "lint_fix": "haiku",
+    "default": "sonnet"
+  },
+  "skip_stages": []
+}
+```
+
+**분리 원칙**: seed.json은 명세만, config.json은 실행 설정만. 설정 변경이 seed 버전에 영향 안 줌.
 
 ## project.state.json
 

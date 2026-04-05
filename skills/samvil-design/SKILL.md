@@ -11,9 +11,10 @@ Generate the technical blueprint that translates the seed spec into concrete arc
 
 1. Read `project.seed.json` → what we're building
 2. Read `project.state.json` → confirm `current_stage` is `"design"`
-3. Read `interview-summary.md` → user context
-4. Read `decisions.log` → binding decisions from Gate A (if exists)
-5. Read `references/seed-schema.md` → blueprint schema reference
+3. Read `project.config.json` → `selected_tier`
+4. Read `interview-summary.md` → user context
+5. Read `decisions.log` → binding decisions from Gate A (if exists)
+6. Read `references/seed-schema.md` → blueprint schema reference
 
 ## Step 1: Generate Blueprint
 
@@ -72,7 +73,7 @@ Include this as a comment section in the blueprint or present to user.
 
 ## Step 3: Gate B — Design Council (if tier ≥ thorough)
 
-Read `seed.agent_tier`. If `thorough` or `full`:
+Read `config.selected_tier`. If `thorough` or `full`:
 
 Spawn design council agents **in parallel** via CC Agent tool:
 

@@ -11,13 +11,14 @@ Spawn multiple agents to debate seed quality. Each agent brings a different pers
 
 1. Read `project.seed.json` → the spec being reviewed
 2. Read `project.state.json` → confirm stage
-3. Read `interview-summary.md` → interview context for agents
-4. Read `references/council-protocol.md` → synthesis rules and format
-5. Read `references/tier-definitions.md` → which agents to activate
+3. Read `project.config.json` → `selected_tier`
+4. Read `interview-summary.md` → interview context for agents
+5. Read `references/council-protocol.md` → synthesis rules and format
+6. Read `references/tier-definitions.md` → which agents to activate
 
 ## Step 1: Determine Active Agents
 
-Read `seed.agent_tier` and apply the Gate A activation table:
+Read `config.selected_tier` and apply the Gate A activation table:
 
 ```
 minimal  → Skip council entirely. Return immediately.
@@ -131,26 +132,33 @@ Apply synthesis rules from `references/council-protocol.md`:
 1. Count verdicts per section across all Round 2 agents
 2. Determine overall: **PROCEED** / **PROCEED WITH CHANGES** / **HOLD**
 
-Present the full synthesis to the user:
+Present the synthesis in a **user-friendly format** — 각 에이전트의 핵심 의견을 한 줄로 요약:
 
 ```
-[SAMVIL] Council Gate A Results
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[SAMVIL] Council 결과
+━━━━━━━━━━━━━━━━━━━━
 
-{Round 1 summary if run}
+  PO:         '모든 AC가 testable하고 명확함'
+  Simplifier: 'P1 기능 3개, 적절한 범위'
+  Scope Guard:'의존성 정직함. drag-drop → board-view 순서 맞음'
 
-Round 2 Review:
-  product-owner:  {verdict} — {reasoning}
-  simplifier:     {verdict} — {reasoning}
-  scope-guard:    {verdict} — {reasoning}
-  ceo-advisor:    {verdict} — {reasoning}
+  결정: PROCEED ✓
+  변경: 없음
+```
 
-Synthesis: {PROCEED / PROCEED WITH CHANGES / HOLD}
+변경이 있는 경우:
+```
+[SAMVIL] Council 결과
+━━━━━━━━━━━━━━━━━━━━
 
-{If changes recommended:}
-Recommended changes:
-  1. {change}
-  2. {change}
+  PO:         'AC 4번이 모호함 — "잘 동작한다"는 testable 아님'
+  Simplifier: 'dashboard는 P2로 강등 권장'
+  Scope Guard:'auth 없이 dashboard 데이터는 어디서?'
+
+  결정: PROCEED WITH CHANGES
+  변경:
+    1. AC 4번 → "Dashboard에 최근 7일 task 통계가 표시된다"
+    2. dashboard → priority 2로 이동
 ```
 
 ## Step 5: Handle Result
@@ -190,6 +198,13 @@ For each CHALLENGE or REJECT verdict, append to `~/dev/<project>/decisions.log`:
 ```
 
 If decisions.log already exists, read it first and append (don't overwrite).
+
+## Step 6b: Event Log
+
+Append to `.samvil/events.jsonl`:
+```json
+{"type":"council_verdict","verdict":"<PROCEED|PROCEED_WITH_CHANGES|HOLD>","agents_count":<N>,"ts":"<ISO 8601>"}
+```
 
 ## Step 7: Chain to Design (INV-4)
 

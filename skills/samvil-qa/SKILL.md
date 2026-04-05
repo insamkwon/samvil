@@ -11,7 +11,8 @@ You are adopting the role of **QA Judge**. Verify the built app against the seed
 
 1. Read `project.seed.json` → acceptance criteria and features
 2. Read `project.state.json` → completed features, failed features, qa_history
-3. Read `references/qa-checklist.md` from this plugin directory
+3. Read `project.config.json` → `qa_max_iterations`, `selected_tier`
+4. Read `references/qa-checklist.md` from this plugin directory
 
 ### Seed 없는 경우 (Brownfield QA)
 
@@ -49,7 +50,35 @@ Check:
 - No TypeScript errors in output (if exit code != 0, `tail -30 .samvil/build.log`)
 - No "Module not found" errors
 
-**If Pass 1 fails:** Verdict = REVISE with specific build errors. Skip Pass 2 and 3.
+**If Pass 1 fails:** Verdict = REVISE with specific build errors. Skip Pass 1b, Pass 2 and 3.
+
+## Pass 1b: Smoke Run (빌드 통과 후)
+
+Build가 성공하면 실제 dev server를 띄워서 앱이 HTTP 응답하는지 확인:
+
+```bash
+cd ~/dev/<seed.name>
+npm run dev &
+DEV_PID=$!
+SMOKE_PASS=false
+for i in {1..10}; do
+  curl -s http://localhost:3000 > /dev/null 2>&1 && SMOKE_PASS=true && break
+  sleep 2
+done
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo "000")
+kill $DEV_PID 2>/dev/null
+wait $DEV_PID 2>/dev/null
+echo "Smoke: $SMOKE_PASS (HTTP $HTTP_CODE)"
+```
+
+- **HTTP 200**: `[SAMVIL] Smoke Run: ✓ (HTTP 200)` → Pass 2로 진행
+- **HTTP != 200 또는 timeout**: `[SAMVIL] Smoke Run: ✗ (HTTP $HTTP_CODE)` → Verdict = REVISE (빌드는 되지만 런타임 에러)
+
+QA Report에 Smoke Run 결과 포함:
+```markdown
+## Pass 1b: Smoke Run
+- Dev Server: PASS/FAIL (HTTP <code>)
+```
 
 ## Pass 2: Functional Verification
 
@@ -122,6 +151,13 @@ Pass 3 (Quality): PASS ✓ / FAIL ✗
 Overall Verdict: PASS / REVISE / FAIL
 ```
 
+## Event Log
+
+After writing QA Report, append to `.samvil/events.jsonl`:
+```json
+{"type":"qa_verdict","verdict":"<PASS|REVISE|FAIL>","iteration":<N>,"pass1":"<PASS|FAIL>","pass2":"<PASS|FAIL>","pass3":"<PASS|FAIL>","ts":"<ISO 8601>"}
+```
+
 ## Ralph Loop (if REVISE)
 
 If verdict is REVISE:
@@ -138,9 +174,9 @@ If verdict is REVISE:
    ```json
    { "iteration": 1, "verdict": "REVISE", "issues": ["..."] }
    ```
-5. **MAX_ITERATIONS = 3**: After 3 REVISE cycles → verdict = FAIL
+5. **MAX_ITERATIONS = config.qa_max_iterations || 3**: After MAX_ITERATIONS REVISE cycles → verdict = FAIL
 
-**Convergence check:** Each iteration MUST fix more issues than it introduces. If not converging → FAIL.
+**Convergence check:** Each iteration MUST reduce total issue count compared to previous iteration. If issues increase or stay same for 2 consecutive iterations → FAIL with stagnation warning.
 
 ## On PASS — Offer Evolve or Chain to Retro (INV-4)
 

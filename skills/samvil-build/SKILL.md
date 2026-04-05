@@ -11,10 +11,11 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
 
 1. Read `project.seed.json` → know what to build
 2. Read `project.state.json` → know what's already done (resume support)
-3. Read `project.blueprint.json` → architecture decisions (screens, data model, components, routes)
-4. Read `decisions.log` → binding decisions from Council (if exists, respect them)
-5. Read `references/web-recipes.md` from this plugin directory → patterns to use
-6. Check `completed_features` in state — skip already-built features
+3. Read `project.config.json` → `selected_tier`, `max_total_builds`
+4. Read `project.blueprint.json` → architecture decisions (screens, data model, components, routes)
+5. Read `decisions.log` → binding decisions from Council (if exists, respect them)
+6. Read `references/web-recipes.md` from this plugin directory → patterns to use
+7. Check `completed_features` in state — skip already-built features
 
 ## Phase A: Core Experience
 
@@ -37,7 +38,18 @@ echo "Exit code: $?"
 
 **Circuit Breaker (MAX_RETRIES=2):**
 - Build fails → `tail -30 .samvil/build.log` → fix → retry
-- 2 failures → STOP, report to user
+- **에러를 수정할 때마다** `.samvil/fix-log.md`에 한 줄 append:
+  ```
+  [core] <에러 내용> → <해결 방법>
+  ```
+- 2 failures → **Adaptive Tier 제안** (minimal/standard인 경우):
+  ```
+  [SAMVIL] Core experience 빌드가 2회 실패했습니다.
+  현재 tier: <tier>. 더 높은 tier로 업그레이드하면 더 많은 에이전트가 도움을 줄 수 있습니다.
+  업그레이드할까요? (yes → Council부터 재실행 / no → 중단)
+  ```
+  승인 시: `config.selected_tier` 업그레이드 → `state.current_stage` = `"council"` → `samvil:council` invoke
+  거부 시: STOP, report to user
 
 7. Update `project.state.json`: note core experience complete
 
@@ -50,7 +62,7 @@ echo "Exit code: $?"
 ## Phase B: Features
 
 Read `seed.features` sorted by priority (1 first, then 2).
-Read `seed.agent_tier` to determine build mode.
+Read `config.selected_tier` to determine build mode.
 
 ### Step 1: Classify Features into Batches
 
@@ -72,16 +84,41 @@ Build features one at a time (same as v1):
 
 **For each feature:**
 
-1. **Re-read Context Kernel (INV-1)** — Re-read `project.seed.json` + `project.state.json` before every feature. Context may have been compressed — files are the truth.
-2. **Plan** — What components? What state changes? What routes? Keep minimal.
-3. **Implement** — Create/modify components, lib, routes. Keep existing code working.
-4. **Build verify (INV-2)**:
+1. **Re-read Context Kernel (INV-1)** — Re-read `project.seed.json` + `project.state.json` before every feature. Context may have been compressed — files are the truth. **Also read `.samvil/fix-log.md`** (if exists) to prevent repeating the same errors.
+2. **Event Log** — Append to `.samvil/events.jsonl`:
+   ```json
+   {"type":"build_feature_start","feature":"<name>","ts":"<ISO 8601>"}
+   ```
+3. **Plan** — What components? What state changes? What routes? Keep minimal.
+4. **Implement** — Create/modify components, lib, routes. Keep existing code working.
+5. **Build verify (INV-2)**:
    ```bash
    cd ~/dev/<seed.name>
    npm run build > .samvil/build.log 2>&1
    ```
-   Circuit Breaker: MAX_RETRIES=2. 2 failures → mark as `failed`, continue.
-5. **Update state** — Add to `completed_features` or `failed`.
+   Circuit Breaker: MAX_RETRIES=2. 2 failures on a feature → mark as `failed`, continue to next feature.
+   **Adaptive Tier**: 전체 failed features가 2개 이상이면 tier 업그레이드 제안 (P1-S5와 동일).
+   **에러를 수정할 때마다** `.samvil/fix-log.md`에 한 줄 append:
+   ```
+   [feature:<name>] <에러 내용> → <해결 방법>
+   ```
+6. **Event Log** — On success or failure, append:
+   ```json
+   {"type":"build_feature_success","feature":"<name>","ts":"<ISO 8601>"}
+   ```
+   or:
+   ```json
+   {"type":"build_feature_fail","feature":"<name>","error":"<brief error>","retry":<N>,"ts":"<ISO 8601>"}
+   ```
+7. **Drift Check** — Feature 구현 후, `seed.features`에서 해당 feature의 `description`을 다시 읽고, 구현이 description 범위를 벗어나면 경고:
+   ```
+   [SAMVIL] ⚠️ Drift: <feature-name>
+     Seed: "<seed description>"
+     구현: "<실제 구현 내용 요약>"
+     → seed에 없는 기능이 추가됨. 제거하거나 seed를 업데이트하세요.
+   ```
+   Drift 감지 시 사용자에게 보고만 하고 진행은 계속한다 (blocking 아님).
+8. **Update state** — Add to `completed_features` or `failed`.
 
 ```
 [SAMVIL] Feature: <name> ✓  [N/M features complete]

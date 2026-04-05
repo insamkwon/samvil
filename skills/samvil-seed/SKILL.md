@@ -36,8 +36,8 @@ Read `interview-summary.md` and map each section:
 - `core_experience.primary_screen`: PascalCase component name from core experience
 - `features[].independent`: `false` if a feature clearly needs another feature's data
 - `features[].depends_on`: set to the dependency feature name if not independent
-- `agent_tier`: `"minimal"` for v1
 - `version`: `1`
+- Note: `agent_tier` is now in `project.config.json`, not in seed
 
 ### Step 2: Be Opinionated
 
@@ -62,11 +62,29 @@ Check against schema rules from `references/seed-schema.md`:
 - [ ] **CRUD completeness**: data entity를 만드는 feature가 있으면, 해당 entity의 Create/Read/Update/Delete 중 빠진 것이 없는지 확인. 빠진 CRUD가 있으면 AC에 추가하거나 out_of_scope에 명시.
 - [ ] **AC가 모든 P1 feature를 커버**: 각 P1 feature에 대해 최소 1개 AC가 존재하는지 확인. 커버 안 되는 P1 feature가 있으면 AC 추가.
 
-### Step 4: Present to User
+### Step 4: Present to User with Preview
+
+Seed의 `core_experience`와 `features`를 기반으로 **텍스트 와이어프레임**을 함께 표시:
 
 ```
 [SAMVIL] Seed Generated — project.seed.json
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 Preview:
+┌─────────────────────────────┐
+│  <App Name>                 │
+│  ┌───────────────────────┐  │
+│  │ <Primary Screen>      │  │
+│  │  [core_experience]    │  │
+│  │  • key_interaction 1  │  │
+│  │  • key_interaction 2  │  │
+│  └───────────────────────┘  │
+│                             │
+│  Features:                  │
+│  ✓ <P1 feature 1>          │
+│  ✓ <P1 feature 2>          │
+│  ○ <P2 feature (if any)>   │
+└─────────────────────────────┘
 
 <pretty-printed seed JSON>
 ```
@@ -81,9 +99,16 @@ If user requests changes: modify the seed and re-present. Do NOT re-interview.
 
 Write the approved seed JSON to `~/dev/<project>/project.seed.json` using the Write tool.
 
+### 1b. Event Log
+
+Append to `.samvil/events.jsonl`:
+```json
+{"type":"seed_generated","version":1,"features_count":<N>,"ts":"<ISO 8601>"}
+```
+
 ### 2. Update state and chain
 
-Read `seed.agent_tier` to determine next step:
+Read `project.config.json` → `selected_tier` to determine next step:
 
 **If tier is `"minimal"` (no council):**
 

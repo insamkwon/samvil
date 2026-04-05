@@ -15,6 +15,29 @@ description: "기존 프로젝트 코드 분석. 구조 파악 → 역방향 see
 - `/samvil:analyze` 로 직접 호출 가능
 - 기존 프로젝트에 SAMVIL 파이프라인을 적용하고 싶을 때
 
+## Step 0: Git 안전망
+
+분석 시작 전, 프로젝트의 git 상태를 확인하여 데이터 손실을 방지한다.
+
+경로 확인 후 (Step 1 이후) 바로 실행:
+
+```bash
+cd <project-path>
+git status --porcelain 2>/dev/null
+GIT_EXIT=$?
+```
+
+| 결과 | 행동 |
+|------|------|
+| `$GIT_EXIT != 0` (git 아님) | `[SAMVIL] ⚠️ Git 저장소가 아닙니다. git init을 권장합니다.` → AskUserQuestion: "git init 할까요?" (예/아니오, 진행) |
+| `git status --porcelain` 출력 없음 (clean) | `[SAMVIL] ✓ Git: clean` → 진행 |
+| `git status --porcelain` 출력 있음 (dirty) | `[SAMVIL] ⚠️ Git: uncommitted changes 감지` → AskUserQuestion: "커밋하고 진행할까요?" (커밋 후 진행 / 그냥 진행 / 중단) |
+
+**"커밋 후 진행"** 선택 시:
+```bash
+git add -A && git commit -m "chore: save state before SAMVIL analyze"
+```
+
 ## Step 1: 프로젝트 경로 확인
 
 AskUserQuestion으로:
@@ -31,6 +54,8 @@ options:
 test -d "<path>" && echo "EXISTS" || echo "NOT FOUND"
 test -f "<path>/package.json" && echo "HAS_PACKAGE_JSON" || echo "NO_PACKAGE_JSON"
 ```
+
+**→ Step 0 (Git 안전망) 실행 후 Step 2로 진행.**
 
 ## Step 2: 프레임워크 감지
 

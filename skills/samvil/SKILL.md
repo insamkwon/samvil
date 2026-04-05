@@ -258,21 +258,55 @@ Wait for user response. If resume: skip to the current stage's skill.
 
 Before starting interview, ask user to choose tier via AskUserQuestion:
 
+**Tier 실적 조회**: `harness-feedback.log` (`~/dev/samvil/harness-feedback.log`)를 읽어서 같은 앱 유형의 이전 실적이 있으면 Tier별 성공률을 표시한다.
+
 ```
 question: "어떤 수준으로 만들까요?"
 header: "Tier"
 options:
   - label: "빠르게 (minimal)"
-    description: "질문 적게, Council 없이 바로 빌드. 프로토타입용."
+    description: "<이전 실적 있으면: 'todo 앱 92% 성공, ~3분' / 없으면: '질문 적게, Council 없이 바로 빌드. 프로토타입용.'>"
   - label: "일반 (standard)"  
-    description: "기본 검증 + Council 토론. 대부분의 프로젝트에 추천."
+    description: "<이전 실적 있으면: 'kanban 앱 100% 성공' / 없으면: '기본 검증 + Council 토론. 대부분의 프로젝트에 추천.'>"
   - label: "꼼꼼하게 (thorough)"
     description: "깊은 인터뷰 + 디자인 리뷰. 품질 중요할 때."
   - label: "풀옵션 (full)"
     description: "모든 에이전트 총동원. 큰 프로젝트용."
 ```
 
+실적 데이터가 없으면 기존 설명 그대로 표시.
+
 선택된 tier를 `project.state.json`에 `selected_tier` 필드로 저장.
+
+**project.config.json 초기화** — Tier 선택 후 실행 설정 파일 생성:
+
+```json
+{
+  "selected_tier": "<선택된 tier>",
+  "evolve_max_cycles": 5,
+  "evolve_mode": "spec-only",
+  "qa_max_iterations": 5,
+  "max_total_builds": 15,
+  "model_routing": {
+    "interview": "opus",
+    "council": "sonnet",
+    "build_worker": "sonnet",
+    "qa": "sonnet",
+    "evolve": "opus",
+    "lint_fix": "haiku",
+    "default": "sonnet"
+  },
+  "skip_stages": []
+}
+```
+
+Write this to `~/dev/<project-name>/project.config.json`.
+
+**3파일 분리 원칙:**
+- `seed.json` = 명세 (what to build) — features, AC, constraints, tech_stack
+- `config.json` = 실행 설정 (how to run) — evolve/qa/model/tier/skip 설정
+- `state.json` = 현재 상태 (where we are) — current_stage, completed_features
+
 인터뷰 스킬이 이 tier를 읽어서 질문 깊이를 조절.
 
 ### Step 5: Start the Chain
@@ -284,6 +318,27 @@ Print:
 [SAMVIL] Tier: <selected tier>
 [SAMVIL] Stage 1/5: Interview...
 ```
+
+**체인 스킵 체크**: `project.config.json`의 `skip_stages`를 읽는다. 체인 invoke 전에 다음 단계가 skip_stages에 포함되어 있으면 건너뛰고 그 다음 스킬로 직접 invoke한다.
+
+```
+예: skip_stages: ["council", "design"]
+  → Seed 완료 후 council/design 스킵 → 바로 scaffold invoke
+```
+
+각 스킬도 체인 invoke 전에 동일하게 skip_stages를 확인한다.
+
+**Event Log**: Append to `.samvil/events.jsonl`:
+```json
+{"type":"stage_change","stage":"interview","ts":"<ISO 8601>"}
+```
+
+**Event Log Rule (모든 스킬 공통):**
+각 스킬이 `project.state.json`의 `current_stage`를 업데이트할 때마다, `.samvil/events.jsonl`에 한 줄 append:
+```json
+{"type":"stage_change","stage":"<new_stage>","ts":"<ISO 8601>"}
+```
+파일이 없으면 생성. 기존 내용은 절대 덮어쓰지 않음 (append-only).
 
 Invoke the Skill tool: `samvil:interview`
 
