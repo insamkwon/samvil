@@ -42,11 +42,131 @@ cd ~/dev/<seed.name>
 # create-next-app이 npm install까지 완료함. 추가 패키지만 별도 설치.
 ```
 
-**Next.js 14 + shadcn 호환 설정** (fix-log 패턴):
-- `app/layout.tsx`: Geist 로컬 폰트 → `Inter` from `next/font/google`로 교체
-- `tailwind.config.ts`: shadcn 호환 HSL 컬러 시스템으로 교체 (border, input, ring, primary 등)
-- `app/globals.css`: HSL 기반 CSS variables로 교체 (`--background: 0 0% 100%` 형식)
-- `tailwindcss-animate` 플러그인 설치: `npm install tailwindcss-animate --save-dev`
+**Next.js 14 + shadcn 호환 설정** — shadcn@latest가 Tailwind v4 문법을 생성하므로 반드시 아래로 덮어써야 함:
+
+**1) `app/layout.tsx`** — Geist 로컬 폰트 제거, Inter 사용:
+```tsx
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+import { cn } from "@/lib/utils";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
+
+export const metadata: Metadata = {
+  title: "<seed.name title-cased>",
+  description: "<seed.description>",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body className={cn("font-sans antialiased", inter.variable)}>{children}</body>
+    </html>
+  );
+}
+```
+
+**2) `tailwind.config.ts`** — 전체 교체:
+```ts
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  darkMode: ["class"],
+  content: [
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: { DEFAULT: "hsl(var(--primary))", foreground: "hsl(var(--primary-foreground))" },
+        secondary: { DEFAULT: "hsl(var(--secondary))", foreground: "hsl(var(--secondary-foreground))" },
+        destructive: { DEFAULT: "hsl(var(--destructive))", foreground: "hsl(var(--destructive-foreground))" },
+        muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },
+        accent: { DEFAULT: "hsl(var(--accent))", foreground: "hsl(var(--accent-foreground))" },
+        card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
+        popover: { DEFAULT: "hsl(var(--popover))", foreground: "hsl(var(--popover-foreground))" },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
+    },
+  },
+  plugins: [require("tailwindcss-animate")],
+};
+export default config;
+```
+
+**3) `app/globals.css`** — 전체 교체 (shadcn이 생성한 oklch 제거):
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+  }
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground; }
+}
+```
+
+**4) 의존성 설치:**
+```bash
+npm install tailwindcss-animate --save-dev
+```
+
+**이 4단계를 shadcn init 전에 실행한다.** shadcn init이 globals.css를 덮어쓰면 다시 위 CSS로 교체.
 
 #### Vite + React
 
@@ -107,6 +227,8 @@ npx astro add react -y
    ```bash
    npx shadcn@latest init -y -d > .samvil/shadcn-init.log 2>&1
    npx shadcn@latest add button card input dialog -y >> .samvil/shadcn-init.log 2>&1
+   ```
+   **⚠️ Next.js 14 전용**: shadcn init이 globals.css와 tailwind.config를 Tailwind v4 문법(oklch)으로 덮어쓴다. **반드시 위 Step 2의 HSL 버전으로 다시 교체해야 한다.** 교체 안 하면 색상이 전부 빠져서 밋밋한 흰/검 디자인이 됨.
    ```
 
 4. **추가 의존성** (blueprint.key_libraries 기반):
