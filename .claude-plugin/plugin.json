@@ -1,7 +1,7 @@
 {
   "name": "samvil",
   "description": "AI vibe-coding harness: one-line input, full web app output.",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "author": {
     "name": "insam"
   },
