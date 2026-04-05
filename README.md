@@ -35,12 +35,7 @@ Claude Code에서 한 줄이면 끝:
 /install-plugin insamkwon/samvil
 ```
 
-설치 후 **새 세션**을 열면 SAMVIL이 자동으로 로드되고, MCP 서버도 자동 설치+등록됩니다.
-
-> **필수 조건**: `uv`가 설치되어 있어야 MCP 자동 설치가 동작합니다.
-> 없으면: `curl -LsSf https://astral.sh/uv/install.sh | sh`
->
-> MCP 자동 설치가 실패해도 기본 파이프라인은 정상 동작합니다.
+설치 후 **새 세션**을 열면 SAMVIL이 자동으로 로드되고, MCP 서버도 자동 설치+등록됩니다. 필요한 도구(`uv` 등)도 없으면 자동으로 설치해요.
 
 ---
 

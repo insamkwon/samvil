@@ -17,10 +17,16 @@ if [ -f "$MCP_DIR/.venv/bin/python" ]; then
   "$MCP_DIR/.venv/bin/python" -c "import samvil_mcp" 2>/dev/null && exit 0
 fi
 
-# Check uv is available
+# Install uv if not available
 if ! command -v uv &>/dev/null; then
-  echo "[SAMVIL] ⚠️ MCP 자동 설치: uv가 필요합니다. curl -LsSf https://astral.sh/uv/install.sh | sh"
-  exit 0
+  echo "[SAMVIL] uv 설치 중..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  if ! command -v uv &>/dev/null; then
+    echo "[SAMVIL] ⚠️ uv 자동 설치 실패. MCP 없이 기본 모드로 진행합니다."
+    exit 0
+  fi
+  echo "[SAMVIL] ✓ uv 설치 완료"
 fi
 
 # Install MCP
