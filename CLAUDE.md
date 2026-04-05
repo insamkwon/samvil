@@ -128,7 +128,8 @@ samvil/
 │   ├── tier-definitions.md     # Tier 구성 + 2-round Gate A
 │   ├── council-protocol.md     # Council 토론 규칙
 │   └── evolve-protocol.md      # 시드 진화 규칙
-├── hooks/                      # 3개 자동화 스크립트 (현재 미적용)
+├── hooks/                      # 4개 자동화 스크립트 (plugin.json hooks로 적용)
+│   ├── setup-mcp.sh            # SessionStart: MCP 자동 설치+등록
 ├── (templates/ removed — CLI-only scaffold since v0.7.0)
 ├── mcp/                        # Python MCP 서버
 │   ├── samvil_mcp/             # 서버 코드 (14 tools)

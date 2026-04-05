@@ -29,36 +29,18 @@ Claude Code에서 **한 줄**로 앱 아이디어를 말하면, AI가 알아서:
 
 ## 설치
 
-### 1. 플러그인 설치
-
-Claude Code에서:
+Claude Code에서 한 줄이면 끝:
 
 ```
 /install-plugin insamkwon/samvil
 ```
 
-### 2. MCP 서버 설치
+설치 후 **새 세션**을 열면 SAMVIL이 자동으로 로드되고, MCP 서버도 자동 설치+등록됩니다.
 
-```bash
-cd ~/.claude/plugins/cache/samvil/samvil/*/mcp
-uv venv .venv && source .venv/bin/activate
-uv pip install -e .
-```
-
-`~/.claude/settings.json`의 `mcpServers`에 추가:
-```json
-"samvil-mcp": {
-  "command": "<위 경로>/mcp/.venv/bin/python",
-  "args": ["-m", "samvil_mcp.server"],
-  "cwd": "<위 경로>/mcp"
-}
-```
-
-### 3. 새 세션 열기
-
-설치 후 **새 세션**을 열면 SAMVIL + MCP가 자동으로 로드됩니다.
-
-> MCP 서버 연결이 안 될 경우에도 기본 파이프라인은 정상 동작합니다. 모호도 수치, 세션 저장, 시드 진화 등 일부 고급 기능만 비활성화됩니다.
+> **필수 조건**: `uv`가 설치되어 있어야 MCP 자동 설치가 동작합니다.
+> 없으면: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+>
+> MCP 자동 설치가 실패해도 기본 파이프라인은 정상 동작합니다.
 
 ---
 
