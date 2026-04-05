@@ -95,14 +95,14 @@ gh api repos/insamkwon/samvil/contents/.claude-plugin/plugin.json --jq '.content
 
 `score_ambiguity` MCP 도구 사용 가능 여부 확인.
 
-- ✅ 연결됨 → `[SAMVIL] ✓ MCP 서버 연결됨 (고급 기능 활성화)`
-- ⚠️ 없음 → AskUserQuestion:
+- ✅ 연결됨 → `[SAMVIL] ✓ MCP 서버 연결됨`
+- ⚠️ 없음 → 설치 안내 표시 후 계속 진행:
   ```
-  question: "MCP 서버가 없습니다. 고급 기능(모호도 수치, 세션 저장, 시드 진화) 없이도 기본 파이프라인은 동작합니다."
-  options:
-    - "MCP 없이 진행" → 계속
-    - "MCP 설치 도움" → 설치 가이드 표시
+  [SAMVIL] ⚠️ MCP 서버 없음. 설치하면 모호도 수치, 세션 저장, 시드 진화를 사용할 수 있습니다.
+    설치: README의 "2. MCP 서버 설치" 참고
+    지금은 MCP 없이 진행합니다.
   ```
+  **MCP 없어도 멈추지 않고 바로 진행한다.** 실제 파이프라인에서 MCP 도구 호출 실패 시에만 fallback 경로 사용.
 
 **8. 이전 프로젝트 확인**
 

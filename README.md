@@ -29,17 +29,15 @@ Claude Code에서 **한 줄**로 앱 아이디어를 말하면, AI가 알아서:
 
 ## 설치
 
-Claude Code에서 한 줄이면 끝:
+### 1. 플러그인 설치
+
+Claude Code에서:
 
 ```
 /install-plugin insamkwon/samvil
 ```
 
-설치 후 **새 세션**을 열면 SAMVIL이 자동으로 로드됩니다.
-
-### MCP 서버 (선택 — 고급 기능)
-
-MCP 없이도 기본 기능은 전부 동작합니다. 아래는 고급 기능(모호도 수치, 세션 저장, 시드 진화)을 원할 때만:
+### 2. MCP 서버 설치
 
 ```bash
 cd ~/.claude/plugins/cache/samvil/samvil/*/mcp
@@ -55,6 +53,12 @@ uv pip install -e .
   "cwd": "<위 경로>/mcp"
 }
 ```
+
+### 3. 새 세션 열기
+
+설치 후 **새 세션**을 열면 SAMVIL + MCP가 자동으로 로드됩니다.
+
+> MCP 서버 연결이 안 될 경우에도 기본 파이프라인은 정상 동작합니다. 모호도 수치, 세션 저장, 시드 진화 등 일부 고급 기능만 비활성화됩니다.
 
 ---
 
