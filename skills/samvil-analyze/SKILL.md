@@ -535,7 +535,6 @@ GAP (누락 가능성):
   "acceptance_criteria": ["<기존 기능 기반 AC>"],
   "constraints": ["<감지된 제약>"],
   "out_of_scope": [],
-  "agent_tier": "standard",
   "version": 1,
   "_analysis": {
     "source": "brownfield",
@@ -587,9 +586,9 @@ multiSelect: true
 
 선택에 따라:
 - **기능 추가**: "어떤 기능?" 추가 질문 → seed.features에 새 기능 추가 (status: "new")
-- **코드 품질**: → samvil:qa 로 체인 (3-pass 검증)
-- **디자인**: → samvil:design 로 체인 (블루프린트 + shadcn 적용)
-- **QA**: → samvil:qa 로 직접 체인
+- **코드 품질**: → `samvil-qa` 로 체인 (3-pass 검증)
+- **디자인**: → `samvil-design` 로 체인 (블루프린트 + shadcn 적용)
+- **QA**: → `samvil-qa` 로 직접 체인
 
 ## Step 8: 저장 + 체인
 

@@ -11,7 +11,7 @@
 | **`standard`** | 20 | ~50K | +2min | **Most projects (default)** |
 | `thorough` | 30 | ~120K | +5min | Quality-critical projects |
 | `full` | 36 | ~200K | +8min | Large projects, team-shared products |
-| `custom` | varies | varies | varies | User-defined via `agent_overrides` |
+| `custom` | varies | varies | varies | Future: user-defined tier composition |
 
 ## Tier Composition
 
@@ -56,15 +56,7 @@ def get_active_agents(tier: str, overrides: dict) -> list:
 
 ## Seed Configuration
 
-```json
-{
-  "agent_tier": "standard",
-  "agent_overrides": {
-    "add": ["security-auditor"],
-    "remove": ["business-analyst"]
-  }
-}
-```
+Tier는 `project.config.json`의 `selected_tier` 필드에서 읽습니다.
 
 ## Gate A: 2-Round Structure (M3+)
 

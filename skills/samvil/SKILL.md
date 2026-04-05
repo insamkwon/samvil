@@ -181,10 +181,10 @@ AskUserQuestion으로 어떤 단계:
 question: "어떤 단계를 실행할까요?"
 header: "단계 선택"
 options:
-  - label: "인터뷰" → samvil:interview
-  - label: "QA 검증" → samvil:qa
-  - label: "진화 (Evolve)" → samvil:evolve
-  - label: "회고 (Retro)" → samvil:retro
+  - label: "인터뷰" → samvil-interview
+  - label: "QA 검증" → samvil-qa
+  - label: "진화 (Evolve)" → samvil-evolve
+  - label: "회고 (Retro)" → samvil-retro
 ```
 
 프로젝트 경로와 seed.json을 물어본 후 해당 스킬만 invoke.
@@ -238,7 +238,7 @@ Wait for user response. If resume: skip to the current stage's skill.
 
 Before starting interview, ask user to choose tier via AskUserQuestion:
 
-**Tier 실적 조회**: `harness-feedback.log` (`~/dev/samvil/harness-feedback.log`)를 읽어서 같은 앱 유형의 이전 실적이 있으면 Tier별 성공률을 표시한다.
+**Tier 실적 조회**: `harness-feedback.log` (`harness-feedback.log (SAMVIL 플러그인 캐시 루트: `~/.claude/plugins/cache/samvil/samvil/*/harness-feedback.log`)`)를 읽어서 같은 앱 유형의 이전 실적이 있으면 Tier별 성공률을 표시한다.
 
 ```
 question: "어떤 수준으로 만들까요?"
@@ -340,19 +340,16 @@ Each stage prints:
 
 ### Agent Tier Selection
 
-After seed is approved (between Step 4 Interview chain start and Scaffold), read `seed.agent_tier` and `seed.agent_overrides` from `project.seed.json`.
+After seed is approved, read `config.selected_tier` from `project.config.json`.
 
 **Read `references/tier-definitions.md`** for the full agent list per tier.
 
 #### Tier Resolution
 
 ```
-1. Read seed.agent_tier (default: "standard")
+1. Read config.selected_tier (from project.config.json)
 2. Look up tier composition from tier-definitions.md
-3. Apply agent_overrides:
-   - add: include these agents even if not in tier
-   - remove: exclude these agents even if in tier
-4. Log the result
+3. Log the result
 ```
 
 #### Log Format

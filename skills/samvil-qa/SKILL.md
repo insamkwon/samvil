@@ -24,7 +24,7 @@ question: "이 프로젝트에 SAMVIL seed가 없습니다. 어떻게 할까요?
 header: "QA 모드"
 options:
   - label: "코드 분석 먼저 (추천)"
-    description: "samvil:analyze로 코드 분석 → 역방향 seed 생성 → QA 실행"
+    description: "samvil-analyze로 코드 분석 → 역방향 seed 생성 → QA 실행"
   - label: "일반 QA만"
     description: "seed 없이 빌드 검증 + 코드 품질만 체크 (AC 검증 생략)"
 ```

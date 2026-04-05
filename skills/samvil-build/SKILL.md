@@ -141,7 +141,7 @@ Read your persona:
 Project: ~/dev/<seed.name>/
 Seed: <paste seed JSON>
 State: <paste state JSON>
-References: Read ~/dev/samvil/references/web-recipes.md for patterns.
+References: Read references/web-recipes.md from the SAMVIL plugin directory for patterns.
 
 ## Your Task
 Build ONLY the feature: <feature-name>

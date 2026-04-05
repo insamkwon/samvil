@@ -20,7 +20,7 @@ You are adopting the role of **Retro Analyst**. Analyze this SAMVIL run and prod
 
 ### Step 0: Read History for Pattern Detection
 
-1. Read `harness-feedback.log` from the SAMVIL plugin directory (`~/dev/samvil/harness-feedback.log`)
+1. Read `harness-feedback.log` from the SAMVIL plugin directory (`harness-feedback.log (SAMVIL 플러그인 캐시 루트: `~/.claude/plugins/cache/samvil/samvil/*/harness-feedback.log`)`)
    — 이전 실행들의 suggestions를 수집
 2. Read `.samvil/events.jsonl` from the project directory
    — 이번 실행의 전체 이벤트 이력
@@ -105,7 +105,7 @@ Suggestions:
 
 ### Step 4: Append to Feedback Log
 
-Append a JSON entry to `harness-feedback.log` in the SAMVIL **plugin** directory (`~/dev/samvil/harness-feedback.log`):
+Append a JSON entry to `harness-feedback.log` in the SAMVIL **plugin** directory (`harness-feedback.log (SAMVIL 플러그인 캐시 루트: `~/.claude/plugins/cache/samvil/samvil/*/harness-feedback.log`)`):
 
 ```json
 {
