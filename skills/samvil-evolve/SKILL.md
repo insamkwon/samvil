@@ -228,7 +228,7 @@ Invoke the Skill tool with skill: `samvil-scaffold`
 1. **Wonder before Reflect** — always analyze before proposing
 2. **Max 2 new features per evolution** — prevent scope explosion
 3. **Preserve name, mode, core_experience** — evolve around the core, not through it
-4. **User approves every evolution** — no auto-modification
+4. **User checkpoint** — 기본적으로 매 진화마다 사용자 승인. 단, 사용자가 "자율 진화", "알아서 해", "수렴할 때까지" 등으로 자율 모드를 지시하면 → 수렴까지 승인 없이 자동 진행. 자율 모드에서도 MAJOR 변경(feature 삭제, core_experience 변경)은 반드시 확인.
 5. **convergence ≥ 0.95 = stop** — diminishing returns beyond this
 6. **Max iterations = config.evolve_max_cycles (default 5)** — hard cap to prevent infinite loops
 
