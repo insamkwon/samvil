@@ -13,6 +13,29 @@ You are adopting the role of **QA Judge**. Verify the built app against the seed
 2. Read `project.state.json` → completed features, failed features, qa_history
 3. Read `references/qa-checklist.md` from this plugin directory
 
+### Seed 없는 경우 (Brownfield QA)
+
+`project.seed.json`이 없으면 — 기존 프로젝트에 직접 QA를 실행하는 경우.
+
+AskUserQuestion으로:
+```
+question: "이 프로젝트에 SAMVIL seed가 없습니다. 어떻게 할까요?"
+header: "QA 모드"
+options:
+  - label: "코드 분석 먼저 (추천)"
+    description: "samvil:analyze로 코드 분석 → 역방향 seed 생성 → QA 실행"
+  - label: "일반 QA만"
+    description: "seed 없이 빌드 검증 + 코드 품질만 체크 (AC 검증 생략)"
+```
+
+**"코드 분석 먼저"** 선택 시: Invoke `samvil:analyze` → analyze가 seed 생성 후 QA로 체인.
+
+**"일반 QA만"** 선택 시:
+- Pass 1 (Mechanical): 빌드 검증 — 정상 실행
+- Pass 2 (Functional): **생략** (AC가 없으므로)
+- Pass 3 (Quality): 코드 품질 — 정상 실행
+- `.samvil/` 디렉토리 생성 후 결과 저장
+
 ## Pass 1: Mechanical Verification
 
 ```bash
