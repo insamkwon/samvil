@@ -64,6 +64,7 @@ Spawn `wonder-analyst` agent:
 ```
 Agent(
   description: "SAMVIL Evolve: wonder-analyst",
+  model: config.model_routing.evolve || config.model_routing.default || "opus",
   prompt: "You are wonder-analyst.
 <paste agents/wonder-analyst.md>
 
@@ -86,6 +87,7 @@ Spawn `reflect-proposer` agent (sequentially, receives wonder output):
 ```
 Agent(
   description: "SAMVIL Evolve: reflect-proposer",
+  model: config.model_routing.evolve || config.model_routing.default || "opus",
   prompt: "You are reflect-proposer.
 <paste agents/reflect-proposer.md>
 
@@ -206,3 +208,12 @@ Invoke the Skill tool with skill: `samvil:scaffold`
 4. **User approves every evolution** — no auto-modification
 5. **convergence ≥ 0.95 = stop** — diminishing returns beyond this
 6. **Max iterations = config.evolve_max_cycles (default 5)** — hard cap to prevent infinite loops
+
+## Chain (Runtime-specific)
+
+### Claude Code
+- After evolve: Invoke the Skill tool with skill: `samvil:retro`
+- If rebuild needed: Invoke the Skill tool with skill: `samvil:build`
+
+### Codex CLI (future)
+Read the appropriate next skill's SKILL.md based on outcome.

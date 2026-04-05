@@ -44,6 +44,7 @@ For each Round 1 agent, use the Agent tool:
 ```
 Agent(
   description: "SAMVIL Council R1: <agent-name>",
+  model: config.model_routing.council || config.model_routing.default || "sonnet",
   prompt: "You are <agent-name> for SAMVIL Council Gate A, Round 1 (Research).
 
 Read your full persona and behavior rules:
@@ -85,6 +86,7 @@ Spawn review agents **in parallel**:
 ```
 Agent(
   description: "SAMVIL Council R2: <agent-name>",
+  model: config.model_routing.council || config.model_routing.default || "sonnet",
   prompt: "You are <agent-name> for SAMVIL Council Gate A, Round 2 (Review).
 
 Read your full persona and behavior rules:
@@ -224,3 +226,11 @@ Invoke the Skill tool with skill: `samvil:design`
 4. **Respect tier boundaries** — never spawn agents the tier doesn't include
 5. **decisions.log is append-only** — never delete previous decisions
 6. **User checkpoint before applying changes** — never auto-modify seed without approval
+
+## Chain (Runtime-specific)
+
+### Claude Code
+Invoke the Skill tool with skill: `samvil:design`
+
+### Codex CLI (future)
+Read `skills/samvil-design/SKILL.md` and follow its instructions.

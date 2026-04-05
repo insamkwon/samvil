@@ -4,6 +4,7 @@
 > preset 없는 앱 유형은 competitor-analyst가 실시간 서치.
 
 ## todo / task-manager
+- **추천 스택**: nextjs (SSR/SEO 불필요하면 vite-react도 가능)
 - **기본 기능**: CRUD, 목록 보기, 완료 토글, 정렬/필터
 - **자주 추가**: 칸반, 태그, 마감일, 우선순위, 반복
 - **data model**: `{ id, title, status, priority, dueDate, tags[], createdAt }`
@@ -17,6 +18,7 @@
 - **Pre-mortem**: "1주 후 삭제 이유?" → 동기화 안 됨, 너무 복잡, 알림 없음
 
 ## dashboard / analytics
+- **추천 스택**: nextjs (API routes + SSR)
 - **기본 기능**: 요약 카드, 차트, 기간 필터, 테이블
 - **자주 추가**: 실시간 갱신, CSV 내보내기, 드릴다운
 - **data model**: `{ metric, value, date, category }`
@@ -29,6 +31,7 @@
 - **Pre-mortem**: "안 쓰게 되는 이유?" → 데이터 수동 입력 귀찮음, 인사이트 부족
 
 ## landing-page
+- **추천 스택**: astro (정적, 빠른 로딩)
 - **기본 기능**: 히어로, 기능 소개 3-4개, CTA, 소셜 프루프, 푸터
 - **자주 추가**: 가격표, FAQ, 뉴스레터 구독, 데모 비디오
 - **data model**: 없음 (정적)
@@ -41,6 +44,7 @@
 - **Pre-mortem**: "전환율 0%인 이유?" → 가치 제안 불명확, CTA 안 보임
 
 ## blog / content
+- **추천 스택**: nextjs (SSR + SEO)
 - **기본 기능**: 글 목록, 글 상세, 카테고리, 마크다운 렌더링
 - **자주 추가**: 검색, 태그, 댓글, RSS
 - **data model**: `{ id, title, content, category, tags[], publishedAt }`
@@ -52,6 +56,7 @@
   - 글이 0개일 때 빈 화면
 
 ## e-commerce / shop
+- **추천 스택**: nextjs (SSR + API routes)
 - **기본 기능**: 상품 목록, 상품 상세, 장바구니, 체크아웃
 - **자주 추가**: 검색, 필터, 위시리스트, 리뷰
 - **data model**: `{ id, name, price, image, category, stock, description }`
@@ -64,6 +69,7 @@
 - **Pre-mortem**: "구매 전환 0%인 이유?" → 결제 복잡, 신뢰 부족, 배송 정보 없음
 
 ## calculator / utility
+- **추천 스택**: vite-react (가벼움, SSR 불필요)
 - **기본 기능**: 입력 인터페이스, 계산 로직, 결과 표시
 - **자주 추가**: 히스토리, 단위 변환, 테마
 - **data model**: 없음 또는 minimal
@@ -75,6 +81,7 @@
   - 소수점 처리 부정확
 
 ## kanban / project-board
+- **추천 스택**: nextjs (상태 복잡 → zustand persist)
 - **기본 기능**: 칼럼 CRUD, 카드 CRUD, 드래그앤드롭
 - **자주 추가**: 라벨, 담당자, 마감일, 필터
 - **data model**: `{ board: { columns: [{ id, title, cards: [{ id, title, description }] }] } }`
@@ -87,6 +94,7 @@
   - 카드 순서 persist 안 됨
 
 ## chat / messaging
+- **추천 스택**: nextjs (API routes + 실시간)
 - **기본 기능**: 메시지 입력, 메시지 목록, 타임스탬프
 - **자주 추가**: 실시간, 읽음 표시, 이미지/파일, 이모지
 - **data model**: `{ id, sender, content, timestamp, type }`
@@ -98,6 +106,7 @@
   - 긴 메시지 레이아웃 깨짐
 
 ## portfolio / personal-site
+- **추천 스택**: astro (정적, SEO 우수)
 - **기본 기능**: 소개, 프로젝트 갤러리, 연락처, 이력
 - **자주 추가**: 블로그, 다크모드, 애니메이션
 - **data model**: 없음 (정적) 또는 minimal
@@ -109,6 +118,7 @@
   - 연락처 폼 동작 안 함
 
 ## form-builder / survey
+- **추천 스택**: nextjs (복잡한 상태 관리)
 - **기본 기능**: 질문 추가/편집, 폼 미리보기, 응답 수집
 - **자주 추가**: 조건 분기, 파일 업로드, 결과 통계
 - **data model**: `{ form: { questions: [{ id, type, label, options?, required }] }, responses: [] }`

@@ -131,6 +131,7 @@ For batches with 2+ independent features, spawn CC Agent workers **in parallel**
 ```
 Agent(
   description: "SAMVIL Build: <feature-name>",
+  model: config.model_routing.build_worker || config.model_routing.default || "sonnet",
   prompt: "You are a feature builder for SAMVIL.
 
 Read your persona:
@@ -225,3 +226,11 @@ Invoke the Skill tool with skill: `samvil:qa`
 - Don't create README.md
 - Don't add premature optimization (memo, lazy loading)
 - Don't dump build logs into conversation — use .samvil/build.log
+
+## Chain (Runtime-specific)
+
+### Claude Code
+Invoke the Skill tool with skill: `samvil:qa`
+
+### Codex CLI (future)
+Read `skills/samvil-qa/SKILL.md` and follow its instructions.

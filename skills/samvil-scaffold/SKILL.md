@@ -1,123 +1,127 @@
 ---
 name: samvil-scaffold
-description: "Generate project skeleton from seed. Copy Next.js 14 template, install deps, verify build passes."
+description: "CLI-based project scaffold. Supports Next.js, Vite+React, Astro. No template folder dependency."
 ---
 
-# SAMVIL Scaffold — Project Skeleton Generation
+# SAMVIL Scaffold — CLI-Based Project Generation
 
-You are adopting the role of **Scaffolder**. Create a project directory with a verified, buildable skeleton.
+You are adopting the role of **Scaffolder**. Create a project directory with a verified, buildable skeleton using CLI tools (no template folder).
 
 ## Boot Sequence (INV-1)
 
 1. Read `project.seed.json` from the project directory
 2. Read `project.state.json` → confirm `current_stage` is `"scaffold"`
-3. Read `project.blueprint.json` → architecture decisions (if exists, created by Design phase)
+3. Read `project.config.json` → `selected_tier`
+4. Read `project.blueprint.json` → architecture decisions (if exists)
    - Use `key_libraries` to know which npm packages to install
    - Use `component_structure` to create feature directories
 
 ## Process
 
-### Step 1: Locate and Copy the Template
+### Step 1: Determine Stack
 
-The template is in this plugin's cache. Try these paths in order:
+Read `seed.tech_stack.framework` to determine which CLI to use:
 
-```bash
-# Try to find the template
-TEMPLATE=""
-for dir in \
-  ~/.claude/plugins/cache/samvil/samvil/*/templates/nextjs-14 \
-  ~/dev/samvil/templates/nextjs-14; do
-  if [ -d "$dir" ]; then
-    TEMPLATE="$dir"
-    break
-  fi
-done
-echo "Template: $TEMPLATE"
-```
+| `tech_stack.framework` | CLI Command | 비고 |
+|---|---|---|
+| `nextjs` | `npx create-next-app@14` | SSR, API routes, SEO |
+| `vite-react` | `npm create vite@latest -- --template react-ts` | 가벼움, SPA |
+| `astro` | `npm create astro@latest` | 정적, 빠른 로딩 |
 
-**If template found:** Copy it to the project directory:
+기본값: `nextjs` (seed에 명시 없으면)
 
-```bash
-cp -r $TEMPLATE/* ~/dev/<seed.name>/
-mkdir -p ~/dev/<seed.name>/components ~/dev/<seed.name>/lib ~/dev/<seed.name>/.samvil
-```
+### Step 2: Generate Project
 
-**If template NOT found (fallback):** Generate the project using `create-next-app`:
+#### Next.js
 
 ```bash
 cd ~/dev
 npx create-next-app@14 <seed.name> --typescript --tailwind --app --src-dir=false --import-alias="@/*" --eslint --use-npm <<< $'No\n'
-mkdir -p ~/dev/<seed.name>/components ~/dev/<seed.name>/lib ~/dev/<seed.name>/.samvil
+cd ~/dev/<seed.name>
+rm -rf node_modules && npm install
 ```
 
-Then simplify `app/layout.tsx` (replace local fonts with Google Inter) and `app/page.tsx` (replace boilerplate with simple welcome page) as described in Step 3 below.
+**Next.js 14 + shadcn 호환 설정** (fix-log 패턴):
+- `app/layout.tsx`: Geist 로컬 폰트 → `Inter` from `next/font/google`로 교체
+- `tailwind.config.ts`: shadcn 호환 HSL 컬러 시스템으로 교체 (border, input, ring, primary 등)
+- `app/globals.css`: HSL 기반 CSS variables로 교체 (`--background: 0 0% 100%` 형식)
+- `tailwindcss-animate` 플러그인 설치: `npm install tailwindcss-animate --save-dev`
 
-### Step 3: Customize
+#### Vite + React
 
-1. **Update `package.json`**:
-   - Set `"name"` to `seed.name`
-   - Set `"description"` to `seed.description`
-   - Add dependencies based on `seed.tech_stack` AND `blueprint.key_libraries` (if blueprint exists):
-     - If `state` = `"zustand"`: add `"zustand": "^4.5.0"` to dependencies
-     - If any feature involves drag-and-drop: add `"@hello-pangea/dnd": "^16.6.0"`
-     - If blueprint has `key_libraries`: add each library to dependencies
-     - Always add: `"clsx": "^2.1.0"`, `"tailwind-merge": "^2.2.0"` (for cn() utility)
+```bash
+cd ~/dev
+npm create vite@latest <seed.name> -- --template react-ts
+cd ~/dev/<seed.name>
+npm install
+npm install -D tailwindcss @tailwindcss/vite
+```
 
-2. **Update `app/layout.tsx`**:
-   - Set `metadata.title` to seed.name (title-cased, spaces for hyphens)
-   - Set `metadata.description` to seed.description
+**Vite + Tailwind v4 설정**:
+- `vite.config.ts`에 `@tailwindcss/vite` 플러그인 추가
+- `src/index.css`에 `@import "tailwindcss"` 추가
+- `tsconfig.json`에 `"paths": { "@/*": ["./src/*"] }` 추가
+- `vite.config.ts`에 `resolve.alias` 추가: `"@": path.resolve(__dirname, "./src")`
 
-3. **Update `app/page.tsx`**:
-   - Simple welcome page with the app name:
-   ```tsx
-   export default function Home() {
-     return (
-       <main className="flex min-h-screen items-center justify-center">
-         <h1 className="text-4xl font-bold">Welcome to <AppName></h1>
-       </main>
-     );
+shadcn/ui는 Vite에서 v4 네이티브 지원:
+```bash
+npx shadcn@latest init -y -d
+npx shadcn@latest add button input -y
+```
+
+#### Astro
+
+```bash
+cd ~/dev
+npm create astro@latest <seed.name> -- --template minimal --install --no-git --typescript strict
+cd ~/dev/<seed.name>
+npx astro add tailwind -y
+npx astro add react -y
+```
+
+### Step 3: Common Setup
+
+모든 스택 공통:
+
+1. **디렉토리 생성**:
+   ```bash
+   mkdir -p ~/dev/<seed.name>/components ~/dev/<seed.name>/lib ~/dev/<seed.name>/.samvil
+   ```
+   (Vite는 `src/components`, `src/lib`)
+
+2. **cn() utility** (shadcn 없으면 직접 생성):
+   ```bash
+   npm install clsx tailwind-merge
+   ```
+   `lib/utils.ts` (또는 `src/lib/utils.ts`):
+   ```typescript
+   import { type ClassValue, clsx } from "clsx";
+   import { twMerge } from "tailwind-merge";
+   export function cn(...inputs: ClassValue[]) {
+     return twMerge(clsx(inputs));
    }
    ```
 
-4. **Create `.gitignore` in project** (if not already there):
+3. **shadcn/ui 초기화** (Next.js, Vite):
+   ```bash
+   npx shadcn@latest init -y -d > .samvil/shadcn-init.log 2>&1
+   npx shadcn@latest add button card input dialog -y >> .samvil/shadcn-init.log 2>&1
    ```
-   node_modules/
-   .next/
-   .samvil/
+
+4. **추가 의존성** (blueprint.key_libraries 기반):
+   ```bash
+   npm install <library1> <library2> ...
    ```
 
-### Step 4: Initialize shadcn/ui
+5. **디자인 프리셋 적용**: `interview-summary.md`에서 디자인 프리셋 읽고, `references/design-presets.md`의 CSS 변수로 교체.
 
-```bash
-cd ~/dev/<seed.name>
-npx shadcn@latest init -y -d > .samvil/shadcn-init.log 2>&1
-```
+6. **package.json 업데이트**: name, description을 seed 기반으로 변경.
 
-This creates: `components.json`, `lib/utils.ts` (cn() utility), updates `tailwind.config.ts` and `globals.css`.
+7. **app/page.tsx** (또는 `src/App.tsx`): 보일러플레이트를 간단한 Welcome 페이지로 교체.
 
-Add commonly needed components:
-```bash
-npx shadcn@latest add button card input dialog -y >> .samvil/shadcn-init.log 2>&1
-```
+8. **.gitignore에 `.samvil/` 추가** (없으면).
 
-### Step 4b: Apply Design Preset
-
-Read `interview-summary.md` for design preset (productivity/creative/minimal/playful).
-Read `references/design-presets.md` for the preset's CSS variables.
-
-Update `app/globals.css` CSS variables to match the design preset colors.
-
-### Step 5: Install Dependencies (INV-2)
-
-```bash
-cd ~/dev/<seed.name>
-npm install > .samvil/install.log 2>&1
-echo "Exit code: $?"
-```
-
-If install fails: read `tail -20 .samvil/install.log`, fix package.json, retry.
-
-### Step 5: Build Verification — Circuit Breaker (INV-2)
+### Step 4: Build Verification — Circuit Breaker (INV-2)
 
 ```bash
 cd ~/dev/<seed.name>
@@ -130,6 +134,7 @@ echo "Exit code: $?"
 ```
 [SAMVIL] Stage 3/5: Scaffold ✓
   Project: ~/dev/<seed.name>/
+  Stack: <framework>
   Dependencies: installed
   Build: passing
 ```
@@ -137,17 +142,12 @@ echo "Exit code: $?"
 **If build fails — Circuit Breaker (MAX_RETRIES=2):**
 
 1. Read error: `tail -30 .samvil/build.log`
-2. Diagnose: missing dependency? Config error? TypeScript error?
-3. Fix the specific issue
-4. Retry: `npm run build > .samvil/build.log 2>&1`
-5. Still fails after 2 retries? → **STOP** and report to user:
-   ```
-   [SAMVIL] ✗ Scaffold build failed after 2 retries
-   Error: <last error message>
-   Project is at ~/dev/<seed.name>/ — please check manually.
-   ```
+2. Diagnose and fix
+3. Log fix to `.samvil/fix-log.md`
+4. Retry build
+5. Still fails after 2 retries? → **STOP** and report to user
 
-### Step 6: Update State and Chain (INV-4)
+### Step 5: Update State and Chain (INV-4)
 
 Update `project.state.json`: set `current_stage` to `"build"`.
 
@@ -160,8 +160,17 @@ Invoke the Skill tool with skill: `samvil:build`
 
 ## Rules
 
-1. **Template files are the source of truth.** Don't generate config files from memory — copy from template.
+1. **No template folder dependency.** CLI tools generate everything.
 2. **npm install MUST succeed.** Fix package.json and retry if it fails.
 3. **npm run build MUST pass.** Non-negotiable.
-4. **No business logic in scaffold.** Components dir is empty. Lib dir is empty. Just the skeleton.
+4. **No business logic in scaffold.** Components dir is empty. Just the skeleton.
 5. **All build output goes to .samvil/ files.** Never dump npm output into conversation.
+6. **Respect seed.tech_stack.framework.** Don't override user's stack choice.
+
+## Chain (Runtime-specific)
+
+### Claude Code
+Invoke the Skill tool with skill: `samvil:build`
+
+### Codex CLI (future)
+Read `skills/samvil-build/SKILL.md` and follow its instructions.

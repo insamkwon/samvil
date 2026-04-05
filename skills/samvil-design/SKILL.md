@@ -85,6 +85,7 @@ Spawn design council agents **in parallel** via CC Agent tool:
 ```
 Agent(
   description: "SAMVIL Gate B: <agent-name>",
+  model: config.model_routing.council || config.model_routing.default || "sonnet",
   prompt: "You are <agent-name> for SAMVIL Gate B (Design Review).
 
 <paste agents/<agent-name>.md content>
@@ -151,3 +152,11 @@ Blueprint looks good? Say 'go' to start building, or tell me what to change.
 3. **Be opinionated** — choose the simplest architecture that supports all seed features
 4. **Gate B is optional** — only runs for thorough+ tiers
 5. **One file output** — everything goes in project.blueprint.json
+
+## Chain (Runtime-specific)
+
+### Claude Code
+Invoke the Skill tool with skill: `samvil:scaffold`
+
+### Codex CLI (future)
+Read `skills/samvil-scaffold/SKILL.md` and follow its instructions.

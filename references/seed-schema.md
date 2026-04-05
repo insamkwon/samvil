@@ -8,7 +8,7 @@
   "description": "string — one-line project description",
   "mode": "web",
   "tech_stack": {
-    "framework": "next-14",
+    "framework": "nextjs | vite-react | astro",
     "ui": "tailwind",
     "state": "zustand | useState | none",
     "router": "app-router"

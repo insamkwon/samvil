@@ -227,3 +227,12 @@ If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
 3. **Lenient on Pass 3.** Flag issues but don't FAIL for cosmetic problems alone.
 4. **Fix during Ralph loop, don't rebuild from scratch.**
 5. **All build output to .samvil/build.log (INV-2).**
+
+## Chain (Runtime-specific)
+
+### Claude Code
+- On PASS: Invoke the Skill tool with skill: `samvil:retro` (or `samvil:evolve` if quality < 4/5)
+- On FAIL: User chooses evolve, retro, or manual fix
+
+### Codex CLI (future)
+Read the appropriate next skill's SKILL.md based on verdict.

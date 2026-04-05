@@ -53,7 +53,10 @@ samvil-update    ← GitHub에서 최신 버전 업데이트
 
 ## Target Output
 
-Next.js 14 + Tailwind CSS + shadcn/ui + TypeScript + App Router
+Supports multiple stacks (CLI-based scaffold, no template folder):
+- **Next.js 14** + Tailwind + shadcn/ui + TypeScript + App Router (default)
+- **Vite + React** + Tailwind v4 + shadcn/ui + TypeScript
+- **Astro** + Tailwind + React islands
 
 ## Versioning (필수)
 
@@ -103,7 +106,7 @@ chore: 설정, 버전, 구조 변경
 
 ## 알려진 이슈
 
-1. **CC Plugin hooks 미적용** — plugin.json에 hooks 넣으면 플러그인 로드 실패. CC Plugin hooks 스펙 확인 후 재적용 필요.
+1. ~~CC Plugin hooks 미적용~~ — **v0.7.0에서 적용 완료**. PreToolUse (guard-destructive, validate-seed), PostToolUse (log-build-result).
 2. **orphaned 마커** — CC가 directory source 플러그인 캐시에 `.orphaned_at` 붙임. 로드 안 되면 해당 파일 삭제.
 3. **QA → Retro 체인** — 수정 완료됐지만, 실행 시 체인 끊김이 또 발생하면 스킬의 Invoke 지시 확인.
 
@@ -126,7 +129,7 @@ samvil/
 │   ├── council-protocol.md     # Council 토론 규칙
 │   └── evolve-protocol.md      # 시드 진화 규칙
 ├── hooks/                      # 3개 자동화 스크립트 (현재 미적용)
-├── templates/nextjs-14/        # Next.js 14 보일러플레이트
+├── (templates/ removed — CLI-only scaffold since v0.7.0)
 ├── mcp/                        # Python MCP 서버
 │   ├── samvil_mcp/             # 서버 코드 (14 tools)
 │   └── tests/                  # 25 tests

@@ -137,3 +137,12 @@ Invoke the Skill tool with skill: `samvil:council`
 1. **Seed is immutable after approval.** No changes during build. User can edit manually between stages.
 2. **Read from files, not conversation.** Interview results come from `interview-summary.md`.
 3. **Be opinionated.** Make technical decisions. Don't burden the user with implementation choices.
+
+## Chain (Runtime-specific)
+
+### Claude Code
+- If minimal tier: Invoke the Skill tool with skill: `samvil:design`
+- If standard+ tier: Invoke the Skill tool with skill: `samvil:council`
+
+### Codex CLI (future)
+Read the next skill's SKILL.md based on tier and follow its instructions.

@@ -1,9 +1,42 @@
 {
   "name": "samvil",
   "description": "AI vibe-coding harness: one-line input, full web app output.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "author": {
     "name": "insam"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/guard-destructive.sh \"$TOOL_INPUT\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/validate-seed-unchanged.sh \"$TOOL_INPUT\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/log-build-result.sh \"$TOOL_INPUT\" \"$TOOL_EXIT_CODE\""
+          }
+        ]
+      }
+    ]
+  }
 }
