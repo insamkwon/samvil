@@ -48,7 +48,7 @@ echo "Exit code: $?"
   현재 tier: <tier>. 더 높은 tier로 업그레이드하면 더 많은 에이전트가 도움을 줄 수 있습니다.
   업그레이드할까요? (yes → Council부터 재실행 / no → 중단)
   ```
-  승인 시: `config.selected_tier` 업그레이드 → `state.current_stage` = `"council"` → `samvil:council` invoke
+  승인 시: `config.selected_tier` 업그레이드 → `state.current_stage` = `"council"` → `samvil-council` invoke
   거부 시: STOP, report to user
 
 7. Update `project.state.json`: note core experience complete
@@ -198,7 +198,7 @@ Update `project.state.json`: set `current_stage` to `"qa"`.
 [SAMVIL] Stage 5/5: Running QA verification...
 ```
 
-Invoke the Skill tool with skill: `samvil:qa`
+Invoke the Skill tool with skill: `samvil-qa`
 
 ## Code Quality Rules
 
@@ -230,7 +230,7 @@ Invoke the Skill tool with skill: `samvil:qa`
 ## Chain (Runtime-specific)
 
 ### Claude Code
-Invoke the Skill tool with skill: `samvil:qa`
+Invoke the Skill tool with skill: `samvil-qa`
 
 ### Codex CLI (future)
 Read `skills/samvil-qa/SKILL.md` and follow its instructions.

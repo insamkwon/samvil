@@ -33,7 +33,7 @@ If `agent_tier` is `"minimal"`, print:
 [SAMVIL] Council: skipped (minimal tier)
 ```
 
-Then invoke `samvil:design` and return.
+Then invoke `samvil-design` and return.
 
 ## Step 2: Round 1 — Research (if tier ≥ thorough)
 
@@ -216,7 +216,7 @@ Update `project.state.json`: set `current_stage` to `"design"`.
 [SAMVIL] Gate A complete. Proceeding to design...
 ```
 
-Invoke the Skill tool with skill: `samvil:design`
+Invoke the Skill tool with skill: `samvil-design`
 
 ## Rules
 
@@ -230,7 +230,7 @@ Invoke the Skill tool with skill: `samvil:design`
 ## Chain (Runtime-specific)
 
 ### Claude Code
-Invoke the Skill tool with skill: `samvil:design`
+Invoke the Skill tool with skill: `samvil-design`
 
 ### Codex CLI (future)
 Read `skills/samvil-design/SKILL.md` and follow its instructions.

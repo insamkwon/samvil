@@ -29,7 +29,7 @@ options:
     description: "seed 없이 빌드 검증 + 코드 품질만 체크 (AC 검증 생략)"
 ```
 
-**"코드 분석 먼저"** 선택 시: Invoke `samvil:analyze` → analyze가 seed 생성 후 QA로 체인.
+**"코드 분석 먼저"** 선택 시: Invoke `samvil-analyze` → analyze가 seed 생성 후 QA로 체인.
 
 **"일반 QA만"** 선택 시:
 - Pass 1 (Mechanical): 빌드 검증 — 정상 실행
@@ -195,12 +195,12 @@ If QA Pass 3 noted quality improvements (score < 4/5 on any dimension):
 QA passed, but quality could improve. Want to evolve the seed? (yes / no)
 ```
 
-- **yes**: Update state `current_stage` to `"evolve"`, invoke `samvil:evolve`
-- **no**: Update state `current_stage` to `"retro"`, invoke `samvil:retro`
+- **yes**: Update state `current_stage` to `"evolve"`, invoke `samvil-evolve`
+- **no**: Update state `current_stage` to `"retro"`, invoke `samvil-retro`
 
 If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
   Update `project.state.json`: set `current_stage` to `"retro"`.
-  Invoke the Skill tool with skill: `samvil:retro`
+  Invoke the Skill tool with skill: `samvil-retro`
 
 ## On FAIL (after 3 iterations)
 
@@ -216,9 +216,9 @@ If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
   3. Fix manually — the app is at ~/dev/<seed.name>/
 ```
 
-- **Option 1**: Update state `current_stage` to `"evolve"`, invoke `samvil:evolve`
-- **Option 2**: Update state `current_stage` to `"retro"`, invoke `samvil:retro`
-- **Option 3**: Update state `current_stage` to `"retro"`, invoke `samvil:retro`
+- **Option 1**: Update state `current_stage` to `"evolve"`, invoke `samvil-evolve`
+- **Option 2**: Update state `current_stage` to `"retro"`, invoke `samvil-retro`
+- **Option 3**: Update state `current_stage` to `"retro"`, invoke `samvil-retro`
 
 ## Rules
 
@@ -231,7 +231,7 @@ If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
 ## Chain (Runtime-specific)
 
 ### Claude Code
-- On PASS: Invoke the Skill tool with skill: `samvil:retro` (or `samvil:evolve` if quality < 4/5)
+- On PASS: Invoke the Skill tool with skill: `samvil-retro` (or `samvil-evolve` if quality < 4/5)
 - On FAIL: User chooses evolve, retro, or manual fix
 
 ### Codex CLI (future)

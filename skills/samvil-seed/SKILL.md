@@ -119,7 +119,7 @@ Update `project.state.json`: set `current_stage` to `"design"`.
 [SAMVIL] Council: skipped (minimal tier)
 ```
 
-Invoke the Skill tool with skill: `samvil:design`
+Invoke the Skill tool with skill: `samvil-design`
 
 **If tier is `"standard"` or higher (council runs):**
 
@@ -130,7 +130,7 @@ Update `project.state.json`: set `current_stage` to `"council"`.
 [SAMVIL] Running Council Gate A...
 ```
 
-Invoke the Skill tool with skill: `samvil:council`
+Invoke the Skill tool with skill: `samvil-council`
 
 ## Rules
 
@@ -141,8 +141,8 @@ Invoke the Skill tool with skill: `samvil:council`
 ## Chain (Runtime-specific)
 
 ### Claude Code
-- If minimal tier: Invoke the Skill tool with skill: `samvil:design`
-- If standard+ tier: Invoke the Skill tool with skill: `samvil:council`
+- If minimal tier: Invoke the Skill tool with skill: `samvil-design`
+- If standard+ tier: Invoke the Skill tool with skill: `samvil-council`
 
 ### Codex CLI (future)
 Read the next skill's SKILL.md based on tier and follow its instructions.

@@ -168,7 +168,7 @@ Append to `.samvil/events.jsonl`:
 [SAMVIL] Spec converged. Running final build + QA...
 ```
 Update `project.state.json`: set `current_stage` to `"build"`.
-Invoke `samvil:build` → Build 완료 후 자동으로 QA 체인.
+Invoke `samvil-build` → Build 완료 후 자동으로 QA 체인.
 
 **If mode is `full`**: 이미 매 세대마다 빌드했으므로 바로 retro로.
 
@@ -194,11 +194,11 @@ If QA still fails: another wonder/reflect cycle.
 After evolve completes (converged, user stops, or max iterations):
 
 Update `project.state.json`: set `current_stage` to `"retro"`.
-Invoke the Skill tool with skill: `samvil:retro`
+Invoke the Skill tool with skill: `samvil-retro`
 
 If user chose to rebuild with new seed:
 Update `project.state.json`: set `current_stage` to `"scaffold"`.
-Invoke the Skill tool with skill: `samvil:scaffold`
+Invoke the Skill tool with skill: `samvil-scaffold`
 
 ## Rules
 
@@ -212,8 +212,8 @@ Invoke the Skill tool with skill: `samvil:scaffold`
 ## Chain (Runtime-specific)
 
 ### Claude Code
-- After evolve: Invoke the Skill tool with skill: `samvil:retro`
-- If rebuild needed: Invoke the Skill tool with skill: `samvil:build`
+- After evolve: Invoke the Skill tool with skill: `samvil-retro`
+- If rebuild needed: Invoke the Skill tool with skill: `samvil-build`
 
 ### Codex CLI (future)
 Read the appropriate next skill's SKILL.md based on outcome.

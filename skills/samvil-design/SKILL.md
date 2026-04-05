@@ -143,7 +143,7 @@ Blueprint looks good? Say 'go' to start building, or tell me what to change.
 [SAMVIL] Stage 3/5: Scaffolding project...
 ```
 
-4. Invoke the Skill tool with skill: `samvil:scaffold`
+4. Invoke the Skill tool with skill: `samvil-scaffold`
 
 ## Rules
 
@@ -156,7 +156,7 @@ Blueprint looks good? Say 'go' to start building, or tell me what to change.
 ## Chain (Runtime-specific)
 
 ### Claude Code
-Invoke the Skill tool with skill: `samvil:scaffold`
+Invoke the Skill tool with skill: `samvil-scaffold`
 
 ### Codex CLI (future)
 Read `skills/samvil-scaffold/SKILL.md` and follow its instructions.

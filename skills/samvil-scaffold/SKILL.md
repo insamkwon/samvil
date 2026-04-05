@@ -156,7 +156,7 @@ Update `project.state.json`: set `current_stage` to `"build"`.
 [SAMVIL] Stage 4/5: Building core experience...
 ```
 
-Invoke the Skill tool with skill: `samvil:build`
+Invoke the Skill tool with skill: `samvil-build`
 
 ## Rules
 
@@ -170,7 +170,7 @@ Invoke the Skill tool with skill: `samvil:build`
 ## Chain (Runtime-specific)
 
 ### Claude Code
-Invoke the Skill tool with skill: `samvil:build`
+Invoke the Skill tool with skill: `samvil-build`
 
 ### Codex CLI (future)
 Read `skills/samvil-build/SKILL.md` and follow its instructions.

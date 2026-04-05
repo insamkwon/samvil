@@ -164,7 +164,7 @@ options:
 
 **Brownfield 프로세스:**
 
-Invoke the Skill tool with skill: `samvil:analyze`
+Invoke the Skill tool with skill: `samvil-analyze`
 
 analyze 스킬이 전체를 처리:
 1. 프로젝트 경로 확인
@@ -320,7 +320,7 @@ Print:
 ```
 파일이 없으면 생성. 기존 내용은 절대 덮어쓰지 않음 (append-only).
 
-Invoke the Skill tool: `samvil:interview`
+Invoke the Skill tool: `samvil-interview`
 
 The chain continues from there — each skill invokes the next (INV-4).
 

@@ -599,10 +599,10 @@ multiSelect: true
 4. `interview-summary.md` — 분석 결과를 인터뷰 요약 형태로 저장 (INV-3)
 
 선택한 개선에 따라 적절한 스킬로 체인:
-- 기능 추가 → `samvil:build` (scaffold 스킵, 기존 코드에 추가)
-- 코드 품질 → `samvil:qa`
-- 디자인 → `samvil:design`
-- QA → `samvil:qa`
+- 기능 추가 → `samvil-build` (scaffold 스킵, 기존 코드에 추가)
+- 코드 품질 → `samvil-qa`
+- 디자인 → `samvil-design`
+- QA → `samvil-qa`
 
 ## Rules
 
