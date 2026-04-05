@@ -1,0 +1,40 @@
+#!/bin/bash
+# SAMVIL pre-push hook: block push if version wasn't bumped
+
+CURRENT=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])" 2>/dev/null)
+REMOTE=$(git show origin/main:.claude-plugin/plugin.json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])" 2>/dev/null)
+
+if [ -z "$CURRENT" ]; then
+  echo "⚠️ plugin.json 읽기 실패. push 허용."
+  exit 0
+fi
+
+if [ -z "$REMOTE" ]; then
+  # First push or remote doesn't exist yet
+  exit 0
+fi
+
+if [ "$CURRENT" = "$REMOTE" ]; then
+  echo ""
+  echo "🛑 SAMVIL: 버전이 올라가지 않았습니다!"
+  echo "   현재: $CURRENT (remote와 동일)"
+  echo ""
+  echo "   버전업 체크리스트:"
+  echo "   1. plugin.json version 올리기"
+  echo "   2. README.md 첫 줄 vX.Y.Z 동기화"
+  echo "   3. PATCH(차이 안 보임) / MINOR(새 기능 보임) / MAJOR(호환 깨짐)"
+  echo ""
+  echo "   강제 push: git push --no-verify"
+  exit 1
+fi
+
+# Also check README badge matches
+README_VER=$(grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' README.md | head -1 | sed 's/v//')
+if [ -n "$README_VER" ] && [ "$README_VER" != "$CURRENT" ]; then
+  echo ""
+  echo "🛑 SAMVIL: README 버전($README_VER)과 plugin.json($CURRENT)이 다릅니다!"
+  echo "   README.md 첫 줄의 버전을 v$CURRENT 로 맞춰주세요."
+  exit 1
+fi
+
+exit 0
