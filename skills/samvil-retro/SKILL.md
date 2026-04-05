@@ -56,6 +56,33 @@ Identify:
 2. **What was slow or failed** — retries, user corrections, QA failures
 3. **Patterns** — recurring issues (e.g., "drag features always fail")
 
+### Step 2b: 플로우 준수 리포트
+
+events.jsonl에서 실제 실행된 단계 순서를 추출하고, 계획된 플로우와 비교:
+
+```
+[SAMVIL] 플로우 준수 리포트
+  계획: Interview → Seed → Council → Design → Scaffold → Build → QA → Retro
+  실제: Interview → Seed → Council → Design → Scaffold → Build(×12) → QA(×2) → Retro
+  편차:
+    - Build 12회 실행 (예상 1~3회) — Tailwind v4 설정 문제
+    - Evolve: SKIPPED
+```
+
+### Step 2c: 에이전트 활용도 리포트
+
+config.selected_tier에서 배치된 에이전트 수와 events.jsonl에서 실제 사용된 에이전트를 비교:
+
+```
+[SAMVIL] 에이전트 활용도
+  Tier: standard (20 에이전트 배치)
+  실제 수행: 8/20 (40%)
+    ✓ socratic-interviewer, seed-architect, product-owner, simplifier, scope-guard
+    ✓ tech-architect, frontend-dev, qa-mechanical
+    ✗ 미사용: backend-dev, infra-dev, ux-designer, ...
+  → 활용도 50% 미만: 다음에 minimal tier 추천
+```
+
 ### Step 3: Generate 3 Improvement Suggestions
 
 Produce **exactly 3** actionable suggestions targeting the harness (skills, references, templates):
@@ -69,6 +96,9 @@ Features: <N>/<M> passed
 Build Retries: <N>
 QA Iterations: <N>
 Final Verdict: <PASS/FAIL>
+
+Flow Compliance: <일치 / 편차 N건>
+Agent Utilization: <M/N> (<percent>%)
 
 What Worked:
   - <observation>

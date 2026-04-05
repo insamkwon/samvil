@@ -106,7 +106,9 @@ Check by reading relevant code:
 - **No debug code**: No console.log left in components
 - **Performance**: First Load JS < 100KB (check build output). Use INP < 200ms as target metric.
 
-**If critical quality issues:** Verdict = REVISE with specific issues.
+**CONCERN 규칙**: 성능 CONCERN(First Load > 100KB 등)이 있으면 CONCERN으로만 표시하지 말고 **REVISE로 처리**. CONCERN은 무시되기 쉬움 — 발견했으면 수정해야 함.
+
+**If critical quality issues or any CONCERN:** Verdict = REVISE with specific issues.
 
 ## Write QA Report
 
@@ -188,6 +190,17 @@ If verdict is REVISE:
   Quality: acceptable
 
   Try it: cd ~/dev/<seed.name> && npm run dev
+
+  다음 단계:
+  □ 환경변수 확인 (.env.local 필요 시)
+  □ API 키 설정 (외부 서비스 사용 시)
+  □ npm run dev 로 실행 확인
+  □ 모바일에서 확인 (반응형)
+```
+
+**스킵된 단계 표시**: Evolve를 스킵하는 경우:
+```
+[SAMVIL] Evolve: SKIPPED (quality score 충족)
 ```
 
 If QA Pass 3 noted quality improvements (score < 4/5 on any dimension):

@@ -62,6 +62,10 @@ Check against schema rules from `references/seed-schema.md`:
 - [ ] No feature name appears in both `features` and `out_of_scope`
 - [ ] **CRUD completeness**: data entity를 만드는 feature가 있으면, 해당 entity의 Create/Read/Update/Delete 중 빠진 것이 없는지 확인. 빠진 CRUD가 있으면 AC에 추가하거나 out_of_scope에 명시.
 - [ ] **AC가 모든 P1 feature를 커버**: 각 P1 feature에 대해 최소 1개 AC가 존재하는지 확인. 커버 안 되는 P1 feature가 있으면 AC 추가.
+- [ ] **데이터 영속성 체크**: feature에 사용자가 생성하는 데이터(글, 할일, 설정 등)가 있으면 → constraints에 영속성 전략 명시. 없으면 자동 추가:
+  - "No backend server — client-only with localStorage" (기본)
+  - 데이터 손실이 치명적인 앱(이력서, 문서 등)이면 AC에 "데이터가 브라우저 재시작 후에도 유지된다" 추가
+- [ ] **첫 30초 가치 전달**: core_experience에 "사용자가 앱을 열었을 때 즉시 가치를 느끼는가?" 체크. 빈 화면만 나오면 → AC에 "빈 상태에서 다음 행동을 유도하는 가이드가 있다" 추가
 
 ### Step 4: Present to User with Preview
 

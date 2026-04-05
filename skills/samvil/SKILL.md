@@ -11,7 +11,7 @@ You are the SAMVIL orchestrator. Take the user's one-line app idea and guide it 
 
 ```
 [1] Interview → [2] Seed → [Gate A] Council → [Design] Blueprint → [3] Scaffold → [4] Build → [5] QA → [Evolve] → [Auto] Retro
-                              ↑ skip if minimal       ↑ Gate B if thorough+              ↑ parallel if standard+  ↑ optional
+                              ↑ Council skip if minimal    ↑ Gate B if thorough+    ↑ parallel if standard+  ↑ optional
 ```
 
 ## How to Run

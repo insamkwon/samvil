@@ -57,6 +57,29 @@ get_evolve_context(session_id, qa_result JSON)
 
 If MCP not available, gather from files manually.
 
+## Step 1b: 4차원 진화 평가
+
+Wonder/Reflect 전에 현재 상태를 4차원으로 평가한다:
+
+| 차원 | 질문 | 체크 방법 |
+|------|------|----------|
+| **Quality** | 코드가 제대로 동작하는가? | QA 결과 (이미 있음) |
+| **Intent** | 사용자의 원래 의도를 충족하는가? | interview-summary의 "핵심 문제"와 실제 구현 비교 |
+| **Purpose** | 제품의 존재 이유를 달성하는가? | seed.description이 약속한 가치가 실제로 전달되는가? |
+| **Beyond** | 더 나아질 수 있는가? | 첫 30초 경험, 바이럴 포인트, 리텐션 요소 |
+
+각 차원 1~5 점수. **3/5 이하인 차원이 있으면 해당 차원에 집중하여 Wonder/Reflect 진행.**
+모두 4/5 이상이면 → 수렴 가능성 높음.
+
+```
+[SAMVIL] Evolve 평가:
+  Quality: 4/5 (QA PASS)
+  Intent:  3/5 — "합격률을 높이는" 기능이 stub 수준
+  Purpose: 3/5 — ATS 호환 PDF가 실제 ATS 통과하는지 미검증
+  Beyond:  2/5 — 첫 30초에 빈 폼만 보임, 가이드 없음
+  → Intent, Purpose, Beyond 중심으로 진화
+```
+
 ## Step 2: Wonder — "What did we miss?"
 
 Spawn `wonder-analyst` agent:

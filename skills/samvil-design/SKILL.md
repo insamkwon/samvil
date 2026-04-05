@@ -146,6 +146,16 @@ Blueprint looks good? Say 'go' to start building, or tell me what to change.
 
 4. Invoke the Skill tool with skill: `samvil-scaffold`
 
+## 모바일 우선 입력 UX 가이드
+
+폼이 많은 앱(이력서, 설문 등)에서는:
+- 섹션별 단계 wizard (한 화면에 전부 보여주지 않기)
+- Progress bar로 완료 현황 표시
+- Auto-save (입력 중 데이터 손실 방지)
+- 모바일 터치 타겟: 최소 44px
+
+blueprint에 `mobile_considerations` 필드를 추가하여 Build 단계에서 참조.
+
 ## Rules
 
 1. **Blueprint must be consistent with seed** — don't add screens for features not in seed
@@ -153,6 +163,7 @@ Blueprint looks good? Say 'go' to start building, or tell me what to change.
 3. **Be opinionated** — choose the simplest architecture that supports all seed features
 4. **Gate B is optional** — only runs for thorough+ tiers
 5. **One file output** — everything goes in project.blueprint.json
+6. **Design은 모든 tier에서 실행** — minimal이라도 design preset 선택은 필수. 1분 안에 끝남.
 
 **TaskUpdate**: "Design" task를 `completed`로 설정
 ## Chain (Runtime-specific)

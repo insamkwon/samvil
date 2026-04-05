@@ -60,6 +60,16 @@ echo "Exit code: $?"
   Build: passing
 ```
 
+## Phase A.5: Dependency Pre-Resolution
+
+모든 feature를 읽고, 필요한 npm 패키지를 **한 번에** 설치한다. feature 빌드 중 하나씩 발견하며 설치하면 시간 낭비.
+
+```bash
+# seed.features + blueprint.key_libraries에서 필요한 패키지 추출
+# 예: DnD → @hello-pangea/dnd, 차트 → recharts, 날짜 → date-fns
+npm install <packages> --save > .samvil/deps-install.log 2>&1
+```
+
 ## Phase B: Features
 
 Read `seed.features` sorted by priority (1 first, then 2).
@@ -217,6 +227,9 @@ Invoke the Skill tool with skill: `samvil-qa`
 11. **No dead code** — don't generate unreachable code
 12. **Hydration-safe** — use the `mounted` pattern from web-recipes.md for any localStorage/browser API usage
 13. **localStorage defensive** — always wrap `JSON.parse(localStorage.getItem())` in try-catch with fallback to empty default. Corrupt data must not crash the app.
+14. **UX Writing** — placeholder 텍스트, 빈 상태 메시지, 에러 메시지, 성공 토스트를 **사용자 관점에서** 작성. "Error occurred" → "저장에 실패했어요. 다시 시도해주세요." 한국어 앱이면 한국어로.
+15. **첫 30초 가치 전달** — core_experience 구현 시 사용자가 앱을 열었을 때 **즉시 가치를 느끼도록**: 샘플 데이터 프리필, 가이드 텍스트, 또는 빈 상태에서 다음 행동 유도.
+16. **프리미엄 게이트 규칙** — 결제가 out_of_scope인데 프리미엄 UI가 있으면, "현재 모든 기능 무료" 배너를 표시하거나 게이트 자체를 비활성화. 결제 안 되는데 잠긴 UI만 보여주면 사용자가 이탈함.
 
 ## What NOT To Do
 
