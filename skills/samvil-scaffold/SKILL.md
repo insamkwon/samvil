@@ -231,18 +231,42 @@ npx astro add react -y
    **⚠️ Next.js 14 전용**: shadcn init이 globals.css와 tailwind.config를 Tailwind v4 문법(oklch)으로 덮어쓴다. **반드시 위 Step 2의 HSL 버전으로 다시 교체해야 한다.** 교체 안 하면 색상이 전부 빠져서 밋밋한 흰/검 디자인이 됨.
    ```
 
-4. **추가 의존성** (blueprint.key_libraries 기반):
+4. **Tailwind 설정 검증** (shadcn init 후 필수):
+
+   shadcn init이 globals.css와 tailwind.config를 Tailwind v4 문법으로 덮어쓸 수 있다. 반드시 확인:
+
+   **Next.js 14:**
+   ```bash
+   # globals.css 첫 줄이 @tailwind base여야 함 (oklch/@import tailwindcss가 아님)
+   head -1 app/globals.css
+   # tailwind.config.ts에 hsl(var(--...)) 패턴이 있어야 함
+   grep -c "hsl(var(--" tailwind.config.ts
+   # postcss.config.mjs에 tailwindcss 플러그인이 있어야 함
+   grep -c "tailwindcss" postcss.config.mjs
+   ```
+
+   **Vite:**
+   ```bash
+   # index.css 첫 줄이 @import "tailwindcss"여야 함
+   head -1 src/index.css
+   # vite.config.ts에 @tailwindcss/vite 플러그인이 있어야 함
+   grep -c "@tailwindcss/vite" vite.config.ts
+   ```
+
+   검증 실패 시: Step 2의 올바른 내용으로 덮어쓰고 다시 검증. 이 단계를 건너뛰면 빌드 재시도 루프의 원인이 됨.
+
+5. **추가 의존성** (blueprint.key_libraries 기반):
    ```bash
    npm install <library1> <library2> ...
    ```
 
-5. **디자인 프리셋 적용**: `interview-summary.md`에서 디자인 프리셋 읽고, `references/design-presets.md`의 CSS 변수로 교체.
+6. **디자인 프리셋 적용**: `interview-summary.md`에서 디자인 프리셋 읽고, `references/design-presets.md`의 CSS 변수로 교체.
 
-6. **package.json 업데이트**: name, description을 seed 기반으로 변경.
+7. **package.json 업데이트**: name, description을 seed 기반으로 변경.
 
-7. **app/page.tsx** (또는 `src/App.tsx`): 보일러플레이트를 간단한 Welcome 페이지로 교체.
+8. **app/page.tsx** (또는 `src/App.tsx`): 보일러플레이트를 간단한 Welcome 페이지로 교체.
 
-8. **.gitignore에 `.samvil/` 추가** (없으면).
+9. **.gitignore에 `.samvil/` 추가** (없으면).
 
 ### Step 4: Build Verification — Circuit Breaker (INV-2)
 

@@ -156,6 +156,21 @@ Append a JSON entry to `harness-feedback.log` in the SAMVIL **plugin** directory
 
 If the file doesn't exist, create it. If it exists, append (read existing content, parse as JSON array, add entry, write back).
 
+### Step 4b: Resolved Suggestion 정리
+
+새 항목을 추가한 후, **기존 런의 suggestions 중 이미 스킬/코드에 반영된 것을 정리**한다.
+
+1. 전체 harness-feedback.log를 순회하며 각 런의 `suggestions[]`를 읽는다
+2. 각 suggestion에 대해: 해당 스킬 파일을 Grep으로 검색하여 반영 여부를 확인
+   - 키워드(예: "UNIMPLEMENTED", "Playwright", "monorepo")가 스킬에 존재하면 → 반영됨
+3. 반영된 suggestion은 해당 런에서 제거하고, `resolved_in` 필드에 현재 버전과 함께 기록:
+   ```json
+   "resolved_in": "v0.X.Y — <resolved items summary>"
+   ```
+4. 미반영 suggestion만 `suggestions[]`에 남긴다
+
+**원칙**: 메트릭 데이터(stages, timestamp, seed_name)는 절대 삭제하지 않는다. suggestions만 정리한다.
+
 ### Step 5: Update State
 
 Update `project.state.json`:
