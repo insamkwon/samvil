@@ -18,6 +18,18 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
 6. Read `references/web-recipes.md` from this plugin directory → patterns to use
 7. Check `completed_features` in state — skip already-built features
 
+## Structured Build Event Schema
+
+Use these normalized `error_category` values everywhere build events are emitted:
+- `import_error`
+- `type_error`
+- `config_error`
+- `runtime_error`
+- `dependency_error`
+- `unknown`
+
+Normalize `error_signature` to a brief, repeatable summary (for example: `Module not found: @/lib/utils`).
+
 ## Phase A: Core Experience
 
 The seed's `core_experience` defines what the user does in the first 30 seconds. **Build this first.**
@@ -38,10 +50,22 @@ echo "Exit code: $?"
 ```
 
 **Circuit Breaker (MAX_RETRIES=2):**
+- On build success, append to `.samvil/events.jsonl`:
+  ```json
+  {"type":"build_pass","attempt":1,"scope":"core","ts":"<ISO 8601>"}
+  ```
 - Build fails → `tail -30 .samvil/build.log` → fix → retry
+- On every build failure, append to `.samvil/events.jsonl`:
+  ```json
+  {"type":"build_fail","attempt":<N>,"scope":"core","error_signature":"<brief normalized error>","error_category":"import_error|type_error|config_error|runtime_error|dependency_error|unknown","touched_files":["<paths>"],"ts":"<ISO 8601>"}
+  ```
 - **에러를 수정할 때마다** `.samvil/fix-log.md`에 한 줄 append:
   ```
   [core] <에러 내용> → <해결 방법>
+  ```
+- Also append to `.samvil/events.jsonl`:
+  ```json
+  {"type":"fix_applied","scope":"core","error_category":"<enum>","summary":"<brief fix summary>","files":["<paths>"],"ts":"<ISO 8601>"}
   ```
 - 2 failures → **Adaptive Tier 제안** (minimal/standard인 경우):
   ```
@@ -107,11 +131,23 @@ Build features one at a time (same as v1):
    cd ~/dev/<seed.name>
    npm run build > .samvil/build.log 2>&1
    ```
+   On build success, append to `.samvil/events.jsonl`:
+   ```json
+   {"type":"build_pass","attempt":1,"scope":"feature:<name>","ts":"<ISO 8601>"}
+   ```
    Circuit Breaker: MAX_RETRIES=2. 2 failures on a feature → mark as `failed`, continue to next feature.
+   On every build failure, append to `.samvil/events.jsonl`:
+   ```json
+   {"type":"build_fail","attempt":<N>,"scope":"feature:<name>","error_signature":"<brief normalized error>","error_category":"import_error|type_error|config_error|runtime_error|dependency_error|unknown","touched_files":["<paths>"],"ts":"<ISO 8601>"}
+   ```
    **Adaptive Tier**: 전체 failed features가 2개 이상이면 tier 업그레이드 제안 (P1-S5와 동일).
    **에러를 수정할 때마다** `.samvil/fix-log.md`에 한 줄 append:
    ```
    [feature:<name>] <에러 내용> → <해결 방법>
+   ```
+   Also append to `.samvil/events.jsonl`:
+   ```json
+   {"type":"fix_applied","scope":"feature:<name>","error_category":"<enum>","summary":"<brief fix summary>","files":["<paths>"],"ts":"<ISO 8601>"}
    ```
 6. **Event Log** — On success or failure, append:
    ```json
@@ -119,7 +155,7 @@ Build features one at a time (same as v1):
    ```
    or:
    ```json
-   {"type":"build_feature_fail","feature":"<name>","error":"<brief error>","retry":<N>,"ts":"<ISO 8601>"}
+   {"type":"build_feature_fail","feature":"<name>","error":"<brief error>","error_category":"type_error","retry":<N>,"ts":"<ISO 8601>"}
    ```
 7. **Drift Check** — Feature 구현 후, `seed.features`에서 해당 feature의 `description`을 다시 읽고, 구현이 description 범위를 벗어나면 경고:
    ```
@@ -177,6 +213,14 @@ Description: <feature description from seed>
 After all workers return:
 
 1. **Integration build** — Run `npm run build` to verify no conflicts
+   - On build success, append to `.samvil/events.jsonl`:
+     ```json
+     {"type":"build_pass","attempt":1,"scope":"integration","ts":"<ISO 8601>"}
+     ```
+   - On build failure, append to `.samvil/events.jsonl`:
+     ```json
+     {"type":"build_fail","attempt":<N>,"scope":"integration","error_signature":"<brief normalized error>","error_category":"import_error|type_error|config_error|runtime_error|dependency_error|unknown","touched_files":["<paths>"],"ts":"<ISO 8601>"}
+     ```
 2. **Conflict detection** — If build fails after parallel workers:
    ```
    [SAMVIL] Parallel build conflict detected
