@@ -1,6 +1,6 @@
 ---
 name: qa-functional
-description: "QA Pass 2: Verify each acceptance criterion against actual code. PASS/FAIL/PARTIAL per AC."
+description: "QA Pass 2: Verify each acceptance criterion against actual code. PASS/PARTIAL/UNIMPLEMENTED/FAIL per AC."
 phase: D
 tier: minimal
 mode: evaluator
@@ -30,9 +30,10 @@ You are NOT running the app — you're reading the code and verifying that the f
 
 | Grade | Meaning | Example |
 |-------|---------|---------|
-| **PASS** | AC is fully implemented and would work | "User can create tasks" — TaskForm component exists, submits to store, task appears in list |
-| **PARTIAL** | AC is partially implemented | "User can create tasks" — Form exists but doesn't save to store |
-| **FAIL** | AC is not implemented or clearly broken | "User can create tasks" — No form, no create function anywhere |
+| **PASS** | AC is fully implemented and evidenced | Real UI + real state + reachable path — "User can create tasks" — TaskForm exists, submits to store, task appears in list |
+| **PARTIAL** | Evidence exists but static analysis cannot fully verify runtime behavior | CSS feel, async timing, drag feel — "Smooth drag-and-drop" — DnD setup exists but interaction feel unverified |
+| **UNIMPLEMENTED** | Stub, hardcoded response, TODO path, simulated data | Fake AI response, sample-only persistence — "AI generates summary" — returns hardcoded sample text |
+| **FAIL** | Missing, broken, unreachable, or contradicted by code | No implementation, dead code, missing state wiring — "User can create tasks" — No form, no create function anywhere |
 
 ### Evidence Required
 
@@ -53,6 +54,12 @@ For each AC, you must cite **specific code evidence**:
 **Delete**: PASS
 - `components/tasks/TaskCard.tsx:45` — delete button with onClick
 - `lib/store.ts:12` — `deleteTask` function removes from array
+
+### AC: "AI generates task summary"
+
+**Summary**: UNIMPLEMENTED
+- `components/tasks/SummaryCard.tsx:10` — renders hardcoded sample text
+- ⚠️ No AI API call, no dynamic generation — returns static string
 ```
 
 ### Static Analysis Limitations
@@ -65,6 +72,7 @@ These items CANNOT be verified by code reading alone. If an AC depends on them, 
 - Drag-and-drop actual interaction feel
 
 PARTIAL counts as 0.5 in verdict calculation (not full PASS, not full FAIL).
+UNIMPLEMENTED counts as 0.0. If the AC is marked `core_experience: true` in the seed, UNIMPLEMENTED automatically escalates to FAIL.
 
 ### Common FAIL Patterns
 
@@ -73,6 +81,14 @@ PARTIAL counts as 0.5 in verdict calculation (not full PASS, not full FAIL).
 - Form exists but doesn't submit (missing onSubmit)
 - API route exists but no frontend calls it
 - Component renders but with hardcoded data (not from store)
+
+### Common UNIMPLEMENTED Patterns
+
+- Component renders with hardcoded sample text instead of real data generation
+- API call returns mock data with `// TODO: connect real API`
+- Persistence claimed but only in-memory state (no localStorage/DB write)
+- AI/ML feature returns static placeholder response
+- Import/export uses dummy data file marked as "sample"
 
 ## Output Format
 
@@ -84,17 +100,19 @@ PARTIAL counts as 0.5 in verdict calculation (not full PASS, not full FAIL).
 | 1 | "User can create tasks" | PASS | TaskForm → addTask → TaskList renders |
 | 2 | "Tasks persist on refresh" | PASS | Zustand persist middleware active |
 | 3 | "Drag tasks between columns" | PARTIAL | DnD setup exists, but onDragEnd doesn't update status |
+| 4 | "AI generates summary" | UNIMPLEMENTED | Hardcoded sample text, no API call |
 
 ### Pass 2 Summary
 - Total ACs: [N]
 - PASS: [N]
 - PARTIAL: [N]
+- UNIMPLEMENTED: [N]
 - FAIL: [N]
 
 ### Pass 2 Verdict: PASS / REVISE / FAIL
-- PASS: All ACs are PASS
-- REVISE: Any PARTIAL (fixable)
-- FAIL: Any FAIL (missing feature)
+- PASS: All ACs are PASS or PARTIAL
+- REVISE: Any UNIMPLEMENTED or PARTIAL (fixable)
+- FAIL: Any FAIL (missing/broken feature)
 
 ### Fix List (for REVISE/FAIL)
 1. [AC] — [what's missing] — [suggested fix]

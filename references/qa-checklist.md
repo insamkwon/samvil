@@ -20,12 +20,16 @@ Verdict per AC: **PASS** / **PARTIAL** / **UNIMPLEMENTED** / **FAIL**
 
 | Verdict | 점수 | 의미 |
 |---------|------|------|
-| PASS | 1.0 | AC 완전 충족 |
-| PARTIAL | 0.5 | 코드는 있으나 검증 불가 (CSS/UX 느낌) |
-| UNIMPLEMENTED | 0.0 | stub/하드코딩/더미 (core_experience면 자동 FAIL 승격) |
-| FAIL | 0.0 | 버그/결함/누락 |
+| PASS | 1.0 | AC 완전 충족 — 실제 UI + 실제 state + reachable path |
+| PARTIAL | 0.5 | 코드는 있으나 정적 분석으로 런타임 검증 불가 (CSS/UX 느낌, async timing, drag feel) |
+| UNIMPLEMENTED | 0.0 | stub/하드코딩/더미/TODO — 실제 동작 불가. core_experience면 자동 FAIL 승격 |
+| FAIL | 0.0 | 버그/결함/누락 — 코드가 broken, unreachable, 또는 AC와 모순됨 |
 
-Overall: All PASS or PARTIAL = PASS, any FAIL or UNIMPLEMENTED = REVISE
+**UNIMPLEMENTED vs FAIL 구분**:
+- UNIMPLEMENTED = 코드 형태는 있지만 실제로 동작하지 않음 (하드코딩, mock, TODO, sample data)
+- FAIL = 코드가 broken하거나 아예 없거나 AC와 정면으로 모순됨
+
+Overall: All PASS or PARTIAL = PASS, any UNIMPLEMENTED = REVISE, any FAIL = REVISE or FAIL
 
 ## Pass 3: Quality
 

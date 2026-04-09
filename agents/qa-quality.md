@@ -122,6 +122,16 @@ You **MUST** check empty states and error states first — they are the most com
 
 - **Don't re-check build** — Pass 1 already verified that
 - **Don't re-check ACs** — Pass 2 already verified that
+- **Don't re-score functional implementation status from Pass 2** — If you see a stub or missing core behavior, flag it as a quality concern and let the main session reconcile it with Pass 2 evidence
 - **Don't score everything 5/5** — be honest about quality gaps
 - **Don't demand perfection** — this is v1, score against v1 expectations
 - **Don't focus only on code** — UX polish matters as much as code structure
+
+## Synthesis-Friendly Output
+
+Your output must be structured for central synthesis. Return:
+1. **Dimension scores** (1-5 per dimension)
+2. **Concrete issue list** (file, line, what's wrong)
+3. **Revise-trigger concerns** (anything that would block a PASS verdict)
+
+Do NOT reclassify functional implementation states (PASS/PARTIAL/UNIMPLEMENTED/FAIL) from Pass 2. Quality review adds orthogonal evidence only.
