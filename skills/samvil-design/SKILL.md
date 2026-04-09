@@ -114,9 +114,52 @@ Append design decisions to `decisions.log`.
 
 If changes recommended and user approves, update blueprint.
 
+## Step 3b: Blueprint Feasibility Check
+
+Run a lightweight feasibility review before the user sees the final blueprint.
+
+Use the CC Agent tool:
+
+```
+Agent(
+  description: "SAMVIL Blueprint feasibility check",
+  model: config.model_routing.design_reviewer || config.model_routing.default || "haiku",
+  prompt: "You are a build feasibility reviewer for SAMVIL.
+
+Read the final blueprint draft and answer:
+1. Are all key_libraries realistically installable and maintainable?
+2. Is the tech stack self-consistent with SAMVIL scaffold conventions?
+3. Are there known compatibility risks?
+4. Is the component/screen scope realistic for this build?
+
+Return one of:
+- GO
+- CONCERN: <list>
+- BLOCKER: <list>
+
+Keep the response under 200 words.",
+  subagent_type: "general-purpose"
+)
+```
+
+### Main-session ownership rules
+
+- The main session remains the only writer of `project.blueprint.json`, `project.state.json`, and `.samvil/events.jsonl`
+- Always append `blueprint_feasibility_checked` to `.samvil/events.jsonl`
+- If the result is `CONCERN` or `BLOCKER`, revise the blueprint in the main session first
+- For each issue you carry forward, append `blueprint_concern` to `.samvil/events.jsonl`
+- Only present the final blueprint to the user after feasibility review and any needed edits
+
+Example events:
+
+```json
+{"type":"blueprint_feasibility_checked","result":"GO|CONCERN|BLOCKER","ts":"<ISO 8601>"}
+{"type":"blueprint_concern","summary":"<brief issue>","severity":"concern|blocker","ts":"<ISO 8601>"}
+```
+
 ## Step 4: User Checkpoint
 
-Present the blueprint:
+Present the post-feasibility blueprint:
 
 ```
 [SAMVIL] Blueprint Generated
@@ -129,8 +172,9 @@ Libraries: [list]
 Routes: [summary]
 
 {Gate B results if run}
+{Feasibility review results}
 
-Blueprint looks good? Say 'go' to start building, or tell me what to change.
+Final blueprint (post-feasibility check) looks good? Say 'go' to start building, or tell me what to change.
 ```
 
 ## Step 5: Save and Chain (INV-4)
