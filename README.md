@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v0.4.0`
+# SAMVIL — AI 바이브코딩 하네스 `v0.5.0`
 
 > **한 줄 입력 → 완성된 웹앱 출력**
 >
@@ -312,6 +312,16 @@ Run #3: 이전 제안 반영 + 패턴 감지 → 더 빠르고 안정적
 | 영속성 | Python MCP Server + SQLite (선택) |
 | 컴포넌트 | shadcn/ui (40+ 컴포넌트) |
 | 모델 라우팅 | config.json으로 작업별 모델 지정 (opus/sonnet/haiku) |
+
+---
+
+## v0.5.0 변경사항
+
+- **Blueprint Feasibility Check**: 설계 단계 끝에서 blueprint를 자동 점검. 라이브러리 충돌, 범위 현실성 검토 후 빌드 전 수정
+- **Structured Build Events**: 빌드 성공/실패, 수정 이력이 `build_fail`, `build_pass`, `fix_applied` 이벤트로 구조화 기록. 에러 카테고리(import/type/config/runtime) 분류
+- **QA Taxonomy Alignment**: 4-state 판정 체계 통일 — PASS / PARTIAL / UNIMPLEMENTED / FAIL. stub/하드코딩을 UNIMPLEMENTED로 명확 분리
+- **QA Synthesis Events**: QA 결과가 `qa_partial`, `qa_unimplemented`, `qa_verdict` 이벤트로 기록
+- **Evolve Artifact Analysis**: 진화 분석이 build.log, fix-log, events.jsonl을 직접 읽어 반복 에러 패턴과 근본 원인 식별
 
 ---
 
