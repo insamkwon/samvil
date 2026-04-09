@@ -106,6 +106,18 @@ Current seed (v{N}): <seed JSON>
 QA Report: <qa-report.md content>
 {convergence info if available}
 
+## Additional Ground Truth
+Read these files if they exist in ~/dev/<seed.name>/.samvil/:
+- build.log — raw build output
+- fix-log.md — applied fixes during build
+- events.jsonl — structured build/QA event trail
+
+Use them to identify:
+- repeated error signatures
+- repeated error categories
+- reverted fixes
+- workaround patterns that indicate a spec issue instead of an implementation issue
+
 ## Task
 Analyze what was lacking. Find surprises and gaps.
 Follow your Output Format. Under 400 words.",
