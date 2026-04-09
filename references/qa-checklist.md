@@ -16,8 +16,16 @@ For each `acceptance_criteria` in seed.json:
 - [ ] Edge case: empty state handled (first-use experience)
 - [ ] Edge case: if data persistence claimed, verify localStorage/DB code
 
-Verdict per AC: **PASS** / **FAIL** / **PARTIAL**
-Overall: All PASS = PASS, any FAIL = REVISE
+Verdict per AC: **PASS** / **PARTIAL** / **UNIMPLEMENTED** / **FAIL**
+
+| Verdict | 점수 | 의미 |
+|---------|------|------|
+| PASS | 1.0 | AC 완전 충족 |
+| PARTIAL | 0.5 | 코드는 있으나 검증 불가 (CSS/UX 느낌) |
+| UNIMPLEMENTED | 0.0 | stub/하드코딩/더미 (core_experience면 자동 FAIL 승격) |
+| FAIL | 0.0 | 버그/결함/누락 |
+
+Overall: All PASS or PARTIAL = PASS, any FAIL or UNIMPLEMENTED = REVISE
 
 ## Pass 3: Quality
 
@@ -58,6 +66,7 @@ Overall: All PASS = PASS, any FAIL = REVISE
 | AC | Verdict | Notes |
 |----|---------|-------|
 | "User can create tasks" | PASS | CreateTask component exists |
+| "AI generates summary" | UNIMPLEMENTED | Hardcoded sample text — needs real API |
 | "Tasks persist on refresh" | FAIL | No localStorage logic found |
 
 ## Pass 3: Quality

@@ -11,6 +11,16 @@ Improve the seed based on QA feedback. Spawn wonder + reflect agents, generate a
 
 - After QA PASS with quality notes → user opts in to evolve
 - After QA FAIL (Ralph exhausted) → evolve may fix the root cause
+- **Auto-trigger (v0.3.2 신규):** Read `project.state.json` and check:
+  - `build_retries ≥ 5` (빌드가 고생했으면 시드에 문제가 있을 가능성 높음)
+  - `qa_history.length ≥ 2` (QA를 여러 번 돌렸으면 구조적 개선 필요)
+  - `partial_count ≥ 5` (PARTIAL이 많으면 AC 정의가 모호할 수 있음)
+  - **둘 중 하나라도 충족하면** QA PASS 후 Evolve 제안을 자동으로 활성화 (사용자 확인 1회)
+  ```
+  [SAMVIL] Evolve 자동 제안 (build_retries=12 ≥ 5)
+    빌드가 12번 재시도되었습니다. 시드 진화로 근본 원인을 개선할 수 있습니다.
+    Evolve 진행? (yes / no)
+  ```
 - User explicitly invokes `/samvil:evolve`
 
 ## Boot Sequence (INV-1)

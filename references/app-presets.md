@@ -129,6 +129,51 @@
   - 유효성 검사 빠뜨림
   - 응답 데이터 export 없음
 
+## ai-tool / ai-writer / ai-assistant
+- **추천 스택**: nextjs (API routes for AI proxy)
+- **기본 기능**: 프롬프트 입력, AI 응답 표시, 결과 복사/편집
+- **자주 추가**: 히스토리, 템플릿, 결과 저장, 스트리밍 응답
+- **data model**: `{ id, prompt, response, template?, createdAt }`
+- **추천 state**: zustand (persist for history)
+- **추천 UI preset**: minimal
+- **흔한 함정**:
+  - AI 응답 중 로딩/스트리밍 처리 없음 → 사용자가 멈춘 줄 앎
+  - 프롬프트가 빈 문자열일 때 에러
+  - 긴 응답이 UI 깨뜨림 (마크다운 렌더링 필요)
+  - API 키 하드코딩 (반드시 env로)
+  - stub 응답(하드코딩 텍스트)을 진짜로 착각 → UNIMPLEMENTED 처리
+- **Pre-mortem**: "안 쓰게 되는 이유?" → 응답 품질 낮음, 대기 시간 김, 결과 저장 안 됨
+
+## admin / crm / project-management / collaboration
+- **추천 스택**: nextjs (SSR + 복잡한 상태 관리)
+- **기본 기능**: 멤버 목록, 역할/권한, 프로젝트 CRUD, 대시보드 요약
+- **자주 추가**: 초대 링크, 활동 로그, 필터/검색, 파일 첨부
+- **data model**: `{ members: [{ id, name, email, role }], projects: [{ id, name, status, assignee, dueDate }] }`
+- **추천 state**: zustand + API fetching
+- **추천 UI preset**: productivity
+- **흔한 함정**:
+  - 권한 체크 없음 (모든 사용자가 모든 것 수정 가능)
+  - 대시보드 요약 카드가 빈 데이터일 때 깨짐
+  - 멤버가 많을 때 검색/필터 없음
+  - 모바일에서 테이블 스크롤 안 됨
+- **Pre-mortem**: "팀이 안 쓰는 이유?" → 입력이 귀찮음, 실시간 동기화 안 됨, 알림 없음
+
+## booking / scheduler / calendar / reservation
+- **추천 스택**: nextjs (SSR + API routes)
+- **기본 기능**: 날짜/시간 선택, 예약 생성, 내 예약 목록, 취소
+- **자주 추가**: 반복 예약, 알림, 캘린더 뷰, 시간대 충돌 체크
+- **data model**: `{ bookings: [{ id, date, time, duration, userId, status }] }`
+- **추천 state**: zustand (persist) + 날짜 상태
+- **추천 UI preset**: minimal
+- **추천 library**: date-fns (날짜 처리), react-day-picker (캘린더 UI)
+- **흔한 함정**:
+  - 시간대(timezone) 처리 안 함 → 해외 사용자 시간 엉킴
+  - 과거 날짜 선택 가능 → 과거 예약 생성됨
+  - 겹치는 시간 예약 허용 (중복 체크 없음)
+  - 캘린더가 모바일에서 깨짐
+  - 월 이동 시 기존 선택 초기화
+- **Pre-mortem**: "노쇼 많은 이유?" → 리마인드 없음, 취소 귀찮음, 시간 혼동
+
 ---
 
 ## Preset 매칭 방법
@@ -146,6 +191,9 @@
 "채팅" / "chat" / "메시징" → chat
 "포트폴리오" / "portfolio" / "개인 사이트" → portfolio
 "폼" / "설문" / "survey" → form-builder
+"AI" / "챗봇" / "작성" / "생성" / "assistant" → ai-tool
+"관리" / "CRM" / "협업" / "프로젝트" / "admin" / "팀" → admin
+"예약" / "캘린더" / "스케줄" / "booking" / "달력" → booking
 ```
 
 매칭 안 되면 → competitor-analyst로 서치 → 결과 기반 임시 preset 생성.

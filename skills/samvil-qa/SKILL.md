@@ -91,21 +91,24 @@ For **EACH** item in `seed.acceptance_criteria`:
 
 Rate each criterion: **PASS** / **FAIL** / **PARTIAL** / **UNIMPLEMENTED**
 
-**PARTIAL rule:** 코드가 존재하지만 코드 리딩만으로 검증 불가 (CSS, 드래그앤드롭 느낌, 비동기 타이밍). PARTIAL counts as 0.5.
+**Verdict Taxonomy (v0.3.2 통일):**
 
-**UNIMPLEMENTED rule (v0.3.0 신규):**
-- API/AI 호출이 stub(하드코딩 응답, simulated response)이면 → **UNIMPLEMENTED** (PARTIAL 아님)
-- seed의 core_experience에 언급된 기능이 stub → **자동 FAIL**
-- "expected for v1"으로 면죄부 주지 않음. out_of_scope는 seed에 명시된 것만 인정. QA가 자의적으로 판단하지 않음.
+| Verdict | 점수 | 의미 | 예시 |
+|---------|------|------|------|
+| **PASS** | 1.0 | AC 완전 충족 | 코드 존재 + 도달 가능 + 엣지케이스 처리 |
+| **PARTIAL** | 0.5 | 코드는 있으나 검증 불가 | CSS/드래그앤드롭 느낌, 비동기 타이밍 — 코드 리딩만으로 확증 불가 |
+| **UNIMPLEMENTED** | 0.0 | stub/하드코딩/더미 | API 하드코딩 응답, simulated data, TODO 주석 |
+| **FAIL** | 0.0 | 버그/결함/누락 | 코드 없음, 런타임 에러, 엣지케이스 미처리 |
 
-```
-예:
-  AC: "AI가 경력기술서를 STAR 기법으로 작성"
-  구현: hardcoded sample text → UNIMPLEMENTED (= FAIL)
-  
-  AC: "드래그앤드롭으로 카드 이동"
-  구현: @hello-pangea/dnd 적용, 코드 존재 → PARTIAL (실제 터치 검증 불가)
-```
+**UNIMPLEMENTED 세부 규칙:**
+- API/AI 호출이 stub(하드코딩 응답, simulated response)이면 → **UNIMPLEMENTED**
+- seed의 core_experience에 언급된 기능이 stub → **자동 FAIL로 승격**
+- "expected for v1"으로 면죄부 주지 않음. out_of_scope는 seed에 명시된 것만 인정.
+
+**PARTIAL 세부 규칙:**
+- PARTIAL은 **해당 AC에 대해 0.5점**. FAIL이 아님.
+- PARTIAL ≥ 3개면 → Pass 3 Quality에서 CONCERN으로 표시 (REVISE 트리거 아님)
+- Evolve auto-trigger 조건으로 활용 (partial_count ≥ 5 → Evolve 제안)
 
 **If any criterion is FAIL or UNIMPLEMENTED:** Verdict = REVISE with the failing criteria listed.
 
@@ -224,7 +227,12 @@ If verdict is REVISE:
 [SAMVIL] Evolve: SKIPPED (quality score 충족)
 ```
 
-If QA Pass 3 noted quality improvements (score < 4/5 on any dimension):
+**Auto-trigger 체크 (v0.3.2):** state.json에서 확인:
+- build_retries ≥ 5 → Evolve 제안
+- qa_history.length ≥ 2 → Evolve 제안
+- partial_count ≥ 5 → Evolve 제안
+
+If any auto-trigger condition is met:
 
 ```
 QA passed, but quality could improve. Want to evolve the seed? (yes / no)
@@ -258,7 +266,7 @@ If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
 ## Rules
 
 1. **Strict on Pass 1.** Build must pass. No exceptions.
-2. **Fair on Pass 2.** PARTIAL is a FAIL for that criterion.
+2. **Fair on Pass 2.** PARTIAL counts as 0.5 (not a FAIL). Only FAIL and UNIMPLEMENTED trigger REVISE.
 3. **Lenient on Pass 3.** Flag issues but don't FAIL for cosmetic problems alone.
 4. **Fix during Ralph loop, don't rebuild from scratch.**
 5. **All build output to .samvil/build.log (INV-2).**
