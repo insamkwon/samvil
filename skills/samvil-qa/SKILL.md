@@ -112,6 +112,91 @@ Rate each criterion: **PASS** / **FAIL** / **PARTIAL** / **UNIMPLEMENTED**
 
 **If any criterion is FAIL or UNIMPLEMENTED:** Verdict = REVISE with the failing criteria listed.
 
+## QA Execution Mode by Tier
+
+After reading `selected_tier` from `project.config.json`, branch execution:
+
+### `minimal` — Inline QA (unchanged)
+
+Run Pass 2 and Pass 3 inline in the main session. This is the existing flow — no changes to preserve the current user experience and cost profile.
+
+### `standard` / `thorough` / `full` — Independent Evidence
+
+Keep Pass 1 in the main session. Then spawn independent agents for Pass 2 and Pass 3:
+
+```
+Pass 1:  main session (build + smoke)
+Pass 2:  independent qa-functional agent
+Pass 3:  independent qa-quality agent
+synthesis: main session only
+```
+
+**The main session is the ONLY writer of:**
+- `.samvil/qa-report.md`
+- `project.state.json`
+- `.samvil/events.jsonl`
+- overall verdict
+
+Independent agents gather evidence only. They do not write files.
+
+### Spawn Pass 2 Independent Agent
+
+```
+Agent(
+  description: "SAMVIL QA Pass 2: independent functional verification",
+  model: config.model_routing.qa || config.model_routing.default || "opus",
+  prompt: "You are an independent QA judge for SAMVIL Pass 2.
+
+<paste agents/qa-functional.md>
+
+## Context
+- Seed: <seed JSON>
+- Project path: ~/dev/<seed.name>/
+
+## Task
+Verify every acceptance criterion with skeptical, evidence-first review.
+You did not write this code.
+Do not write files.
+Return a markdown section using the required output format.",
+  subagent_type: "general-purpose"
+)
+```
+
+### Spawn Pass 3 Independent Agent
+
+```
+Agent(
+  description: "SAMVIL QA Pass 3: independent quality verification",
+  model: config.model_routing.qa || config.model_routing.default || "opus",
+  prompt: "You are an independent QA judge for SAMVIL Pass 3.
+
+<paste agents/qa-quality.md>
+
+## Context
+- Seed: <seed JSON>
+- Project path: ~/dev/<seed.name>/
+
+## Task
+Review responsive design, accessibility basics, code structure, and UX polish.
+You did not write this code.
+Do not write files.
+Return a markdown section using the required output format.",
+  subagent_type: "general-purpose"
+)
+```
+
+### Central Synthesis Rules
+
+After both independent agents return their markdown evidence:
+
+1. Read Pass 1 result from main-session checks
+2. Read Pass 2 markdown returned by independent agent
+3. Read Pass 3 markdown returned by independent agent
+4. Apply verdict matrix from `references/qa-checklist.md`
+5. Write `.samvil/qa-report.md`
+6. Append `qa_partial`, `qa_unimplemented`, and `qa_verdict` events to `.samvil/events.jsonl`
+7. Update `project.state.json`
+
 ## Pass 3: Quality Verification
 
 Check by reading relevant code:

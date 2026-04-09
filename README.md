@@ -267,6 +267,8 @@ shadcn/ui 기반이라 컴포넌트가 기본적으로 프로 수준입니다.
 
 Tier에 따라 필요한 만큼만 활성화. 간단한 앱에 36명이 달려들진 않아요.
 
+**QA Tier 차이**: `minimal`은 기존처럼 메인 세션에서 3-pass를 직접 실행. `standard` 이상은 Pass 2/3를 독립 에이전트가 검증하고 메인 세션이 최종 verdict를 종합합니다 ("Independent Evidence, Central Verdict" 원칙).
+
 ---
 
 ## Self-Evolution (자동 진화)
