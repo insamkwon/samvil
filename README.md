@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v0.5.0`
+# SAMVIL — AI 바이브코딩 하네스 `v0.6.0`
 
 > **한 줄 입력 → 완성된 웹앱 출력**
 >
@@ -324,6 +324,12 @@ Run #3: 이전 제안 반영 + 패턴 감지 → 더 빠르고 안정적
 - **QA Taxonomy Alignment**: 4-state 판정 체계 통일 — PASS / PARTIAL / UNIMPLEMENTED / FAIL. stub/하드코딩을 UNIMPLEMENTED로 명확 분리
 - **QA Synthesis Events**: QA 결과가 `qa_partial`, `qa_unimplemented`, `qa_verdict` 이벤트로 기록
 - **Evolve Artifact Analysis**: 진화 분석이 build.log, fix-log, events.jsonl을 직접 읽어 반복 에러 패턴과 근본 원인 식별
+
+## v0.6.0 변경사항
+
+- **Independent QA for Standard+**: `standard`, `thorough`, `full` 티어에서 Pass 2(기능 검증)와 Pass 3(품질 검증)을 독립 에이전트가 수행. 코드를 작성하지 않은 에이전트가 객관적으로 검증
+- **Minimal Tier Unchanged**: `minimal` 티어는 기존 inline QA 흐름 유지 — 비용과 속도 그대로
+- **Independent Evidence, Central Verdict**: 독립 에이전트는 evidence만 반환. 최종 verdict/리포트/events 기록은 메인 세션이 전담. 에이전트가 파일을 직접 쓰지 않음
 
 ---
 
