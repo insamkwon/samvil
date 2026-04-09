@@ -174,9 +174,25 @@ Overall Verdict: PASS / REVISE / FAIL
 ## Event Log
 
 After writing QA Report, append to `.samvil/events.jsonl`:
+
+For each Pass 2 item marked **PARTIAL**:
+```json
+{"type":"qa_partial","criterion":"<AC>","reason":"<brief>","source":"pass2","ts":"<ISO 8601>"}
+```
+
+For each Pass 2 item marked **UNIMPLEMENTED**:
+```json
+{"type":"qa_unimplemented","criterion":"<AC>","reason":"<brief>","is_core_experience":<true|false>,"ts":"<ISO 8601>"}
+```
+
+Pass 3 concerns that are evidence-limited may also emit `qa_partial` with `"source":"pass3"`.
+
+Final verdict event (always emitted):
 ```json
 {"type":"qa_verdict","verdict":"<PASS|REVISE|FAIL>","iteration":<N>,"pass1":"<PASS|FAIL>","pass2":"<PASS|FAIL>","pass3":"<PASS|FAIL>","ts":"<ISO 8601>"}
 ```
+
+**Event ownership:** Independent QA agents (if spawned) never append events directly. The main session emits all QA events after synthesizing returned evidence.
 
 ## Ralph Loop (if REVISE)
 
