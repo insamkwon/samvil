@@ -81,54 +81,23 @@ QA Report에 Smoke Run 결과 포함:
 - Dev Server: PASS/FAIL (HTTP <code>)
 ```
 
-## Pass 2: Functional Verification
-
-For **EACH** item in `seed.acceptance_criteria`:
-
-1. Use Grep/Read to search the codebase for code implementing this criterion
-2. Verify the implementation is reachable (imported and rendered)
-3. Check edge case: empty state handled?
-
-Rate each criterion: **PASS** / **FAIL** / **PARTIAL** / **UNIMPLEMENTED**
-
-**Verdict Taxonomy (v0.3.2 통일):**
-
-| Verdict | 점수 | 의미 | 예시 |
-|---------|------|------|------|
-| **PASS** | 1.0 | AC 완전 충족 | 코드 존재 + 도달 가능 + 엣지케이스 처리 |
-| **PARTIAL** | 0.5 | 코드는 있으나 검증 불가 | CSS/드래그앤드롭 느낌, 비동기 타이밍 — 코드 리딩만으로 확증 불가 |
-| **UNIMPLEMENTED** | 0.0 | stub/하드코딩/더미 | API 하드코딩 응답, simulated data, TODO 주석 |
-| **FAIL** | 0.0 | 버그/결함/누락 | 코드 없음, 런타임 에러, 엣지케이스 미처리 |
-
-**UNIMPLEMENTED 세부 규칙:**
-- API/AI 호출이 stub(하드코딩 응답, simulated response)이면 → **UNIMPLEMENTED**
-- seed의 core_experience에 언급된 기능이 stub → **자동 FAIL로 승격**
-- "expected for v1"으로 면죄부 주지 않음. out_of_scope는 seed에 명시된 것만 인정.
-
-**PARTIAL 세부 규칙:**
-- PARTIAL은 **해당 AC에 대해 0.5점**. FAIL이 아님.
-- PARTIAL ≥ 3개면 → Pass 3 Quality에서 CONCERN으로 표시 (REVISE 트리거 아님)
-- Evolve auto-trigger 조건으로 활용 (partial_count ≥ 5 → Evolve 제안)
-
-**If any criterion is FAIL or UNIMPLEMENTED:** Verdict = REVISE with the failing criteria listed.
-
 ## QA Execution Mode by Tier
 
-After reading `selected_tier` from `project.config.json`, branch execution:
+After reading `selected_tier` from `project.config.json` (Boot Sequence step 3), choose execution path:
 
 ### `minimal` — Inline QA (unchanged)
 
-Run Pass 2 and Pass 3 inline in the main session. This is the existing flow — no changes to preserve the current user experience and cost profile.
+Run Pass 2 and Pass 3 inline in the main session. Follow the sections below directly. This is the existing flow — no changes to preserve the current user experience and cost profile.
 
 ### `standard` / `thorough` / `full` — Independent Evidence
 
-Keep Pass 1 in the main session. Then spawn independent agents for Pass 2 and Pass 3:
+Keep Pass 1 in the main session. Then **skip the inline Pass 2 and Pass 3 sections below** and instead spawn independent agents:
 
 ```
 Pass 1:  main session (build + smoke)
-Pass 2:  independent qa-functional agent
-Pass 3:  independent qa-quality agent
-synthesis: main session only
+Pass 2:  independent qa-functional agent → skip to "Spawn Pass 2 Independent Agent"
+Pass 3:  independent qa-quality agent → skip to "Spawn Pass 3 Independent Agent"
+synthesis: main session only → follow "Central Synthesis Rules"
 ```
 
 **The main session is the ONLY writer of:**
@@ -197,7 +166,40 @@ After both independent agents return their markdown evidence:
 6. Append `qa_partial`, `qa_unimplemented`, and `qa_verdict` events to `.samvil/events.jsonl`
 7. Update `project.state.json`
 
-## Pass 3: Quality Verification
+---
+
+## Pass 2: Functional Verification (minimal inline path)
+
+For **EACH** item in `seed.acceptance_criteria`:
+
+1. Use Grep/Read to search the codebase for code implementing this criterion
+2. Verify the implementation is reachable (imported and rendered)
+3. Check edge case: empty state handled?
+
+Rate each criterion: **PASS** / **FAIL** / **PARTIAL** / **UNIMPLEMENTED**
+
+**Verdict Taxonomy (v0.3.2 통일):**
+
+| Verdict | 점수 | 의미 | 예시 |
+|---------|------|------|------|
+| **PASS** | 1.0 | AC 완전 충족 | 코드 존재 + 도달 가능 + 엣지케이스 처리 |
+| **PARTIAL** | 0.5 | 코드는 있으나 검증 불가 | CSS/드래그앤드롭 느낌, 비동기 타이밍 — 코드 리딩만으로 확증 불가 |
+| **UNIMPLEMENTED** | 0.0 | stub/하드코딩/더미 | API 하드코딩 응답, simulated data, TODO 주석 |
+| **FAIL** | 0.0 | 버그/결함/누락 | 코드 없음, 런타임 에러, 엣지케이스 미처리 |
+
+**UNIMPLEMENTED 세부 규칙:**
+- API/AI 호출이 stub(하드코딩 응답, simulated response)이면 → **UNIMPLEMENTED**
+- seed의 core_experience에 언급된 기능이 stub → **자동 FAIL로 승격**
+- "expected for v1"으로 면죄부 주지 않음. out_of_scope는 seed에 명시된 것만 인정.
+
+**PARTIAL 세부 규칙:**
+- PARTIAL은 **해당 AC에 대해 0.5점**. FAIL이 아님.
+- PARTIAL ≥ 3개면 → Pass 3 Quality에서 CONCERN으로 표시 (REVISE 트리거 아님)
+- Evolve auto-trigger 조건으로 활용 (partial_count ≥ 5 → Evolve 제안)
+
+**If any criterion is FAIL or UNIMPLEMENTED:** Verdict = REVISE with the failing criteria listed.
+
+## Pass 3: Quality Verification (minimal inline path)
 
 Check by reading relevant code:
 - **Responsive**: Tailwind responsive classes (`md:`, `lg:`) used for layout components
