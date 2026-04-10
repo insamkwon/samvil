@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v0.7.2`
+# SAMVIL — AI 바이브코딩 하네스 `v0.8.2`
 
 > **한 줄 입력 → 완성된 웹앱 출력**
 >
@@ -191,8 +191,8 @@ AI가 자동으로 분석해요:
 | **디자인** | 화면 구조, 데이터 모델, 아키텍처 결정 + blueprint feasibility 점검 | 설계 회의 |
 | **스캐폴드** | CLI로 프로젝트 뼈대 생성 (Next.js / Vite / Astro) | 공사장 세팅 |
 | **빌드** | 기능별 코드 작성 (독립 기능은 병렬) + Drift 경고 | 실제 공사 |
-| **QA** | 3단계 검증: 빌드 → Smoke Run → 기능 → 품질 | 품질 검사 |
-| **진화** | spec-only 모드로 설계서 수렴 후 최종 빌드 (선택). 빌드/QA 이벤트 trace를 분석해 반복 패턴 식별 | 피드백 반영 |
+| **QA** | 3단계 검증: 빌드 → Playwright Smoke Run → 기능 → 품질 | 품질 검사 |
+| **진화** | spec-only 모드로 설계서 수렴 후 최종 빌드 (선택). 시드 버전 히스토리 + diff 자동 저장. 빌드/QA 이벤트 trace를 분석해 반복 패턴 식별 | 피드백 반영 |
 | **회고** | 패턴 감지 + 프리셋 축적 제안 + 하네스 개선 3개 | 회고 미팅 |
 
 설계 단계 끝에서 blueprint를 한 번 더 점검해요.
@@ -316,6 +316,31 @@ Run #3: 이전 제안 반영 + 패턴 감지 → 더 빠르고 안정적
 | 모델 라우팅 | config.json으로 작업별 모델 지정 (opus/sonnet/haiku) |
 
 ---
+
+## v0.8.0 변경사항
+
+- **MAX_PARALLEL=2** — 병렬 Agent 동시 실행 제한. CPU 100% 이슈 해결
+- **모델 최적화** — Council R1: Haiku, QA: Sonnet, Evolve 2사이클+: Sonnet. Opus 사용 80% 감소
+- **빌드 캐싱** — Worker는 lint/typecheck만, full build는 배치 완료 후 1회. 빌드 횟수 67% 감소
+- **토큰 절약** — Agent에게 해당 feature만 전달. QA도 AC 관련만 전달
+- **Agent Persona 경량화** — 5개 Agent에 Compact Mode 추가
+- **qa_max_iterations** 5 → 3. Ralph Loop 과다 반복 방지
+- **관측성** — build_stage_complete 이벤트에 agents_spawned, builds_run 메트릭 추가
+
+## v0.8.1 변경사항
+
+- **ISS-03 버전 동기화** — `hooks/validate-version-sync.sh` 추가. push 전 plugin.json / __init__.py / README 버전 일치 검증
+- **ISS-01/02 MCP 의무 호출** — 11개 스킬에 18개 이벤트 타입 MCP 통합. 이벤트 누락 시 경고
+- **ISS-05 모호도 tier 파라미터** — interview_engine에 tier별 임계값 (minimal 0.10 / standard 0.05 / thorough 0.02 / full 0.01)
+- **PHI-01 Playwright Smoke Run** — QA Pass 1b에서 dev server 콘솔 에러 + 빈 화면 자동 검출
+- **PHI-03 Seed 버전 히스토리** — Evolve에서 시드 백업 + compare_seeds diff 자동 저장
+- **PHI-04 QA ralph_max_iterations** — config 기반 반복 한도 (기본 3회)
+- **PHI-05 Build 구현률** — build_stage_complete에 implementation_rate 기록. Evolve diff를 파일로 저장
+- **PHI-06 Testable AC** — Seed에 AC별 vague_words 태깅. Interview에 AC 재질문 로직
+
+## v0.8.2 변경사항
+
+- **캐시→리포 동기화** — v0.8.1 변경사항을 git 리포에 반영. 버전 전체 0.8.2로 통일
 
 ## v0.5.0 변경사항
 

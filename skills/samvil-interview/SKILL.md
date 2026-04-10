@@ -10,13 +10,13 @@ description: "Socratic interview with app presets, unknown-unknown probing, and 
 ## Boot Sequence (INV-1)
 
 0. **TaskUpdate**: "Interview" task를 `in_progress`로 설정
-1. Read `project.state.json` → confirm `current_stage` is `"interview"`
+1. Read `project.state.json` → confirm `current_stage` is `"interview"`, get `session_id`
 2. Read `project.config.json` → `selected_tier`
 3. Read `references/app-presets.md` → preset 매칭 준비
 4. The app idea is in the conversation context (from orchestrator)
-5. **Event Log**: Append to `.samvil/events.jsonl`:
-   ```json
-   {"type":"interview_start","tier":"<selected_tier>","ts":"<ISO 8601>"}
+5. **MCP (필수):** Save interview start event:
+   ```
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_start", stage="interview", data='{"tier":"<selected_tier>"}')
    ```
 
 ## Step 0: Mode Detection
@@ -117,11 +117,27 @@ preset의 **"흔한 함정"**과 **"Pre-mortem"**을 활용:
 □ Constraints: 제약 조건 1개 이상 명시됨? (Y/N)
 ```
 
+**AC Testability Gate (PHI-06):** 각 AC에 대해 vague 단어가 있는지 검사.
+Vague: "좋은", "빠른", "깔끔한", "직관적인", "부드러운", "전문적인", "모던한", "사용자 친화적인", "good", "nice", "fast", "clean", "intuitive", "smooth", "user-friendly"
+
+vague AC가 있으면 재질문:
+```
+question: "이 성공 기준이 좀 모호해요. 구체적으로 어떤 걸 의미하나요?"
+header: "AC 구체화"
+options:
+  - label: "<자동 제안된 rewrite>"
+    description: "<rewrite_hint 기반>"
+  - Other로 직접 입력
+```
+
 Constraints가 비어있으면 추가 질문: "이 앱에 제약 조건이 있나요? (예: 백엔드 없음, 모바일 필수, 특정 브라우저만 등)"
 답변이 없어도 기본값 추가: "No backend server — client-only with localStorage"
 
-MCP `score_ambiguity` 사용 가능 시:
-`[SAMVIL] 모호도: 0.32 → 0.18 → 0.07 → 0.04 ✓ (목표: ≤ {tier_target})`
+**MCP (필수):** Call `mcp__samvil_mcp__score_ambiguity` with interview state JSON and tier:
+```
+mcp__samvil_mcp__score_ambiguity(interview_state='{"target_user":"...","core_problem":"...","core_experience":"...","features":[...],"exclusions":[...],"constraints":[...],"acceptance_criteria":[...]}', tier="<selected_tier>")
+```
+Display: `[SAMVIL] 모호도: 0.32 → 0.18 → 0.07 → 0.04 ✓ (목표: ≤ {tier_target})`
 
 ### Phase 3.5: 스택 추천
 
@@ -206,7 +222,10 @@ Write `~/dev/<project>/interview-summary.md`
 interview-summary.md에 `디자인 프리셋: <preset>` 포함 → seed가 읽음
 
 ### 3. 상태 업데이트
-`project.state.json`의 `current_stage` → `"seed"`
+**MCP (필수):** Save stage transition event (auto-updates session stage):
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_complete", stage="seed", data='{"questions_asked":<N>,"preset_matched":"<preset>"}')
+```
 
 ### 4. 진행 표시
 ```

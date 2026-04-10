@@ -11,7 +11,7 @@ Generate the technical blueprint that translates the seed spec into concrete arc
 
 0. **TaskUpdate**: "Design" task를 `in_progress`로 설정
 1. Read `project.seed.json` → what we're building
-2. Read `project.state.json` → confirm `current_stage` is `"design"`
+2. Read `project.state.json` → confirm `current_stage` is `"design"`, get `session_id`
 3. Read `project.config.json` → `selected_tier`
 4. Read `interview-summary.md` → user context
 5. Read `decisions.log` → binding decisions from Gate A (if exists)
@@ -150,18 +150,17 @@ Keep the response under 200 words.",
 
 ### Main-session ownership rules
 
-- The main session remains the only writer of `project.blueprint.json`, `project.state.json`, and `.samvil/events.jsonl`
-- Always append `blueprint_feasibility_checked` to `.samvil/events.jsonl`
+- The main session remains the only writer of `project.blueprint.json` and `project.state.json`
+- **MCP (필수):** After feasibility check:
+  ```
+  mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="blueprint_feasibility_checked", stage="design", data='{"result":"GO|CONCERN|BLOCKER"}')
+  ```
 - If the result is `CONCERN` or `BLOCKER`, revise the blueprint in the main session first
-- For each issue you carry forward, append `blueprint_concern` to `.samvil/events.jsonl`
+- For each issue carried forward:
+  ```
+  mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="blueprint_concern", stage="design", data='{"summary":"<brief issue>","severity":"concern|blocker"}')
+  ```
 - Only present the final blueprint to the user after feasibility review and any needed edits
-
-Example events:
-
-```json
-{"type":"blueprint_feasibility_checked","result":"GO|CONCERN|BLOCKER","ts":"<ISO 8601>"}
-{"type":"blueprint_concern","summary":"<brief issue>","severity":"concern|blocker","ts":"<ISO 8601>"}
-```
 
 ## Step 4: User Checkpoint
 
@@ -186,7 +185,10 @@ Final blueprint (post-feasibility check) looks good? Say 'go' to start building,
 ## Step 5: Save and Chain (INV-4)
 
 1. Write `project.blueprint.json` to project directory
-2. Update `project.state.json`: set `current_stage` to `"scaffold"`
+2. **MCP (필수):** Save stage transition:
+   ```
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="blueprint_generated", stage="scaffold", data='{"screens":<N>,"libraries":[<list>]}')
+   ```
 3. Print progress:
 
 ```

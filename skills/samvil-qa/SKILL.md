@@ -11,7 +11,7 @@ You are adopting the role of **QA Judge**. Verify the built app against the seed
 
 0. **TaskUpdate**: "QA" task를 `in_progress`로 설정
 1. Read `project.seed.json` → acceptance criteria and features
-2. Read `project.state.json` → completed features, failed features, qa_history
+2. Read `project.state.json` → completed features, failed features, qa_history, `session_id`
 3. Read `project.config.json` → `qa_max_iterations`, `selected_tier`
 4. Read `references/qa-checklist.md` from this plugin directory
 
@@ -53,33 +53,64 @@ Check:
 
 **If Pass 1 fails:** Verdict = REVISE with specific build errors. Skip Pass 1b, Pass 2 and 3.
 
-## Pass 1b: Smoke Run (빌드 통과 후)
+## Pass 1b: Playwright Smoke Run (빌드 통과 후)
 
-Build가 성공하면 실제 dev server를 띄워서 앱이 HTTP 응답하는지 확인:
+Build가 성공하면 Playwright로 dev server를 띄워서 콘솔 에러와 빈 화면을 검출:
 
 ```bash
 cd ~/dev/<seed.name>
-npm run dev &
-DEV_PID=$!
-SMOKE_PASS=false
-for i in {1..10}; do
-  curl -s http://localhost:3000 > /dev/null 2>&1 && SMOKE_PASS=true && break
-  sleep 2
-done
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo "000")
-kill $DEV_PID 2>/dev/null
-wait $DEV_PID 2>/dev/null
-echo "Smoke: $SMOKE_PASS (HTTP $HTTP_CODE)"
 ```
 
-- **HTTP 200**: `[SAMVIL] Smoke Run: ✓ (HTTP 200)` → Pass 2로 진행
-- **HTTP != 200 또는 timeout**: `[SAMVIL] Smoke Run: ✗ (HTTP $HTTP_CODE)` → Verdict = REVISE (빌드는 되지만 런타임 에러)
-
-QA Report에 Smoke Run 결과 포함:
-```markdown
-## Pass 1b: Smoke Run
-- Dev Server: PASS/FAIL (HTTP <code>)
+### Playwright 설치 확인 (최초 1회)
+```bash
+npx playwright install chromium 2>/dev/null
 ```
+
+### Smoke Test 실행
+
+Use the `mcp__plugin_playwright_playwright__browser_navigate` tool to visit the dev server:
+
+1. **Start dev server in background:**
+   ```bash
+   cd ~/dev/<seed.name> && npm run dev &
+   ```
+   Wait for it to be ready (up to 15 seconds).
+
+2. **Navigate to the app:**
+   ```
+   mcp__plugin_playwright_playwright__browser_navigate(url="http://localhost:3000")
+   ```
+
+3. **Check for console errors:**
+   ```
+   mcp__plugin_playwright_playwright__browser_console_messages(level="error")
+   ```
+   - **No errors**: `[SAMVIL] Smoke Run: ✓ (no console errors)` → Pass 2로 진행
+   - **Console errors found**: `[SAMVIL] Smoke Run: ✗ (N console errors)` → List the errors
+
+4. **Check for empty body:**
+   ```
+   mcp__plugin_playwright_playwright__browser_evaluate(function="() => document.body.innerHTML.trim().length > 0")
+   ```
+   - **Body has content**: PASS
+   - **Empty body**: `[SAMVIL] Smoke Run: ✗ (empty <body>)` → Verdict = REVISE
+
+5. **Take screenshot for evidence (optional):**
+   ```
+   mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=".samvil/smoke-screenshot.png")
+   ```
+
+6. **Visit each route** from `blueprint.routing`:
+   For each route, navigate and check for console errors + non-empty body.
+
+7. **Stop dev server:**
+   ```bash
+   kill $(lsof -ti:3000) 2>/dev/null
+   ```
+
+**Verdict:**
+- All routes: no console errors + non-empty body → PASS → Pass 2로 진행
+- Any route: console errors OR empty body → REVISE with specific issues
 
 ## QA Execution Mode by Tier
 
@@ -169,8 +200,8 @@ After both independent agents return their markdown evidence:
 3. Read Pass 3 markdown returned by independent agent
 4. Apply verdict matrix from `references/qa-checklist.md`
 5. Write `.samvil/qa-report.md`
-6. Append `qa_partial`, `qa_unimplemented`, and `qa_verdict` events to `.samvil/events.jsonl`
-7. Update `project.state.json`
+6. **MCP (필수):** Emit all QA events via `mcp__samvil_mcp__save_event` (see Event Log section)
+7. Update `project.state.json` (only completed_features, failed, qa_history — NOT current_stage, which MCP manages)
 
 ---
 
@@ -264,28 +295,28 @@ Pass 3 (Quality): PASS ✓ / FAIL ✗
 Overall Verdict: PASS / REVISE / FAIL
 ```
 
-## Event Log
+## Event Log (MCP 필수)
 
-After writing QA Report, append to `.samvil/events.jsonl`:
+After writing QA Report, use MCP to save all events:
 
 For each Pass 2 item marked **PARTIAL**:
-```json
-{"type":"qa_partial","criterion":"<AC>","reason":"<brief>","source":"pass2","ts":"<ISO 8601>"}
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="qa_partial", stage="qa", data='{"criterion":"<AC>","reason":"<brief>","source":"pass2"}')
 ```
 
 For each Pass 2 item marked **UNIMPLEMENTED**:
-```json
-{"type":"qa_unimplemented","criterion":"<AC>","reason":"<brief>","is_core_experience":<true|false>,"ts":"<ISO 8601>"}
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="qa_unimplemented", stage="qa", data='{"criterion":"<AC>","reason":"<brief>","is_core_experience":<true|false>}')
 ```
 
 Pass 3 concerns that are evidence-limited may also emit `qa_partial` with `"source":"pass3"`.
 
 Final verdict event (always emitted):
-```json
-{"type":"qa_verdict","verdict":"<PASS|REVISE|FAIL>","iteration":<N>,"pass1":"<PASS|FAIL>","pass2":"<PASS|FAIL>","pass3":"<PASS|FAIL>","ts":"<ISO 8601>"}
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="qa_verdict", stage="qa", data='{"verdict":"<PASS|REVISE|FAIL>","iteration":<N>,"pass1":"<PASS|FAIL>","pass2":"<PASS|FAIL>","pass3":"<PASS|FAIL>"}')
 ```
 
-**Event ownership:** Independent QA agents (if spawned) never append events directly. The main session emits all QA events after synthesizing returned evidence.
+**Event ownership:** Independent QA agents (if spawned) never emit events directly. The main session emits all QA events after synthesizing returned evidence.
 
 ## Ralph Loop (if REVISE)
 
@@ -305,7 +336,38 @@ If verdict is REVISE:
    ```
 5. **MAX_ITERATIONS = config.qa_max_iterations || 3**: After MAX_ITERATIONS REVISE cycles → verdict = FAIL
 
-**Convergence check:** Each iteration MUST reduce total issue count compared to previous iteration. If issues increase or stay same for 2 consecutive iterations → FAIL with stagnation warning.
+**Convergence check:** Each iteration MUST reduce total issue count compared to previous iteration.
+
+**BLOCKED detection (PHI-04):** Compare issue lists across iterations:
+- Extract issue identifiers from each iteration's `qa_history` entry
+- If **identical issues persist for 2 consecutive iterations** → declare **BLOCKED**
+
+Example:
+```
+Cycle 1: [A, B, C, D]
+Cycle 2: [A, B, C, E]     ← D resolved, E new
+Cycle 3: [A, B, C, F]     ← E resolved, F new
+→ A, B, C cannot be auto-fixed.
+```
+
+On BLOCKED:
+```
+[SAMVIL] ✗ QA BLOCKED after iteration <N>
+  Persistent issues that auto-fix cannot resolve:
+    - <issue A>
+    - <issue B>
+    - <issue C>
+
+  Manual intervention required. Options:
+  1. Evolve seed — change the spec to avoid these issues
+  2. Skip to retro — end this run with analysis
+  3. Fix manually — the app is at ~/dev/<seed.name>/
+```
+
+**MCP (필수):** Emit BLOCKED event:
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="qa_blocked", stage="qa", data='{"iteration":<N>,"persistent_issues":["<A>","<B>","<C>"],"total_attempts":<N>}')
+```
 
 ## On PASS — Offer Evolve or Chain to Retro (INV-4)
 
@@ -347,11 +409,11 @@ If any auto-trigger condition is met:
 QA passed, but quality could improve. Want to evolve the seed? (yes / no)
 ```
 
-- **yes**: Update state `current_stage` to `"evolve"`, invoke `samvil-evolve`
-- **no**: Update state `current_stage` to `"retro"`, invoke `samvil-retro`
+- **yes**: **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="evolve", data='{"reason":"quality_improvement"}')` → invoke `samvil-evolve`
+- **no**: **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"qa_pass"}')` → invoke `samvil-retro`
 
 If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
-  Update `project.state.json`: set `current_stage` to `"retro"`.
+  **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"quality_excellent"}')`
   Invoke the Skill tool with skill: `samvil-retro`
 
 ## On FAIL (after 3 iterations)
@@ -368,9 +430,9 @@ If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
   3. Fix manually — the app is at ~/dev/<seed.name>/
 ```
 
-- **Option 1**: Update state `current_stage` to `"evolve"`, invoke `samvil-evolve`
-- **Option 2**: Update state `current_stage` to `"retro"`, invoke `samvil-retro`
-- **Option 3**: Update state `current_stage` to `"retro"`, invoke `samvil-retro`
+- **Option 1**: **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="evolve", data='{"reason":"qa_fail_evolve"}')` → invoke `samvil-evolve`
+- **Option 2**: **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"qa_fail"}')` → invoke `samvil-retro`
+- **Option 3**: **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"manual_fix"}')` → invoke `samvil-retro`
 
 ## Rules
 

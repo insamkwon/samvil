@@ -11,7 +11,7 @@ You are adopting the role of **Scaffolder**. Create a project directory with a v
 
 0. **TaskUpdate**: "Scaffold" task를 `in_progress`로 설정
 1. Read `project.seed.json` from the project directory
-2. Read `project.state.json` → confirm `current_stage` is `"scaffold"`
+2. Read `project.state.json` → confirm `current_stage` is `"scaffold"`, get `session_id`
 3. Read `project.config.json` → `selected_tier`
 4. Read `project.blueprint.json` → architecture decisions (if exists)
    - Use `key_libraries` to know which npm packages to install
@@ -268,6 +268,13 @@ npx astro add react -y
 
 9. **.gitignore에 `.samvil/` 추가** (없으면).
 
+10. **Playwright 설치** (QA Smoke Run용):
+    ```bash
+    npm install -D @playwright/test
+    npx playwright install chromium
+    ```
+    Playwright는 QA Pass 1b에서 dev server의 콘솔 에러와 빈 화면을 검출하는 데 사용.
+
 ### Step 4: Build Verification — Circuit Breaker (INV-2)
 
 ```bash
@@ -296,7 +303,10 @@ echo "Exit code: $?"
 
 ### Step 5: Update State and Chain (INV-4)
 
-Update `project.state.json`: set `current_stage` to `"build"`.
+**MCP (필수):** Save scaffold completion:
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="scaffold_complete", stage="build", data='{"framework":"<framework>","shadcn_components":["button","card","input","dialog"]}')
+```
 
 ```
 [SAMVIL] Stage 3/5: Scaffold ✓

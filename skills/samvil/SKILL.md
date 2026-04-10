@@ -209,6 +209,7 @@ Initialize `project.state.json`:
 
 ```json
 {
+  "session_id": null,
   "seed_version": 1,
   "current_stage": "interview",
   "completed_features": [],
@@ -221,6 +222,14 @@ Initialize `project.state.json`:
 ```
 
 Write this to `~/dev/<project-name>/project.state.json`.
+
+**MCP (필수):** Create a SAMVIL session for event tracking:
+
+```
+mcp__samvil_mcp__create_session(project_name="<project-name>", agent_tier="<selected_tier>")
+```
+
+Parse the returned `session_id` and update `project.state.json` → set `session_id` to the returned value.
 
 ### Step 4: Check for Resume
 
@@ -327,17 +336,19 @@ Print:
 
 각 스킬도 체인 invoke 전에 동일하게 skip_stages를 확인한다.
 
-**Event Log**: Append to `.samvil/events.jsonl`:
-```json
-{"type":"stage_change","stage":"interview","ts":"<ISO 8601>"}
+**MCP (필수):** Save pipeline start event:
+
+```
+mcp__samvil_mcp__save_event(
+  session_id="<session_id from state.json>",
+  event_type="stage_change",
+  stage="interview",
+  data='{"app":"<app-idea>","tier":"<selected_tier>"}'
+)
 ```
 
-**Event Log Rule (모든 스킬 공통):**
-각 스킬이 `project.state.json`의 `current_stage`를 업데이트할 때마다, `.samvil/events.jsonl`에 한 줄 append:
-```json
-{"type":"stage_change","stage":"<new_stage>","ts":"<ISO 8601>"}
-```
-파일이 없으면 생성. 기존 내용은 절대 덮어쓰지 않음 (append-only).
+**MCP Event Rule (모든 스킬 공통):**
+각 스킬이 상태를 변경할 때마다 **반드시** `mcp__samvil_mcp__save_event` 호출. 이 호출이 자동으로 session의 current_stage를 업데이트함. `.samvil/events.jsonl`에 직접 쓰지 않음.
 
 Invoke the Skill tool: `samvil-interview`
 

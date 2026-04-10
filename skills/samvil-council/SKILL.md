@@ -11,7 +11,7 @@ Spawn multiple agents to debate seed quality. Each agent brings a different pers
 
 0. **TaskUpdate**: "Council" task를 `in_progress`로 설정
 1. Read `project.seed.json` → the spec being reviewed
-2. Read `project.state.json` → confirm stage
+2. Read `project.state.json` → confirm stage, get `session_id`
 3. Read `project.config.json` → `selected_tier`
 4. Read `interview-summary.md` → interview context for agents
 5. Read `references/council-protocol.md` → synthesis rules and format
@@ -214,16 +214,13 @@ For each CHALLENGE or REJECT verdict, append to `~/dev/<project>/decisions.log`:
 
 If decisions.log already exists, read it first and append (don't overwrite).
 
-## Step 6b: Event Log
+## Step 6b: MCP Event (필수)
 
-Append to `.samvil/events.jsonl`:
-```json
-{"type":"council_verdict","verdict":"<PROCEED|PROCEED_WITH_CHANGES|HOLD>","agents_count":<N>,"ts":"<ISO 8601>"}
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="council_verdict", stage="design", data='{"verdict":"<PROCEED|PROCEED_WITH_CHANGES|HOLD>","agents_count":<N>}')
 ```
 
 ## Step 7: Chain to Design (INV-4)
-
-Update `project.state.json`: set `current_stage` to `"design"`.
 
 ```
 [SAMVIL] Gate A complete. Proceeding to design...

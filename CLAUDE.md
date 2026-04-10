@@ -78,10 +78,12 @@ Supports multiple stacks (CLI-based scaffold, no template folder):
 
 ### 버전업 체크리스트 (push 전 필수)
 
-1. `plugin.json`의 `version` 올리기 (SSOT)
-2. `README.md` 첫 줄의 `` `vX.Y.Z` `` 동기화
-3. 캐시 동기화: 변경 파일을 plugin cache에 복사
-4. minor/major 버전업 시 git tag: `git tag vX.Y.0 && git push --tags`
+1. `hooks/validate-version-sync.sh` 실행 → 버전 일치 확인
+2. `plugin.json`의 `version` 올리기 (SSOT)
+3. `README.md` 첫 줄의 `` `vX.Y.Z` `` 동기화
+4. `mcp/samvil_mcp/__init__.py`의 `__version__` 동기화
+5. 캐시 동기화: 변경 파일을 plugin cache에 복사
+6. minor/major 버전업 시 git tag: `git tag vX.Y.0 && git push --tags`
 
 ## 개발 컨벤션
 
@@ -120,8 +122,28 @@ chore: 설정, 버전, 구조 변경
 1. ~~CC Plugin hooks 미적용~~ — **v0.7.0에서 적용 완료**. PreToolUse (guard-destructive, validate-seed), PostToolUse (log-build-result).
 2. **orphaned 마커** — CC가 directory source 플러그인 캐시에 `.orphaned_at` 붙임. 로드 안 되면 해당 파일 삭제.
 3. **QA → Retro 체인** — 수정 완료됐지만, 실행 시 체인 끊김이 또 발생하면 스킬의 Invoke 지시 확인.
+4. ~~버전 불일치~~ — **v0.8.1에서 해결**. `hooks/validate-version-sync.sh`로 push 전 검증. plugin.json, __init__.py, README 동기화.
 
-## v0.7.2 변경 내역
+## v0.8.0 변경 내역 (v0.7.2 → v0.8.0)
+
+1. **MAX_PARALLEL=2** — 병렬 Agent 동시 실행 제한 (build, council, design). CPU 100% 이슈 해결.
+2. **모델 최적화** — Council R1: Haiku, QA: Sonnet, Evolve 2사이클+: Sonnet. Opus 사용 80% 감소.
+3. **빌드 캐싱** — Worker는 lint/typecheck만, full build는 배치 완료 후 1회. 빌드 횟수 67% 감소.
+4. **토큰 절약** — Agent에게 해당 feature만 전달 (전체 seed 대신). QA도 AC 관련만 전달.
+5. **Agent Persona 경량화** — 5개 Agent에 Compact Mode 추가 (qa-mechanical, qa-quality, council R1 agents).
+6. **qa_max_iterations** 5 → 3. Ralph Loop 과다 반복 방지.
+7. **관측성** — build_stage_complete 이벤트에 agents_spawned, builds_run 메트릭 추가.
+
+## v0.8.1 변경 내역 (retro-v0.8.0 기반 8개 개선)
+
+1. **ISS-03 버전 동기화** — `hooks/validate-version-sync.sh` 추가. plugin.json / __init__.py / README 버전 일치 검증.
+2. **ISS-01/02 MCP 의무 호출** — 11개 스킬에 18개 이벤트 타입 MCP 통합. 누락 시 경고.
+3. **ISS-05 모호도 tier 파라미터** — interview_engine에 tier별 임계값 (minimal 0.10 / standard 0.05 / thorough 0.02 / full 0.01).
+4. **PHI-01 Playwright Smoke Run** — QA Pass 1b에서 dev server 콘솔 에러 + 빈 화면 자동 검출.
+5. **PHI-03 Seed 버전 히스토리** — Evolve에서 시드 백업 + compare_seeds diff 자동 저장.
+6. **PHI-04 QA ralph_max_iterations** — config 기반 반복 한도 (기본 3회).
+7. **PHI-05 Build 구현률** — build_stage_complete에 implementation_rate 기록. Evolve diff 파일 저장.
+8. **PHI-06 Testable AC** — Seed에 AC별 vague_words 태깅. Interview에 AC 재질문 로직.
 
 1. **MAX_PARALLEL=2** — 병렬 Agent 동시 실행 제한 (build, council, design). CPU 100% 이슈 해결.
 2. **모델 최적화** — Council R1: Haiku, QA: Sonnet, Evolve 2사이클+: Sonnet. Opus 사용 80% 감소.
@@ -149,8 +171,9 @@ samvil/
 │   ├── tier-definitions.md     # Tier 구성 + 2-round Gate A
 │   ├── council-protocol.md     # Council 토론 규칙
 │   └── evolve-protocol.md      # 시드 진화 규칙
-├── hooks/                      # 4개 자동화 스크립트 (plugin.json hooks로 적용)
+├── hooks/                      # 5개 자동화 스크립트 (plugin.json hooks로 적용)
 │   ├── setup-mcp.sh            # SessionStart: MCP 자동 설치+등록
+│   └── validate-version-sync.sh # 수동/CI: 버전 동기화 검증
 ├── (templates/ removed — CLI-only scaffold since v0.7.0)
 ├── mcp/                        # Python MCP 서버
 │   ├── samvil_mcp/             # 서버 코드 (14 tools)

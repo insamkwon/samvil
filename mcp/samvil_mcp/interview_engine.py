@@ -15,7 +15,7 @@ import json
 import re
 
 
-def score_ambiguity(interview_state: dict) -> dict:
+def score_ambiguity(interview_state: dict, tier: str = "standard") -> dict:
     """Score ambiguity of an interview state.
 
     Args:
@@ -27,10 +27,20 @@ def score_ambiguity(interview_state: dict) -> dict:
             - exclusions: list[str] (out of scope)
             - constraints: list[str] (technical limits)
             - acceptance_criteria: list[str] (testable criteria)
+        tier: Agent tier determining the target threshold.
+            minimal=0.10, standard=0.05, thorough=0.02, full=0.01
 
     Returns:
         Dict with per-dimension scores and overall ambiguity.
     """
+    TIER_TARGETS = {
+        "minimal": 0.10,
+        "standard": 0.05,
+        "thorough": 0.02,
+        "full": 0.01,
+    }
+    target = TIER_TARGETS.get(tier, 0.05)
+
     goal_score = _score_goal(interview_state)
     constraint_score = _score_constraints(interview_state)
     criteria_score = _score_criteria(interview_state)
@@ -42,8 +52,9 @@ def score_ambiguity(interview_state: dict) -> dict:
         "constraint_clarity": round(1.0 - constraint_score, 3),
         "criteria_testability": round(1.0 - criteria_score, 3),
         "ambiguity": round(overall, 3),
-        "converged": overall <= 0.05,
-        "target": 0.05,
+        "converged": overall <= target,
+        "target": target,
+        "tier": tier,
     }
 
 

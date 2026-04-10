@@ -231,14 +231,14 @@ async def get_evolve_context(session_id: str, qa_result: str) -> str:
 
 
 @mcp.tool()
-async def score_ambiguity(interview_state: str) -> str:
+async def score_ambiguity(interview_state: str, tier: str = "standard") -> str:
     """Score interview ambiguity. interview_state is JSON with keys:
     target_user, core_problem, core_experience, features, exclusions,
-    constraints, acceptance_criteria. Returns ambiguity score (0=clear, 1=ambiguous).
-    Target: ≤ 0.05 to converge."""
+    constraints, acceptance_criteria. tier: minimal(0.10), standard(0.05),
+    thorough(0.02), full(0.01). Returns ambiguity score (0=clear, 1=ambiguous)."""
     from .interview_engine import score_ambiguity as _score
     state = json.loads(interview_state)
-    result = _score(state)
+    result = _score(state, tier=tier)
     return json.dumps(result)
 
 

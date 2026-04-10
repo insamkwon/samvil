@@ -11,7 +11,7 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
 
 0. **TaskUpdate**: "Build" task를 `in_progress`로 설정
 1. Read `project.seed.json` → know what to build
-2. Read `project.state.json` → know what's already done (resume support)
+2. Read `project.state.json` → know what's already done (resume support), get `session_id`
 3. Read `project.config.json` → `selected_tier`, `max_total_builds`
 4. Read `project.blueprint.json` → architecture decisions (screens, data model, components, routes)
 5. Read `decisions.log` → binding decisions from Council (if exists, respect them)
@@ -50,22 +50,22 @@ echo "Exit code: $?"
 ```
 
 **Circuit Breaker (MAX_RETRIES=2):**
-- On build success, append to `.samvil/events.jsonl`:
-  ```json
-  {"type":"build_pass","attempt":1,"scope":"core","ts":"<ISO 8601>"}
+- On build success, **MCP (필수):**
+  ```
+  mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_pass", stage="build", data='{"attempt":1,"scope":"core"}')
   ```
 - Build fails → `tail -30 .samvil/build.log` → fix → retry
-- On every build failure, append to `.samvil/events.jsonl`:
-  ```json
-  {"type":"build_fail","attempt":<N>,"scope":"core","error_signature":"<brief normalized error>","error_category":"import_error|type_error|config_error|runtime_error|dependency_error|unknown","touched_files":["<paths>"],"ts":"<ISO 8601>"}
+- On every build failure, **MCP (필수):**
+  ```
+  mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_fail", stage="build", data='{"attempt":<N>,"scope":"core","error_signature":"<brief normalized error>","error_category":"<enum>","touched_files":["<paths>"]}')
   ```
 - **에러를 수정할 때마다** `.samvil/fix-log.md`에 한 줄 append:
   ```
   [core] <에러 내용> → <해결 방법>
   ```
-- Also append to `.samvil/events.jsonl`:
-  ```json
-  {"type":"fix_applied","scope":"core","error_category":"<enum>","summary":"<brief fix summary>","files":["<paths>"],"ts":"<ISO 8601>"}
+- **MCP (필수):** Log the fix:
+  ```
+  mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="fix_applied", stage="build", data='{"scope":"core","error_category":"<enum>","summary":"<brief fix summary>","files":["<paths>"]}')
   ```
 - 2 failures → **Adaptive Tier 제안** (minimal/standard인 경우):
   ```
@@ -120,9 +120,9 @@ Build features one at a time (same as v1):
 **For each feature:**
 
 1. **Re-read Context Kernel (INV-1)** — Re-read `project.seed.json` + `project.state.json` before every feature. Context may have been compressed — files are the truth. **Also read `.samvil/fix-log.md`** (if exists) to prevent repeating the same errors.
-2. **Event Log** — Append to `.samvil/events.jsonl`:
-   ```json
-   {"type":"build_feature_start","feature":"<name>","ts":"<ISO 8601>"}
+2. **MCP (필수):** Log feature start:
+   ```
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_feature_start", stage="build", data='{"feature":"<name>"}')
    ```
 3. **Plan** — What components? What state changes? What routes? Keep minimal.
 4. **Implement** — Create/modify components, lib, routes. Keep existing code working.
@@ -131,31 +131,32 @@ Build features one at a time (same as v1):
    cd ~/dev/<seed.name>
    npm run build > .samvil/build.log 2>&1
    ```
-   On build success, append to `.samvil/events.jsonl`:
-   ```json
-   {"type":"build_pass","attempt":1,"scope":"feature:<name>","ts":"<ISO 8601>"}
+   On build success, **MCP (필수):**
+   ```
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_pass", stage="build", data='{"attempt":1,"scope":"feature:<name>"}')
    ```
    Circuit Breaker: MAX_RETRIES=2. 2 failures on a feature → mark as `failed`, continue to next feature.
-   On every build failure, append to `.samvil/events.jsonl`:
-   ```json
-   {"type":"build_fail","attempt":<N>,"scope":"feature:<name>","error_signature":"<brief normalized error>","error_category":"import_error|type_error|config_error|runtime_error|dependency_error|unknown","touched_files":["<paths>"],"ts":"<ISO 8601>"}
+   On every build failure, **MCP (필수):**
+   ```
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_fail", stage="build", data='{"attempt":<N>,"scope":"feature:<name>","error_signature":"<brief>","error_category":"<enum>","touched_files":["<paths>"]}')
    ```
    **Adaptive Tier**: 전체 failed features가 2개 이상이면 tier 업그레이드 제안 (P1-S5와 동일).
    **에러를 수정할 때마다** `.samvil/fix-log.md`에 한 줄 append:
    ```
    [feature:<name>] <에러 내용> → <해결 방법>
    ```
-   Also append to `.samvil/events.jsonl`:
-   ```json
-   {"type":"fix_applied","scope":"feature:<name>","error_category":"<enum>","summary":"<brief fix summary>","files":["<paths>"],"ts":"<ISO 8601>"}
+   **MCP (필수):** Log the fix:
    ```
-6. **Event Log** — On success or failure, append:
-   ```json
-   {"type":"build_feature_success","feature":"<name>","ts":"<ISO 8601>"}
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="fix_applied", stage="build", data='{"scope":"feature:<name>","error_category":"<enum>","summary":"<brief fix summary>","files":["<paths>"]}')
    ```
-   or:
-   ```json
-   {"type":"build_feature_fail","feature":"<name>","error":"<brief error>","error_category":"type_error","retry":<N>,"ts":"<ISO 8601>"}
+6. **MCP (필수):** Log feature result:
+   On success:
+   ```
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_feature_success", stage="build", data='{"feature":"<name>"}')
+   ```
+   On failure:
+   ```
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_feature_fail", stage="build", data='{"feature":"<name>","error":"<brief error>","error_category":"<enum>","retry":<N>}')
    ```
 7. **Drift Check** — Feature 구현 후, `seed.features`에서 해당 feature의 `description`을 다시 읽고, 구현이 description 범위를 벗어나면 경고:
    ```
@@ -230,13 +231,13 @@ After all chunks complete:
      cd ~/dev/<seed.name> && npx tsc --noEmit && npx eslint . --quiet
      ```
    - Full `npm run build` runs only here (after all chunks complete) and during QA.
-   - On build success, append to `.samvil/events.jsonl`:
-     ```json
-     {"type":"build_pass","attempt":1,"scope":"integration","ts":"<ISO 8601>"}
+   - On build success, **MCP (필수):**
      ```
-   - On build failure, append to `.samvil/events.jsonl`:
-     ```json
-     {"type":"build_fail","attempt":<N>,"scope":"integration","error_signature":"<brief normalized error>","error_category":"import_error|type_error|config_error|runtime_error|dependency_error|unknown","touched_files":["<paths>"],"ts":"<ISO 8601>"}
+     mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_pass", stage="build", data='{"attempt":1,"scope":"integration"}')
+     ```
+   - On build failure, **MCP (필수):**
+     ```
+     mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_fail", stage="build", data='{"attempt":<N>,"scope":"integration","error_signature":"<brief>","error_category":"<enum>","touched_files":["<paths>"]}')
      ```
 2. **Conflict detection** — If build fails after parallel workers:
    ```
@@ -264,14 +265,14 @@ After all chunks complete:
   Builds run: <count>
 ```
 
-Append to `.samvil/events.jsonl`:
-```json
-{"type":"build_stage_complete","features_passed":<N>,"features_failed":<N>,"agents_spawned":<N>,"builds_run":<N>,"ts":"<ISO 8601>"}
+**MCP (필수):** Save build stage completion with implementation rate:
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_stage_complete", stage="qa", data='{"features_passed":<N>,"features_failed":<N>,"features_total":<M>,"implementation_rate":<N/M>,"agents_spawned":<N>,"builds_run":<N>}')
 ```
 
-## Chain to QA (INV-4)
+Update `project.state.json` with `implementation_rate`: `"implementation_rate": <N/M>` (e.g., 0.85 for 85%).
 
-Update `project.state.json`: set `current_stage` to `"qa"`.
+## Chain to QA (INV-4)
 
 ```
 [SAMVIL] Stage 5/5: Running QA verification...

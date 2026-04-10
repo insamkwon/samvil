@@ -173,9 +173,10 @@ If the file doesn't exist, create it. If it exists, append (read existing conten
 
 ### Step 5: Update State
 
-Update `project.state.json`:
-- `current_stage`: `"complete"`
-- `retro_count`: increment by 1
+**MCP (필수):** Save retro completion:
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="retro_complete", stage="complete", data='{"suggestions_count":3,"features_passed":<N>,"features_failed":<N>,"build_retries":<N>,"qa_iterations":<N>}')
+```
 
 ### Step 6: Final Message
 

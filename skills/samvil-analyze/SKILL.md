@@ -593,9 +593,18 @@ multiSelect: true
 ## Step 8: 저장 + 체인
 
 1. `project.seed.json` 저장 (역방향 seed + 새 기능)
-2. `project.state.json` 초기화
+2. `project.state.json` 초기화 (`session_id` 포함)
 3. `.samvil/` 디렉토리 생성
 4. `interview-summary.md` — 분석 결과를 인터뷰 요약 형태로 저장 (INV-3)
+5. **MCP (필수):** Create session and save analysis:
+   ```
+   mcp__samvil_mcp__create_session(project_name="<project-name>", agent_tier="<tier>")
+   → Parse session_id, update state.json
+
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="analyze_complete", stage="<next_stage>", data='{"framework":"<detected>","existing_features":<N>,"quality_score":"<score>"}')
+
+   mcp__samvil_mcp__save_seed_version(session_id="<session_id>", version=1, seed_json='<escaped seed JSON>', change_summary="Reverse-engineered from existing codebase")
+   ```
 
 선택한 개선에 따라 적절한 스킬로 체인:
 - 기능 추가 → `samvil-build` (scaffold 스킵, 기존 코드에 추가)

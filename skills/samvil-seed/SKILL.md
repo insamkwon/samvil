@@ -10,7 +10,7 @@ You are adopting the role of **Seed Architect**. Transform interview results int
 ## Boot Sequence (INV-1)
 
 0. **TaskUpdate**: "Seed" task를 `in_progress`로 설정
-1. Read `project.state.json` → confirm `current_stage` is `"seed"`
+1. Read `project.state.json` → confirm `current_stage` is `"seed"`, get `session_id`
 2. Read `interview-summary.md` from the project directory (INV-3 — **read from file, not conversation**)
 3. Read `references/seed-schema.md` from this plugin directory for the schema
 
@@ -67,6 +67,25 @@ Check against schema rules from `references/seed-schema.md`:
   - 데이터 손실이 치명적인 앱(이력서, 문서 등)이면 AC에 "데이터가 브라우저 재시작 후에도 유지된다" 추가
 - [ ] **첫 30초 가치 전달**: core_experience에 "사용자가 앱을 열었을 때 즉시 가치를 느끼는가?" 체크. 빈 화면만 나오면 → AC에 "빈 상태에서 다음 행동을 유도하는 가이드가 있다" 추가
 - [ ] **Stub 허용 판정**: AC 중 AI/API 연동이 필요한 항목은 stub으로 대체 가능한지 판정. core_experience에 직결되는 기능은 stub 불허 (QA에서 UNIMPLEMENTED = FAIL 처리됨). out_of_scope에 명시적으로 "v1은 mock 데이터" 등으로 적어야만 stub 허용.
+- [ ] **Testable AC (PHI-06)**: 각 acceptance_criteria 항목에 대해 vague 단어를 감지하고 `vague_words` 배열을 태깅:
+
+Vague patterns: "좋은", "빠른", "깔끔한", "직관적인", "부드러운", "전문적인", "모던한", "사용자 친화적인", "good", "nice", "fast", "clean", "intuitive", "smooth", "professional", "modern", "user-friendly", "well-designed"
+
+AC JSON format:
+```json
+{
+  "description": "UI가 직관적이다",
+  "vague_words": ["직관적"],
+  "rewrite_hint": "주요 기능이 3클릭 이내 도달 가능하다"
+}
+```
+
+**vague_words가 비어있지 않은 AC가 있으면**: Seed presentation 시 경고 표시:
+```
+⚠️ Vague AC detected: "UI가 직관적이다"
+  → Rewrite hint: "주요 기능이 3클릭 이내 도달 가능하다"
+```
+vague AC는 1개까지 허용. 2개 이상이면 자동으로 rewrite_hint 기반으로 재작성.
 
 ### Step 4: Present to User with Preview
 
@@ -105,11 +124,12 @@ If user requests changes: modify the seed and re-present. Do NOT re-interview.
 
 Write the approved seed JSON to `~/dev/<project>/project.seed.json` using the Write tool.
 
-### 1b. Event Log
+### 1b. MCP Event + Seed Version (필수)
 
-Append to `.samvil/events.jsonl`:
-```json
-{"type":"seed_generated","version":1,"features_count":<N>,"ts":"<ISO 8601>"}
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="seed_generated", stage="seed", data='{"version":1,"features_count":<N>}')
+
+mcp__samvil_mcp__save_seed_version(session_id="<session_id>", version=1, seed_json='<escaped seed JSON>', change_summary="Initial seed from interview")
 ```
 
 ### 2. Update state and chain
@@ -118,7 +138,10 @@ Read `project.config.json` → `selected_tier` to determine next step:
 
 **If tier is `"minimal"` (no council):**
 
-Update `project.state.json`: set `current_stage` to `"design"`.
+**MCP (필수):** Update stage:
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="design", data='{"skipped":"council","reason":"minimal tier"}')
+```
 
 ```
 [SAMVIL] Stage 2/5: Seed ✓
@@ -129,7 +152,10 @@ Invoke the Skill tool with skill: `samvil-design`
 
 **If tier is `"standard"` or higher (council runs):**
 
-Update `project.state.json`: set `current_stage` to `"council"`.
+**MCP (필수):** Update stage:
+```
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="council", data='{"council_activated":true}')
+```
 
 ```
 [SAMVIL] Stage 2/5: Seed ✓
