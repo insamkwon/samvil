@@ -596,7 +596,7 @@ multiSelect: true
 2. `project.state.json` 초기화 (`session_id` 포함)
 3. `.samvil/` 디렉토리 생성
 4. `interview-summary.md` — 분석 결과를 인터뷰 요약 형태로 저장 (INV-3)
-5. **MCP (필수):** Create session and save analysis:
+5. **MCP (best-effort):** Create session and save analysis:
    ```
    mcp__samvil_mcp__create_session(project_name="<project-name>", agent_tier="<tier>")
    → Parse session_id, update state.json

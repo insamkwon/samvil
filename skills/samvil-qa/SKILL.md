@@ -103,10 +103,8 @@ Use the `mcp__plugin_playwright_playwright__browser_navigate` tool to visit the 
 6. **Visit each route** from `blueprint.routing`:
    For each route, navigate and check for console errors + non-empty body.
 
-7. **Stop dev server:**
-   ```bash
-   kill $(lsof -ti:3000) 2>/dev/null
-   ```
+7. **Keep dev server running** — Pass 2 needs it for runtime verification.
+   Dev server stays up through Pass 2 and is stopped after Pass 2 completes.
 
 **Verdict:**
 - All routes: no console errors + non-empty body → PASS → Pass 2로 진행
@@ -155,9 +153,13 @@ Agent(
 - Constraints: <paste seed.constraints only>
 - Full Seed: Read project.seed.json if you need additional context.
 - Project path: ~/dev/<seed.name>/
+- Dev server: http://localhost:3000 (already running)
 
 ## Task
-Verify every acceptance criterion with skeptical, evidence-first review.
+Verify every acceptance criterion using Playwright MCP runtime testing.
+Use browser_snapshot to find elements, browser_type/browser_click to interact, browser_snapshot to verify results.
+Take screenshots of each AC result (save to .samvil/qa-evidence/).
+Fall back to Grep/Read only for backend-only or non-UI logic.
 You did not write this code.
 Do not write files.
 Return a markdown section using the required output format.",
@@ -200,18 +202,67 @@ After both independent agents return their markdown evidence:
 3. Read Pass 3 markdown returned by independent agent
 4. Apply verdict matrix from `references/qa-checklist.md`
 5. Write `.samvil/qa-report.md`
-6. **MCP (필수):** Emit all QA events via `mcp__samvil_mcp__save_event` (see Event Log section)
+6. **MCP (best-effort):** Emit all QA events via `mcp__samvil_mcp__save_event` (see Event Log section)
 7. Update `project.state.json` (only completed_features, failed, qa_history — NOT current_stage, which MCP manages)
 
 ---
 
-## Pass 2: Functional Verification (minimal inline path)
+## Pass 2: Functional Verification (Runtime-first)
+
+Dev server should still be running from Pass 1b. If not:
+```bash
+cd ~/dev/<seed.name> && npm run dev &
+```
+
+### Runtime Verification with Playwright MCP
 
 For **EACH** item in `seed.acceptance_criteria`:
 
-1. Use Grep/Read to search the codebase for code implementing this criterion
+1. **Understand the AC** — What user action would prove this criterion?
+2. **Navigate to the right page** — Use `browser_navigate` to the relevant route
+3. **Capture current state** — Use `browser_snapshot` (accessibility tree) to see available elements
+4. **Perform the action** — `browser_type` to fill inputs, `browser_click` to press buttons
+5. **Wait if needed** — `browser_wait_for` for dynamic content (max 3 seconds)
+6. **Verify the result** — `browser_snapshot` to confirm the expected outcome appeared in the DOM
+7. **Screenshot evidence** — `browser_take_screenshot` for the AC result (save to `.samvil/qa-evidence/`)
+
+**Example flows:**
+
+```
+AC: "User can add a new todo"
+→ browser_snapshot → find input[role="textbox"]
+→ browser_type(ref="input-ref", text="QA test todo")
+→ browser_click the submit button
+→ browser_wait_for(text="QA test todo")
+→ browser_snapshot → confirm "QA test todo" in list → PASS
+
+AC: "Completed todos are visually distinct"
+→ browser_snapshot → find todo items
+→ browser_click a todo's checkbox
+→ browser_snapshot → confirm strikethrough or checked state → PASS
+
+AC: "Empty state shows helpful message"
+→ browser_navigate to a page with no items
+→ browser_snapshot → check for "no items" text → PASS
+```
+
+### Fallback to Static Analysis
+
+If Playwright MCP is unavailable OR an AC cannot be verified via browser interaction
+(e.g., backend-only logic, webhook handling, email sending):
+
+1. Use Grep/Read to search the codebase for implementing code
 2. Verify the implementation is reachable (imported and rendered)
-3. Check edge case: empty state handled?
+3. Mark as PARTIAL with `"reason": "runtime_unverifiable"` instead of PASS
+
+### Stop Dev Server
+
+After all ACs are verified, stop the dev server:
+```bash
+kill $(lsof -ti:3000) 2>/dev/null
+```
+
+### Verdict
 
 Rate each criterion: **PASS** / **FAIL** / **PARTIAL** / **UNIMPLEMENTED**
 
@@ -219,10 +270,10 @@ Rate each criterion: **PASS** / **FAIL** / **PARTIAL** / **UNIMPLEMENTED**
 
 | Verdict | 점수 | 의미 | 예시 |
 |---------|------|------|------|
-| **PASS** | 1.0 | AC 완전 충족 | 코드 존재 + 도달 가능 + 엣지케이스 처리 |
-| **PARTIAL** | 0.5 | 코드는 있으나 검증 불가 | CSS/드래그앤드롭 느낌, 비동기 타이밍 — 코드 리딩만으로 확증 불가 |
+| **PASS** | 1.0 | AC 완전 충족 | 런타임에서 실제 동작 확인 + 스크린샷 증거 |
+| **PARTIAL** | 0.5 | 런타임 검증 불가, 코드는 존재 | Playwright 접근 불가, 백엔드 로직, 비동기 타이밍 |
 | **UNIMPLEMENTED** | 0.0 | stub/하드코딩/더미 | API 하드코딩 응답, simulated data, TODO 주석 |
-| **FAIL** | 0.0 | 버그/결함/누락 | 코드 없음, 런타임 에러, 엣지케이스 미처리 |
+| **FAIL** | 0.0 | 런타임에서 동작하지 않음 | 버튼 클릭해도 반응 없음, 에러 발생, 엣지케이스 미처리 |
 
 **UNIMPLEMENTED 세부 규칙:**
 - API/AI 호출이 stub(하드코딩 응답, simulated response)이면 → **UNIMPLEMENTED**
@@ -261,10 +312,11 @@ Write results to `~/dev/<seed.name>/.samvil/qa-report.md`:
 ## Pass 1: Mechanical
 - Build: PASS/FAIL
 
-## Pass 2: Functional
-| AC | Verdict | Notes |
-|----|---------|-------|
-| "<criterion>" | PASS/FAIL | <what was found/missing> |
+## Pass 2: Functional (Runtime)
+| AC | Verdict | Method | Notes |
+|----|---------|--------|-------|
+| "<criterion>" | PASS | runtime | <what was tested + screenshot path> |
+| "<criterion>" | PARTIAL | static | <why runtime unverifiable> |
 
 ## Pass 3: Quality
 - Responsive: PASS/FAIL
@@ -364,7 +416,7 @@ On BLOCKED:
   3. Fix manually — the app is at ~/dev/<seed.name>/
 ```
 
-**MCP (필수):** Emit BLOCKED event:
+**MCP (best-effort):** Emit BLOCKED event:
 ```
 mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="qa_blocked", stage="qa", data='{"iteration":<N>,"persistent_issues":["<A>","<B>","<C>"],"total_attempts":<N>}')
 ```
@@ -379,19 +431,22 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="qa_blocked", 
 
   Try it: cd ~/dev/<seed.name> && npm run dev
 
-  다음 단계 (런칭 준비):
-  □ npm run dev 로 실행 확인
-  □ 환경변수 확인 (.env.local 필요 시)
-  □ API 키 발급 + 설정 (외부 서비스 사용 시)
-  □ 스텁→실동작 교체: <UNIMPLEMENTED 항목 목록>
-  □ 모바일에서 확인 (반응형)
-  □ 회고 진행 → 다음 개발 우선순위 결정
+  배포 방법:
+  1. Vercel (추천): cd ~/dev/<seed.name> && npx vercel
+  2. Railway: GitHub 연동 후 자동 배포 (Dockerfile 자동 감지)
+  3. 수동: npm run build && npm start (standalone output 지원)
+
+  배포 전 체크리스트:
+  □ .env.local에 실제 API 키 설정
+  □ Supabase 프로젝트 생성 + URL/KEY 입력 (Supabase 선택 시)
+  □ npm run dev 로 최종 확인
+  □ 모바일에서 반응형 확인
 ```
 
 **런칭 준비 리포트**: `.samvil/launch-checklist.md`에 저장:
-- UNIMPLEMENTED 항목별 실동작 교체 가이드
 - 필요한 환경변수 목록 (.env.example 기반)
-- 배포 명령어 (Vercel/Netlify 등)
+- 배포 명령어 (Vercel/Railway)
+- Supabase 설정 가이드 (해당 시)
 
 **스킵된 단계 표시**: Evolve를 스킵하는 경우:
 ```
@@ -409,11 +464,11 @@ If any auto-trigger condition is met:
 QA passed, but quality could improve. Want to evolve the seed? (yes / no)
 ```
 
-- **yes**: **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="evolve", data='{"reason":"quality_improvement"}')` → invoke `samvil-evolve`
-- **no**: **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"qa_pass"}')` → invoke `samvil-retro`
+- **yes**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="evolve", data='{"reason":"quality_improvement"}')` → invoke `samvil-evolve`
+- **no**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"qa_pass"}')` → invoke `samvil-retro`
 
 If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
-  **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"quality_excellent"}')`
+  **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"quality_excellent"}')`
   Invoke the Skill tool with skill: `samvil-retro`
 
 ## On FAIL (after 3 iterations)
@@ -430,9 +485,9 @@ If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
   3. Fix manually — the app is at ~/dev/<seed.name>/
 ```
 
-- **Option 1**: **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="evolve", data='{"reason":"qa_fail_evolve"}')` → invoke `samvil-evolve`
-- **Option 2**: **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"qa_fail"}')` → invoke `samvil-retro`
-- **Option 3**: **MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"manual_fix"}')` → invoke `samvil-retro`
+- **Option 1**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="evolve", data='{"reason":"qa_fail_evolve"}')` → invoke `samvil-evolve`
+- **Option 2**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"qa_fail"}')` → invoke `samvil-retro`
+- **Option 3**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"manual_fix"}')` → invoke `samvil-retro`
 
 ## Rules
 

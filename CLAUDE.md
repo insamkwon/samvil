@@ -153,6 +153,14 @@ chore: 설정, 버전, 구조 변경
 6. **qa_max_iterations** 5 → 3. Ralph Loop 과다 반복 방지.
 7. **관측성** — build_stage_complete 이벤트에 agents_spawned, builds_run 메트릭 추가.
 
+## v0.9.0 변경 내역 (v0.8.2 → v0.9.0)
+
+1. **QA 런타임 검증** — Pass 2를 정적 Grep에서 Playwright MCP 런타임 검증으로 전환. browser_snapshot/click/type으로 실제 상호작용 테스트. 스크린샷 증거 저장. Fallback: 정적 분석.
+2. **MCP Dual-Write + 장애 추적** — 파일 먼저 기록 → MCP best-effort. 40+ MCP 호출 "필수"→"best-effort" 전환. mcp-health.jsonl 로깅. health_check 도구 추가. Retro에서 MCP 건강 리포트.
+3. **실제 연동 기본화** — 인터뷰에 DB/Auth/API 질문 추가. Supabase 클라이언트 자동 설정. 스텁/하드코딩 금지. .env.example 자동 생성.
+4. **배포 준비** — next.config.mjs에 output:'standalone'. QA 완료 후 Vercel/Railway/수동 배포 옵션 제시.
+5. **Council 간접 토론** — Round 1 결과에서 논쟁점(consensus/debate/blind_spots) 추출 → Round 2 prompt에 주입.
+
 ## 디렉토리 구조
 
 ```

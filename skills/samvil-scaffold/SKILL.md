@@ -275,6 +275,56 @@ npx astro add react -y
     ```
     Playwright는 QA Pass 1b에서 dev server의 콘솔 에러와 빈 화면을 검출하는 데 사용.
 
+11. **Supabase 설정** (interview에서 Supabase 선택 시만):
+    ```bash
+    npm install @supabase/supabase-js @supabase/ssr
+    ```
+    `lib/supabase/client.ts`:
+    ```typescript
+    import { createBrowserClient } from '@supabase/ssr'
+
+    export function createClient() {
+      return createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      )
+    }
+    ```
+    `lib/supabase/server.ts` (Next.js only):
+    ```typescript
+    import { createServerClient } from '@supabase/ssr'
+    import { cookies } from 'next/headers'
+
+    export async function createClient() {
+      const cookieStore = await cookies()
+      return createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        { cookies: { getAll() { return cookieStore.getAll() }, setAll(cookiesToSet) { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) } } }
+      )
+    }
+    ```
+
+12. **.env.example 생성** (필요한 환경변수 명시):
+    ```
+    # Supabase (if selected)
+    NEXT_PUBLIC_SUPABASE_URL=your-project-url
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+
+    # External APIs (if applicable)
+    NEXT_PUBLIC_API_KEY=your-api-key
+    ```
+    Copy `.env.example` to `.env.local` as template.
+
+13. **next.config.mjs에 standalone output 추가** (배포 준비):
+    ```javascript
+    /** @type {import('next').NextConfig} */
+    const nextConfig = {
+      output: 'standalone',
+    }
+    export default nextConfig
+    ```
+
 ### Step 4: Build Verification — Circuit Breaker (INV-2)
 
 ```bash
@@ -303,7 +353,7 @@ echo "Exit code: $?"
 
 ### Step 5: Update State and Chain (INV-4)
 
-**MCP (필수):** Save scaffold completion:
+**MCP (best-effort):** Save scaffold completion:
 ```
 mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="scaffold_complete", stage="build", data='{"framework":"<framework>","shadcn_components":["button","card","input","dialog"]}')
 ```

@@ -223,7 +223,7 @@ Initialize `project.state.json`:
 
 Write this to `~/dev/<project-name>/project.state.json`.
 
-**MCP (필수):** Create a SAMVIL session for event tracking:
+**MCP (best-effort):** Create a SAMVIL session for event tracking:
 
 ```
 mcp__samvil_mcp__create_session(project_name="<project-name>", agent_tier="<selected_tier>")
@@ -336,7 +336,7 @@ Print:
 
 각 스킬도 체인 invoke 전에 동일하게 skip_stages를 확인한다.
 
-**MCP (필수):** Save pipeline start event:
+**MCP (best-effort):** Save pipeline start event:
 
 ```
 mcp__samvil_mcp__save_event(
@@ -347,8 +347,25 @@ mcp__samvil_mcp__save_event(
 )
 ```
 
-**MCP Event Rule (모든 스킬 공통):**
-각 스킬이 상태를 변경할 때마다 **반드시** `mcp__samvil_mcp__save_event` 호출. 이 호출이 자동으로 session의 current_stage를 업데이트함. `.samvil/events.jsonl`에 직접 쓰지 않음.
+**MCP Event Rule (모든 스킬 공통) — Dual-Write Pattern:**
+각 스킬이 상태를 변경할 때마다 다음 순서로 이벤트를 기록:
+
+1. **항상 파일에 먼저 기록** — `.samvil/events.jsonl`에 append (절대 실패하지 않음)
+2. **MCP는 best-effort** — `mcp__samvil_mcp__save_event` 호출 시도. 성공하면 좋고, 실패해도 파이프라인 계속 진행
+3. **실패 시 기록** — MCP 호출이 실패하면 `.samvil/mcp-health.jsonl`에 `{status:"fail", tool:"<name>", error:"<msg>", timestamp:"..."}` append
+
+```
+# 파일 기록 (항상 실행)
+append to .samvil/events.jsonl: {"event_type":"<type>","stage":"<stage>","data":{...},"timestamp":"<ISO>"}
+
+# MCP 호출 (best-effort)
+try:
+  mcp__samvil_mcp__save_event(session_id=..., event_type=..., stage=..., data=...)
+except:
+  append to .samvil/mcp-health.jsonl: {"status":"fail","tool":"save_event","error":"<error>"}
+```
+
+**Retro에서 MCP 건강 리포트를 출력** — `.samvil/mcp-health.jsonl`이 있으면 성공률 집계.
 
 Invoke the Skill tool: `samvil-interview`
 

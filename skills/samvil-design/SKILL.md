@@ -151,7 +151,7 @@ Keep the response under 200 words.",
 ### Main-session ownership rules
 
 - The main session remains the only writer of `project.blueprint.json` and `project.state.json`
-- **MCP (필수):** After feasibility check:
+- **MCP (best-effort):** After feasibility check:
   ```
   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="blueprint_feasibility_checked", stage="design", data='{"result":"GO|CONCERN|BLOCKER"}')
   ```
@@ -185,7 +185,7 @@ Final blueprint (post-feasibility check) looks good? Say 'go' to start building,
 ## Step 5: Save and Chain (INV-4)
 
 1. Write `project.blueprint.json` to project directory
-2. **MCP (필수):** Save stage transition:
+2. **MCP (best-effort):** Save stage transition:
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="blueprint_generated", stage="scaffold", data='{"screens":<N>,"libraries":[<list>]}')
    ```

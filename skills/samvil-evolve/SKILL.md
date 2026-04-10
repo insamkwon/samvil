@@ -59,7 +59,7 @@ Wonder → Reflect → seed 수정 → Build → QA
 
 ## Step 1: Gather Context
 
-**MCP (필수):** Call `mcp__samvil_mcp__get_evolve_context`:
+**MCP (best-effort):** Call `mcp__samvil_mcp__get_evolve_context`:
 ```
 mcp__samvil_mcp__get_evolve_context(session_id="<session_id>", qa_result='<qa-report JSON summary>')
 → Returns: current seed, QA result, convergence trend, previous changes
@@ -157,7 +157,7 @@ Apply reflect-proposer's recommendations to create seed v(N+1):
    ```
 3. Apply proposed changes
 4. Increment version: `version: N+1`
-4. **MCP (필수):** Validate evolved seed:
+4. **MCP (best-effort):** Validate evolved seed:
    ```
    mcp__samvil_mcp__validate_evolved_seed(original_seed='<current seed JSON>', evolved_seed='<new seed JSON>')
    ```
@@ -184,7 +184,7 @@ EOF
 
 ## Step 5: User Checkpoint
 
-**MCP (필수):** Generate seed diff for display:
+**MCP (best-effort):** Generate seed diff for display:
 ```
 mcp__samvil_mcp__compare_seeds(seed_a='<previous seed JSON>', seed_b='<new seed JSON>')
 → Returns: similarity score and change list
@@ -218,11 +218,11 @@ Apply this evolution? (yes / no / edit)
 1. Write updated `project.seed.json`
 2. **수렴 판정**: 새 seed와 이전 seed를 비교.
    - features, acceptance_criteria, constraints가 **모두 동일**이면 → 수렴
-   - **MCP (필수):** `mcp__samvil_mcp__check_convergence(seed_history='<JSON array of seed dicts>')`
+   - **MCP (best-effort):** `mcp__samvil_mcp__check_convergence(seed_history='<JSON array of seed dicts>')`
 
 ### If Converged (seed 변경 없음)
 
-**MCP (필수):**
+**MCP (best-effort):**
 ```
 mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="evolve_converge", stage="evolve", data='{"final_version":<N+1>,"total_generations":<N>}')
 ```
@@ -261,11 +261,11 @@ If QA still fails: another wonder/reflect cycle.
 
 After evolve completes (converged, user stops, or max iterations):
 
-**MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"evolve_complete"}')`
+**MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"evolve_complete"}')`
 Invoke the Skill tool with skill: `samvil-retro`
 
 If user chose to rebuild with new seed:
-**MCP (필수):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="scaffold", data='{"reason":"rebuild_with_evolved_seed"}')`
+**MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="scaffold", data='{"reason":"rebuild_with_evolved_seed"}')`
 Invoke the Skill tool with skill: `samvil-scaffold`
 
 ## Rules

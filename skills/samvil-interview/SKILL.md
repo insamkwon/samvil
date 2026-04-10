@@ -14,7 +14,7 @@ description: "Socratic interview with app presets, unknown-unknown probing, and 
 2. Read `project.config.json` → `selected_tier`
 3. Read `references/app-presets.md` → preset 매칭 준비
 4. The app idea is in the conversation context (from orchestrator)
-5. **MCP (필수):** Save interview start event:
+5. **MCP (best-effort):** Save interview start event:
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_start", stage="interview", data='{"tier":"<selected_tier>"}')
    ```
@@ -93,6 +93,34 @@ description: "Socratic interview with app presets, unknown-unknown probing, and 
 6. **제약 조건** (multiSelect: true):
    - 보기: 백엔드 없음(localStorage) / 모바일 반응형 필수 / 인증 필요 / 제약 없음 / Other
 
+6b. **데이터 & 인프라** (인증 필요 또는 제약 없음 선택 시):
+   AskUserQuestion:
+   ```
+   question: "데이터 저장과 인증을 어떻게 할까요?"
+   header: "인프라"
+   options:
+     - label: "Supabase (추천)"
+       description: "PostgreSQL DB + 인증 + Storage. 실제 프로덕션 배포 가능."
+     - label: "로컬 localStorage"
+       description: "백엔드 없이 브라우저에만 저장. 빠르지만 새로고침 시 유지."
+     - label: "별도 설정 안 함"
+       description: "나중에 직접 연동하겠습니다."
+   ```
+
+6c. **외부 API** (필요 시):
+   If the app idea involves external APIs (AI, payment, maps, etc.):
+   ```
+   question: "외부 API 연동이 필요한가요?"
+   header: "API"
+   options:
+     - label: "네, API 키를 가지고 있어요"
+       description: ".env.example에 API 키 설정을 포함합니다."
+     - label: "나중에 연동할게요"
+       description: "API 호출 부분은 env var 패턴으로 작성, 키는 나중에 설정."
+     - label: "필요 없어요"
+       description: "외부 API 없이 자체 데이터만 사용합니다."
+   ```
+
 ### Phase 2.5: Unknown Unknowns (thorough/full tier만)
 
 preset의 **"흔한 함정"**과 **"Pre-mortem"**을 활용:
@@ -133,7 +161,7 @@ options:
 Constraints가 비어있으면 추가 질문: "이 앱에 제약 조건이 있나요? (예: 백엔드 없음, 모바일 필수, 특정 브라우저만 등)"
 답변이 없어도 기본값 추가: "No backend server — client-only with localStorage"
 
-**MCP (필수):** Call `mcp__samvil_mcp__score_ambiguity` with interview state JSON and tier:
+**MCP (best-effort):** Call `mcp__samvil_mcp__score_ambiguity` with interview state JSON and tier:
 ```
 mcp__samvil_mcp__score_ambiguity(interview_state='{"target_user":"...","core_problem":"...","core_experience":"...","features":[...],"exclusions":[...],"constraints":[...],"acceptance_criteria":[...]}', tier="<selected_tier>")
 ```
@@ -222,7 +250,7 @@ Write `~/dev/<project>/interview-summary.md`
 interview-summary.md에 `디자인 프리셋: <preset>` 포함 → seed가 읽음
 
 ### 3. 상태 업데이트
-**MCP (필수):** Save stage transition event (auto-updates session stage):
+**MCP (best-effort):** Save stage transition event (auto-updates session stage):
 ```
 mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_complete", stage="seed", data='{"questions_asked":<N>,"preset_matched":"<preset>"}')
 ```

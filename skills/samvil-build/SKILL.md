@@ -50,12 +50,12 @@ echo "Exit code: $?"
 ```
 
 **Circuit Breaker (MAX_RETRIES=2):**
-- On build success, **MCP (필수):**
+- On build success, **MCP (best-effort):**
   ```
   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_pass", stage="build", data='{"attempt":1,"scope":"core"}')
   ```
 - Build fails → `tail -30 .samvil/build.log` → fix → retry
-- On every build failure, **MCP (필수):**
+- On every build failure, **MCP (best-effort):**
   ```
   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_fail", stage="build", data='{"attempt":<N>,"scope":"core","error_signature":"<brief normalized error>","error_category":"<enum>","touched_files":["<paths>"]}')
   ```
@@ -63,7 +63,7 @@ echo "Exit code: $?"
   ```
   [core] <에러 내용> → <해결 방법>
   ```
-- **MCP (필수):** Log the fix:
+- **MCP (best-effort):** Log the fix:
   ```
   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="fix_applied", stage="build", data='{"scope":"core","error_category":"<enum>","summary":"<brief fix summary>","files":["<paths>"]}')
   ```
@@ -120,7 +120,7 @@ Build features one at a time (same as v1):
 **For each feature:**
 
 1. **Re-read Context Kernel (INV-1)** — Re-read `project.seed.json` + `project.state.json` before every feature. Context may have been compressed — files are the truth. **Also read `.samvil/fix-log.md`** (if exists) to prevent repeating the same errors.
-2. **MCP (필수):** Log feature start:
+2. **MCP (best-effort):** Log feature start:
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_feature_start", stage="build", data='{"feature":"<name>"}')
    ```
@@ -131,12 +131,12 @@ Build features one at a time (same as v1):
    cd ~/dev/<seed.name>
    npm run build > .samvil/build.log 2>&1
    ```
-   On build success, **MCP (필수):**
+   On build success, **MCP (best-effort):**
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_pass", stage="build", data='{"attempt":1,"scope":"feature:<name>"}')
    ```
    Circuit Breaker: MAX_RETRIES=2. 2 failures on a feature → mark as `failed`, continue to next feature.
-   On every build failure, **MCP (필수):**
+   On every build failure, **MCP (best-effort):**
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_fail", stage="build", data='{"attempt":<N>,"scope":"feature:<name>","error_signature":"<brief>","error_category":"<enum>","touched_files":["<paths>"]}')
    ```
@@ -145,11 +145,11 @@ Build features one at a time (same as v1):
    ```
    [feature:<name>] <에러 내용> → <해결 방법>
    ```
-   **MCP (필수):** Log the fix:
+   **MCP (best-effort):** Log the fix:
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="fix_applied", stage="build", data='{"scope":"feature:<name>","error_category":"<enum>","summary":"<brief fix summary>","files":["<paths>"]}')
    ```
-6. **MCP (필수):** Log feature result:
+6. **MCP (best-effort):** Log feature result:
    On success:
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_feature_success", stage="build", data='{"feature":"<name>"}')
@@ -231,11 +231,11 @@ After all chunks complete:
      cd ~/dev/<seed.name> && npx tsc --noEmit && npx eslint . --quiet
      ```
    - Full `npm run build` runs only here (after all chunks complete) and during QA.
-   - On build success, **MCP (필수):**
+   - On build success, **MCP (best-effort):**
      ```
      mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_pass", stage="build", data='{"attempt":1,"scope":"integration"}')
      ```
-   - On build failure, **MCP (필수):**
+   - On build failure, **MCP (best-effort):**
      ```
      mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_fail", stage="build", data='{"attempt":<N>,"scope":"integration","error_signature":"<brief>","error_category":"<enum>","touched_files":["<paths>"]}')
      ```
@@ -265,7 +265,7 @@ After all chunks complete:
   Builds run: <count>
 ```
 
-**MCP (필수):** Save build stage completion with implementation rate:
+**MCP (best-effort):** Save build stage completion with implementation rate:
 ```
 mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_stage_complete", stage="qa", data='{"features_passed":<N>,"features_failed":<N>,"features_total":<M>,"implementation_rate":<N/M>,"agents_spawned":<N>,"builds_run":<N>}')
 ```
@@ -309,6 +309,12 @@ Invoke the Skill tool with skill: `samvil-qa`
 - Don't create README.md
 - Don't add premature optimization (memo, lazy loading)
 - Don't dump build logs into conversation — use .samvil/build.log
+- **Don't hardcode API responses or use mock data** — real integrations only:
+  - External APIs → `fetch` with `process.env.NEXT_PUBLIC_*` / `process.env.*` env vars
+  - Database → Supabase client (if interview selected Supabase), NOT localStorage for persistent data
+  - Auth → Supabase Auth (if interview selected auth), NOT fake login
+  - If an API key is required, create `.env.example` with the key name and a placeholder
+  - If real integration is truly impossible (API key unavailable), use env var pattern with `if (!apiKey) return fallback` — NOT hardcoded responses
 
 **TaskUpdate**: "Build" task를 `completed`로 설정
 ## Chain (Runtime-specific)

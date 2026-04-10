@@ -173,12 +173,30 @@ If the file doesn't exist, create it. If it exists, append (read existing conten
 
 ### Step 5: Update State
 
-**MCP (필수):** Save retro completion:
+**MCP (best-effort):** Save retro completion:
 ```
 mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="retro_complete", stage="complete", data='{"suggestions_count":3,"features_passed":<N>,"features_failed":<N>,"build_retries":<N>,"qa_iterations":<N>}')
 ```
 
 ### Step 6: Final Message
+
+### MCP Health Report
+
+If `.samvil/mcp-health.jsonl` exists, read it and generate a report:
+
+```
+[SAMVIL] MCP Health Report:
+  Total calls: <count>
+  Successful: <count> (<%>)
+  Failed: <count> (<%>)
+  Failed tools: <list of tools that failed>
+
+  → If failure rate > 20%: recommend running `setup-mcp.sh` or checking Python/uv installation
+```
+
+Append this report to `harness-feedback.log` as well.
+
+If `.samvil/mcp-health.jsonl` does not exist: print `[SAMVIL] MCP Health: All calls successful (0 failures logged)`.
 
 ```
 [SAMVIL] ✓ Pipeline complete!

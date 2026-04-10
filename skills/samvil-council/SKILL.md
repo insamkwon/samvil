@@ -77,6 +77,30 @@ Keep your response under 500 words — focus on key findings only.",
 
 After all Round 1 agents return, collect their outputs as `round1_context`.
 
+### Round 1 Debate Point Extraction
+
+Before spawning Round 2, synthesize Round 1 findings into **debate points**:
+
+1. **Agreement points** — Issues all agents agree on (no debate needed)
+2. **Debate points** — Agents disagree or raise conflicting concerns
+3. **Blind spots** — Important aspects no agent covered
+
+Format for Round 2:
+```
+## Round 1 Synthesis
+
+### Consensus (agents agree)
+- <point 1>
+- <point 2>
+
+### Debate Points (agents disagree)
+- <agent A> says X, but <agent B> says Y about <topic>
+- <agent C> raised concern about Z, no other agent addressed it
+
+### Blind Spots (nobody mentioned)
+- <potential risk or opportunity not covered>
+```
+
 Print progress:
 
 ```
@@ -114,8 +138,10 @@ Interview summary:
 <paste interview-summary.md content>
 
 {If Round 1 ran:}
-## Research Findings (from Round 1)
-<paste round1_context>
+## Round 1 Synthesis (Research → Debate Points)
+<paste round1_synthesis with consensus/debate/blind_spots>
+
+Specifically address any debate points in your review — do you side with one agent's view or propose a different perspective?
 
 ## Your Task
 

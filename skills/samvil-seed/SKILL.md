@@ -138,7 +138,7 @@ Read `project.config.json` → `selected_tier` to determine next step:
 
 **If tier is `"minimal"` (no council):**
 
-**MCP (필수):** Update stage:
+**MCP (best-effort):** Update stage:
 ```
 mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="design", data='{"skipped":"council","reason":"minimal tier"}')
 ```
@@ -152,7 +152,7 @@ Invoke the Skill tool with skill: `samvil-design`
 
 **If tier is `"standard"` or higher (council runs):**
 
-**MCP (필수):** Update stage:
+**MCP (best-effort):** Update stage:
 ```
 mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="council", data='{"council_activated":true}')
 ```

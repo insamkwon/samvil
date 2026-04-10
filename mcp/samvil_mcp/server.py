@@ -30,6 +30,29 @@ async def get_store() -> EventStore:
 
 
 @mcp.tool()
+async def health_check() -> str:
+    """Check MCP server health. Returns server status and DB connectivity."""
+    try:
+        store = await get_store()
+        # Test DB connectivity with a lightweight query
+        sessions = await store.list_sessions(limit=1)
+        return json.dumps({
+            "status": "ok",
+            "db_path": str(DB_PATH),
+            "sessions_accessible": True,
+        })
+    except Exception as e:
+        return json.dumps({
+            "status": "error",
+            "error": str(e),
+            "db_path": str(DB_PATH),
+        })
+
+
+
+
+
+@mcp.tool()
 async def create_session(project_name: str, agent_tier: str = "standard") -> str:
     """Create a new SAMVIL session for a project. Returns session ID."""
     store = await get_store()
