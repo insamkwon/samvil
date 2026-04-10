@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "version": "1.0.0",
+  "description": "Git Easy 스킬 설정 파일",
+  "auto_trigger": true,
+  "settings": {
+    "auto_branch_name": true,
+    "auto_commit_message": true,
+    "auto_push": true
+  }
+}
