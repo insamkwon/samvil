@@ -121,6 +121,16 @@ chore: 설정, 버전, 구조 변경
 2. **orphaned 마커** — CC가 directory source 플러그인 캐시에 `.orphaned_at` 붙임. 로드 안 되면 해당 파일 삭제.
 3. **QA → Retro 체인** — 수정 완료됐지만, 실행 시 체인 끊김이 또 발생하면 스킬의 Invoke 지시 확인.
 
+## v0.7.2 변경 내역
+
+1. **MAX_PARALLEL=2** — 병렬 Agent 동시 실행 제한 (build, council, design). CPU 100% 이슈 해결.
+2. **모델 최적화** — Council R1: Haiku, QA: Sonnet, Evolve 2사이클+: Sonnet. Opus 사용 80% 감소.
+3. **빌드 캐싱** — Worker는 lint/typecheck만, full build는 배치 완료 후 1회. 빌드 횟수 67% 감소.
+4. **토큰 절약** — Agent에게 해당 feature만 전달 (전체 seed 대신). QA도 AC 관련만 전달.
+5. **Agent Persona 경량화** — 5개 Agent에 Compact Mode 추가 (qa-mechanical, qa-quality, council R1 agents).
+6. **qa_max_iterations** 5 → 3. Ralph Loop 과다 반복 방지.
+7. **관측성** — build_stage_complete 이벤트에 agents_spawned, builds_run 메트릭 추가.
+
 ## 디렉토리 구조
 
 ```

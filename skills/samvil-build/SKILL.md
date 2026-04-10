@@ -173,7 +173,13 @@ Build features one at a time (same as v1):
 
 #### If tier is `standard` or higher — Parallel Dispatch (spawn workers)
 
-For batches with 2+ independent features, spawn CC Agent workers **in parallel**:
+For batches with 2+ independent features, spawn CC Agent workers **in controlled parallel batches**:
+
+```
+MAX_PARALLEL = config.max_parallel || 2
+```
+
+Split independent features into chunks of `MAX_PARALLEL`. Spawn each chunk in ONE message (parallel). Wait for all agents in a chunk to complete before spawning the next chunk.
 
 ```
 Agent(
@@ -186,9 +192,12 @@ Read your persona:
 
 ## Context
 Project: ~/dev/<seed.name>/
-Seed: <paste seed JSON>
+Tech Stack: <paste seed.tech_stack only>
+Global Constraints: <paste seed.constraints only>
+Your Feature: <paste seed.features[YOUR_FEATURE_INDEX] only>
 State: <paste state JSON>
 References: Read references/web-recipes.md from the SAMVIL plugin directory for patterns.
+Full Seed: Read project.seed.json if you need other features for context.
 
 ## Your Task
 Build ONLY the feature: <feature-name>
@@ -199,8 +208,8 @@ Description: <feature description from seed>
 - Create components in components/<feature-name>/
 - Do NOT modify shared files (layout.tsx, store root) unless absolutely necessary
 - Do NOT touch other features' components
-- Run: cd ~/dev/<seed.name> && npm run build > .samvil/build-<feature>.log 2>&1
-- Report: files created, files modified, build status
+- Run: cd ~/dev/<seed.name> && npx tsc --noEmit 2>&1 | head -20 && npx eslint . --quiet 2>&1 | head -20
+- Report: files created, files modified, lint/typecheck status
 
 ## Code Quality
 <paste Code Quality Rules section>",
@@ -208,11 +217,19 @@ Description: <feature description from seed>
 )
 ```
 
-**Spawn all independent features in ONE message (parallel).**
+**Example with MAX_PARALLEL=2 and 5 independent features:**
+- Chunk 1: spawn agents for feature A + feature B (parallel) → wait
+- Chunk 2: spawn agents for feature C + feature D (parallel) → wait
+- Chunk 3: spawn agent for feature E (single) → wait
 
-After all workers return:
+After all chunks complete:
 
 1. **Integration build** — Run `npm run build` to verify no conflicts
+   - Do NOT run `npm run build` inside individual worker agents. Instead, workers run quick checks only:
+     ```bash
+     cd ~/dev/<seed.name> && npx tsc --noEmit && npx eslint . --quiet
+     ```
+   - Full `npm run build` runs only here (after all chunks complete) and during QA.
    - On build success, append to `.samvil/events.jsonl`:
      ```json
      {"type":"build_pass","attempt":1,"scope":"integration","ts":"<ISO 8601>"}
@@ -243,6 +260,13 @@ After all workers return:
   Features: N/M passed (X parallel, Y sequential)
   Failed: [list or "none"]
   Build: passing
+  Agents spawned: <count>
+  Builds run: <count>
+```
+
+Append to `.samvil/events.jsonl`:
+```json
+{"type":"build_stage_complete","features_passed":<N>,"features_failed":<N>,"agents_spawned":<N>,"builds_run":<N>,"ts":"<ISO 8601>"}
 ```
 
 ## Chain to QA (INV-4)

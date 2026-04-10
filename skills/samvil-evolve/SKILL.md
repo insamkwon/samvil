@@ -97,7 +97,7 @@ Spawn `wonder-analyst` agent:
 ```
 Agent(
   description: "SAMVIL Evolve: wonder-analyst",
-  model: config.model_routing.evolve || config.model_routing.default || "opus",
+  model: current_cycle === 1 ? (config.model_routing.evolve || "opus") : (config.model_routing.evolve_cycle || "sonnet"),
   prompt: "You are wonder-analyst.
 <paste agents/wonder-analyst.md>
 
@@ -132,7 +132,7 @@ Spawn `reflect-proposer` agent (sequentially, receives wonder output):
 ```
 Agent(
   description: "SAMVIL Evolve: reflect-proposer",
-  model: config.model_routing.evolve || config.model_routing.default || "opus",
+  model: current_cycle === 1 ? (config.model_routing.evolve || "opus") : (config.model_routing.evolve_cycle || "sonnet"),
   prompt: "You are reflect-proposer.
 <paste agents/reflect-proposer.md>
 

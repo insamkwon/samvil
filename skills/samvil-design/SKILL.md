@@ -76,7 +76,13 @@ Include this as a comment section in the blueprint or present to user.
 
 Read `config.selected_tier`. If `thorough` or `full`:
 
-Spawn design council agents **in parallel** via CC Agent tool:
+Spawn design council agents **in controlled parallel batches**:
+
+```
+MAX_PARALLEL = config.max_parallel || 2
+```
+
+Split design council agents into chunks of `MAX_PARALLEL`. Spawn each chunk in ONE message (parallel). Wait for all agents in a chunk to complete before spawning the next chunk.
 
 | Tier | Agents |
 |------|--------|

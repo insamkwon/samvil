@@ -38,14 +38,20 @@ Then invoke `samvil-design` and return.
 
 ## Step 2: Round 1 — Research (if tier ≥ thorough)
 
-Spawn research agents **in parallel** (single message, multiple Agent tool calls):
+Spawn research agents **in controlled parallel batches**:
+
+```
+MAX_PARALLEL = config.max_parallel || 2
+```
+
+Split Round 1 agents into chunks of `MAX_PARALLEL`. Spawn each chunk in ONE message (parallel). Wait for all agents in a chunk to complete before spawning the next chunk.
 
 For each Round 1 agent, use the Agent tool:
 
 ```
 Agent(
   description: "SAMVIL Council R1: <agent-name>",
-  model: config.model_routing.council || config.model_routing.default || "sonnet",
+  model: config.model_routing.council_research || config.model_routing.default || "haiku",
   prompt: "You are <agent-name> for SAMVIL Council Gate A, Round 1 (Research).
 
 Read your full persona and behavior rules:
@@ -82,7 +88,13 @@ Print progress:
 
 ## Step 3: Round 2 — Review (always, if council runs)
 
-Spawn review agents **in parallel**:
+Spawn review agents **in controlled parallel batches**:
+
+```
+MAX_PARALLEL = config.max_parallel || 2
+```
+
+Split Round 2 agents into chunks of `MAX_PARALLEL`. Spawn each chunk in ONE message (parallel). Wait for all agents in a chunk to complete before spawning the next chunk.
 
 ```
 Agent(
@@ -222,7 +234,7 @@ Invoke the Skill tool with skill: `samvil-design`
 ## Rules
 
 1. **Read agent .md files before spawning** — the agent's persona must be in its prompt
-2. **All agents in a round spawn in ONE message** — parallel, not sequential
+2. **All agents in a chunk spawn in ONE message** — parallel within chunk, sequential between chunks. MAX_PARALLEL (default 2) controls chunk size.
 3. **500 word limit per agent** — prevent context bloat
 4. **Respect tier boundaries** — never spawn agents the tier doesn't include
 5. **decisions.log is append-only** — never delete previous decisions

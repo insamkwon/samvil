@@ -113,13 +113,16 @@ Independent agents gather evidence only. They do not write files.
 ```
 Agent(
   description: "SAMVIL QA Pass 2: independent functional verification",
-  model: config.model_routing.qa || config.model_routing.default || "opus",
+  model: config.model_routing.qa || config.model_routing.default || "sonnet",
   prompt: "You are an independent QA judge for SAMVIL Pass 2.
 
 <paste agents/qa-functional.md>
 
 ## Context
-- Seed: <seed JSON>
+- Tech Stack: <paste seed.tech_stack only>
+- Features + ACs: <paste seed.features with acceptance_criteria only>
+- Constraints: <paste seed.constraints only>
+- Full Seed: Read project.seed.json if you need additional context.
 - Project path: ~/dev/<seed.name>/
 
 ## Task
@@ -136,13 +139,16 @@ Return a markdown section using the required output format.",
 ```
 Agent(
   description: "SAMVIL QA Pass 3: independent quality verification",
-  model: config.model_routing.qa || config.model_routing.default || "opus",
+  model: config.model_routing.qa || config.model_routing.default || "sonnet",
   prompt: "You are an independent QA judge for SAMVIL Pass 3.
 
 <paste agents/qa-quality.md>
 
 ## Context
-- Seed: <seed JSON>
+- Tech Stack: <paste seed.tech_stack only>
+- Screens: <paste blueprint.screens only>
+- Constraints: <paste seed.constraints only>
+- Full Seed: Read project.seed.json if you need additional context.
 - Project path: ~/dev/<seed.name>/
 
 ## Task
