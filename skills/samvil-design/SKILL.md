@@ -208,6 +208,40 @@ Final blueprint (post-feasibility check) looks good? Say 'go' to start building,
 
 blueprint에 `mobile_considerations` 필드를 추가하여 Build 단계에서 참조.
 
+## Output Format
+
+Write `~/dev/<project>/project.blueprint.json` — valid JSON with these required fields:
+
+```json
+{
+  "screens": ["<PascalCase name>"],
+  "data_model": { "<Entity>": { "id": "string", "<field>": "<type>" } },
+  "api_routes": [],
+  "state_management": "zustand | useState | none",
+  "auth_strategy": "none | supabase | custom",
+  "key_libraries": ["<lib>"],
+  "component_structure": {
+    "shared_ui": ["<Component>"],
+    "feature_components": { "<feature>": ["<Component>"] }
+  },
+  "routing": { "/": "<Screen>" },
+  "mobile_considerations": {}
+}
+```
+
+Decision rules for each field:
+- `state_management`: "useState" if <= 2 entities, no cross-component sharing. "zustand" if persistence or 3+ entities. "none" if static.
+- `auth_strategy`: "none" unless seed explicitly requires auth.
+- `api_routes`: empty array if localStorage. Populate if API needed.
+- `key_libraries`: only libraries features actually need.
+- `screens`: primary_screen + one per major feature needing its own page.
+
+## Anti-Patterns
+
+1. Do NOT add screens for features not in seed
+2. Do NOT contradict Gate A binding decisions from decisions.log
+3. Do NOT include libraries without a clear feature-level justification
+
 ## Rules
 
 1. **Blueprint must be consistent with seed** — don't add screens for features not in seed

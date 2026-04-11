@@ -606,11 +606,40 @@ multiSelect: true
    mcp__samvil_mcp__save_seed_version(session_id="<session_id>", version=1, seed_json='<escaped seed JSON>', change_summary="Reverse-engineered from existing codebase")
    ```
 
-선택한 개선에 따라 적절한 스킬로 체인:
+선택한 개선에 따라 대상 스킬로 체인:
 - 기능 추가 → `samvil-build` (scaffold 스킵, 기존 코드에 추가)
 - 코드 품질 → `samvil-qa`
 - 디자인 → `samvil-design`
 - QA → `samvil-qa`
+
+## Output Format
+
+Files created in `<project-path>/`:
+- `project.seed.json`: reverse-engineered seed with `_analysis.source: "brownfield"` and `status: "existing"` on detected features
+- `project.state.json`: initialized with `session_id` from MCP
+- `interview-summary.md`: analysis results in interview summary format (for INV-3 compatibility)
+- `.samvil/analysis-report.md`: full analysis report with quality scan, convention detection, dependency map
+
+Console output:
+```
+[SAMVIL] 프로젝트 분석 결과
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+경로: <path>
+프레임워크: <framework> (<router type>)
+언어: TypeScript
+상태관리: <detected>
+UI: <detected>
+기존 기능: N개 감지
+코딩 컨벤션: <summary>
+재사용 가능: <count> components, <count> hooks
+의존성 영향: 고 N개, 중 N개, 저 N개
+```
+
+## Anti-Patterns
+
+1. Do NOT delete or modify existing code during analysis — read-only phase
+2. Do NOT force framework conversion (e.g., React to Next.js)
+3. Do NOT generate features not detected in the codebase — ask the user for new features
 
 ## Rules
 

@@ -208,6 +208,58 @@ If `.samvil/mcp-health.jsonl` does not exist: print `[SAMVIL] MCP Health: All ca
   3 improvement suggestions recorded for future runs.
 ```
 
+## Output Format
+
+Append JSON entry to `harness-feedback.log` in the SAMVIL plugin directory:
+
+```json
+{
+  "run_id": "samvil-YYYY-MM-DD-NNN",
+  "seed_name": "<name>",
+  "timestamp": "<ISO 8601>",
+  "stages": {
+    "interview": { "questions": <N> },
+    "seed": { "user_edits": <N> },
+    "scaffold": { "build_retries": <N> },
+    "build": { "features_attempted": <N>, "features_passed": <N>, "retries": <N> },
+    "qa": { "verdict": "<PASS|FAIL>", "iterations": <N> }
+  },
+  "suggestions": ["<suggestion 1>", "<suggestion 2>", "<suggestion 3>"]
+}
+```
+
+Console output:
+```
+[SAMVIL] Retrospective — Run Analysis
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+App: <seed.name>
+Features: <N>/<M> passed
+Build Retries: <N>
+QA Iterations: <N>
+Final Verdict: <PASS/FAIL>
+Flow Compliance: <matched / N deviations>
+Agent Utilization: <M/N> (<percent>%)
+
+What Worked:
+  - <observation>
+
+What Needs Improvement:
+  - <observation>
+
+Suggestions:
+  1. <specific change to a SAMVIL skill/reference/template>
+  2. <specific change>
+  3. <specific change>
+```
+
+Exactly 3 suggestions. All data from files — zero conversation-dependent metrics.
+
+## Anti-Patterns
+
+1. Do NOT blame the user — target harness improvements only
+2. Do NOT include vague suggestions — each must specify which file to change and what to change
+3. Do NOT skip the MCP Health Report when `.samvil/mcp-health.jsonl` exists
+
 ## Rules
 
 1. **Be honest.** If the run was rough, say so.

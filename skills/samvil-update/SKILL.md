@@ -84,3 +84,16 @@ fi
   원인: {에러 메시지}
   수동 업데이트: gh repo clone insamkwon/samvil /tmp/samvil && cp -r /tmp/samvil/* {CACHE_DIR}
 ```
+
+## Output Format
+
+Console output only (no files written):
+- Success: `[SAMVIL] ✓ 업데이트 완료! v{CURRENT} → v{LATEST}`
+- Already latest: `[SAMVIL] ✓ 이미 최신 버전입니다 (v{CURRENT})`
+- Failure: `[SAMVIL] ✗ 업데이트 실패` with error message and manual instructions
+
+## Anti-Patterns
+
+1. Do NOT overwrite the MCP `.venv` directory — only update source files
+2. Do NOT modify user project files — this updates the plugin only
+3. Do NOT proceed if `gh` CLI is not installed

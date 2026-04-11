@@ -268,6 +268,36 @@ If user chose to rebuild with new seed:
 **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="scaffold", data='{"reason":"rebuild_with_evolved_seed"}')`
 Invoke the Skill tool with skill: `samvil-scaffold`
 
+## Output Format
+
+Files modified per evolution cycle:
+- `~/dev/<seed.name>/project.seed.json`: updated seed with `version: N+1`
+- `~/dev/<seed.name>/seed_history/v{N}.json`: backup of previous seed
+- `~/dev/<seed.name>/seed_history/v{N}_v{N+1}_diff.md`: change summary with similarity score
+
+Console output per cycle:
+```
+[SAMVIL] Seed Evolution: v{N} -> v{N+1}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Wonder findings:
+  1. <finding>
+
+Proposed changes:
+  1. <change>
+
+{Convergence trend: converging/diverging/stable}
+```
+
+Agent output format (per agent):
+- wonder-analyst: numbered findings list, under 400 words
+- reflect-proposer: numbered change proposals with rationale, under 400 words
+
+## Anti-Patterns
+
+1. Do NOT add more than 2 new features per evolution cycle
+2. Do NOT modify `name`, `mode`, or `core_experience` — evolve around the core
+3. Do NOT skip the user checkpoint unless autonomous mode is explicitly requested
+
 ## Rules
 
 1. **Wonder before Reflect** — always analyze before proposing

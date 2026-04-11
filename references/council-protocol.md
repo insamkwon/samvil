@@ -70,16 +70,50 @@ Agent(
 
 After all agents return:
 
+### Consensus Score Calculation
+
+For each seed section (features, ACs, constraints, etc.), calculate a Consensus Score:
+
+```
+consensus_score = approve_count / total_reviewing_agents
+
+Threshold: ≥ 60% (3/5, 2/3, or equivalent) to auto-adopt a section decision.
+If fewer than 3 agents: majority (>50%) applies.
+```
+
+Score interpretation:
+- **≥ 80%**: Strong consensus — auto-proceed
+- **60-79%**: Moderate consensus — proceed with noted concerns
+- **< 60%**: Weak/no consensus — present to user for decision
+
 ### Per-Section Counting
 
 For each seed section (features, ACs, constraints, etc.):
 
 ```
-3/3 APPROVE           → auto-proceed
-2/3 APPROVE + 1 CHALLENGE (MINOR) → note the challenge, proceed
-2/3 CHALLENGE or any REJECT       → present to user with recommendations
-Any BLOCKING severity              → must address before proceeding
+Consensus Score ≥ 80% (e.g., 3/3 APPROVE) → auto-proceed
+Consensus Score 60-79% (e.g., 2/3 APPROVE + 1 MINOR CHALLENGE) → note the challenge, proceed
+Consensus Score < 60% (e.g., 2/3 CHALLENGE or any REJECT) → present to user with recommendations
+Any BLOCKING severity → must address before proceeding
 ```
+
+### Devil's Advocate Preservation
+
+For every section, identify agents whose verdict differs from the majority:
+
+```
+For each section:
+  majority_verdict = verdict with highest count
+  for each agent with verdict != majority_verdict:
+    record as dissenting_opinion
+```
+
+Dissenting opinions are:
+1. Displayed in a separate `⚠️ 반대 의견 (Devil's Advocate)` section in synthesis output
+2. Recorded in decisions.log with `binding: false` and `dissenting: true` fields
+3. Prefixed with: "이 의견은 최종 결정에 반영되지 않았지만 기록으로 남깁니다."
+
+This ensures minority perspectives are never lost and can be revisited in later stages (Evolve, Retro).
 
 ### Synthesis Output Format
 
@@ -98,10 +132,16 @@ Round 2 Review:
   scope-guard:    APPROVE (dependencies correct)
   ceo-advisor:    Go — strategic risk: [risk]
 
+Consensus Score: [score] ([approve_count]/[total_agents])
+
 Synthesis: PROCEED / PROCEED WITH CHANGES / HOLD FOR USER
 Changes recommended:
   1. [specific change from simplifier]
   2. [specific change from other agents]
+
+⚠️ 반대 의견 (Devil's Advocate):
+  • [agent]: [dissenting opinion]
+    → 이 의견은 최종 결정에 반영되지 않았지만 기록으로 남깁니다.
 ```
 
 ### User Interaction
@@ -128,13 +168,35 @@ Every council decision is appended to `~/dev/<project>/decisions.log`:
   "severity": "MINOR",
   "binding": true,
   "applied": true,
+  "dissenting": false,
+  "consensus_score": 0.67,
+  "timestamp": "2026-04-04T18:30:00+09:00"
+}
+```
+
+For dissenting opinions (agents who disagreed with the majority):
+
+```json
+{
+  "id": "d002",
+  "gate": "A",
+  "round": 2,
+  "agent": "scope-guard",
+  "decision": "Auth should be P1, not P2",
+  "reason": "Dashboard data without auth is meaningless in production",
+  "severity": "MINOR",
+  "binding": false,
+  "applied": false,
+  "dissenting": true,
+  "consensus_score": 0.33,
   "timestamp": "2026-04-04T18:30:00+09:00"
 }
 ```
 
 **Rules:**
 - Decisions with `binding: true` are enforced in all subsequent stages
-- Build skill reads decisions.log and respects them
+- Decisions with `dissenting: true` are preserved for reference but not enforced
+- Build skill reads decisions.log and respects `binding: true` decisions
 - To overturn a binding decision: user must explicitly request, or Council reconvenes
 - `applied: false` means the user chose not to apply the recommendation
 
@@ -144,3 +206,5 @@ Every council decision is appended to `~/dev/<project>/decisions.log`:
 - **Don't let one agent dominate** — synthesis uses majority, not loudest voice
 - **Don't re-run council on minor edits** — only on seed version changes
 - **Don't spawn agents the tier doesn't include** — respect tier boundaries
+- **Don't discard minority opinions** — always preserve dissenting views as Devil's Advocate
+- **Don't proceed below 60% consensus without user approval** — weak consensus requires user decision

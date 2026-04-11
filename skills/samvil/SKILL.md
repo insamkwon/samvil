@@ -385,7 +385,16 @@ Each stage prints:
 [SAMVIL] Stage N/5: <name>... <status>
 ```
 
-### Agent Tier Selection
+### Output Format
+
+This skill does not write files directly. It orchestrates other skills.
+Outputs to the conversation:
+- Health check result table (markdown)
+- Tier selection confirmation: `[SAMVIL] Tier: <tier>`
+- Pipeline start message: `[SAMVIL] Starting pipeline for: "<app idea>"`
+- Progress: `[SAMVIL] Stage N/5: <name>...`
+
+## Agent Tier Selection
 
 After seed is approved, read `config.selected_tier` from `project.config.json`.
 

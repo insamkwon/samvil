@@ -164,6 +164,30 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change"
 
 Invoke the Skill tool with skill: `samvil-council`
 
+## Output Format
+
+Write `~/dev/<project>/project.seed.json` — valid JSON conforming to `references/seed-schema.md`.
+
+Required fields and constraints:
+- `name`: valid npm package name, kebab-case (e.g., "task-manager")
+- `description`: 1-sentence string
+- `mode`: always `"web"`
+- `tech_stack`: `{ framework, ui, state, router }` — use simplest valid choice
+- `core_experience`: `{ description, primary_screen (PascalCase), key_interactions[] }`
+- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
+- `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
+- `constraints[]`: at least 1 item (default: "No backend server — client-only with localStorage")
+- `out_of_scope[]`: at least 2 items
+- `version`: integer, starts at 1
+
+No extra fields beyond the schema. No comments in JSON.
+
+## Anti-Patterns
+
+1. Do NOT ask the user implementation choices — be opinionated (e.g., choose zustand vs useState yourself)
+2. Do NOT leave `constraints` or `out_of_scope` empty — add defaults if none specified
+3. Do NOT accept vague ACs — rewrite any with vague_words automatically
+
 ## Rules
 
 1. **Seed is immutable after approval.** No changes during build. User can edit manually between stages.

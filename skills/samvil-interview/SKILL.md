@@ -55,14 +55,29 @@ description: "Socratic interview with app presets, unknown-unknown probing, and 
 
 | Tier | 질문 수 | 모호도 목표 | Phase 2.5 |
 |------|--------|-----------|-----------|
-| minimal | 3-4개 | ≤ 0.10 | 없음 |
-| standard | 5-6개 | ≤ 0.05 | 없음 |
-| thorough | 6-8개 | ≤ 0.02 | 있음 |
-| full | 8개 + | ≤ 0.01 | 있음 + Research |
+| minimal | 3-4개 | ≤ 0.10 | 자동 감지 시 (Pre-mortem만) |
+| standard | 5-6개 | ≤ 0.05 | 자동 감지 시 (Pre-mortem만) |
+| thorough | 6-8개 | ≤ 0.02 | 항상 |
+| full | 8개 + | ≤ 0.01 | 항상 + Research |
 
 ## Step 3: 인터뷰 질문
 
 모든 질문은 **AskUserQuestion** 도구로 객관식 제시. preset이 있으면 보기에 preset 기본값 포함.
+
+### 답변 적응형 질문 (Adaptive Follow-up)
+
+각 답변 후 길이/내용을 분석하여 후속 질문 전략을 선택:
+
+| 답변 유형 | 판정 기준 | 후속 질문 전략 |
+|-----------|----------|---------------|
+| **긴 답변** | 100자 이상 또는 여러 주제 포함 | 구조화 질문: "구체적으로 어떤 화면에서 어떻게 동작하나요?" / "말씀하신 A와 B 중 먼저 만들 건가요?" |
+| **짧은 답변** | 30자 미만 또는 단어 1-2개 | 확장 질문: "~하는 이유가 무엇인가요? 어떤 문제를 해결하고 싶나요?" / "예를 들면 어떤 상황인가요?" |
+| **모호한 답변** | vague 단어 포함 또는 "적당히", "알아서", "대충" | 선택 질문: "A와 B 중 어떤 방향에 더 가까운가요?" / "구체적으로 수치나 기준이 있나요?" |
+
+**적용 규칙:**
+- adaptive follow-up은 Phase 1~2 내에서만. Phase 3(Convergence)에서는 미적용.
+- 같은 주제에 대한 연속 follow-up은 최대 1회. 2회 연속 시 다음 Phase로 전환.
+- 짧은 답변이어도 선택지 중 하나를 선택한 경우 → follow-up 없이 다음 질문.
 
 ### Phase 1: Core Understanding (2-3 questions)
 
@@ -121,7 +136,13 @@ description: "Socratic interview with app presets, unknown-unknown probing, and 
        description: "외부 API 없이 자체 데이터만 사용합니다."
    ```
 
-### Phase 2.5: Unknown Unknowns (thorough/full tier만)
+### Phase 2.5: Unknown Unknowns (thorough/full tier + 자동 감지)
+
+**활성화 조건** (둘 중 하나):
+- `selected_tier`가 `thorough` 또는 `full`
+- **자동 감지**: Phase 1~2 답변에서 불확실성이 높은 경우 (preset 매칭 실패 + 짧은 답변 비율 > 50%)
+
+자동 감지 시 minimal/standard라도 Phase 2.5를 활성화하되, 질문은 1개로 축소 (Pre-mortem만).
 
 preset의 **"흔한 함정"**과 **"Pre-mortem"**을 활용:
 
@@ -136,6 +157,24 @@ preset의 **"흔한 함정"**과 **"Pre-mortem"**을 활용:
 → 답변을 AC 또는 constraints에 자동 반영
 
 ### Phase 3: Convergence Check
+
+#### 인터뷰 종료 조건
+
+인터뷰는 **ambiguity_score ≤ tier 임계값**일 때 종료 가능:
+
+| Tier | 종료 임계값 | 재질문 없이 종료 가능 |
+|------|-----------|---------------------|
+| minimal | ≤ 0.10 | O (preset 매칭 시) |
+| standard | ≤ 0.05 | preset 매칭 + Phase 1 충실 시 |
+| thorough | ≤ 0.02 | X (Phase 2.5 필수) |
+| full | ≤ 0.01 | X (Phase 2.5 + Research 필수) |
+
+**종료 루프:**
+1. Phase 3 gates 평가
+2. `mcp__samvil_mcp__score_ambiguity` 호출
+3. score ≤ 임계값 AND 모든 gates = Y → Phase 4로 진행
+4. score > 임계값 → vague AC 재질문 + 부족한 gate 보충 질문
+5. 재질문 후 다시 평가 (최대 2회 반복, 이후 강제 진행)
 
 4 gates (모두 Y여야 진행):
 ```
@@ -275,13 +314,70 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_com
    예: "데이터는 기기 간에 공유돼야 하나요, 한 기기에서만 쓰나요?"
 3. **Breadth control** — Phase 내에서 같은 기능에 대한 질문이 2회 연속이면 다른 주제로 전환한다.
 
+## Output Format
+
+Write `~/dev/<project>/interview-summary.md` with these sections (Korean):
+
+```markdown
+# Interview Summary
+
+## 타겟 유저
+<target user>
+
+## 핵심 문제
+<1-sentence problem statement>
+
+## 핵심 경험
+<first 30 seconds behavior>
+
+## 앱 유형
+<preset name or "커스텀">
+
+## 필수 기능 (P1)
+1. <feature>
+...
+
+## 제외 항목
+- <excluded item>
+...
+
+## 제약 조건
+- <constraint>
+...
+
+## 성공 기준
+1. <testable criterion>
+...
+
+## 디자인 프리셋
+<preset: productivity/creative/minimal/playful>
+
+## 추천 스택
+<framework name>
+
+## 가정 사항
+- <assumption>
+...
+
+## 코딩 컨벤션 (brownfield only)
+<detected conventions>
+```
+
+Each section must be non-empty. Constraints must have >= 1 item. Success criteria must have >= 3 items.
+
+## Anti-Patterns
+
+1. Do NOT ask 2+ questions at once (one at a time via AskUserQuestion)
+2. Do NOT skip the summary verification (even in Zero-Question mode)
+3. Do NOT accept vague ACs without offering a rewrite suggestion
+
 ## Rules
 
 1. **모든 질문은 AskUserQuestion 도구 사용** — 객관식 보기 + Other
 2. **대화는 한국어로.** 기술 용어와 코드만 영어.
 3. **한 번에 하나씩.** 2개 이상 질문 금지.
 4. **preset 있으면 활용.** 질문을 줄이고 보기 품질 높임.
-5. **Phase 2.5는 thorough/full만.** minimal/standard에서는 스킵.
+5. **Phase 2.5는 thorough/full 기본 + 자동 감지.** preset 매칭 실패 + 짧은 답변 비율 > 50%면 minimal/standard도 활성화.
 6. **Zero-Question은 요약 검토 1회 필수.** 완전 무확인 빌드는 안 됨.
 7. **tier별 모호도 목표 준수.** minimal=0.10, standard=0.05, thorough=0.02, full=0.01.
 8. **Tech stack 기본값:** preset 추천 스택 우선. 없으면 Next.js 14 + Tailwind + shadcn/ui.

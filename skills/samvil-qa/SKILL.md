@@ -66,6 +66,29 @@ cd ~/dev/<seed.name>
 npx playwright install chromium 2>/dev/null
 ```
 
+### 증거 디렉토리 준비
+```bash
+mkdir -p ~/dev/<seed.name>/.samvil/qa-evidence
+```
+
+### Playwright MCP 연결 안정화
+
+모든 Playwright 호출에 다음 규칙 적용:
+
+- **Timeout**: 기본 30초. `project.config.json`의 `playwright_timeout`으로 설정 가능 (단위: ms).
+- **Retry**: 최대 2회, exponential backoff (1초 → 2초).
+- **연결 실패 로깅**: Playwright MCP 호출 시 에러가 발생하면, fallback 전에 반드시 에러 내용을 콘솔에 명시적 출력:
+  ```
+  [SAMVIL] ⚠ Playwright MCP error: <error message>
+  [SAMVIL] Retrying (attempt N/2)...
+  ```
+- **Fallback 전환**: 2회 재시도 후에도 실패 시:
+  ```
+  [SAMVIL] ⚠ Playwright MCP unavailable after 2 retries.
+  [SAMVIL] Falling back to static analysis (제한적 검증).
+  ```
+  이후 정적 분석(Grep/Read)으로 전환. QC 리포트에 `Method: static (Playwright unavailable)`로 기록.
+
 ### Smoke Test 실행
 
 Use the `mcp__plugin_playwright_playwright__browser_navigate` tool to visit the dev server:
@@ -95,9 +118,9 @@ Use the `mcp__plugin_playwright_playwright__browser_navigate` tool to visit the 
    - **Body has content**: PASS
    - **Empty body**: `[SAMVIL] Smoke Run: ✗ (empty <body>)` → Verdict = REVISE
 
-5. **Take screenshot for evidence (optional):**
+5. **Take screenshot for evidence:**
    ```
-   mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=".samvil/smoke-screenshot.png")
+   mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=".samvil/qa-evidence/smoke-desktop-pass.png")
    ```
 
 6. **Visit each route** from `blueprint.routing`:
@@ -246,14 +269,109 @@ AC: "Empty state shows helpful message"
 → browser_snapshot → check for "no items" text → PASS
 ```
 
+### Pass 2-A: 렌더링 검증
+
+모든 주요 라우트에 대해 다음 항목 검증:
+
+1. **빈 화면 감지**:
+   ```
+   mcp__plugin_playwright_playwright__browser_evaluate(function="() => document.body.innerHTML.trim().length > 50")
+   ```
+   - 50자 미만이면 빈 화면으로 간주 → FAIL
+
+2. **콘솔 에러 감지**:
+   ```
+   mcp__plugin_playwright_playwright__browser_console_messages(level="error")
+   ```
+   - React hydration 에러, chunk load 실패, undefined reference 등 치명적 에러만 FAIL 처리
+   - CORS 경고, deprecated API 경고는 CONCERN으로 기록 (FAIL 아님)
+
+3. **주요 텍스트/버튼 존재 확인**:
+   - `browser_snapshot`으로 accessibility tree 확인
+   - 각 페이지의 heading (h1, h2)이 존재하는지 확인
+   - 주요 CTA 버튼(role="button" 또는 `<a>` 태그)이 존재하는지 확인
+   - 누락 시 해당 AC에 대해 FAIL
+
+### Pass 2-B: 상호작용 검증
+
+AC에 상호작용이 포함된 경우 다음 검증 수행:
+
+1. **주요 버튼 클릭 가능**:
+   ```
+   mcp__plugin_playwright_playwright__browser_click(ref="<button-ref>")
+   ```
+   - 클릭 후 `browser_snapshot`으로 변화 확인
+   - 클릭해도 아무 반응 없으면 FAIL
+
+2. **폼 제출 동작**:
+   - 입력 필드에 `browser_type`으로 값 입력
+   - 제출 버튼 `browser_click`
+   - 제출 후 결과 확인: 성공 메시지, 에러 메시지, 또는 페이지 전환
+   - 폼 제출 후 아무 피드백 없으면 FAIL
+
+3. **네비게이션 동작**:
+   - 링크/탭 클릭 후 `browser_navigate` 결과 확인
+   - 404 페이지 또는 에러 페이지로 이동 시 FAIL
+   - SPA 라우팅: URL 변경 + 콘솔 에러 없음 확인
+
+### Pass 2-C: 반응형 검증
+
+3개 뷰포트에서 레이아웃 확인:
+
+```
+viewports = [
+  { name: "mobile",  width: 375,  height: 812 },
+  { name: "tablet",  width: 768,  height: 1024 },
+  { name: "desktop", width: 1280, height: 720 }
+]
+```
+
+각 뷰포트마다:
+1. **뷰포트 전환**:
+   ```
+   mcp__plugin_playwright_playwright__browser_resize(width=<width>, height=<height>)
+   ```
+
+2. **스크린샷 캡처**:
+   ```
+   mcp__plugin_playwright_playwright__browser_take_screenshot(
+     type="png",
+     filename=".samvil/qa-evidence/<feature>-<viewport>-pass.png"
+   )
+   ```
+   - FAIL 시 파일명: `<feature>-<viewport>-fail.png`
+
+3. **레이아웃 확인**:
+   - 가로 스크롤 발생 여부 (mobile에서 `overflow-x` 체크)
+   - 텍스트 오버플로우 (잘린 텍스트, 겹침)
+   - 버튼/링크 터치 영역 (mobile에서 최소 44x44px)
+   - 중요 콘텐츠가 뷰포트 밖으로 밀려나지 않았는지 확인
+
+4. **desktop 뷰포트로 복원** (후속 테스트를 위해):
+   ```
+   mcp__plugin_playwright_playwright__browser_resize(width=1280, height=720)
+   ```
+
+**반응형 검증 결과**: 치명적 레이아웃 깨짐(콘텐츠 접근 불가)만 FAIL. 사소한 정렬 문제는 CONCERN.
+
 ### Fallback to Static Analysis
 
-If Playwright MCP is unavailable OR an AC cannot be verified via browser interaction
-(e.g., backend-only logic, webhook handling, email sending):
+If Playwright MCP is unavailable (연결 안정화에서 2회 재시도 후에도 실패) OR
+an AC cannot be verified via browser interaction (e.g., backend-only logic, webhook handling, email sending):
 
-1. Use Grep/Read to search the codebase for implementing code
-2. Verify the implementation is reachable (imported and rendered)
-3. Mark as PARTIAL with `"reason": "runtime_unverifiable"` instead of PASS
+1. **명시적 경고 출력**:
+   ```
+   [SAMVIL] ⚠ Falling back to static analysis for: "<AC description>"
+   [SAMVIL]   Reason: <Playwright unavailable | backend-only | runtime_unverifiable>
+   ```
+
+2. Use Grep/Read to search the codebase for implementing code
+3. Verify the implementation is reachable (imported and rendered)
+4. Mark as PARTIAL with `"reason": "runtime_unverifiable"` instead of PASS
+
+**Fallback 결과는 "제한적 검증"으로 명시**:
+- QC 리포트의 Method 컬럼에 `static (Playwright unavailable)` 또는 `static (backend-only)` 표시
+- PASS 대신 PARTIAL로 처리 (정적 분석으로는 완전한 검증 불가)
 
 ### Stop Dev Server
 
@@ -298,6 +416,18 @@ Check by reading relevant code:
 - **No debug code**: No console.log left in components
 - **Performance**: First Load JS < 100KB (check build output). Use INP < 200ms as target metric.
 
+### Pass 3 스크린샷 증거
+
+Playwright가 연결된 상태면 Pass 3에서도 스크린샷 캡처:
+```
+mcp__plugin_playwright_playwright__browser_take_screenshot(
+  type="png",
+  filename=".samvil/qa-evidence/quality-desktop-pass.png"
+)
+```
+- 반응형 검증이 Pass 2-C에서 수행되지 않은 경우, 여기서 3개 뷰포트 캡처
+- 파일명 규칙: `quality-<mobile|tablet|desktop>-<pass|fail>.png`
+
 **CONCERN 규칙**: 성능 CONCERN(First Load > 100KB 등)이 있으면 CONCERN으로만 표시하지 말고 **REVISE로 처리**. CONCERN은 무시되기 쉬움 — 발견했으면 수정해야 함.
 
 **If critical quality issues or any CONCERN:** Verdict = REVISE with specific issues.
@@ -312,16 +442,47 @@ Write results to `~/dev/<seed.name>/.samvil/qa-report.md`:
 ## Pass 1: Mechanical
 - Build: PASS/FAIL
 
+## Pass 1b: Smoke Run
+- Verification Method: Playwright / Static (Playwright unavailable)
+- Console Errors: <count> errors
+- Empty Pages: <list of routes or "none">
+
 ## Pass 2: Functional (Runtime)
+### Verification Method: Playwright / Static (제한적 검증)
+
 | AC | Verdict | Method | Notes |
 |----|---------|--------|-------|
 | "<criterion>" | PASS | runtime | <what was tested + screenshot path> |
-| "<criterion>" | PARTIAL | static | <why runtime unverifiable> |
+| "<criterion>" | PARTIAL | static (Playwright unavailable) | <why runtime unverifiable> |
+| "<criterion>" | PARTIAL | static (backend-only) | <backend logic, code review based> |
+
+### Rendering Verification (Pass 2-A)
+- Empty pages: <list or "none">
+- Console errors (critical): <list or "none">
+- Missing headings/buttons: <list or "none">
+
+### Interaction Verification (Pass 2-B)
+- Button clicks: <count> tested, <count> passed
+- Form submissions: <count> tested, <count> passed
+- Navigation: <count> routes tested, <count> passed
+
+### Responsive Verification (Pass 2-C)
+- Mobile (375px): PASS/FAIL — <screenshot path>
+- Tablet (768px): PASS/FAIL — <screenshot path>
+- Desktop (1280px): PASS/FAIL — <screenshot path>
 
 ## Pass 3: Quality
-- Responsive: PASS/FAIL
-- Accessibility: PASS/FAIL
+- Responsive: PASS/FAIL (<count> components checked)
+- Accessibility: PASS/FAIL (<count> issues)
 - Code structure: PASS/FAIL
+- Empty states: PASS/FAIL (<count> lists checked)
+- Error states: PASS/FAIL
+- Debug code: PASS/FAIL (<count> console.log found)
+- Performance: PASS/CONCERN (First Load JS: <size>)
+
+## Evidence
+- Screenshots: `.samvil/qa-evidence/`
+- Build log: `.samvil/build.log`
 
 ## Overall: PASS / REVISE / FAIL
 Issues to fix:
@@ -488,6 +649,91 @@ If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
 - **Option 1**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="evolve", data='{"reason":"qa_fail_evolve"}')` → invoke `samvil-evolve`
 - **Option 2**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"qa_fail"}')` → invoke `samvil-retro`
 - **Option 3**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"manual_fix"}')` → invoke `samvil-retro`
+
+## Output Format
+
+Write `~/dev/<seed.name>/.samvil/qa-report.md` with this exact structure:
+
+```markdown
+# QA Report — Iteration <N>
+
+## Pass 1: Mechanical
+- Build: PASS/FAIL
+
+## Pass 1b: Smoke Run
+- Verification Method: Playwright / Static (Playwright unavailable)
+- Console Errors: <count> errors
+- Empty Pages: <list of routes or "none">
+
+## Pass 2: Functional (Runtime)
+### Verification Method: Playwright / Static (제한적 검증)
+
+| AC | Verdict | Method | Notes |
+|----|---------|--------|-------|
+| "<criterion>" | PASS/PARTIAL/UNIMPLEMENTED/FAIL | runtime/static (Playwright unavailable)/static (backend-only) | <evidence + screenshot path> |
+
+### Rendering Verification (Pass 2-A)
+- Empty pages: <list or "none">
+- Console errors (critical): <list or "none">
+- Missing headings/buttons: <list or "none">
+
+### Interaction Verification (Pass 2-B)
+- Button clicks: <count>/<count> passed
+- Form submissions: <count>/<count> passed
+- Navigation: <count>/<count> routes passed
+
+### Responsive Verification (Pass 2-C)
+- Mobile (375px): PASS/FAIL — .samvil/qa-evidence/<feature>-mobile-<pass|fail>.png
+- Tablet (768px): PASS/FAIL — .samvil/qa-evidence/<feature>-tablet-<pass|fail>.png
+- Desktop (1280px): PASS/FAIL — .samvil/qa-evidence/<feature>-desktop-<pass|fail>.png
+
+## Pass 3: Quality
+- Responsive: PASS/FAIL (<count> components checked)
+- Accessibility: PASS/FAIL (<count> issues)
+- Code structure: PASS/FAIL
+- Empty states: PASS/FAIL (<count> lists checked)
+- Error states: PASS/FAIL
+- Debug code: PASS/FAIL (<count> console.log found)
+- Performance: PASS/CONCERN (First Load JS: <size>)
+
+## Evidence
+- Screenshots: `.samvil/qa-evidence/`
+- Build log: `.samvil/build.log`
+
+## Overall: PASS / REVISE / FAIL
+Issues to fix:
+1. <issue>
+```
+
+Console output format:
+```
+[SAMVIL] Stage 5/5: QA Results
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Verification Method: Playwright / Static (제한적 검증)
+
+Pass 1 (Mechanical): PASS ✓ / FAIL ✗
+Pass 1b (Smoke Run): PASS ✓ / FAIL ✗ — Method: Playwright/Static
+Pass 2 (Functional):
+  Rendering: PASS ✓ / FAIL ✗
+  Interaction: PASS ✓ / FAIL ✗
+  Responsive: Mobile ✓ / Tablet ✓ / Desktop ✓
+  - "<AC>" -> PASS ✓ / FAIL ✗ [runtime | static]
+Pass 3 (Quality): PASS ✓ / FAIL ✗
+Overall Verdict: PASS / REVISE / FAIL
+
+Evidence: .samvil/qa-evidence/
+```
+
+Screenshots saved to `.samvil/qa-evidence/` with naming convention:
+- `<feature>-<viewport>-<pass|fail>.png` (per AC per viewport)
+- `smoke-desktop-pass.png` (Pass 1b)
+- `quality-<viewport>-<pass|fail>.png` (Pass 3)
+
+## Anti-Patterns
+
+1. Do NOT accept UNIMPLEMENTED for core_experience features — auto-promote to FAIL
+2. Do NOT downgrade CONCERN to informational — performance CONCERN = REVISE
+3. Do NOT run full `npm run build` inside worker agents — workers run lint/typecheck only
 
 ## Rules
 

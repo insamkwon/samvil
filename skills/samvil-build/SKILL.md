@@ -36,8 +36,8 @@ The seed's `core_experience` defines what the user does in the first 30 seconds.
 
 1. Read `seed.core_experience`
 2. Create the primary screen component: `components/<primary_screen>.tsx`
-3. Create supporting components as needed (keep minimal)
-4. Create state management if needed:
+3. Create supporting components (1-3 components, single responsibility each)
+4. Create state management if the feature requires cross-component state sharing:
    - Zustand (`seed.tech_stack.state` = `"zustand"`): create `lib/store.ts`
    - useState: inline in components
 5. Wire into page: update `app/page.tsx` to import and render the primary screen
@@ -124,7 +124,7 @@ Build features one at a time (same as v1):
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_feature_start", stage="build", data='{"feature":"<name>"}')
    ```
-3. **Plan** — What components? What state changes? What routes? Keep minimal.
+3. **Plan** — What components? What state changes? What routes? Max 3 new files per feature.
 4. **Implement** — Create/modify components, lib, routes. Keep existing code working.
 5. **Build verify (INV-2)**:
    ```bash
@@ -279,6 +279,35 @@ Update `project.state.json` with `implementation_rate`: `"implementation_rate": 
 ```
 
 Invoke the Skill tool with skill: `samvil-qa`
+
+## Output Format
+
+Modified/created files in `~/dev/<seed.name>/`:
+- `components/<primary_screen>.tsx`: core experience component
+- `components/<feature-name>/*.tsx`: feature components (PascalCase, one per file)
+- `lib/store.ts` (if zustand): state management with typed slices
+- `app/page.tsx`: updated to import primary screen
+- `app/<feature>/page.tsx`: feature pages (if applicable)
+
+Verification output per feature:
+- `[SAMVIL] Feature: <name> ✓ [N/M features complete]`
+- `npm run build` exit code 0 after each feature
+
+Final summary:
+```
+[SAMVIL] Stage 4/5: Build complete
+  Features: N/M passed (X parallel, Y sequential)
+  Failed: [list or "none"]
+  Build: passing
+  Agents spawned: <count>
+  Builds run: <count>
+```
+
+## Anti-Patterns
+
+1. Do NOT add features not listed in seed.features
+2. Do NOT hardcode API responses or use mock data — use env vars + real fetch patterns
+3. Do NOT dump build logs into conversation — write to `.samvil/build.log`
 
 ## Code Quality Rules
 

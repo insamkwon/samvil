@@ -408,6 +408,28 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="scaffold_comp
 
 Invoke the Skill tool with skill: `samvil-build`
 
+## Output Format
+
+Files created in `~/dev/<seed.name>/`:
+- Scaffolded project via CLI (Next.js / Vite / Astro — based on `seed.tech_stack.framework`)
+- `lib/utils.ts` (or `src/lib/utils.ts`): `cn()` utility using clsx + tailwind-merge
+- `components/ui/`: shadcn/ui components (button, card, input, dialog, label, select, textarea)
+- `app/page.tsx` (or `src/App.tsx`): minimal Welcome page — no business logic
+- `.env.example`: environment variable templates
+- `.samvil/`: build logs, shadcn init log
+- `app/globals.css`: HSL CSS variables (NOT oklch — shadcn overwrite prevention)
+- `tailwind.config.ts` (Next.js only): HSL `hsl(var(--...))` color tokens
+
+Verification output:
+- `npm run build` exit code 0
+- `[SAMVIL] Stage 3/5: Scaffold ✓` with project path, stack, dependency, build status
+
+## Anti-Patterns
+
+1. Do NOT include any business logic in scaffold — components dir has only shadcn/ui defaults
+2. Do NOT use `@latest` for any package — use pinned versions from `references/dependency-matrix.json`
+3. Do NOT skip the Tailwind verification step after shadcn init
+
 ## Rules
 
 1. **No template folder dependency.** CLI tools generate everything.
