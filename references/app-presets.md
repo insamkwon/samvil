@@ -176,9 +176,100 @@
 
 ---
 
+## Custom Presets (사용자 정의 프리셋)
+
+빌트인 프리셋에 없는 앱 유형을 사용자가 직접 등록할 수 있다.
+
+### 저장 위치
+
+```
+~/.samvil/presets/<preset-name>.json
+```
+
+- `<preset-name>`은 소문자 + 하이픈 (예: `my-habit-tracker.json`)
+- 디렉토리가 없으면 인터뷰 시작 시 자동 생성
+
+### 포맷
+
+```json
+{
+  "name": "나만의 앱",
+  "description": "한 줄 설명",
+  "core_experience": "처음 30초에 사용자가 하는 것",
+  "features": [
+    {
+      "name": "기능1",
+      "description": "설명",
+      "acceptance_criteria": [
+        "AC1: 구체적인 검증 가능한 기준",
+        "AC2: 구체적인 검증 가능한 기준"
+      ]
+    }
+  ],
+  "tech_stack": {
+    "framework": "nextjs",
+    "state": "zustand",
+    "auth": false,
+    "database": false
+  },
+  "keywords": ["키워드1", "키워드2"],
+  "common_pitfalls": [
+    "흔히 발생하는 문제 1",
+    "흔히 발생하는 문제 2"
+  ],
+  "pre_mortem": "1주 후 삭제 이유? → ...",
+  "data_model": "{ id, field1, field2 }"
+}
+```
+
+### 필드 설명
+
+| 필드 | 필수 | 설명 |
+|------|------|------|
+| `name` | O | 프리셋 표시 이름 |
+| `description` | O | 앱 유형 한 줄 설명 |
+| `core_experience` | O | 첫 30초 핵심 경험 |
+| `features` | O | 기본 기능 목록 (최소 1개) |
+| `tech_stack` | O | 추천 기술 스택 |
+| `keywords` | X | 매칭용 키워드 배열 (인터뷰에서 자동 매칭에 사용) |
+| `common_pitfalls` | X | 흔한 함정 목록 (Phase 2.5에서 활용) |
+| `pre_mortem` | X | Pre-mortem 시나리오 (Phase 2.5에서 활용) |
+| `data_model` | X | 기본 데이터 모델 |
+
+### 우선순위
+
+**커스텀 프리셋 > 빌트인 프리셋**
+
+같은 이름/키워드 매칭 시 커스텀 프리셋이 우선 적용된다.
+빌트인 프리셋을 오버라이드하려면 동일한 키워드로 커스텀 프리셋을 생성하면 된다.
+
+### CLI 인터페이스 (스켈레톤)
+
+```bash
+# 프리셋 내보내기: 현재 프로젝트의 seed에서 프리셋 JSON 생성
+/samvil --export-preset <name>
+# → ~/.samvil/presets/<name>.json 생성
+
+# 프리셋 가져오기: URL에서 프리셋 다운로드 (향후 구현)
+/samvil --import-preset <url>
+# → URL의 JSON을 ~/.samvil/presets/에 저장
+```
+
+> **Note**: `--import-preset`은 인터페이스만 정의. 실제 다운로드 로직은 향후 구현.
+> `file.zep.works` 연동 시 URL에서 직접 import 가능하도록 설계.
+
+---
+
 ## Preset 매칭 방법
 
 인터뷰 시작 시 앱 아이디어에서 키워드 매칭:
+
+### 1단계: 커스텀 프리셋 스캔
+
+`~/.samvil/presets/` 디렉토리를 먼저 스캔하여 `keywords` 필드와 매칭.
+커스텀 프리셋이 매칭되면 빌트인 검색을 건너뛴다.
+
+### 2단계: 빌트인 프리셋 매칭
 
 ```
 "할일" / "todo" / "task" → todo
@@ -195,5 +286,7 @@
 "관리" / "CRM" / "협업" / "프로젝트" / "admin" / "팀" → admin
 "예약" / "캘린더" / "스케줄" / "booking" / "달력" → booking
 ```
+
+### 3단계: 매칭 실패 시
 
 매칭 안 되면 → competitor-analyst로 서치 → 결과 기반 임시 preset 생성.

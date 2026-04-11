@@ -13,10 +13,15 @@ description: "Socratic interview with app presets, unknown-unknown probing, and 
 1. Read `project.state.json` → confirm `current_stage` is `"interview"`, get `session_id`
 2. Read `project.config.json` → `selected_tier`
 3. Read `references/app-presets.md` → preset 매칭 준비
-4. The app idea is in the conversation context (from orchestrator)
-5. **MCP (best-effort):** Save interview start event:
+4. **커스텀 프리셋 스캔**: `~/.samvil/presets/` 디렉토리 스캔
+   - 디렉토리가 없으면 생성: `mkdir -p ~/.samvil/presets`
+   - `*.json` 파일 목록 수집
+   - 각 파일의 `name`과 `keywords` 필드 파싱
+   - 감지된 커스텀 프리셋이 있으면 목록 저장
+5. The app idea is in the conversation context (from orchestrator)
+6. **MCP (best-effort):** Save interview start event:
    ```
-   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_start", stage="interview", data='{"tier":"<selected_tier>"}')
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_start", stage="interview", data='{"tier":"<selected_tier>","custom_presets":<N>}')
    ```
 
 ## Step 0: Mode Detection
@@ -29,9 +34,48 @@ description: "Socratic interview with app presets, unknown-unknown probing, and 
 **Normal Mode** — 그 외 모든 경우:
 → 전체 인터뷰 진행
 
+## Step 0.5: 커스텀 프리셋 선택
+
+Boot Sequence에서 감지한 커스텀 프리셋이 있을 경우:
+
+**감지된 프리셋이 있는 경우:**
+```
+[SAMVIL] 감지된 커스텀 프리셋: <N>개
+  - <프리셋명1>: <설명>
+  - <프리셋명2>: <설명>
+```
+
+AskUserQuestion으로 선택:
+```
+question: "저장된 프리셋을 사용하시겠어요?"
+header: "커스텀 프리셋"
+options:
+  - label: "<프리셋명1>"
+    description: "<설명>"
+  - label: "<프리셋명2>"
+    description: "<설명>"
+  - label: "새로 만들게요"
+    description: "저장된 프리셋 없이 인터뷰 진행"
+```
+
+**선택 시**: 해당 커스텀 프리셋을 preset으로 로드 → Phase 2.5 자동 활성화
+**"새로 만들게요"**: 기존 Step 1 빌트인 매칭으로 진행
+
+**커스텀 프리셋이 없는 경우**: 이 단계를 건너뛰고 Step 1로 진행
+
 ## Step 1: Preset 매칭
 
-앱 아이디어에서 키워드로 `references/app-presets.md` 매칭:
+앱 아이디어에서 키워드로 매칭. **커스텀 프리셋 > 빌트인 프리셋** 순서로 검색.
+
+### 1a. 커스텀 프리셋 매칭
+
+`~/.samvil/presets/*.json` 파일들의 `keywords` 필드와 앱 아이디어 비교:
+- 키워드가 앱 아이디어에 포함되면 매칭
+- 여러 개 매칭 시 가장 많은 키워드가 일치하는 것 선택
+
+### 1b. 빌트인 프리셋 매칭
+
+커스텀 매칭 실패 시 `references/app-presets.md` 매칭:
 
 ```
 "할일"/"todo"/"task" → todo
@@ -48,6 +92,17 @@ description: "Socratic interview with app presets, unknown-unknown probing, and 
 
 **매칭 성공**: preset의 기본 기능/data model/흔한 함정을 컨텍스트에 로드
 **매칭 실패**: competitor-analyst 에이전트를 spawn해서 유사 앱 서치 (full tier만) 또는 빈 프리셋으로 진행
+
+### 1c. 프리셋 내보내기 (Post-Interview)
+
+인터뷰 완료 후, 사용자가 이 앱 유형을 재사용할 수 있도록 프리셋으로 저장 가능:
+
+```
+/samvil --export-preset <name>
+```
+
+실행 시 `project.seed.json`에서 프리셋 포맷(JSON)으로 변환하여 `~/.samvil/presets/<name>.json`에 저장.
+저장 시 `keywords` 필드에 앱 아이디어의 핵심 명사를 자동 추출하여 포함.
 
 ## Step 2: Tier 기반 인터뷰 깊이
 
@@ -271,6 +326,19 @@ options:
   - "수정할 부분 있어" → 수정 후 재확인
 ```
 
+**빌트인 프리셋에 매칭되지 않은 커스텀 앱 유형**이거나 **매칭 실패 후 인터뷰로 구체화한 경우**:
+```
+question: "이 앱 유형을 프리셋으로 저장할까요? 다음에 비슷한 앱을 만들 때 빠르게 시작할 수 있어요."
+header: "프리셋 저장"
+options:
+  - label: "저장할게요"
+    description: "~/.samvil/presets/에 JSON으로 저장. 프리셋 이름을 알려주세요."
+  - label: "나중에 할게요"
+    description: "저장 없이 진행. 언제든 /samvil --export-preset으로 저장 가능."
+```
+
+저장 시: 인터뷰 결과에서 프리셋 JSON 포맷(`references/app-presets.md` Custom Presets 섹션 참조)으로 변환하여 `~/.samvil/presets/<name>.json`에 Write.
+
 ## Zero-Question Mode 흐름
 
 Step 0에서 감지 시:
@@ -382,6 +450,8 @@ Each section must be non-empty. Constraints must have >= 1 item. Success criteri
 7. **tier별 모호도 목표 준수.** minimal=0.10, standard=0.05, thorough=0.02, full=0.01.
 8. **Tech stack 기본값:** preset 추천 스택 우선. 없으면 Next.js 14 + Tailwind + shadcn/ui.
 9. **Breadth rule:** 같은 기능 질문 2회 연속이면 다른 주제로 전환.
+10. **커스텀 프리셋 우선.** `~/.samvil/presets/`의 프리셋이 빌트인보다 먼저 매칭. 같은 키워드면 커스텀이 우선.
+11. **프리셋 자동 제안.** 매칭 실패 후 인터뷰로 구체화한 앱은 프리셋 저장을 제안.
 
 **TaskUpdate**: "Interview" task를 `completed`로 설정
 ## Chain (Runtime-specific)

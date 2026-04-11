@@ -112,6 +112,33 @@ Read `seed.tech_stack.framework` to determine which CLI to use:
 
 기본값: `nextjs` (seed에 명시 없으면)
 
+#### Stack Comparison (인터뷰에서 프레임워크 질문 시 참고)
+
+**지원 스택 (Stable)**
+
+| 항목 | Next.js 14 | Vite + React | Astro |
+|---|---|---|---|
+| **장점** | SSR/SSG, API routes, SEO, 풍부한 에코시스템 | 빠른 개발 서버, 가벼운 번들, 간단한 설정 | 콘텐츠 중심, MPA, 빠른 로딩, 멀티 프레임워크 |
+| **단점** | 빌드 느림, 복잡한 라우팅, 서버 필수 | SSR 미지원, SEO 취약, 대규모 앱 한계 | 동적 인터랙션 제한, React islands 오버헤드 |
+| **UI** | shadcn/ui (풀 지원) | shadcn/ui (Tailwind v4) | 커스텀 (shadcn 수동 설정) |
+| **인증** | next-auth, supabase-auth | supabase-auth | supabase-auth |
+| **DB** | supabase, prisma | supabase | supabase |
+| **배포** | Vercel, Railway | Vercel, Netlify | Vercel, Netlify |
+| **추천 사례** | 풀스택 웹앱, 대시보드, 마켓플레이스 | 관리자 도구, 내부 툴, 프로토타입 | 블로그, 랜딩페이지, 문서 사이트 |
+
+**계획 중인 스택 (Planned — 아직 scaffold 미구현)**
+
+| 항목 | Nuxt 3 | SvelteKit |
+|---|---|---|
+| **장점** | 파일 기반 라우팅, auto-imports, Nitro 서버 | 작은 번들, 컴파일 타임 최적화, 간결한 문법 |
+| **단점** | Vue 에코시스템 규모, Nuxt 모듈 의존 | 에코시스템 작음, 레퍼런스 부족 |
+| **UI** | Nuxt UI | shadcn-svelte |
+| **상태관리** | Pinia | Svelte stores (내장) |
+| **scaffold CLI** | `npx nuxi@latest init` | `npx sv create` |
+| **상태** | **🚧 Planned** | **🚧 Planned** |
+
+> **Nuxt/SvelteKit 지원은 계획 중입니다.** 선택 시: "Nuxt support coming soon" 또는 "SvelteKit support coming soon" 메시지 출력 후 `nextjs`로 폴백 안내.
+
 ### Step 2: Generate Project
 
 #### Next.js
@@ -286,6 +313,54 @@ npm create astro@6.1.5 <seed.name> -- --template minimal --install --no-git --ty
 cd ~/dev/<seed.name>
 npx astro add tailwind -y
 npx astro add react -y
+```
+
+#### Nuxt 3 (🚧 Planned — 아직 구현되지 않음)
+
+> **Nuxt support coming soon.** 아래는 설계만 포함하며, 실제 scaffold 로직은 후속 버전에서 구현 예정.
+
+**설계:**
+```bash
+cd ~/dev
+npx nuxi@latest init <seed.name>
+cd ~/dev/<seed.name>
+# 예정된 설정:
+# - @nuxt/ui 설치 및 설정
+# - Tailwind CSS 통합 (Nuxt UI에 포함)
+# - Pinia 상태관리 설정
+# - Supabase 모듈 연동 (@nuxtjs/supabase)
+# - TypeScript strict 모드
+```
+
+**seed.tech_stack.framework이 `nuxt`인 경우:**
+```
+[SAMVIL] Nuxt 3 scaffold is planned but not yet implemented.
+  Falling back to Next.js 14 (default stack).
+  Nuxt support will be available in a future version.
+```
+
+#### SvelteKit (🚧 Planned — 아직 구현되지 않음)
+
+> **SvelteKit support coming soon.** 아래는 설계만 포함하며, 실제 scaffold 로직은 후속 버전에서 구현 예정.
+
+**설계:**
+```bash
+cd ~/dev
+npx sv create <seed.name>
+cd ~/dev/<seed.name>
+# 예정된 설정:
+# - shadcn-svelte 설치 및 컴포넌트 추가
+# - Tailwind CSS 설정
+# - Svelte stores 기반 상태관리
+# - Supabase 클라이언트 설정 (@supabase/ssr)
+# - TypeScript 설정
+```
+
+**seed.tech_stack.framework이 `sveltekit`인 경우:**
+```
+[SAMVIL] SvelteKit scaffold is planned but not yet implemented.
+  Falling back to Next.js 14 (default stack).
+  SvelteKit support will be available in a future version.
 ```
 
 ### Step 3: Common Setup

@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v0.12.0`
+# SAMVIL — AI 바이브코딩 하네스 `v1.0.0`
 
 > **한 줄 입력 → 완성된 웹앱 출력**
 >
@@ -8,6 +8,39 @@
 /samvil "할일 관리 앱 with 칸반보드"
   → 인터뷰 → 설계 → 제작 → 검증 → 완성
   → npm run dev → localhost:3000 🎉
+```
+
+---
+
+## 빠른 시작 (5분)
+
+1. **설치**: Claude Code에서 `/install-plugin insamkwon/samvil` 실행
+2. **새 세션 열기**: SAMVIL이 자동으로 로드됩니다
+3. **실행**: `/samvil "할일 관리 앱"` 입력
+4. **인터뷰에 답변**: AI가 객관식으로 물어봐요
+5. **완성!** `~/dev/<app-name>/` 에 프로젝트가 생성됩니다
+
+```bash
+cd ~/dev/<app-name>
+npm run dev    # → localhost:3000
+```
+
+---
+
+## 아키텍처
+
+```mermaid
+graph LR
+    A[인터뷰] --> B[시드]
+    B --> C{Council Gate}
+    C --> D[디자인]
+    D --> E[스캐폴드]
+    E --> F[빌드]
+    F --> G[QA]
+    G --> H{통과?}
+    H -->|Yes| I[진화]
+    H -->|No| F
+    I --> J[회고]
 ```
 
 ---
@@ -317,44 +350,51 @@ Run #3: 이전 제안 반영 + 패턴 감지 → 더 빠르고 안정적
 
 ---
 
-## v0.8.0 변경사항
+## CHANGELOG
 
-- **MAX_PARALLEL=2** — 병렬 Agent 동시 실행 제한. CPU 100% 이슈 해결
-- **모델 최적화** — Council R1: Haiku, QA: Sonnet, Evolve 2사이클+: Sonnet. Opus 사용 80% 감소
-- **빌드 캐싱** — Worker는 lint/typecheck만, full build는 배치 완료 후 1회. 빌드 횟수 67% 감소
-- **토큰 절약** — Agent에게 해당 feature만 전달. QA도 AC 관련만 전달
-- **Agent Persona 경량화** — 5개 Agent에 Compact Mode 추가
-- **qa_max_iterations** 5 → 3. Ralph Loop 과다 반복 방지
-- **관측성** — build_stage_complete 이벤트에 agents_spawned, builds_run 메트릭 추가
+### v0.12.0 — Phase 3: Scale
 
-## v0.8.1 변경사항
+- 병렬 Agent 동시 실행 제한 (MAX_PARALLEL=2). CPU 100% 이슈 해결
+- Council R1: Haiku, QA: Sonnet, Evolve 2사이클+: Sonnet. Opus 사용 80% 감소
+- Worker는 lint/typecheck만, full build는 배치 완료 후 1회. 빌드 횟수 67% 감소
+- Agent에게 해당 feature만 전달. QA도 AC 관련만 전달
+- 5개 Agent에 Compact Mode 추가
+- qa_max_iterations 5 → 3. Ralph Loop 과다 반복 방지
+- build_stage_complete 이벤트에 agents_spawned, builds_run 메트릭 추가
 
-- **ISS-03 버전 동기화** — `hooks/validate-version-sync.sh` 추가. push 전 plugin.json / __init__.py / README 버전 일치 검증
-- **ISS-01/02 MCP 의무 호출** — 11개 스킬에 18개 이벤트 타입 MCP 통합. 이벤트 누락 시 경고
-- **ISS-05 모호도 tier 파라미터** — interview_engine에 tier별 임계값 (minimal 0.10 / standard 0.05 / thorough 0.02 / full 0.01)
-- **PHI-01 Playwright Smoke Run** — QA Pass 1b에서 dev server 콘솔 에러 + 빈 화면 자동 검출
-- **PHI-03 Seed 버전 히스토리** — Evolve에서 시드 백업 + compare_seeds diff 자동 저장
-- **PHI-04 QA ralph_max_iterations** — config 기반 반복 한도 (기본 3회)
-- **PHI-05 Build 구현률** — build_stage_complete에 implementation_rate 기록. Evolve diff를 파일로 저장
-- **PHI-06 Testable AC** — Seed에 AC별 vague_words 태깅. Interview에 AC 재질문 로직
+### v0.11.0 — Phase 2: Intelligence
 
-## v0.8.2 변경사항
+- QA Pass 2를 정적 Grep에서 Playwright MCP 런타임 검증으로 전환. 스크린샷 증거 저장
+- MCP Dual-Write + 장애 추적. 파일 먼저 기록 → MCP best-effort
+- 인터뷰에 DB/Auth/API 질문 추가. Supabase 클라이언트 자동 설정
+- next.config.mjs에 output:'standalone'. QA 완료 후 배포 옵션 제시
+- Council 간접 토론. Round 1에서 논쟁점 추출 → Round 2 prompt에 주입
 
-- **캐시→리포 동기화** — v0.8.1 변경사항을 git 리포에 반영. 버전 전체 0.8.2로 통일
+### v0.10.0 — Phase 1: Foundation
 
-## v0.5.0 변경사항
+- `hooks/validate-version-sync.sh` 추가. push 전 버전 일치 검증
+- 11개 스킬에 18개 이벤트 타입 MCP 통합. 누락 시 경고
+- interview_engine에 tier별 모호도 임계값 적용
+- QA Pass 1b에서 dev server 콘솔 에러 + 빈 화면 자동 검출
+- Evolve에서 시드 백업 + compare_seeds diff 자동 저장
+- config 기반 QA 반복 한도 (기본 3회)
+- build_stage_complete에 implementation_rate 기록
+- Seed에 AC별 vague_words 태깅. Interview에 AC 재질문 로직
 
-- **Blueprint Feasibility Check**: 설계 단계 끝에서 blueprint를 자동 점검. 라이브러리 충돌, 범위 현실성 검토 후 빌드 전 수정
-- **Structured Build Events**: 빌드 성공/실패, 수정 이력이 `build_fail`, `build_pass`, `fix_applied` 이벤트로 구조화 기록. 에러 카테고리(import/type/config/runtime) 분류
-- **QA Taxonomy Alignment**: 4-state 판정 체계 통일 — PASS / PARTIAL / UNIMPLEMENTED / FAIL. stub/하드코딩을 UNIMPLEMENTED로 명확 분리
-- **QA Synthesis Events**: QA 결과가 `qa_partial`, `qa_unimplemented`, `qa_verdict` 이벤트로 기록
-- **Evolve Artifact Analysis**: 진화 분석이 build.log, fix-log, events.jsonl을 직접 읽어 반복 에러 패턴과 근본 원인 식별
+### v0.9.0 — Runtime QA, MCP Resilience
 
-## v0.6.0 변경사항
+- Blueprint Feasibility Check: 설계 단계 끝에서 blueprint 자동 점검
+- Structured Build Events: 빌드 성공/실패, 수정 이력 구조화 기록
+- QA Taxonomy Alignment: 4-state 판정 체계 통일 (PASS / PARTIAL / UNIMPLEMENTED / FAIL)
+- Independent QA for Standard+: Pass 2/3을 독립 에이전트가 수행
+- Independent Evidence, Central Verdict 원칙 도입
+- Evolve Artifact Analysis: 반복 에러 패턴과 근본 원인 식별
 
-- **Independent QA for Standard+**: `standard`, `thorough`, `full` 티어에서 Pass 2(기능 검증)와 Pass 3(품질 검증)을 독립 에이전트가 수행. 코드를 작성하지 않은 에이전트가 객관적으로 검증
-- **Minimal Tier Unchanged**: `minimal` 티어는 기존 inline QA 흐름 유지 — 비용과 속도 그대로
-- **Independent Evidence, Central Verdict**: 독립 에이전트는 evidence만 반환. 최종 verdict/리포트/events 기록은 메인 세션이 전담. 에이전트가 파일을 직접 쓰지 않음
+### v0.8.2 — MCP Integration, Playwright Smoke
+
+- 캐시→리포 동기화. 버전 전체 0.8.2로 통일
+- MCP 의무 호출 체계 안정화
+- Playwright Smoke Run 기본 동작 확인
 
 ---
 
