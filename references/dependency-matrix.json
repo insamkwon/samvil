@@ -2,142 +2,83 @@
   "_comment": "SAMVIL Dependency Matrix — Stack ecosystem overview + pinned versions for deterministic scaffold. Updated: 2026-04-12",
   "_update_policy": "Update when: 1) CI breaks on a pinned version 2) Security patch needed 3) Monthly review",
 
-  "nextjs": {
-    "framework": "next@14",
-    "react": "react@18",
-    "tailwind": "tailwindcss@3",
-    "ui": "shadcn/ui",
-    "state": ["zustand", "react-context"],
-    "auth": ["next-auth", "supabase-auth"],
-    "database": ["supabase", "prisma"],
-    "deploy": ["vercel", "railway"],
+  "nextjs14": {
+    "cli_command": "npx create-next-app@14.2.35",
+    "framework": "next@14.2.35",
+    "react": "react@18.3.1",
+    "react_dom": "react-dom@18.3.1",
+    "typescript": "typescript@5.7.3",
+    "tailwindcss": "tailwindcss@3.4.19",
+    "postcss": "postcss@8.5.3",
+    "autoprefixer": "autoprefixer@10.4.21",
+    "tailwindcss_animate": "tailwindcss-animate@1.0.7",
+    "shadcn_cli": "shadcn@2.6.3",
+    "clsx": "clsx@2.1.1",
+    "tailwind_merge": "tailwind-merge@3.5.0",
+    "eslint": "eslint@8.57.1",
+    "eslint_config_next": "eslint-config-next@14.2.35",
+    "shadcn_components": ["button", "card", "input", "dialog", "label", "select", "textarea"],
+    "notes": "shadcn init generates Tailwind v4 CSS. Must overwrite with HSL v3 config after init.",
     "status": "stable"
   },
 
   "vite-react": {
-    "framework": "vite@5",
-    "react": "react@18",
-    "tailwind": "tailwindcss@4",
-    "ui": "shadcn/ui",
-    "state": ["zustand", "react-context"],
-    "auth": ["supabase-auth"],
-    "database": ["supabase"],
-    "deploy": ["vercel", "netlify"],
+    "cli_command": "npm create vite@5.4.21 -- --template react-ts",
+    "framework": "vite@5.4.21",
+    "react": "react@18.3.1",
+    "react_dom": "react-dom@18.3.1",
+    "typescript": "typescript@5.7.3",
+    "tailwindcss_vite": "@tailwindcss/vite@4.2.2",
+    "tailwindcss": "tailwindcss@4.1.4",
+    "shadcn_cli": "shadcn@2.6.3",
+    "clsx": "clsx@2.1.1",
+    "tailwind_merge": "tailwind-merge@3.5.0",
+    "shadcn_components": ["button", "card", "input", "dialog", "label", "select", "textarea"],
+    "notes": "Vite uses Tailwind v4 natively. @tailwindcss/vite plugin required. shadcn supports v4 directly.",
     "status": "stable"
   },
 
   "astro": {
-    "framework": "astro@4",
-    "react": "react@18",
-    "tailwind": "tailwindcss@3",
-    "ui": "custom",
-    "state": ["react-context"],
-    "auth": ["supabase-auth"],
-    "database": ["supabase"],
-    "deploy": ["vercel", "netlify"],
+    "cli_command": "npm create astro@6.1.5 -- --template minimal --install --no-git --typescript strict",
+    "framework": "astro@6.1.5",
+    "react": "react@18.3.1",
+    "react_dom": "react-dom@18.3.1",
+    "typescript": "typescript@5.7.3",
+    "astro_tailwind": "@astrojs/tailwind@6.0.2",
+    "astro_react": "@astrojs/react@4.2.4",
+    "clsx": "clsx@2.1.1",
+    "tailwind_merge": "tailwind-merge@3.5.0",
+    "shadcn_components": [],
+    "notes": "Astro uses React islands. shadcn/ui manual setup required — copy component files from Next.js setup.",
     "status": "stable"
   },
 
-  "nuxt": {
+  "common": {
+    "supabase_js": "@supabase/supabase-js@2.49.4",
+    "supabase_ssr": "@supabase/ssr@0.6.1",
+    "playwright": "@playwright/test@1.52.0"
+  },
+
+  "nuxt_planned": {
+    "cli_command": "npx nuxi@latest init",
     "framework": "nuxt@3",
     "vue": "vue@3",
-    "tailwind": "tailwindcss@3",
-    "ui": "nuxt-ui",
-    "state": ["pinia"],
-    "auth": ["supabase-auth"],
-    "database": ["supabase", "prisma"],
-    "deploy": ["vercel", "railway"],
+    "typescript": "typescript@5.7.3",
+    "tailwindcss": "tailwindcss@3.4.19",
+    "ui_lib": "@nuxt/ui",
+    "state": "pinia",
+    "notes": "Nuxt scaffold is planned. Not yet implemented.",
     "status": "planned"
   },
 
-  "sveltekit": {
-    "framework": "sveltekit@2",
+  "sveltekit_planned": {
+    "cli_command": "npx sv create",
+    "framework": "@sveltejs/kit@2",
     "svelte": "svelte@4",
-    "tailwind": "tailwindcss@3",
-    "ui": "shadcn-svelte",
-    "state": ["svelte-stores"],
-    "auth": ["supabase-auth"],
-    "database": ["supabase"],
-    "deploy": ["vercel", "netlify"],
+    "typescript": "typescript@5.7.3",
+    "tailwindcss": "tailwindcss@3.4.19",
+    "ui_lib": "shadcn-svelte",
+    "notes": "SvelteKit scaffold is planned. Not yet implemented.",
     "status": "planned"
-  },
-
-  "pinned_versions": {
-    "_comment": "Exact versions for deterministic scaffold. CLI commands use these pins.",
-
-    "nextjs14": {
-      "cli_command": "npx create-next-app@14.2.35",
-      "framework": "next@14.2.35",
-      "react": "react@18.3.1",
-      "react_dom": "react-dom@18.3.1",
-      "typescript": "typescript@5.7.3",
-      "tailwindcss": "tailwindcss@3.4.19",
-      "postcss": "postcss@8.5.3",
-      "autoprefixer": "autoprefixer@10.4.21",
-      "tailwindcss_animate": "tailwindcss-animate@1.0.7",
-      "shadcn_cli": "shadcn@2.6.3",
-      "clsx": "clsx@2.1.1",
-      "tailwind_merge": "tailwind-merge@3.5.0",
-      "eslint": "eslint@8.57.1",
-      "eslint_config_next": "eslint-config-next@14.2.35",
-      "shadcn_components": ["button", "card", "input", "dialog", "label", "select", "textarea"],
-      "notes": "shadcn init generates Tailwind v4 CSS. Must overwrite with HSL v3 config after init."
-    },
-
-    "vite-react": {
-      "cli_command": "npm create vite@5.4.21 -- --template react-ts",
-      "framework": "vite@5.4.21",
-      "react": "react@18.3.1",
-      "react_dom": "react-dom@18.3.1",
-      "typescript": "typescript@5.7.3",
-      "tailwindcss_vite": "@tailwindcss/vite@4.2.2",
-      "tailwindcss": "tailwindcss@4.1.4",
-      "shadcn_cli": "shadcn@2.6.3",
-      "clsx": "clsx@2.1.1",
-      "tailwind_merge": "tailwind-merge@3.5.0",
-      "shadcn_components": ["button", "card", "input", "dialog", "label", "select", "textarea"],
-      "notes": "Vite uses Tailwind v4 natively. @tailwindcss/vite plugin required. shadcn supports v4 directly."
-    },
-
-    "astro": {
-      "cli_command": "npm create astro@6.1.5 -- --template minimal --install --no-git --typescript strict",
-      "framework": "astro@6.1.5",
-      "react": "react@18.3.1",
-      "react_dom": "react-dom@18.3.1",
-      "typescript": "typescript@5.7.3",
-      "astro_tailwind": "@astrojs/tailwind@6.0.2",
-      "astro_react": "@astrojs/react@4.2.4",
-      "clsx": "clsx@2.1.1",
-      "tailwind_merge": "tailwind-merge@3.5.0",
-      "shadcn_components": [],
-      "notes": "Astro uses React islands. shadcn/ui manual setup required — copy component files from Next.js setup."
-    },
-
-    "nuxt_planned": {
-      "cli_command": "npx nuxi@latest init",
-      "framework": "nuxt@3",
-      "vue": "vue@3",
-      "typescript": "typescript@5.7.3",
-      "tailwindcss": "tailwindcss@3.4.19",
-      "ui_lib": "@nuxt/ui",
-      "state": "pinia",
-      "notes": "Nuxt scaffold is planned. Not yet implemented."
-    },
-
-    "sveltekit_planned": {
-      "cli_command": "npx sv create",
-      "framework": "@sveltejs/kit@2",
-      "svelte": "svelte@4",
-      "typescript": "typescript@5.7.3",
-      "tailwindcss": "tailwindcss@3.4.19",
-      "ui_lib": "shadcn-svelte",
-      "notes": "SvelteKit scaffold is planned. Not yet implemented."
-    },
-
-    "common": {
-      "supabase_js": "@supabase/supabase-js@2.49.4",
-      "supabase_ssr": "@supabase/ssr@0.6.1",
-      "playwright": "@playwright/test@1.52.0"
-    }
   }
 }
