@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "samvil://seed-schema/v1",
+  "title": "SAMVIL Seed Schema",
+  "description": "Immutable specification for SAMVIL project generation. Version starts at 1, increments on evolve.",
+  "type": "object",
+  "required": ["name", "description", "tech_stack", "core_experience", "features", "acceptance_criteria", "constraints", "out_of_scope", "version"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
+      "minLength": 2,
+      "maxLength": 100,
+      "description": "kebab-case project name, must be valid npm package name"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 200,
+      "description": "One-line project description"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["web", "mobile", "desktop"],
+      "default": "web"
+    },
+    "tech_stack": {
+      "type": "object",
+      "required": ["framework"],
+      "additionalProperties": false,
+      "properties": {
+        "framework": {
+          "type": "string",
+          "enum": ["nextjs", "vite-react", "astro"],
+          "description": "Target framework"
+        },
+        "ui": {
+          "type": "string",
+          "enum": ["tailwind", "css-modules", "styled-components"],
+          "default": "tailwind"
+        },
+        "state": {
+          "type": "string",
+          "enum": ["zustand", "useState", "jotai", "none"],
+          "default": "useState"
+        },
+        "router": {
+          "type": "string",
+          "enum": ["app-router", "pages-router", "react-router"],
+          "default": "app-router"
+        }
+      }
+    },
+    "core_experience": {
+      "type": "object",
+      "required": ["description", "primary_screen", "key_interactions"],
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 20,
+          "description": "What user does in first 30 seconds"
+        },
+        "primary_screen": {
+          "type": "string",
+          "pattern": "^[A-Z][a-zA-Z0-9]*$",
+          "description": "PascalCase component name for primary screen"
+        },
+        "key_interactions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 3 },
+          "minItems": 1,
+          "maxItems": 10,
+          "description": "Verb-noun format interaction descriptions"
+        }
+      }
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "priority"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "kebab-case feature name"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "independent": {
+            "type": "boolean",
+            "default": true
+          },
+          "depends_on": {
+            "type": ["string", "null"],
+            "default": null,
+            "description": "Must reference an existing feature name if independent=false"
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 10 },
+      "minItems": 1,
+      "description": "Testable statements that define done"
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Technical or business constraints. Empty = red flag."
+    },
+    "out_of_scope": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Explicitly excluded features. Empty = scope creep risk."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "Schema version, increments on evolve"
+    }
+  }
+}

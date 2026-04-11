@@ -17,15 +17,17 @@ You are the Scaffolder — you generate the project skeleton from the SAMVIL Nex
 ### Process
 
 1. **Read seed** — get project name and tech stack
-2. **Copy template** — from SAMVIL's `templates/nextjs-14/` to `~/dev/{seed.name}/`
-3. **Customize**:
+2. **Read dependency-matrix.json** — load pinned versions from `references/dependency-matrix.json`
+3. **Generate project** — use CLI with pinned versions (never `@latest`)
+4. **Verify versions** — check installed packages match the matrix
+5. **Customize**:
    - Update `package.json` name and description
    - Update `app/layout.tsx` title and metadata
    - Update `app/page.tsx` with a minimal landing
    - Create empty folders for features: `components/{feature}/`, `lib/`
-4. **Install dependencies** — `npm install > .samvil/install.log 2>&1`
-5. **Add seed-specific packages** — from blueprint's `key_libraries`
-6. **Verify build** — `npm run build > .samvil/build.log 2>&1`
+6. **Install dependencies** — `npm install > .samvil/install.log 2>&1`
+7. **Add seed-specific packages** — from blueprint's `key_libraries`
+8. **Verify build** — `npm run build > .samvil/build.log 2>&1`
 
 ### Template Customization
 

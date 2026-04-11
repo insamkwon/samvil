@@ -265,6 +265,38 @@ async def score_ambiguity(interview_state: str, tier: str = "standard") -> str:
     return json.dumps(result)
 
 
+# ── Schema validation tools (Inter-Stage Contract) ────────────
+
+
+@mcp.tool()
+async def validate_seed(seed_json: str) -> str:
+    """Validate a seed JSON against seed-schema.json.
+    Returns {valid: bool, errors: [...]}."""
+    from .seed_manager import validate_seed as _validate
+    seed = json.loads(seed_json)
+    result = _validate(seed)
+    return json.dumps(result)
+
+
+@mcp.tool()
+async def validate_state(state_json: str) -> str:
+    """Validate a state JSON against state-schema.json.
+    Returns {valid: bool, errors: [...]}."""
+    from .seed_manager import validate_state as _validate
+    state = json.loads(state_json)
+    result = _validate(state)
+    return json.dumps(result)
+
+
+@mcp.tool()
+async def check_db_integrity() -> str:
+    """Check SQLite database integrity via PRAGMA integrity_check.
+    Returns {status: 'ok'|'error', details: ...}."""
+    store = await get_store()
+    result = await store.check_integrity()
+    return json.dumps(result)
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 

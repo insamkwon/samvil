@@ -16,18 +16,25 @@ You are adopting the role of **Scaffolder**. Create a project directory with a v
 4. Read `project.blueprint.json` → architecture decisions (if exists)
    - Use `key_libraries` to know which npm packages to install
    - Use `component_structure` to create feature directories
+5. **Read `references/dependency-matrix.json`** → get pinned versions for the target stack
 
 ## Process
+
+### Step 0: Load Pinned Versions (Determinism)
+
+Read `references/dependency-matrix.json` to get exact version pins. This ensures **same input → same output, every time**.
+
+Never use `@latest` or unversioned installs. Always use versions from the matrix.
 
 ### Step 1: Determine Stack
 
 Read `seed.tech_stack.framework` to determine which CLI to use:
 
-| `tech_stack.framework` | CLI Command | 비고 |
-|---|---|---|
-| `nextjs` | `npx create-next-app@14` | SSR, API routes, SEO |
-| `vite-react` | `npm create vite@latest -- --template react-ts` | 가벼움, SPA |
-| `astro` | `npm create astro@latest` | 정적, 빠른 로딩 |
+| `tech_stack.framework` | Matrix Key | CLI Command (pinned) | 비고 |
+|---|---|---|---|
+| `nextjs` | `nextjs14` | `npx create-next-app@14.2.35` | SSR, API routes, SEO |
+| `vite-react` | `vite-react` | `npm create vite@5.4.21 -- --template react-ts` | 가벼움, SPA |
+| `astro` | `astro` | `npm create astro@6.1.5 -- --template minimal` | 정적, 빠른 로딩 |
 
 기본값: `nextjs` (seed에 명시 없으면)
 
@@ -37,9 +44,16 @@ Read `seed.tech_stack.framework` to determine which CLI to use:
 
 ```bash
 cd ~/dev
-npx create-next-app@14 <seed.name> --typescript --tailwind --app --src-dir=false --import-alias="@/*" --eslint --use-npm <<< $'No\n'
+npx create-next-app@14.2.35 <seed.name> --typescript --tailwind --app --src-dir=false --import-alias="@/*" --eslint --use-npm <<< $'No\n'
 cd ~/dev/<seed.name>
-# create-next-app이 npm install까지 완료함. 추가 패키지만 별도 설치.
+# create-next-app@14.2.35이 npm install까지 완료함. 추가 패키지만 별도 설치.
+```
+
+**Version pin verification (idempotency check):**
+```bash
+# Verify installed next version matches matrix
+node -e "console.log(require('./package.json').dependencies.next)"
+# Must show 14.2.35. If not, run: npm install next@14.2.35 react@18.3.1 react-dom@18.3.1
 ```
 
 **Next.js 14 + shadcn 호환 설정** — shadcn@latest가 Tailwind v4 문법을 생성하므로 반드시 아래로 덮어써야 함:
@@ -161,9 +175,9 @@ export default config;
 }
 ```
 
-**4) 의존성 설치:**
+**4) 의존성 설치 (pinned versions from matrix):**
 ```bash
-npm install tailwindcss-animate --save-dev
+npm install tailwindcss-animate@1.0.7 --save-dev
 ```
 
 **이 4단계를 shadcn init 전에 실행한다.** shadcn init이 globals.css를 덮어쓰면 다시 위 CSS로 교체.
@@ -172,10 +186,10 @@ npm install tailwindcss-animate --save-dev
 
 ```bash
 cd ~/dev
-npm create vite@latest <seed.name> -- --template react-ts
+npm create vite@5.4.21 <seed.name> -- --template react-ts
 cd ~/dev/<seed.name>
 npm install
-npm install -D tailwindcss @tailwindcss/vite
+npm install -D tailwindcss@4.1.4 @tailwindcss/vite@4.2.2
 ```
 
 **Vite + Tailwind v4 설정**:
@@ -186,15 +200,15 @@ npm install -D tailwindcss @tailwindcss/vite
 
 shadcn/ui는 Vite에서 v4 네이티브 지원:
 ```bash
-npx shadcn@latest init -y -d
-npx shadcn@latest add button input -y
+npx shadcn@2.6.3 init -y -d
+npx shadcn@2.6.3 add button card input dialog label select textarea -y
 ```
 
 #### Astro
 
 ```bash
 cd ~/dev
-npm create astro@latest <seed.name> -- --template minimal --install --no-git --typescript strict
+npm create astro@6.1.5 <seed.name> -- --template minimal --install --no-git --typescript strict
 cd ~/dev/<seed.name>
 npx astro add tailwind -y
 npx astro add react -y
@@ -210,9 +224,9 @@ npx astro add react -y
    ```
    (Vite는 `src/components`, `src/lib`)
 
-2. **cn() utility** (shadcn 없으면 직접 생성):
+2. **cn() utility** (shadcn 없으면 직접 생성, pinned versions):
    ```bash
-   npm install clsx tailwind-merge
+   npm install clsx@2.1.1 tailwind-merge@3.5.0
    ```
    `lib/utils.ts` (또는 `src/lib/utils.ts`):
    ```typescript
@@ -223,10 +237,10 @@ npx astro add react -y
    }
    ```
 
-3. **shadcn/ui 초기화** (Next.js, Vite):
+3. **shadcn/ui 초기화** (Next.js, Vite) — **반드시 매트릭스 버전 사용**:
    ```bash
-   npx shadcn@latest init -y -d > .samvil/shadcn-init.log 2>&1
-   npx shadcn@latest add button card input dialog -y >> .samvil/shadcn-init.log 2>&1
+   npx shadcn@2.6.3 init -y -d > .samvil/shadcn-init.log 2>&1
+   npx shadcn@2.6.3 add button card input dialog label select textarea -y >> .samvil/shadcn-init.log 2>&1
    ```
    **⚠️ Next.js 14 전용**: shadcn init이 globals.css와 tailwind.config를 Tailwind v4 문법(oklch)으로 덮어쓴다. **반드시 위 Step 2의 HSL 버전으로 다시 교체해야 한다.** 교체 안 하면 색상이 전부 빠져서 밋밋한 흰/검 디자인이 됨.
    ```
@@ -331,6 +345,35 @@ npx astro add react -y
 cd ~/dev/<seed.name>
 npm run build > .samvil/build.log 2>&1
 echo "Exit code: $?"
+```
+
+**Pre-build Version Check (idempotency guard):**
+```bash
+# Verify key dependencies match the matrix before building
+node -e "
+const pkg = require('./package.json');
+const checks = {
+  'next': '14.2.35',
+  'react': '18.3.1',
+  'react-dom': '18.3.1',
+  'tailwindcss': '3.4.19',
+  'tailwindcss-animate': '1.0.7',
+  'clsx': '2.1.1',
+  'tailwind-merge': '3.5.0'
+};
+let ok = true;
+for (const [dep, expected] of Object.entries(checks)) {
+  const actual = pkg.dependencies[dep] || pkg.devDependencies[dep] || 'MISSING';
+  // Strip leading ^ or ~
+  const clean = actual.replace(/^[\^~]/, '');
+  if (clean !== expected) {
+    console.error('MISMATCH: ' + dep + ' expected=' + expected + ' actual=' + actual);
+    ok = false;
+  }
+}
+if (ok) console.log('All versions match dependency-matrix.json');
+process.exit(ok ? 0 : 1);
+"
 ```
 
 **If build succeeds (exit 0):**

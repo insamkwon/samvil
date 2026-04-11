@@ -63,6 +63,7 @@ class EventStore:
 
     async def initialize(self) -> None:
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(SCHEMA)
             await db.commit()
 
@@ -77,6 +78,7 @@ class EventStore:
             updated_at=_now(),
         )
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN")
             await db.execute(
                 "INSERT INTO sessions (id, project_name, seed_version, current_stage, agent_tier, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (session.id, session.project_name, session.seed_version, session.current_stage, session.agent_tier, session.created_at, session.updated_at),
@@ -143,6 +145,7 @@ class EventStore:
 
     async def update_session_stage(self, session_id: str, stage: Stage) -> None:
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN")
             await db.execute(
                 "UPDATE sessions SET current_stage = ?, updated_at = ? WHERE id = ?",
                 (stage.value, _now(), session_id),
@@ -151,6 +154,7 @@ class EventStore:
 
     async def update_session_seed_version(self, session_id: str, version: int) -> None:
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN")
             await db.execute(
                 "UPDATE sessions SET seed_version = ?, updated_at = ? WHERE id = ?",
                 (version, _now(), session_id),
@@ -175,6 +179,7 @@ class EventStore:
             timestamp=_now(),
         )
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN")
             await db.execute(
                 "INSERT INTO events (id, session_id, event_type, stage, data, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
                 (event.id, event.session_id, event.event_type.value, event.stage.value, json.dumps(event.data), event.timestamp),
@@ -231,6 +236,7 @@ class EventStore:
             created_at=_now(),
         )
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN")
             await db.execute(
                 "INSERT OR REPLACE INTO seed_versions (id, session_id, version, seed_json, change_summary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (sv.id, sv.session_id, sv.version, sv.seed_json, sv.change_summary, sv.created_at),
@@ -257,3 +263,13 @@ class EventStore:
                 )
                 for r in rows
             ]
+
+    # ── Integrity ─────────────────────────────────────────
+
+    async def check_integrity(self) -> dict[str, str]:
+        """Run PRAGMA integrity_check and return the result."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("PRAGMA integrity_check")
+            row = await cursor.fetchone()
+            status = row[0] if row else "unknown"
+            return {"status": status}

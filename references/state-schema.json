@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "samvil://state-schema/v1",
+  "title": "SAMVIL State Schema",
+  "description": "Runtime state for SAMVIL pipeline execution. Updated at each stage transition.",
+  "type": "object",
+  "required": ["seed_version", "current_stage"],
+  "additionalProperties": true,
+  "properties": {
+    "seed_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Current seed version"
+    },
+    "current_stage": {
+      "type": "string",
+      "enum": ["interview", "seed", "scaffold", "build", "qa", "retro", "evolve", "complete"],
+      "description": "Current pipeline stage"
+    },
+    "session_id": {
+      "type": ["string", "null"],
+      "description": "MCP session ID for event tracking"
+    },
+    "completed_features": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "List of completed feature names"
+    },
+    "in_progress": {
+      "type": ["string", "null"],
+      "default": null,
+      "description": "Currently building feature name"
+    },
+    "failed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "feature": { "type": "string" },
+          "stage": { "type": "string" },
+          "error": { "type": "string" },
+          "timestamp": { "type": "string", "format": "date-time" }
+        },
+        "required": ["feature", "stage", "error"]
+      },
+      "default": []
+    },
+    "build_retries": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "qa_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pass": { "type": "integer" },
+          "fail": { "type": "integer" },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      },
+      "default": []
+    },
+    "retro_count": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    }
+  }
+}

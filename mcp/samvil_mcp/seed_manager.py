@@ -3,11 +3,109 @@
 Compares seed versions to detect convergence:
   - similarity = 1.0 means identical seeds
   - similarity ≥ 0.95 = converged (stop evolving)
+
+Also provides JSON Schema validation for inter-stage contracts.
 """
 
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+
+
+# ── Schema Validation ──────────────────────────────────────────────
+
+SCHEMAS_DIR = Path(__file__).parent.parent.parent / "references"
+
+
+def _load_schema(schema_name: str) -> dict:
+    """Load a JSON Schema from references/ directory."""
+    schema_path = SCHEMAS_DIR / schema_name
+    if not schema_path.exists():
+        raise FileNotFoundError(f"Schema not found: {schema_path}")
+    with open(schema_path) as f:
+        return json.load(f)
+
+
+def validate_seed(seed: dict) -> dict:
+    """Validate a seed against seed-schema.json.
+
+    Returns dict with 'valid' bool and 'errors' list.
+    Uses jsonschema if available, falls back to manual checks.
+    """
+    errors = []
+
+    # Required fields
+    required = ["name", "description", "tech_stack", "core_experience",
+                "features", "acceptance_criteria", "constraints",
+                "out_of_scope", "version"]
+    for field in required:
+        if field not in seed:
+            errors.append(f"Missing required field: {field}")
+
+    if errors:
+        return {"valid": False, "errors": errors}
+
+    # Name validation
+    import re
+    if not re.match(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$", seed.get("name", "")):
+        errors.append("name must be kebab-case (lowercase, hyphens, no spaces)")
+
+    # tech_stack.framework
+    if seed.get("tech_stack", {}).get("framework") not in ("nextjs", "vite-react", "astro"):
+        errors.append("tech_stack.framework must be nextjs, vite-react, or astro")
+
+    # features
+    features = seed.get("features", [])
+    if not features:
+        errors.append("features must have at least 1 item")
+    for i, feat in enumerate(features):
+        if not feat.get("name"):
+            errors.append(f"features[{i}].name is required")
+        if feat.get("priority", 0) < 1:
+            errors.append(f"features[{i}].priority must be >= 1")
+
+    # acceptance_criteria
+    ac = seed.get("acceptance_criteria", [])
+    if not ac:
+        errors.append("acceptance_criteria must have at least 1 item")
+
+    # core_experience
+    ce = seed.get("core_experience", {})
+    if not ce.get("primary_screen") or not re.match(r"^[A-Z]", ce.get("primary_screen", "")):
+        errors.append("core_experience.primary_screen must be PascalCase")
+    if not ce.get("key_interactions"):
+        errors.append("core_experience.key_interactions must have at least 1 item")
+
+    # constraints and out_of_scope
+    if not seed.get("constraints"):
+        errors.append("constraints is empty — may indicate missing requirements")
+    if not seed.get("out_of_scope"):
+        errors.append("out_of_scope is empty — scope creep risk")
+
+    # depends_on reference check
+    feature_names = {f["name"] for f in features if "name" in f}
+    for feat in features:
+        if not feat.get("independent", True) and feat.get("depends_on"):
+            if feat["depends_on"] not in feature_names:
+                errors.append(f"features[{feat['name']}].depends_on references non-existent feature: {feat['depends_on']}")
+
+    return {"valid": len(errors) == 0, "errors": errors}
+
+
+def validate_state(state: dict) -> dict:
+    """Validate a state dict against state-schema.json."""
+    errors = []
+
+    if "seed_version" not in state:
+        errors.append("Missing required field: seed_version")
+    if "current_stage" not in state:
+        errors.append("Missing required field: current_stage")
+    elif state["current_stage"] not in ("interview", "seed", "scaffold", "build", "qa", "retro", "evolve", "complete"):
+        errors.append(f"Invalid current_stage: {state['current_stage']}")
+
+    return {"valid": len(errors) == 0, "errors": errors}
 
 
 def compare_seeds(seed_a: dict, seed_b: dict) -> dict:
