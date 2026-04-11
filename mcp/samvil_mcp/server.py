@@ -1,4 +1,15 @@
-"""SAMVIL MCP Server — persistence and analysis tools for the harness."""
+"""SAMVIL MCP Server — persistence and analysis tools for the harness.
+
+Graceful Degradation (INV-7):
+  - All state changes are first written to files (project.state.json, .samvil/metrics.json).
+  - MCP is a secondary channel. Pipeline continues even when MCP is down.
+  - MCP call failures are logged to .samvil/mcp-health.jsonl.
+  - Skill-level MCP try/catch pattern:
+      1. Write state to file (always)
+      2. Attempt MCP call (best-effort)
+      3. On failure, log to mcp-health.jsonl
+      4. Continue pipeline without blocking
+"""
 
 from __future__ import annotations
 
@@ -26,6 +37,21 @@ async def get_store() -> EventStore:
     return _store
 
 
+def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
+    """Log MCP health event to .samvil/mcp-health.jsonl for retro reporting."""
+    from datetime import datetime, timezone
+    health_path = Path.home() / ".samvil" / "mcp-health.jsonl"
+    health_path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "status": status,
+        "tool": tool,
+        "error": error,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    with open(health_path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
 # ── Session tools ─────────────────────────────────────────────
 
 
@@ -42,6 +68,7 @@ async def health_check() -> str:
             "sessions_accessible": True,
         })
     except Exception as e:
+        _log_mcp_health("fail", "health_check", str(e))
         return json.dumps({
             "status": "error",
             "error": str(e),
@@ -55,9 +82,13 @@ async def health_check() -> str:
 @mcp.tool()
 async def create_session(project_name: str, agent_tier: str = "standard") -> str:
     """Create a new SAMVIL session for a project. Returns session ID."""
-    store = await get_store()
-    session = await store.create_session(project_name, agent_tier)
-    return json.dumps({"session_id": session.id, "project_name": project_name, "tier": agent_tier})
+    try:
+        store = await get_store()
+        session = await store.create_session(project_name, agent_tier)
+        return json.dumps({"session_id": session.id, "project_name": project_name, "tier": agent_tier})
+    except Exception as e:
+        _log_mcp_health("fail", "create_session", str(e))
+        return json.dumps({"session_id": None, "error": str(e)})
 
 
 @mcp.tool()
@@ -115,18 +146,24 @@ async def save_event(
     event_type: str,
     stage: str,
     data: str = "{}",
+    token_count: int | None = None,
 ) -> str:
-    """Save a pipeline event. data is a JSON string."""
-    store = await get_store()
-    event = await store.save_event(
-        session_id=session_id,
-        event_type=EventType(event_type),
-        stage=Stage(stage),
-        data=json.loads(data),
-    )
-    # Update session's current stage
-    await store.update_session_stage(session_id, Stage(stage))
-    return json.dumps({"event_id": event.id, "saved": True})
+    """Save a pipeline event. data is a JSON string. token_count is optional estimated token usage."""
+    try:
+        store = await get_store()
+        event = await store.save_event(
+            session_id=session_id,
+            event_type=EventType(event_type),
+            stage=Stage(stage),
+            data=json.loads(data),
+            token_count=token_count,
+        )
+        # Update session's current stage
+        await store.update_session_stage(session_id, Stage(stage))
+        return json.dumps({"event_id": event.id, "saved": True})
+    except Exception as e:
+        _log_mcp_health("fail", "save_event", str(e))
+        return json.dumps({"event_id": None, "saved": False, "error": str(e)})
 
 
 @mcp.tool()
@@ -140,6 +177,7 @@ async def get_events(session_id: str, event_type: str = "", limit: int = 50) -> 
         "event_type": e.event_type,
         "stage": e.stage,
         "data": e.data,
+        "token_count": e.token_count,
         "timestamp": e.timestamp,
     } for e in events])
 
@@ -154,8 +192,11 @@ async def session_status(session_id: str) -> str:
 
     events = await store.get_events(session_id, limit=100)
     event_counts: dict[str, int] = {}
+    total_tokens = 0
     for e in events:
         event_counts[e.event_type] = event_counts.get(e.event_type, 0) + 1
+        if e.token_count:
+            total_tokens += e.token_count
 
     return json.dumps({
         "session": {
@@ -167,6 +208,7 @@ async def session_status(session_id: str) -> str:
         },
         "event_summary": event_counts,
         "total_events": len(events),
+        "total_tokens": total_tokens if total_tokens > 0 else None,
     })
 
 

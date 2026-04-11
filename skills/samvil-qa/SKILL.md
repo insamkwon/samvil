@@ -38,6 +38,104 @@ options:
 - Pass 3 (Quality): 코드 품질 — 정상 실행
 - `.samvil/` 디렉토리 생성 후 결과 저장
 
+## Incremental QA — 변경된 Feature만 재검증
+
+### QA 결과 캐시 (.samvil/qa-results.json)
+
+이전 QA 결과를 저장하여 변경 없는 feature의 재검증을 생략:
+
+**캐시 파일 포맷** (`.samvil/qa-results.json`):
+```json
+{
+  "_meta": {
+    "seed_version": "<seed.version>",
+    "seed_hash": "<features 해시>",
+    "last_full_qa": "2025-01-01T00:00:00Z",
+    "total_iterations": 3
+  },
+  "features": {
+    "feature_name_1": {
+      "status": "PASS",
+      "timestamp": "2025-01-01T12:00:00Z",
+      "seed_hash": "abc123def456",
+      "ac_results": [
+        { "criterion": "AC 설명", "verdict": "PASS", "method": "runtime" }
+      ]
+    },
+    "feature_name_2": {
+      "status": "FAIL",
+      "timestamp": "2025-01-01T12:00:00Z",
+      "seed_hash": "abc123def456",
+      "ac_results": [
+        { "criterion": "AC 설명", "verdict": "FAIL", "method": "runtime", "issue": "버튼 클릭 불가" }
+      ]
+    }
+  }
+}
+```
+
+### 증분 QA 실행 로직
+
+1. **qa-results.json 읽기** (존재하는 경우)
+2. **seed diff 계산** — 이전 seed_hash와 현재 seed_hash 비교
+3. **변경된 feature 추출**:
+   ```bash
+   cd ~/dev/<seed.name>
+   # 현재 features 해시
+   node -e "
+   const crypto = require('crypto');
+   const seed = require('./project.seed.json');
+   const features = seed.features || [];
+   features.forEach(f => {
+     const hash = crypto.createHash('sha256')
+       .update(JSON.stringify(f)).digest('hex').slice(0, 12);
+     console.log(f.name + '|' + hash);
+   });
+   "
+   ```
+4. **이전 결과와 비교** — 각 feature의 seed_hash가 동일하면 이전 결과 재사용
+5. **재검증 대상만 Pass 1~3 실행**
+
+### 증분 QA 출력
+
+```
+[SAMVIL] 증분 QA 모드
+  이전 QA 결과: .samvil/qa-results.json
+  전체 feature: N개
+  변경 감지: M개 (재검증)
+  변경 없음: K개 (이전 결과 재사용)
+
+  재검증 대상:
+    - feature_A (seed 변경)
+    - feature_B (이전 FAIL)
+
+  재사용 (스킵):
+    - feature_C: PASS (2025-01-01T12:00:00Z)
+    - feature_D: PASS (2025-01-01T12:00:00Z)
+```
+
+### 전체 재검증 (--full-qa)
+
+사용자가 전체 재검증을 요청한 경우:
+```
+[SAMVIL] 전체 QA 모드 (--full-qa)
+  모든 feature 재검증
+```
+
+전체 재검증 조건:
+- 사용자가 명시적으로 `--full-qa` 요청
+- seed.version이 변경됨 (메이저/마이너 버전업)
+- `.samvil/qa-results.json`이 손상되었거나 없음
+- 이전 QA에서 overall FAIL이었던 경우
+
+### QA 결과 갱신
+
+QA 완료 후 `.samvil/qa-results.json` 갱신:
+1. 재검증한 feature의 결과 업데이트
+2. 재사용한 feature는 타임스탬프 유지
+3. `_meta.last_full_qa` 업데이트 (전체 QA 시에만)
+4. `_meta.total_iterations` 증가
+
 ## Pass 1: Mechanical Verification
 
 ```bash

@@ -20,7 +20,81 @@ You are adopting the role of **Scaffolder**. Create a project directory with a v
 
 ## Process
 
-### Step 0: Load Pinned Versions (Determinism)
+### Step 0: 기존 프로젝트 감지 및 캐시 확인
+
+#### 기존 프로젝트 감지 (Incremental Scaffold)
+
+```bash
+ls ~/dev/<seed.name>/package.json 2>/dev/null
+```
+
+**package.json이 존재하면:**
+
+```
+[SAMVIL] 기존 프로젝트 감지. scaffold 생략.
+  Project: ~/dev/<seed.name>/
+```
+
+기존 프로젝트 감지 시 전체 scaffold를 스킵하고 대신:
+1. `blueprint.key_libraries`에서 누락된 dependency만 추가 설치
+   ```bash
+   cd ~/dev/<seed.name>
+   # package.json에 없는 패키지만 골라서 설치
+   node -e "
+   const pkg = require('./package.json');
+   const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+   const needed = process.argv.slice(2).filter(d => !allDeps[d.split('@')[0]]);
+   if (needed.length) console.log(needed.join(' '));
+   " <missing_packages>
+   ```
+2. `.samvil/` 디렉토리가 없으면 생성
+3. Step 4 (Build Verification)로 바로 이동
+
+**package.json이 없으면:** 아래 Step 0.5 ~ Step 5까지 전체 scaffold 실행.
+
+#### 빌드 캐시 시스템 (.samvil/cache/)
+
+캐시는 동일한 feature의 반복 빌드를 방지:
+
+```bash
+mkdir -p ~/dev/<seed.name>/.samvil/cache
+```
+
+**캐시 키 생성:**
+```bash
+# seed.features 배열을 해시하여 캐시 키 생성
+node -e "
+const crypto = require('crypto');
+const seed = require('./project.seed.json');
+const hash = crypto.createHash('sha256')
+  .update(JSON.stringify(seed.features || []))
+  .digest('hex').slice(0, 12);
+console.log(hash);
+" > ~/dev/<seed.name>/.samvil/cache/seed-hash.txt
+```
+
+**캐시 적중 판정:**
+1. `.samvil/cache/seed-hash.txt` 읽기
+2. 현재 seed.features 해시와 비교
+3. 일치 → 변경 없는 feature의 scaffold 스킵
+4. 불일치 → 전체 캐시 무효화 후 전체 scaffold 실행
+
+**캐시 무효화 조건:**
+- seed 버전(`seed.version`)이 변경된 경우 → `.samvil/cache/` 전체 삭제 후 재생성
+- features 배열이 변경된 경우 → 변경된 feature만 재빌드
+
+**캐시 파일 포맷** (`.samvil/cache/<feature-name>.json`):
+```json
+{
+  "feature_name": "<feature.name>",
+  "seed_hash": "abc123def456",
+  "scaffolded_at": "2025-01-01T00:00:00Z",
+  "dependencies_installed": ["pkg1@1.0.0", "pkg2@2.0.0"],
+  "files_created": ["components/Feature.tsx", "lib/feature.ts"]
+}
+```
+
+### Step 0.5: Load Pinned Versions (Determinism)
 
 Read `references/dependency-matrix.json` to get exact version pins. This ensures **same input → same output, every time**.
 

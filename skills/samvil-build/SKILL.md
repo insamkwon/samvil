@@ -120,6 +120,9 @@ Build features one at a time (same as v1):
 **For each feature:**
 
 1. **Re-read Context Kernel (INV-1)** — Re-read `project.seed.json` + `project.state.json` before every feature. Context may have been compressed — files are the truth. **Also read `.samvil/fix-log.md`** (if exists) to prevent repeating the same errors.
+   - **Context Compression**: seed에서 해당 feature만 추출하여 작업. 전체 seed를 컨텍스트에 유지하지 않음.
+   - **Include**: feature_name, description, acceptance_criteria, ui_hints
+   - **Exclude**: interview_summary, evolve_history, other features' details
 2. **MCP (best-effort):** Log feature start:
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_feature_start", stage="build", data='{"feature":"<name>"}')
@@ -174,11 +177,103 @@ Build features one at a time (same as v1):
 
 #### If tier is `standard` or higher — Parallel Dispatch (spawn workers)
 
-For batches with 2+ independent features, spawn CC Agent workers **in controlled parallel batches**:
+For batches with 2+ independent features, spawn CC Agent workers **in controlled parallel batches**.
+
+### Dynamic Parallelism (MAX_PARALLEL)
+
+Determine `MAX_PARALLEL` at runtime based on system resources:
 
 ```
-MAX_PARALLEL = config.max_parallel || 2
+## Step 0: Determine MAX_PARALLEL
+
+# 1) 사용자 override 확인
+if config.max_parallel is set:
+    MAX_PARALLEL = config.max_parallel
+else:
+    # 2) CPU 코어 기반 기본값
+    CPU_CORES = sysctl -n hw.ncpu (macOS) or nproc (Linux)
+    if CPU_CORES <= 4:   MAX_PARALLEL = 1
+    elif CPU_CORES >= 8: MAX_PARALLEL = 3
+    else:                MAX_PARALLEL = 2  # 기본값
+
+    # 3) 메모리 압박 시 감소
+    MEM_USAGE = 현재 메모리 사용률 (%)
+    if MEM_USAGE > 80%:  MAX_PARALLEL = max(1, MAX_PARALLEL - 1)
+
+# 최종값 출력
+[SAMVIL] MAX_PARALLEL = <N> (CPU: <cores> cores, Memory: <usage>%)
 ```
+
+### Independence Verification (병렬 가능 여부 체크)
+
+Before spawning parallel workers, verify that features in the same batch are truly independent:
+
+```
+## 독립성 체크리스트 — 모두 YES여야 병렬 실행 가능
+
+1. 파일 겹침 없음: 두 feature가 같은 파일을 생성/수정하지 않는가?
+   - OK: feature A → components/todo/, feature B → components/calendar/
+   - NG: feature A와 B 모두 app/layout.tsx 수정 필요
+2. Shared store 변경 없음: 두 feature가 같은 Zustand slice를 수정하지 않는가?
+3. Routing 충돌 없음: 두 feature가 같은 route 경로를 사용하지 않는가?
+4. 의존성 역방향 없음: feature B가 feature A의 컴포넌트를 import하지 않는가?
+```
+
+하나라도 NO이면 해당 feature쌍은 순차 실행으로 강등:
+
+```
+[SAMVIL] Independence check: <feature-A> + <feature-B> → SEQUENTIAL (reason: <why>)
+```
+
+모두 YES인 feature만 같은 chunk에서 병렬 실행.
+
+### Worker Context Budget (토큰 최적화)
+
+Worker에게 전달하는 컨텍스트는 **2000 토큰 이내**로 유지한다. 전체 seed를 전달하지 않고, 해당 feature만 slicing하여 전달한다.
+
+**포함 (Include):**
+- `feature_name`, `feature_description`, `acceptance_criteria` — 해당 feature 1개만
+- `ui_hints` — 해당 feature에 관련된 것만
+- `relevant_web_recipe` — references/web-recipes.md에서 해당 feature와 관련된 패턴만 발췌
+- `tech_stack 요약` — framework, UI library, state management 3줄 요약
+- `architecture` — blueprint.json의 architecture 섹션에서 디렉토리 구조 + 컴포넌트 계층만
+
+**제외 (Exclude):**
+- `interview_summary` — Worker에게 불필요
+- `evolve_history` — Worker에게 불핀요
+- `full preset data` — app-presets, design-presets 전체
+- 다른 features의 상세 내용 — 다른 feature 이름 목록만 제공 (의존성 파악용)
+- `core_experience` 전문 — 이미 Phase A에서 구현 완료
+
+**압축 규칙:**
+1. seed에서 feature를 추출할 때 JSON 그대로가 아닌 요약 형태로 변환:
+   ```
+   Feature: <name>
+   Description: <description>
+   AC: <acceptance_criteria를 bullet 3-5개로>
+   UI: <ui_hints 요약>
+   Depends: <depends_on 리스트>
+   ```
+2. tech_stack은 다음 형식으로 압축:
+   ```
+   Stack: Next.js 14 + TypeScript + Tailwind + shadcn/ui + Zustand
+   ```
+3. architecture는 디렉토리 트리 + 주요 컴포넌트 이름만:
+   ```
+   Arch: app/(page, layout), components/<primary>/, lib/(store, utils)
+   ```
+
+**공통 프리앰블 최소화 (Prompt Caching):**
+- 모든 Worker에게 동일하게 전달되는 "Coding Standards" / "Rules" 섹션은 한 번만 작성
+- Agent 프롬프트 내에서 공통 규칙은 파일 경로 참조로 대체:
+  ```
+  ## Coding Standards
+  Read and follow: references/web-recipes.md from the SAMVIL plugin directory.
+  Key rules: shadcn/ui 우선, cn() 사용, 'use client' 필수, TypeScript strict.
+  ```
+- 전체 Code Quality Rules 섹션을 inline paste하지 않고 핵심 3-5줄로 요약
+
+### Chunk Dispatch
 
 Split independent features into chunks of `MAX_PARALLEL`. Spawn each chunk in ONE message (parallel). Wait for all agents in a chunk to complete before spawning the next chunk.
 
@@ -191,18 +286,23 @@ Agent(
 Read your persona:
 <paste content of agents/frontend-dev.md>
 
-## Context
+## Context (≤2000 tokens)
 Project: ~/dev/<seed.name>/
-Tech Stack: <paste seed.tech_stack only>
-Global Constraints: <paste seed.constraints only>
-Your Feature: <paste seed.features[YOUR_FEATURE_INDEX] only>
-State: <paste state JSON>
-References: Read references/web-recipes.md from the SAMVIL plugin directory for patterns.
-Full Seed: Read project.seed.json if you need other features for context.
+Stack: <tech_stack 1-line summary, e.g., "Next.js 14 + TypeScript + Tailwind + shadcn/ui + Zustand">
+Constraints: <seed.constraints in 3 bullet points max>
+Architecture: <blueprint directory tree + component hierarchy, 5-10 lines>
+Other Features: <comma-separated list of OTHER feature names only>
 
-## Your Task
-Build ONLY the feature: <feature-name>
-Description: <feature description from seed>
+## Your Feature
+Name: <feature-name>
+Description: <feature description>
+AC:
+  - <acceptance_criteria bullet 1>
+  - <acceptance_criteria bullet 2>
+  - <acceptance_criteria bullet 3>
+UI Hints: <relevant ui_hints, 1-2 lines>
+Depends On: <depends_on or "none">
+Recipe: <relevant web-recipe pattern name + key code snippet only>
 
 ## Rules
 - Read existing code first to understand current structure
@@ -212,11 +312,29 @@ Description: <feature description from seed>
 - Run: cd ~/dev/<seed.name> && npx tsc --noEmit 2>&1 | head -20 && npx eslint . --quiet 2>&1 | head -20
 - Report: files created, files modified, lint/typecheck status
 
-## Code Quality
-<paste Code Quality Rules section>",
+## Coding Standards
+Read: references/web-recipes.md from SAMVIL plugin directory for patterns.
+Key: shadcn/ui 우선 | cn() 사용 | 'use client' 필수 | TypeScript strict | no `any`",
   subagent_type: "general-purpose"
 )
 ```
+
+### Progress Trim (실시간 진행 상황 출력)
+
+각 Agent의 진행 상황을 실시간으로 출력:
+
+```
+[SAMVIL] [Worker 1/<total>] Feature: <name> — building...
+[SAMVIL] [Worker 2/<total>] Feature: <name> — building...
+[SAMVIL] [Worker 1/<total>] Feature: <name> — done ✓
+[SAMVIL] [Worker 2/<total>] Feature: <name> — failed ✗ (see .samvil/build.log)
+```
+
+형식 규칙:
+- Worker 번호는 해당 chunk 내 1부터 시작
+- `<total>` = 현재 chunk의 전체 worker 수
+- Agent가 완료되면 즉시 결과 라인 출력
+- 실패 시 로그 파일 경로 안내
 
 **Example with MAX_PARALLEL=2 and 5 independent features:**
 - Chunk 1: spawn agents for feature A + feature B (parallel) → wait
@@ -292,6 +410,15 @@ Modified/created files in `~/dev/<seed.name>/`:
 Verification output per feature:
 - `[SAMVIL] Feature: <name> ✓ [N/M features complete]`
 - `npm run build` exit code 0 after each feature
+
+Progress trim (parallel workers):
+```
+[SAMVIL] [Worker <N>/<total>] Feature: <name> — building...
+[SAMVIL] [Worker <N>/<total>] Feature: <name> — done ✓
+[SAMVIL] [Worker <N>/<total>] Feature: <name> — failed ✗ (see .samvil/build.log)
+[SAMVIL] Independence check: <A> + <B> → SEQUENTIAL (reason: <why>)
+[SAMVIL] MAX_PARALLEL = <N> (CPU: <cores> cores, Memory: <usage>%)
+```
 
 Final summary:
 ```

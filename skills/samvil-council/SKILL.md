@@ -41,7 +41,17 @@ Then invoke `samvil-design` and return.
 Spawn research agents **in controlled parallel batches**:
 
 ```
-MAX_PARALLEL = config.max_parallel || 2
+## Determine MAX_PARALLEL (동적 병렬도)
+# Build 스킬과 동일한 로직 적용:
+if config.max_parallel is set:
+    MAX_PARALLEL = config.max_parallel
+else:
+    CPU_CORES = sysctl -n hw.ncpu (macOS) or nproc (Linux)
+    if CPU_CORES <= 4:   MAX_PARALLEL = 1
+    elif CPU_CORES >= 8: MAX_PARALLEL = 3
+    else:                MAX_PARALLEL = 2
+    MEM_USAGE = 현재 메모리 사용률 (%)
+    if MEM_USAGE > 80%:  MAX_PARALLEL = max(1, MAX_PARALLEL - 1)
 ```
 
 Split Round 1 agents into chunks of `MAX_PARALLEL`. Spawn each chunk in ONE message (parallel). Wait for all agents in a chunk to complete before spawning the next chunk.
@@ -136,7 +146,17 @@ Print progress:
 Spawn review agents **in controlled parallel batches**:
 
 ```
-MAX_PARALLEL = config.max_parallel || 2
+## Determine MAX_PARALLEL (동적 병렬도)
+# Build 스킬과 동일한 로직 적용 (Round 1에서 이미 계산된 값 재사용 권장)
+if config.max_parallel is set:
+    MAX_PARALLEL = config.max_parallel
+else:
+    CPU_CORES = sysctl -n hw.ncpu (macOS) or nproc (Linux)
+    if CPU_CORES <= 4:   MAX_PARALLEL = 1
+    elif CPU_CORES >= 8: MAX_PARALLEL = 3
+    else:                MAX_PARALLEL = 2
+    MEM_USAGE = 현재 메모리 사용률 (%)
+    if MEM_USAGE > 80%:  MAX_PARALLEL = max(1, MAX_PARALLEL - 1)
 ```
 
 Split Round 2 agents into chunks of `MAX_PARALLEL`. Spawn each chunk in ONE message (parallel). Wait for all agents in a chunk to complete before spawning the next chunk.
@@ -356,7 +376,7 @@ Invoke the Skill tool with skill: `samvil-design`
 ## Rules
 
 1. **Read agent .md files before spawning** — the agent's persona must be in its prompt
-2. **All agents in a chunk spawn in ONE message** — parallel within chunk, sequential between chunks. MAX_PARALLEL (default 2) controls chunk size.
+2. **All agents in a chunk spawn in ONE message** — parallel within chunk, sequential between chunks. MAX_PARALLEL은 CPU/메모리 기반으로 동적 결정 (기본 2, CPU ≤4 → 1, CPU ≥8 → 3, 메모리 80% 초과 시 -1). `config.max_parallel` 설정 시 override.
 3. **500 word limit per agent** — prevent context bloat
 4. **Respect tier boundaries** — never spawn agents the tier doesn't include
 5. **decisions.log is append-only** — never delete previous decisions

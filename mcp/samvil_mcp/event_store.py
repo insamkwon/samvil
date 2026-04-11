@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS events (
     event_type TEXT NOT NULL,
     stage TEXT NOT NULL,
     data TEXT DEFAULT '{}',
+    token_count INTEGER DEFAULT NULL,
     timestamp TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
@@ -48,6 +49,11 @@ CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_name);
 CREATE INDEX IF NOT EXISTS idx_seed_versions_session ON seed_versions(session_id, version);
 """
 
+# Migration: add token_count column to existing events tables
+_MIGRATIONS = [
+    "ALTER TABLE events ADD COLUMN token_count INTEGER DEFAULT NULL",
+]
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -65,6 +71,12 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(SCHEMA)
+            # Run migrations (ignore errors if column already exists)
+            for migration in _MIGRATIONS:
+                try:
+                    await db.execute(migration)
+                except aiosqlite.OperationalError:
+                    pass
             await db.commit()
 
     # ── Sessions ──────────────────────────────────────────
@@ -169,6 +181,7 @@ class EventStore:
         event_type: EventType,
         stage: Stage,
         data: dict | None = None,
+        token_count: int | None = None,
     ) -> Event:
         event = Event(
             id=_uuid(),
@@ -181,8 +194,8 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("BEGIN")
             await db.execute(
-                "INSERT INTO events (id, session_id, event_type, stage, data, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-                (event.id, event.session_id, event.event_type.value, event.stage.value, json.dumps(event.data), event.timestamp),
+                "INSERT INTO events (id, session_id, event_type, stage, data, token_count, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (event.id, event.session_id, event.event_type.value, event.stage.value, json.dumps(event.data), token_count, event.timestamp),
             )
             await db.commit()
         return event
@@ -213,6 +226,7 @@ class EventStore:
                     event_type=EventType(r["event_type"]),
                     stage=Stage(r["stage"]),
                     data=json.loads(r["data"]),
+                    token_count=r["token_count"] if "token_count" in r.keys() else None,
                     timestamp=r["timestamp"],
                 )
                 for r in rows

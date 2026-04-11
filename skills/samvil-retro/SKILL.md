@@ -14,6 +14,20 @@ You are adopting the role of **Retro Analyst**. Analyze this SAMVIL run and prod
 2. Read `project.state.json` → completed_features, failed, qa_history, build_retries
 3. Read `.samvil/qa-report.md` → QA pass results (if exists)
 4. Read `interview-summary.md` → count questions (count lines starting with a question pattern)
+5. **Read `.samvil/metrics.json`** → 관측성 대시보드 메트릭 (stage durations, pass rates, etc.)
+
+**Retro Boot에서 metrics 종료 처리** — metrics.json이 존재하면:
+```json
+{
+  "stages": {
+    "retro": {
+      "started_at": "<ISO timestamp now>"
+    }
+  },
+  "total_duration_ms": <now_ms - timestamp_ms>
+}
+```
+`total_duration_ms`를 계산해서 저장한다 (파이프라인 전체 소요 시간).
 
 **Do NOT rely on conversation history for metrics.** Files are the truth.
 
@@ -48,6 +62,65 @@ From the files above, extract:
 | QA final verdict | state.json: qa_history last entry |
 | Interview question count | interview-summary.md |
 | User seed edits | state.json (if tracked) |
+| **Stage durations** | **metrics.json: stages.\*.duration_ms** |
+| **QA pass rate** | **metrics.json: stages.qa.pass_rate** |
+| **Build failure rate** | **metrics.json: stages.build (features_total - features_passed) / features_total** |
+| **Total pipeline duration** | **metrics.json: total_duration_ms** |
+| **Agents spawned per stage** | **metrics.json: stages.\*.agents_spawned** |
+
+#### Step 1b: 관측성 대시보드 분석
+
+`.samvil/metrics.json`이 존재하면 아래 분석을 수행하고 콘솔에 출력:
+
+**1. 병목 스테이지 식별** — duration_ms가 가장 큰 스테이지:
+
+```
+[SAMVIL] 관측성 대시보드 — 병목 분석
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  스테이지별 소요 시간:
+    interview    12.3s (36%)
+    seed          2.3s ( 7%)
+    design        3.5s (10%)
+    scaffold      4.6s (14%)
+    build        56.8s (■■ 45%) ← 병목
+    qa           67.9s (■■ 54%) ← 병목
+  ─────────────────────────────
+  총 소요: 147.4s
+  병목: build + qa (전체의 99%)
+```
+
+**2. 빌드 실패율 계산:**
+
+```
+  빌드 성공률: 4/5 (80%)
+  빌드 실행 횟수: 3회
+  기능별 통과: 4 passed / 1 failed
+    ✗ failed: "<feature_name>" — <사유 from state.failed>
+```
+
+**3. QA 패스율 추이 (이전 실행과 비교):**
+
+`harness-feedback.log`에서 이전 실행들의 `stages.qa.verdict`를 수집하여 현재 실행과 비교:
+
+```
+  QA 패스율 추이:
+    run-001: FAIL (2 iterations)
+    run-002: PASS (1 iteration)
+    run-003 (현재): PASS (2 iterations, pass_rate=0.80)
+  → 추세: 안정적 (최근 2회 연속 PASS)
+```
+
+**4. 병목 구간 개선 제안** — 상위 2개 병목 스테이지에 대해 구체적 개선안 제시:
+
+```
+  병목 개선 제안:
+    1. build (56.8s): "features_total이 5개. 병렬 빌드(max_parallel=2)가 활성화되어 있으나,
+       3개 이상 feature에서 순차 실행 발생. max_parallel=3으로 증가 권장."
+    2. qa (67.9s): "QA iterations=2. Pass 2 런타임 검증이 주요 지연.
+       config에서 qa_max_iterations=2로 조정 검토."
+```
+
+**metrics.json이 없으면** — 기존 Step 1 로직만으로 분석 진행 (경고 없이).
 
 ### Step 2: Analyze
 
@@ -150,6 +223,13 @@ Append a JSON entry to `harness-feedback.log` in the SAMVIL **plugin** directory
     "build": { "features_attempted": 0, "features_passed": 0, "retries": 0 },
     "qa": { "verdict": "PASS", "iterations": 0 }
   },
+  "metrics": {
+    "stage_durations_ms": {},
+    "total_duration_ms": 0,
+    "build_pass_rate": 0.0,
+    "qa_pass_rate": 0.0,
+    "bottleneck_stages": []
+  },
   "suggestions": ["...", "...", "..."]
 }
 ```
@@ -224,6 +304,13 @@ Append JSON entry to `harness-feedback.log` in the SAMVIL plugin directory:
     "build": { "features_attempted": <N>, "features_passed": <N>, "retries": <N> },
     "qa": { "verdict": "<PASS|FAIL>", "iterations": <N> }
   },
+  "metrics": {
+    "stage_durations_ms": { "interview": <N>, "seed": <N>, "build": <N>, "qa": <N>, ... },
+    "total_duration_ms": <N>,
+    "build_pass_rate": <float>,
+    "qa_pass_rate": <float>,
+    "bottleneck_stages": ["<stage>", "<stage>"]
+  },
   "suggestions": ["<suggestion 1>", "<suggestion 2>", "<suggestion 3>"]
 }
 ```
@@ -239,6 +326,23 @@ QA Iterations: <N>
 Final Verdict: <PASS/FAIL>
 Flow Compliance: <matched / N deviations>
 Agent Utilization: <M/N> (<percent>%)
+
+[SAMVIL] 관측성 대시보드 — 병목 분석
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  스테이지별 소요 시간:
+    interview    <duration>s (<percent>%)
+    seed          <duration>s (<percent>%)
+    design        <duration>s (<percent>%)
+    scaffold      <duration>s (<percent>%)
+    build        <duration>s (<percent>%) ← 병목 (있으면)
+    qa           <duration>s (<percent>%) ← 병목 (있으면)
+  ─────────────────────────────
+  총 소요: <total>s
+  병목: <top 2 stages> (전체의 <percent>%)
+
+  빌드 성공률: <N>/<M> (<percent>%)
+  빌드 실행 횟수: <N>회
+  QA 패스율 추이: <trend summary>
 
 What Worked:
   - <observation>

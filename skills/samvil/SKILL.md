@@ -212,6 +212,7 @@ Initialize `project.state.json`:
   "session_id": null,
   "seed_version": 1,
   "current_stage": "interview",
+  "completed_stages": [],
   "completed_features": [],
   "in_progress": null,
   "failed": [],
@@ -223,6 +224,40 @@ Initialize `project.state.json`:
 
 Write this to `~/dev/<project-name>/project.state.json`.
 
+**Checkpoint 원칙 (INV-6):** 각 스킬은 자신의 스테이지를 완료한 직후 `project.state.json`을 업데이트해야 한다:
+1. `completed_stages` 배열에 스테이지명 추가 (중복 방지: 이미 있으면 스킵)
+2. `current_stage`를 다음 스테이지로 업데이트
+3. 파일에 즉시 저장 (MCP 장애와 무관하게 항상 파일에 기록)
+
+```python
+# Checkpoint 예시 (각 스킬 종료 시)
+state = read_json("project.state.json")
+stage_name = "interview"
+if stage_name not in state["completed_stages"]:
+    state["completed_stages"].append(stage_name)
+state["current_stage"] = "<next_stage>"
+write_json("project.state.json", state)
+```
+
+**Initialize `.samvil/metrics.json`** — 관측성 대시보드용 메트릭 초기화:
+
+```json
+{
+  "session_id": null,
+  "version": "<current version from plugin.json>",
+  "stages": {},
+  "total_duration_ms": null,
+  "timestamp": "<ISO 8601 now>"
+}
+```
+
+각 스테이지는 시작/종료 시 이 파일의 `stages.<stage_name>` 필드를 업데이트한다:
+- **스테이지 시작 시**: `stages.<stage_name>.started_at = <ISO timestamp>`
+- **스테이지 종료 시**: `stages.<stage_name>.ended_at = <ISO timestamp>` + 스테이지별 메트릭 기록
+- `duration_ms`는 `ended_at - started_at`으로 자동 계산
+
+Write this to `~/dev/<project-name>/.samvil/metrics.json`.
+
 **MCP (best-effort):** Create a SAMVIL session for event tracking:
 
 ```
@@ -233,15 +268,105 @@ Parse the returned `session_id` and update `project.state.json` → set `session
 
 ### Step 4: Check for Resume
 
-If `project.state.json` already exists when `/samvil` is invoked:
+**Resume 트리거 조건** — 다음 중 하나라도 해당하면 Resume 모드를 제안:
+- `/samvil --resume` 또는 `/samvil --continue` 플래그 사용
+- `project.state.json` 파일이 이미 존재
+- `.samvil/` 디렉토리가 이미 존재
+
+#### 4-A: State 파일 기반 Resume
+
+`project.state.json`이 이미 존재하면:
 
 ```
-[SAMVIL] Found existing project at ~/dev/<project-name>/
-  Current stage: <stage> 
-  Resume from here? Or start fresh?
+[SAMVIL] 이전 실행을 감지했습니다: ~/dev/<project-name>/
+  완료된 단계: interview, seed, scaffold
+  현재 단계: build
+  이어서 진행할까요?
 ```
 
-Wait for user response. If resume: skip to the current stage's skill.
+AskUserQuestion:
+```
+question: "이전 프로젝트를 이어서 진행할까요?"
+header: "이어하기"
+options:
+  - label: "이어서 진행 (Resume)"
+    description: "마지막 완료 단계(build)부터 재시작"
+  - label: "처음부터 다시 (Fresh)"
+    description: "기존 state를 초기화하고 새로 시작"
+```
+
+Resume 선택 시 `state.completed_stages`를 읽어서 다음 스테이지의 스킬을 바로 invoke.
+
+#### 4-B: 산출물 기반 자동 감지
+
+`project.state.json`이 없지만 프로젝트 디렉토리에 산출물이 있으면 자동으로 복구:
+
+```bash
+# 산출물 존재 여부 체크
+PROJECT_DIR=~/dev/<project-name>
+
+# 1. seed.json 존재 → interview + seed 완료로 간주
+test -f "$PROJECT_DIR/seed.json" && echo "seed:found"
+
+# 2. blueprint.json 존재 → design 완료로 간주
+test -f "$PROJECT_DIR/blueprint.json" && echo "blueprint:found"
+
+# 3. package.json 존재 → scaffold 완료로 간주
+test -f "$PROJECT_DIR/package.json" && echo "scaffold:found"
+
+# 4. src/ 디렉토리 존재 + 파일 수 > 5 → build 진행 중으로 간주
+test -d "$PROJECT_DIR/src" && echo "src:found"
+```
+
+산출물 기반 감지 결과로 `completed_stages`를 자동 복원:
+
+```
+[SAMVIL] 산출물 기반 자동 감지:
+  ✓ seed.json 발견 → interview + seed 완료
+  ✓ package.json 발견 → scaffold 완료
+  ✓ src/ 발견 (23 files) → build 진행 중으로 추정
+  → build 스테이지부터 재시작합니다
+```
+
+산출물이 감지되면 자동으로 `project.state.json`을 복원:
+```json
+{
+  "session_id": null,
+  "seed_version": 1,
+  "current_stage": "build",
+  "completed_stages": ["interview", "seed", "scaffold"],
+  "completed_features": [],
+  "in_progress": null,
+  "failed": [],
+  "build_retries": 0,
+  "qa_history": [],
+  "retro_count": 0
+}
+```
+
+#### 4-C: Resume 실행
+
+Resume이 확정되면:
+
+1. `project.state.json` 읽기 → `completed_stages` 확인
+2. `project.config.json` 읽기 → Tier, skip_stages 복원
+3. `.samvil/metrics.json` 읽기 → 기존 메트릭 복원 (없으면 초기화)
+4. 체인의 올바른 위치에서 바로 스킬 invoke
+
+```
+[SAMVIL] Resume 모드 활성화
+  프로젝트: ~/dev/<project-name>/
+  완료: interview → seed → scaffold
+  재시작: build (Stage 4/5)
+```
+
+**파이프라인 스테이지 순서** (체인 복구용):
+```
+interview → seed → council → design → scaffold → build → qa → evolve → retro
+```
+
+`completed_stages`의 마지막 스테이지 다음 순서의 스킬을 invoke.
+`skip_stages`에 포함된 스테이지는 건너뛰고 그 다음으로 진행.
 
 ### Step 4: Select Tier
 
@@ -371,12 +496,128 @@ Invoke the Skill tool: `samvil-interview`
 
 The chain continues from there — each skill invokes the next (INV-4).
 
+**Metrics Tracking (INV-5)** — 각 스테이지 시작/종료 시 `.samvil/metrics.json` 업데이트:
+
+이 지시는 체인의 모든 스킬이 따라야 한다:
+
+```
+# 스테이지 시작 시 (각 스킬의 Boot Sequence에서):
+metrics.json을 읽기
+metrics.stages.<stage>.started_at = <ISO timestamp now>
+metrics.json에 저장
+
+# 스테이지 종료 시 (각 스킬이 다음 스킬 invoke 직전):
+metrics.json을 읽기
+metrics.stages.<stage>.ended_at = <ISO timestamp now>
+metrics.stages.<stage>.duration_ms = ended_at - started_at (milliseconds)
+# 스테이지별 추가 메트릭 기록 (아래 참고)
+metrics.json에 저장
+```
+
+**스테이지별 메트릭 필드:**
+
+| Stage | Fields |
+|-------|--------|
+| `interview` | `questions_asked` (int) |
+| `seed` | _(duration만)_ |
+| `council` | `agents_spawned` (int), `rounds_completed` (int) |
+| `design` | `agents_spawned` (int), `blueprint_generated` (bool) |
+| `scaffold` | `stack` (string), `files_created` (int) |
+| `build` | `features_total` (int), `features_passed` (int), `features_failed` (int), `builds_run` (int), `agents_spawned` (int) |
+| `qa` | `pass_rate` (float 0~1), `iterations` (int), `verdict` (PASS/REVISE/FAIL) |
+| `evolve` | `cycles_run` (int), `seed_versions_created` (int) |
+
+**체인 종료 시 (Retro 직전)** — 오케스트레이터 또는 마지막 스킬이:
+
+```
+metrics.json을 읽기
+metrics.total_duration_ms = now - metrics.timestamp (milliseconds)
+metrics.json에 저장
+```
+
+### Graceful Degradation (INV-7)
+
+MCP 서버가 다운되거나 응답하지 않을 때 파일 기반으로 폴백하는 규칙.
+
+**핵심 원칙:** `project.state.json`, `.samvil/metrics.json`, `.samvil/events.jsonl`은 항상 파일에 먼저 기록. MCP는 보조 채널.
+
+#### MCP 장애 감지
+
+MCP 호출 시 다음 증상이 나타나면 장애로 판단:
+- `mcp__samvil_mcp__*` 도구가 응답하지 않음 (timeout)
+- MCP 도구 호출 시 에러 반환
+- `mcp__samvil_mcp__health_check` 실패
+
+**초기 감지** (Health Check 시):
+```bash
+# MCP health check (best-effort)
+# MCP 도구가 보이지 않으면 자동으로 파일 모드로 전환
+```
+
+장애 감지 시 출력:
+```
+[SAMVIL] MCP 서버 응답 없음. 파일 기반 추적으로 전환합니다.
+  상태 파일: project.state.json
+  메트릭: .samvil/metrics.json
+  이벤트: .samvil/events.jsonl
+```
+
+#### 파일 기반 폴백 규칙
+
+| 데이터 | MCP 도구 | 파일 폴백 |
+|--------|----------|-----------|
+| 세션 상태 | `create_session` / `get_session` | `project.state.json` |
+| 이벤트 기록 | `save_event` | `.samvil/events.jsonl` (append) |
+| 메트릭 | 없음 | `.samvil/metrics.json` (overwrite) |
+| Seed 버전 | `save_seed_version` | `.samvil/seed-history/<version>.json` |
+| 인터뷰 상태 | `score_ambiguity` | 인라인 계산 (threshold만 사용) |
+
+**이벤트 파일 기록 형식:**
+```
+# .samvil/events.jsonl (한 줄에 하나의 JSON)
+{"event_type":"stage_start","stage":"interview","data":{},"timestamp":"2024-01-01T00:00:00Z"}
+{"event_type":"stage_end","stage":"interview","data":{"questions_asked":5},"timestamp":"2024-01-01T00:05:00Z"}
+```
+
+**MCP 건강 로깅** — MCP 호출 실패 시마다 `.samvil/mcp-health.jsonl`에 기록:
+```
+{"status":"fail","tool":"save_event","error":"connection refused","timestamp":"..."}
+{"status":"fail","tool":"create_session","error":"timeout","timestamp":"..."}
+```
+
+Retro에서 `.samvil/mcp-health.jsonl`을 읽어 MCP 성공률 집계:
+```
+[SAMVIL] MCP 건강 리포트:
+  총 호출: 18회
+  성공: 15회 (83%)
+  실패: 3회 (17%)
+  실패 도구: save_event(2), create_session(1)
+```
+
+#### MCP 복구
+
+체인 실행 중 MCP가 복구되면 자동으로 전환:
+1. MCP 호출이 다시 성공하면 파일 기반 로깅과 병행
+2. 파일에 기록된 이벤트를 MCP에 백필하지 않음 (중복 방지)
+3. 이후 이벤트는 Dual-Write 패턴 유지
+
 ### Error Recovery
 
 If the chain breaks (context compressed, skill fails, etc.):
-1. Read `project.state.json` to determine current stage
-2. Invoke the appropriate skill directly
-3. The skill reads state.json and picks up where it left off
+1. Read `project.state.json` to determine `completed_stages` and `current_stage`
+2. If `current_stage` not in `completed_stages` → retry that stage
+3. If `current_stage` in `completed_stages` → invoke next stage
+4. Each skill reads `project.state.json` and picks up where it left off
+
+**Recovery 시나리오별 처리:**
+
+| 시나리오 | 복구 방법 |
+|----------|-----------|
+| 컨텍스트 압축 | `project.state.json`의 `completed_stages`에서 다음 스테이지 invoke |
+| 스킬 실행 중 에러 | `failed` 배열에 기록, 사용자에게 보고, 재시도 여부 확인 |
+| 빌드 실패 | `build_retries` 증가, MAX_RETRIES(2) 초과 시 중단 |
+| MCP 서버 다운 | INV-7 Graceful Degradation으로 파일 기반 폴백 |
+| 사용자 중단 | `project.state.json`에 현재 상태 저장, `/samvil --resume`으로 복구 가능 |
 
 ### Progress Format
 
