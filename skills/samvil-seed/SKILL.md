@@ -44,6 +44,34 @@ Read `interview-summary.md` and map each section.
 - `version`: `1`
 - Note: `agent_tier` is now in `project.config.json`, not in seed
 
+#### solution_type: "mobile-app"
+
+| Interview Section | Seed Field |
+|---|---|
+| 타겟 유저 + 핵심 경험 | `description` |
+| 핵심 경험 | `core_experience` (description, primary_screen, key_interactions) |
+| 필수 기능 | `features` with priority assignment |
+| 제외 항목 | `out_of_scope` |
+| 제약 조건 | `constraints` |
+| 성공 기준 | `acceptance_criteria` |
+
+**Derive automatically:**
+- `name`: kebab-case from the app idea (e.g., "todo tracker app" → "todo-tracker")
+- `solution_type`: `"mobile-app"`
+- `tech_stack`: `{ framework: "expo", state: "zustand" }` — Expo always, Zustand for state
+- `implementation`:
+  - `type`: `"expo-app"`
+  - `runtime`: `"hybrid"`
+  - `entry_point`: `"App.tsx"`
+  - `platforms`: from interview (`["ios", "android"]` default)
+  - `native_features`: from interview (camera, gps, push, sensors)
+  - `navigation`: from interview (tabs, drawer, stack)
+  - `offline_support`: from interview
+- `core_experience.primary_screen`: PascalCase component name
+- `features[].independent`: `true` for most mobile features (they're usually standalone screens)
+- `version`: `1`
+- **Auto-add constraint**: `"Expo web preview for development — native build via EAS"`
+
 #### solution_type: "automation"
 
 | Interview Section | Seed Field |
@@ -300,6 +328,30 @@ Required fields and constraints:
 - `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
   - Game ACs should be verifiable via browser: "Player sprite moves left when left arrow is pressed", "Score increases when collectible is picked up", "GameOver screen appears when player hits enemy"
 - `constraints[]`: must include `"Game must run in browser via Phaser 3"` + any user-specified constraints
+- `out_of_scope[]`: at least 2 items
+- `version`: integer, starts at 1
+
+No extra fields beyond the schema. No comments in JSON.
+
+### mobile-app
+
+Required fields and constraints:
+- `name`: kebab-case (e.g., "todo-tracker")
+- `description`: 1-sentence string
+- `solution_type`: `"mobile-app"`
+- `tech_stack`: `{ framework: "expo", state: "zustand" }` — no ui/router (Expo Router handles routing)
+- `core_experience`: `{ description, primary_screen (PascalCase), key_interactions[] }`
+- `implementation`:
+  - `type`: `"expo-app"`
+  - `runtime`: `"hybrid"`
+  - `entry_point`: `"App.tsx"`
+  - `platforms`: `["ios", "android"]` (or subset)
+  - `native_features`: `[]` (camera, gps, push, sensors if needed)
+  - `navigation`: `"tabs"` | `"drawer"` | `"stack"`
+  - `offline_support`: `"none"` | `"basic"` | `"full"`
+- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
+- `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
+- `constraints[]`: must include `"Expo web preview for development — native build via EAS"` + any user-specified constraints
 - `out_of_scope[]`: at least 2 items
 - `version`: integer, starts at 1
 

@@ -391,6 +391,85 @@ Decision rules for each field:
 - `key_libraries`: Always `["phaser"]`
 - `state_management`: Always `"phaser-scene"`
 
+### mobile-app
+
+```json
+{
+  "screens": ["<PascalCase name>"],
+  "navigation": {
+    "type": "tabs|drawer|stack",
+    "tabs": [{ "name": "<Tab>", "screen": "<Screen>", "icon": "<icon>" }]
+  },
+  "data_model": { "<Entity>": { "id": "string", "<field>": "<type>" } },
+  "state_management": "zustand",
+  "native_modules": ["<expo-module>"],
+  "key_libraries": ["expo-router", "zustand"],
+  "component_structure": {
+    "shared_ui": ["<Component>"],
+    "feature_components": { "<feature>": ["<Component>"] }
+  }
+}
+```
+
+Decision rules for each field:
+- `screens`: primary_screen + one per major feature needing its own page
+- `navigation.type`: from seed.implementation.navigation, default `"tabs"`
+- `native_modules`: from seed.implementation.native_features, mapped to expo packages
+- `key_libraries`: always `["expo-router", "zustand"]` + feature-specific additions
+- `state_management`: always `"zustand"`
+
+### solution_type: "mobile-app"
+
+Create `project.blueprint.json` with mobile-specific structure:
+
+```json
+{
+  "screens": ["HomeScreen", "SettingsScreen"],
+  "navigation": {
+    "type": "tabs",
+    "tabs": [
+      { "name": "Home", "screen": "HomeScreen", "icon": "home" },
+      { "name": "Settings", "screen": "SettingsScreen", "icon": "settings" }
+    ]
+  },
+  "data_model": {
+    "EntityName": {
+      "id": "string",
+      "field": "type",
+      "createdAt": "string (ISO 8601)"
+    }
+  },
+  "state_management": "zustand",
+  "native_modules": [],
+  "key_libraries": ["expo-router", "zustand"],
+  "component_structure": {
+    "shared_ui": ["Button", "Card", "Input"],
+    "feature_components": {
+      "feature-name": ["Component1", "Component2"]
+    }
+  }
+}
+```
+
+#### Mobile Blueprint Decision Rules
+
+- **screens**: Derive from seed.core_experience.primary_screen + one per major feature. Each screen maps to an Expo Router page in `app/`.
+- **navigation.type**: From `seed.implementation.navigation`. Default `"tabs"`.
+  - `"tabs"` → `app/(tabs)/_layout.tsx` with BottomTabNavigator
+  - `"drawer"` → `app/(drawer)/_layout.tsx` with DrawerNavigator
+  - `"stack"` → `app/_layout.tsx` with StackNavigator
+- **native_modules**: From `seed.implementation.native_features`.
+  - camera → `expo-camera`
+  - gps → `expo-location`
+  - push → `expo-notifications`
+  - sensors → `expo-sensors`
+- **key_libraries**: Always `["expo-router", "zustand"]`. Add based on features:
+  - offline → `+ ["@react-native-async-storage/async-storage"]`
+  - maps → `+ ["react-native-maps"]`
+  - forms → `+ ["react-hook-form"]`
+- **state_management**: `"zustand"` for all mobile apps (same pattern as web-app).
+- **component_structure**: Same pattern as web-app but uses React Native components (View, Text, TextInput, ScrollView) instead of HTML elements.
+
 ## Anti-Patterns
 
 1. Do NOT add screens for features not in seed

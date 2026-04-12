@@ -80,6 +80,54 @@ ls dist/
 
 **배포 확인**: 브라우저에서 URL 접속 → Phaser 게임이 로드되는지 확인.
 
+### mobile-app
+
+seed에 `tech_stack.deploy`가 있으면 자동 선택, 없으면 사용자에게 선택 제시:
+
+1. **EAS Build (APK preview)** — 빠른 테스트 빌드.
+   ```bash
+   cd ~/dev/<seed.name>
+   eas build --platform android --profile preview
+   ```
+   - APK 파일이 생성되어 직접 설치 가능
+   - App Store/Play Store 등록 없이 테스트
+
+2. **EAS Build (production)** — 스토어 제출용 빌드.
+   ```bash
+   cd ~/dev/<seed.name>
+   eas build --platform ios --profile production
+   eas build --platform android --profile production
+   ```
+   - App Store Connect / Google Play Console에 제출
+   - 인증서/프로비저닝 필요 (가이드만 제공)
+
+3. **Expo Update (OTA)** — 코드 업데이트를 스토어 심사 없이 배포.
+   ```bash
+   cd ~/dev/<seed.name>
+   eas update --branch production --message "bug fix"
+   ```
+
+4. **수동** — 개발 서버 실행 안내만 제공.
+
+**배포 전 체크리스트 안내:**
+```
+[SAMVIL] 모바일 배포 준비
+  1. EAS 계정 설정: eas login
+  2. 프로젝트 연결: eas build:configure
+  3. 앱 서명 (iOS): Apple Developer 계정 필요
+  4. 앱 서명 (Android): keystore 생성 필요
+  5. 스토어 등록: App Store Connect / Google Play Console
+
+  빠른 테스트:
+    eas build --platform android --profile preview
+    → APK 다운로드 링크 제공
+
+  프로덕션:
+    eas build --platform ios --profile production
+    eas build --platform android --profile production
+    → 스토어 제출 가이드
+```
+
 ### automation (execution type)
 
 Read `seed.core_flow.trigger` or `blueprint.execution.type` to determine deployment:
@@ -251,6 +299,18 @@ Output:
   URL: https://my-app.vercel.app
   Environment: production
   Deploy time: 30s
+```
+
+### mobile-app
+
+```
+[SAMVIL] Deploy complete (mobile)
+  Type: EAS Build
+  Platform: <ios / android / both>
+  Profile: <preview / production>
+  Build: <EAS build URL or "pending">
+  OTA: eas update --branch production
+  Config: app.json에 권한/버전 확인
 ```
 
 ### automation

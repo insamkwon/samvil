@@ -20,6 +20,8 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
 6. **Read recipe reference** based on `solution_type`:
    - web-app: `references/web-recipes.md`
    - automation: `references/automation-recipes.md`
+   - game: `references/game-recipes.md`
+   - mobile-app: `references/mobile-recipes.md`
 7. Check `completed_features` in state — skip already-built features
 8. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
@@ -175,6 +177,38 @@ The seed's `core_flow` defines the main processing pipeline. **Build this first.
   Dry-run: passing
 ```
 
+### solution_type: "mobile-app"
+
+The seed's `core_experience` defines what the user does in the first 30 seconds. **Build this first.**
+
+1. Read `seed.core_experience`
+2. Create the primary screen component: `app/(tabs)/index.tsx` (update existing)
+3. Create supporting components (1-3 components, single responsibility each):
+   - Use React Native components: `View`, `Text`, `TextInput`, `ScrollView`, `TouchableOpacity`
+   - Use Tamagui or React Native Paper for UI library (if configured)
+4. Create state management with Zustand: `lib/store.ts`
+5. Wire into the tab navigation
+6. **Build verify (INV-2):**
+   ```bash
+   cd ~/dev/<seed.name>
+   npx expo export --platform web > .samvil/build.log 2>&1
+   echo "Exit code: $?"
+   ```
+
+   **Circuit Breaker (MAX_RETRIES=2):** Same as web-app.
+   On every build failure, append to `.samvil/fix-log.md`:
+   ```
+   [core:mobile] <에러 내용> → <해결 방법>
+   ```
+
+7. Update `project.state.json`: note core experience complete
+
+```
+[SAMVIL] Stage 4/5: Core Experience built ✓
+  Screen: <primary_screen>
+  Platform: web export passing
+```
+
 ## Phase A.5: Dependency Pre-Resolution
 
 모든 feature를 읽고, 필요한 패키지를 **한 번에** 설치한다. feature 빌드 중 하나씩 발견하며 설치하면 시간 낭비.
@@ -261,6 +295,38 @@ Game features map to game mechanics within Phaser scenes. Each feature modifies 
 - Touch/mouse: `this.input.on("pointerdown", callback)`
 
 **Circuit breaker**: MAX_RETRIES=2 per mechanic. TypeScript strict — no `any`.
+
+### solution_type: "mobile-app" — Screen-based Build
+
+Mobile features map to screens/components. Each feature adds a screen or modifies an existing one:
+
+| Feature | Implementation | File |
+|---------|---------------|------|
+| item-list | List screen with FlatList | `app/(tabs)/index.tsx` or `components/ItemList.tsx` |
+| item-detail | Detail screen | `app/item/[id].tsx` |
+| add-item | Form screen or modal | `components/AddItemForm.tsx` |
+| settings | Settings screen | `app/(tabs)/settings.tsx` |
+| data-persistence | Zustand + AsyncStorage | `lib/store.ts` |
+| camera-access | Camera screen | `components/CameraView.tsx` |
+
+**Build each feature:**
+1. Create component in `components/` using React Native primitives:
+   - `View` (container), `Text` (display), `TextInput` (input), `ScrollView` (scrollable)
+   - `TouchableOpacity` (button), `FlatList` (list), `Image` (image)
+   - Use `StyleSheet.create()` for styles (NOT Tailwind — React Native uses StyleSheet)
+2. Add screen route in `app/` (Expo Router file-based routing)
+3. Update Zustand store if feature needs state
+4. **Build verify**: `npx expo export --platform web` (web export for fast verification)
+5. **Runtime verify**: `npx expo start` → Playwright on web preview
+
+**Key patterns:**
+- Expo Router: file-based routing. `app/(tabs)/index.tsx` → `/` tab, `app/item/[id].tsx` → `/item/:id`
+- Navigation: `router.push("/item/123")`, `router.back()`
+- Components: `import { View, Text, StyleSheet } from "react-native"`
+- Touch targets: minimum 44x44 points for interactive elements
+- State: `const items = useAppStore((s) => s.items)` — Zustand selectors
+
+**Circuit breaker**: MAX_RETRIES=2 per feature. TypeScript strict — no `any`.
 
 ### solution_type: "web-app" — Component-based Build (기존)
 
@@ -569,6 +635,16 @@ After all chunks complete:
   Build: passing
 ```
 
+#### mobile-app
+
+```
+[SAMVIL] Stage 4/5: Build complete (mobile)
+  Features: N/M implemented
+  Failed: [list or "none"]
+  Web export: passing
+  Build: passing
+```
+
 **MCP (best-effort):** Save build stage completion with implementation rate:
 ```
 mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_stage_complete", stage="qa", data='{"features_passed":<N>,"features_failed":<N>,"features_total":<M>,"implementation_rate":<N/M>,"agents_spawned":<N>,"builds_run":<N>}')
@@ -658,6 +734,8 @@ Final summary:
 14. **UX Writing** — placeholder 텍스트, 빈 상태 메시지, 에러 메시지, 성공 토스트를 **사용자 관점에서** 작성. "Error occurred" → "저장에 실패했어요. 다시 시도해주세요." 한국어 앱이면 한국어로.
 15. **첫 30초 가치 전달** — core_experience 구현 시 사용자가 앱을 열었을 때 **즉시 가치를 느끼도록**: 샘플 데이터 프리필, 가이드 텍스트, 또는 빈 상태에서 다음 행동 유도.
 16. **프리미엄 게이트 규칙** — 결제가 out_of_scope인데 프리미엄 UI가 있으면, "현재 모든 기능 무료" 배너를 표시하거나 게이트 자체를 비활성화. 결제 안 되는데 잠긴 UI만 보여주면 사용자가 이탈함.
+17. **React Native 컴포넌트 (mobile-app)** — `<div>` 대신 `View`, `<span>` 대신 `Text`, `<input>` 대신 `TextInput` 사용. Tailwind 대신 `StyleSheet.create()` 사용. `TouchableOpacity`로 터치 영역 44px 이상 확보.
+18. **Expo Router (mobile-app)** — 파일 기반 라우팅. `router.push()`로 네비게이션. `_layout.tsx`에 네비게이션 구조 정의.
 
 ## What NOT To Do
 

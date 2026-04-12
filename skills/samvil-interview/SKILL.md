@@ -188,6 +188,26 @@ options:
    - 보기: pixel art (8-bit/16-bit) / simple shapes (원, 사각형 기반) / minimal flat / Other
    - **안내**: "Phaser 3는 2D 스프라이트 기반입니다. 3D 모델링은 불가능합니다. 복잡한 애니메이션은 코드로 생성하는 simple shapes를 추천합니다."
 
+#### solution_type: "mobile-app"
+
+**안내 메시지 (최초 1회 표시):**
+```
+[SAMVIL] 모바일 앱 모드로 진행합니다.
+  Claude Code는 네이티브 iOS/Android 앱을 직접 빌드할 수 없습니다.
+  대신 Expo (React Native)로 크로스 플랫폼 앱을 만듭니다.
+  - 가능: iOS + Android 동시 지원, 카메라/GPS/푸시알림 접근, 웹 미리보기
+  - 불가능: Swift/Kotlin 전용 기능, App Store 직접 제출 (가이드만 제공)
+```
+
+1. **플랫폼**: "어떤 플랫폼을 타겟으로 하나요?"
+   - 보기: iOS만 / Android만 / 둘 다 (추천) / Other
+
+2. **핵심 경험**: "앱을 열면 첫 30초에 사용자가 할 행동은?"
+   - 보기: 앱 아이디어 기반 보기 3개 + Other
+
+3. **성공 기준**: "반드시 동작해야 하는 것은?" (multiSelect: true)
+   - 보기: 맥락 기반 보기 4개 + Other
+
 ### Phase 2: Scope Definition (2-3 questions)
 
 #### solution_type: "web-app" (기본)
@@ -301,6 +321,55 @@ options:
        description: "단순 시스템 작업 (파일 이동, 백업 등)."
      - label: "CC 스킬"
        description: "Claude Code 내에서 실행. AI 판단이 필요한 작업에 적합."
+   ```
+
+#### solution_type: "mobile-app"
+
+4. **네이티브 기능** (multiSelect: true):
+   ```
+   question: "네이티브 기능이 필요한가요?"
+   header: "네이티브"
+   options:
+     - label: "카메라"
+       description: "사진 촬영, QR 코드 스캔"
+     - label: "GPS / 위치"
+       description: "현재 위치, 지도 연동"
+     - label: "푸시 알림"
+       description: "원격 푸시 알림 수신"
+     - label: "센서"
+       description: "가속도, 자이로, 생체인증 등"
+     - label: "필요 없어요"
+       description: "일반적인 UI 앱"
+     - label: "Other"
+       description: "다른 네이티브 기능 (직접 입력)"
+   ```
+
+5. **네비게이션**:
+   ```
+   question: "앱의 기본 네비게이션 구조는?"
+   header: "네비게이션"
+   options:
+     - label: "탭바 (추천)"
+       description: "하단 탭으로 화면 전환. 대부분의 앱에 적합."
+     - label: "드로어"
+       description: "사이드 메뉴. 설정이 많은 앱에 적합."
+     - label: "스택"
+       description: "화면 위에 화면 쌓기. 상세 페이지 중심."
+     - label: "Other"
+       description: "다른 네비게이션 (직접 입력)"
+   ```
+
+6. **오프라인 지원**:
+   ```
+   question: "오프라인에서도 동작해야 하나요?"
+   header: "오프라인"
+   options:
+     - label: "아니요, 온라인만"
+       description: "인터넷 연결 필수. 구현 단순."
+     - label: "네, 기본 오프라인"
+       description: "캐싱으로 이전 데이터 표시. 온라인 복구 시 동기화."
+     - label: "네, 완전 오프라인"
+       description: "모든 기능 오프라인 동작. 로컬 DB 필요."
    ```
 
 ### Phase 2.5: Unknown Unknowns (thorough/full tier + 자동 감지)
@@ -441,6 +510,25 @@ Seed에서 `tech_stack.framework`에 매핑:
 - Shell → `"shell-script"`
 - CC 스킬 → `"cc-skill"`
 
+#### solution_type: "mobile-app"
+
+```
+question: "모바일 기술 스택을 추천합니다."
+header: "스택"
+options:
+  - label: "Expo + React Native + TypeScript (추천)"
+    description: "iOS + Android 동시 지원. Expo로 빠른 개발. Claude Code에서 웹 미리보기 가능."
+  - label: "Expo + React Native + JavaScript"
+    description: "TypeScript 없이 순수 JavaScript. 더 간단한 설정."
+```
+
+**안내**: "Expo는 Claude Code가 네이티브 앱을 직접 빌드할 수 없는 환경에서 유일하게 사용 가능한 모바일 프레임워크입니다. 웹 버전으로 미리보기하고 EAS Build로 실제 APK/IPA를 생성합니다."
+
+선택 결과를 interview-summary.md에 `추천 스택: <선택>` 으로 저장.
+Seed에서 `tech_stack.framework`에 매핑:
+- Expo + TypeScript → `"expo"`
+- Expo + JavaScript → `"expo"`
+
 ### Phase 4: 요약 & 확인
 
 #### web-app 요약
@@ -533,6 +621,33 @@ Seed에서 `tech_stack.framework`에 매핑:
   ...
 
 추천 스택: <python-script / node-script / shell-script / cc-skill>
+```
+
+#### mobile-app 요약
+
+```
+[SAMVIL] 인터뷰 요약 (Mobile)
+━━━━━━━━━━━━━━━━━━━━
+
+플랫폼: <iOS만/Android만/둘 다>
+네이티브 기능: <카메라, GPS, 푸시, 센서, 없음>
+네비게이션: <탭바/드로어/스택>
+오프라인: <온라인만/기본 오프라인/완전 오프라인>
+
+필수 기능 (P1):
+  1. <기능>
+  ...
+
+제약 조건:
+  - <제약>
+  ...
+
+성공 기준:
+  1. <testable 기준>
+  ...
+
+추천 스택: Expo + React Native + TypeScript
+런타임: hybrid (Expo web preview + native)
 ```
 
 AskUserQuestion으로 확인:
@@ -751,6 +866,53 @@ automation
 
 ## 추천 스택
 <python-script / node-script / shell-script / cc-skill>
+
+## 가정 사항
+- <assumption>
+...
+```
+
+### mobile-app
+
+```markdown
+# Interview Summary
+
+## 솔루션 타입
+mobile-app
+
+## 플랫폼
+<iOS만/Android만/둘 다>
+
+## 네이티브 기능
+- <카메라, GPS, 푸시 알림, 센서 등 또는 "없음">
+
+## 네비게이션
+<탭바/드로어/스택>
+
+## 오프라인 지원
+<온라인만/기본 오프라인/완전 오프라인>
+
+## 앱 유형
+<preset name or "커스텀">
+
+## 필수 기능 (P1)
+1. <feature>
+...
+
+## 제외 항목
+- <excluded item>
+...
+
+## 제약 조건
+- <constraint>
+...
+
+## 성공 기준
+1. <testable criterion>
+...
+
+## 추천 스택
+Expo + React Native + TypeScript
 
 ## 가정 사항
 - <assumption>

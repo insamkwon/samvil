@@ -203,6 +203,22 @@ Check:
 
 **If Pass 1 fails:** Verdict = REVISE with specific errors. Skip Pass 2 and 3.
 
+### mobile-app
+
+```bash
+cd ~/dev/<seed.name>
+npx expo export --platform web > .samvil/build.log 2>&1
+echo "Expo web export exit code: $?"
+```
+
+Check:
+- `expo export --platform web` exits with code 0
+- No TypeScript errors in output
+- No "Module not found" errors
+- Web bundle generated in `dist/`
+
+**If Pass 1 fails:** Verdict = REVISE with specific build errors. Skip Pass 1b, Pass 2 and 3.
+
 ## Pass 1b: Playwright Smoke Run (빌드 통과 후)
 
 ### web-app
@@ -350,6 +366,37 @@ mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=
 **Keep dev server running** — Pass 2 needs it.
 
 **If canvas check fails:** Verdict = REVISE with specific issues.
+
+### mobile-app
+
+Mobile 프로젝트는 Expo 웹 미리보기 + Playwright로 QA를 실행합니다.
+
+**1. Start dev server:**
+```bash
+cd ~/dev/<seed.name> && npx expo start --web &
+```
+
+**2. Navigate to the web preview:**
+```
+mcp__plugin_playwright_playwright__browser_navigate(url="http://localhost:8081")
+```
+
+**3. Check rendering:**
+```
+mcp__plugin_playwright_playwright__browser_evaluate(function="() => document.body.innerHTML.trim().length > 50")
+```
+
+**4. Check for console errors:**
+```
+mcp__plugin_playwright_playwright__browser_console_messages(level="error")
+```
+
+**5. Take screenshot:**
+```
+mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=".samvil/qa-evidence/smoke-mobile-pass.png")
+```
+
+**Keep dev server running** — Pass 2 needs it.
 
 ## QA Execution Mode by Tier
 
@@ -673,6 +720,55 @@ If Playwright MCP is unavailable, fall back to:
 2. **TypeScript check** — `npx tsc --noEmit` passes
 3. Mark unverifiable ACs as PARTIAL with `"reason": "runtime_unverifiable"`
 
+### mobile-app — Functional Verification
+
+Mobile은 Expo 웹 미리보기에서 Playwright로 AC를 검증합니다. React Native 컴포넌트가 웹에서 렌더링되므로 DOM 기반 검증이 가능합니다.
+
+**Pass 2-A: 렌더링 검증**
+
+Dev server should be running from Pass 1b. Navigate if needed:
+```bash
+# If not already running
+cd ~/dev/<seed.name> && npx expo start --web &
+```
+
+For **EACH** item in `seed.acceptance_criteria`:
+
+1. **Navigate to the relevant tab/route** — Use `browser_navigate` or click tab buttons
+2. **Capture current state** — `browser_snapshot` to see available elements
+3. **Perform the action** — `browser_type` to fill inputs, `browser_click` to press buttons
+4. **Verify the result** — `browser_snapshot` to confirm expected outcome
+5. **Screenshot evidence** — `browser_take_screenshot` for the AC result
+
+**Pass 2-B: 상호작용 검증**
+
+- Tab navigation: click tab buttons to verify screen transitions
+- Form input: type text and submit
+- List interactions: scroll, tap items
+
+**Pass 2-C: 반응형 검증 (device sizes)**
+
+```
+device_sizes = [
+  { name: "iphone-se",  width: 375,  height: 667 },
+  { name: "iphone-15",  width: 390,  height: 844 },
+  { name: "ipad",       width: 768,  height: 1024 }
+]
+```
+
+각 디바이스 사이즈마다:
+1. **뷰포트 전환**: `browser_resize(width=<width>, height=<height>)`
+2. **스크린샷**: `.samvil/qa-evidence/<feature>-<device>-<pass|fail>.png`
+3. **터치 타겟 확인**: 모든 버튼/링크가 44px 이상인지 확인
+4. **레이아웃 확인**: 콘텐츠가 뷰포트 내에 올바르게 배치되었는지
+
+**Fallback for mobile:**
+If Playwright MCP is unavailable, fall back to:
+1. **Static code analysis** — Verify React Native components exist, proper imports
+2. **TypeScript check** — `npx tsc --noEmit` passes (if configured)
+3. **Expo export check** — `npx expo export --platform web` passes
+4. Mark unverifiable ACs as PARTIAL with `"reason": "runtime_unverifiable"`
+
 ### automation — Functional Verification
 
 Automation은 Playwright 대신 `--dry-run` 실행으로 AC를 검증합니다.
@@ -803,6 +899,22 @@ Check by reading relevant code:
   ```
 - **No dead code**: All entity classes imported and used in scenes.
 - **Clean state management**: Game restart resets all state (score, positions, timers).
+
+**If critical quality issues:** Verdict = REVISE with specific issues.
+
+### mobile-app — Quality Verification
+
+Check by reading relevant code:
+- **Touch targets**: All interactive elements (TouchableOpacity, Pressable) have minimum 44x44 points. Use `StyleSheet.create()` with `minHeight: 44, minWidth: 44`.
+- **Accessibility**: Interactive elements have `accessibilityLabel`. No `onClick` on plain `View` — use `TouchableOpacity`.
+- **Code structure**: Components in `components/`, screens in `app/`, lib in `lib/`.
+- **StyleSheet**: Using `StyleSheet.create()` — no inline styles in render method.
+- **React Native components**: `View`/`Text`/`TextInput` — NOT `<div>`/`<span>`/`<input>`.
+- **Empty states**: Lists/collections (FlatList) handle zero items with `ListEmptyComponent`.
+- **No debug code**: No `console.log` left in components.
+- **Platform-specific code**: Uses `Platform.OS` checks where needed. `Platform.select()` for platform-specific styles.
+- **Navigation**: Expo Router file-based routing. Proper `_layout.tsx` structure.
+- **State**: Zustand store properly typed. No `any` types.
 
 **If critical quality issues:** Verdict = REVISE with specific issues.
 
