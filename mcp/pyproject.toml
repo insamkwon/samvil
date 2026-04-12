@@ -1,6 +1,6 @@
 [project]
 name = "samvil-mcp"
-version = "0.1.0"
+version = "1.0.0"
 description = "SAMVIL MCP Server — session persistence, evaluation history, and evolve convergence for the AI vibe-coding harness."
 requires-python = ">=3.12"
 authors = [{ name = "insam" }]

@@ -368,7 +368,7 @@ interview → seed → council → design → scaffold → build → qa → depl
 `completed_stages`의 마지막 스테이지 다음 순서의 스킬을 invoke.
 `skip_stages`에 포함된 스테이지는 건너뛰고 그 다음으로 진행.
 
-### Step 4: Select Tier
+### Step 5: Select Tier
 
 Before starting interview, ask user to choose tier via AskUserQuestion:
 
@@ -427,7 +427,7 @@ Write this to `~/dev/<project-name>/project.config.json`.
 
 인터뷰 스킬이 이 tier를 읽어서 질문 깊이를 조절.
 
-### Step 5: Start the Chain
+### Step 6: Start the Chain
 
 **파이프라인 진행 상황 등록** — TaskCreate 도구로 전체 단계를 생성한다. 사용자가 하단에서 진행 상황을 한눈에 볼 수 있도록:
 

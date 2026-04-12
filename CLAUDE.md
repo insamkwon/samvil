@@ -147,14 +147,6 @@ chore: 설정, 버전, 구조 변경
 7. **PHI-05 Build 구현률** — build_stage_complete에 implementation_rate 기록. Evolve diff 파일 저장.
 8. **PHI-06 Testable AC** — Seed에 AC별 vague_words 태깅. Interview에 AC 재질문 로직.
 
-1. **MAX_PARALLEL=2** — 병렬 Agent 동시 실행 제한 (build, council, design). CPU 100% 이슈 해결.
-2. **모델 최적화** — Council R1: Haiku, QA: Sonnet, Evolve 2사이클+: Sonnet. Opus 사용 80% 감소.
-3. **빌드 캐싱** — Worker는 lint/typecheck만, full build는 배치 완료 후 1회. 빌드 횟수 67% 감소.
-4. **토큰 절약** — Agent에게 해당 feature만 전달 (전체 seed 대신). QA도 AC 관련만 전달.
-5. **Agent Persona 경량화** — 5개 Agent에 Compact Mode 추가 (qa-mechanical, qa-quality, council R1 agents).
-6. **qa_max_iterations** 5 → 3. Ralph Loop 과다 반복 방지.
-7. **관측성** — build_stage_complete 이벤트에 agents_spawned, builds_run 메트릭 추가.
-
 ## v0.9.0 변경 내역 (v0.8.2 → v0.9.0)
 
 1. **QA 런타임 검증** — Pass 2를 정적 Grep에서 Playwright MCP 런타임 검증으로 전환. browser_snapshot/click/type으로 실제 상호작용 테스트. 스크린샷 증거 저장. Fallback: 정적 분석.

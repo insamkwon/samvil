@@ -101,6 +101,11 @@
             "type": ["string", "null"],
             "default": null,
             "description": "Must reference an existing feature name if independent=false"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 5,
+            "description": "Human-readable feature description"
           }
         }
       },
@@ -108,7 +113,20 @@
     },
     "acceptance_criteria": {
       "type": "array",
-      "items": { "type": "string", "minLength": 10 },
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 10 },
+          {
+            "type": "object",
+            "required": ["criterion"],
+            "properties": {
+              "criterion": { "type": "string", "minLength": 10, "description": "Testable statement that defines done" },
+              "vague_words": { "type": "array", "items": { "type": "string" }, "description": "Words flagged as ambiguous during interview" },
+              "rewrite_hint": { "type": "string", "description": "Suggested rewrite to remove ambiguity" }
+            }
+          }
+        ]
+      },
       "minItems": 1,
       "description": "Testable statements that define done"
     },
