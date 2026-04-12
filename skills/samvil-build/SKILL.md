@@ -22,6 +22,7 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
    - automation: `references/automation-recipes.md`
    - game: `references/game-recipes.md`
    - mobile-app: `references/mobile-recipes.md`
+   - dashboard: `references/dashboard-recipes.md`
 7. Check `completed_features` in state — skip already-built features
 8. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
@@ -209,6 +210,94 @@ The seed's `core_experience` defines what the user does in the first 30 seconds.
   Platform: web export passing
 ```
 
+### solution_type: "dashboard"
+
+Dashboard is a web-app subset. The seed's `core_experience` defines the primary dashboard view. **Build the dashboard layout + first chart first.**
+
+1. Read `seed.core_experience`
+2. Create the dashboard layout component: `components/dashboard-layout.tsx`
+   - Responsive grid with sidebar (optional) + main content area
+   - Use CSS Grid: `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` for cards
+   - Include header with date range filter + export button
+3. Create metric card component: `components/metric-card.tsx`
+   - Shows KPI value, trend indicator (up/down/stable), percentage change
+   - Uses lucide-react icons (TrendingUp, TrendingDown, Minus)
+4. Create the primary chart component based on seed features:
+   - Time-series → `LineChart` or `AreaChart` from recharts
+   - Categorical → `BarChart` from recharts
+   - Distribution → `PieChart` from recharts
+5. Wire into page: update `app/page.tsx` to render dashboard layout with cards + chart
+6. **Build verify (INV-2):**
+   ```bash
+   cd ~/dev/<seed.name>
+   npm run build > .samvil/build.log 2>&1
+   echo "Exit code: $?"
+   ```
+   Circuit Breaker: MAX_RETRIES=2. Same as web-app.
+
+7. Update `project.state.json`: note core dashboard experience complete
+
+```
+[SAMVIL] Stage 4/5: Core Dashboard built ✓
+  Layout: dashboard-layout
+  Charts: <chart-type>
+  Build: passing
+```
+
+#### Dashboard Build Patterns
+
+**Chart Component Pattern** — Wrap each recharts chart in a `'use client'` component:
+```tsx
+'use client'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+
+interface ChartProps {
+  data: Array<Record<string, unknown>>
+  xKey: string
+  yKey: string
+  color?: string
+}
+
+export function MetricLineChart({ data, xKey, yKey, color = '#2563eb' }: ChartProps) {
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+        <XAxis dataKey={xKey} tick={{ fontSize: 12 }} />
+        <YAxis tick={{ fontSize: 12 }} />
+        <Tooltip />
+        <Line type="monotone" dataKey={yKey} stroke={color} strokeWidth={2} dot={false} />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+```
+
+**Data Table with Sorting/Filtering** — Use shadcn `Table` component:
+```tsx
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+// Sort with useState, filter with search input
+// Paginate with "Load more" button (simpler than pagination for v1)
+```
+
+**Filter Controls** — Date range + category selector:
+```tsx
+// Date range: two date inputs or a preset selector (7d, 30d, 90d, custom)
+// Category: shadcn Select component with "All" + unique categories
+// Filters update zustand store → charts re-render via store subscription
+```
+
+**Responsive Grid for Dashboard Cards**:
+```tsx
+<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+  {metrics.map(m => <MetricCard key={m.label} {...m} />)}
+</div>
+<div className="grid grid-cols-1 gap-4 mt-4 lg:grid-cols-2">
+  <ChartCard title="Trend">{/* LineChart */}</ChartCard>
+  <ChartCard title="Distribution">{/* PieChart */}</ChartCard>
+</div>
+```
+
 ## Phase A.5: Dependency Pre-Resolution
 
 모든 feature를 읽고, 필요한 패키지를 **한 번에** 설치한다. feature 빌드 중 하나씩 발견하며 설치하면 시간 낭비.
@@ -325,6 +414,38 @@ Mobile features map to screens/components. Each feature adds a screen or modifie
 - Components: `import { View, Text, StyleSheet } from "react-native"`
 - Touch targets: minimum 44x44 points for interactive elements
 - State: `const items = useAppStore((s) => s.items)` — Zustand selectors
+
+**Circuit breaker**: MAX_RETRIES=2 per feature. TypeScript strict — no `any`.
+
+### solution_type: "dashboard" — Chart-based Build
+
+Dashboard is a web-app subset. Dashboard features map to chart components, data tables, and filter controls:
+
+| Feature | Implementation | File |
+|---------|---------------|------|
+| metric-cards | KPI cards with trend indicator | `components/metric-card.tsx` |
+| time-series-chart | LineChart/AreaChart with date axis | `components/charts/metric-line-chart.tsx` |
+| bar-comparison | BarChart for categorical data | `components/charts/category-bar-chart.tsx` |
+| pie-distribution | PieChart for breakdown | `components/charts/distribution-pie-chart.tsx` |
+| date-filter | Date range picker with presets | `components/date-range-filter.tsx` |
+| data-table | Table with sort + search + pagination | `components/data-table.tsx` |
+| csv-export | Download button → CSV generation | `components/csv-export-button.tsx` |
+| realtime-update | SWR polling or WebSocket | `lib/use-realtime-data.ts` |
+| alert-list | Alert cards with severity | `components/alert-list.tsx` |
+
+**Build each feature:**
+1. Create chart component in `components/charts/` — wrap recharts in `'use client'` with `ResponsiveContainer`
+2. Create data hook in `lib/` — SWR for API fetching with loading/error states
+3. Wire into dashboard layout — update grid in main page
+4. **Build verify**: `npm run build` (standard web-app verification)
+5. **Chart-specific checks**: verify recharts imports resolve, ResponsiveContainer wraps chart
+
+**Key patterns:**
+- All charts use `ResponsiveContainer width="100%" height={300}` for responsive sizing
+- Use `isAnimationActive={false}` for real-time updating charts to prevent visual jumping
+- Data hooks: `const { data, isLoading, error } = useSWR(key, fetcher)` — always handle loading/error
+- Chart colors: use CSS variables or Tailwind color classes for theme consistency
+- Date formatting: always use date-fns (`format(date, 'yyyy-MM-dd')`) — never manual string manipulation
 
 **Circuit breaker**: MAX_RETRIES=2 per feature. TypeScript strict — no `any`.
 
@@ -642,6 +763,16 @@ After all chunks complete:
   Features: N/M implemented
   Failed: [list or "none"]
   Web export: passing
+  Build: passing
+```
+
+#### dashboard
+
+```
+[SAMVIL] Stage 4/5: Build complete (dashboard)
+  Charts: N implemented
+  Data hooks: N implemented
+  Failed: [list or "none"]
   Build: passing
 ```
 

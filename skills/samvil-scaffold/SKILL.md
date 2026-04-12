@@ -1232,6 +1232,15 @@ cd ~/dev/<seed.name>
    npm install <library1> <library2> ...
    ```
 
+   **Dashboard 전용 의존성** (`seed.solution_type === "dashboard"` 또는 blueprint에 차트 관련 기능이 있을 때):
+   ```bash
+   npm install recharts@^2.12 date-fns@^3.6 lucide-react@^0.400
+   ```
+   - `recharts`: 차트 라이브러리 (LineChart, BarChart, PieChart, AreaChart)
+   - `date-fns`: 날짜 포맷/조작 (`format`, `parseISO`, `subDays`, `startOfMonth`)
+   - `lucide-react`: 아이콘 (TrendingUp, TrendingDown, Download, Filter 등 대시보드 UI용)
+   - **Alternative**: Tremor (`@tremor/react`) — shadcn 기반 고수준 대시보드 컴포넌트. 간단한 대시보드에 적합. recharts보다 설정이 적지만 커스터마이징이 제한적.
+
 6. **디자인 프리셋 적용**: `interview-summary.md`에서 디자인 프리셋 읽고, `references/design-presets.md`의 CSS 변수로 교체.
 
 7. **package.json 업데이트**: name, description을 seed 기반으로 변경.

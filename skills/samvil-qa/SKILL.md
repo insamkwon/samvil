@@ -398,6 +398,37 @@ mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=
 
 **Keep dev server running** — Pass 2 needs it.
 
+### dashboard
+
+Dashboard는 web-app의 서브셋이므로 web-app Smoke Run과 동일하게 실행합니다. 추가 검증:
+
+**1. Chart 렌더링 확인:**
+```
+mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const svgs = document.querySelectorAll('.recharts-surface'); const canvases = document.querySelectorAll('canvas'); return { svgCharts: svgs.length, canvasElements: canvases.length, hasCharts: svgs.length > 0 || canvases.length > 0 }; }")
+```
+- recharts charts render as SVG (`.recharts-surface` elements)
+- At least 1 chart element must exist for dashboard projects
+- No charts found: FAIL
+
+**2. Tooltip 동작 확인:**
+```
+mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const tooltips = document.querySelectorAll('.recharts-tooltip-wrapper'); return { tooltipElements: tooltips.length }; }")
+```
+- Tooltip wrappers exist in DOM (will activate on hover)
+
+**3. Loading skeleton 확인:**
+```
+mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const skeletons = document.querySelectorAll('[data-slot=\"skeleton\"], .animate-pulse'); return { hasSkeletons: skeletons.length > 0, skeletonCount: skeletons.length }; }")
+```
+- If charts are loading, skeleton placeholders should be visible
+
+**4. Screenshot:**
+```
+mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=".samvil/qa-evidence/smoke-dashboard-pass.png")
+```
+
+**Keep dev server running** — Pass 2 needs it.
+
 ## QA Execution Mode by Tier
 
 After reading `selected_tier` from `project.config.json` (Boot Sequence step 3), choose execution path:
@@ -769,6 +800,53 @@ If Playwright MCP is unavailable, fall back to:
 3. **Expo export check** — `npx expo export --platform web` passes
 4. Mark unverifiable ACs as PARTIAL with `"reason": "runtime_unverifiable"`
 
+### dashboard — Functional Verification
+
+Dashboard는 web-app의 서브셋이므로 web-app Functional Verification을 기본으로 실행하며, 아래 dashboard-specific 검증을 추가:
+
+**Pass 2-D: Chart Rendering Verification**
+
+1. **차트 SVG/Canvas 요소 존재 확인:**
+   ```
+   mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const charts = document.querySelectorAll('.recharts-wrapper'); return { chartCount: charts.length, charts: Array.from(charts).map(c => ({ width: c.clientWidth, height: c.clientHeight })) }; }")
+   ```
+   - chartCount > 0: PASS (at least 1 chart rendered)
+   - chartCount === 0: FAIL (no charts rendered)
+
+2. **Tooltip 동작 확인** (hover interaction):
+   ```
+   mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const chart = document.querySelector('.recharts-wrapper'); if (!chart) return { error: 'no chart' }; const event = new MouseEvent('mousemove', { bubbles: true }); const area = chart.querySelector('.recharts-area-chart, .recharts-line-chart, .recharts-bar-chart'); if (area) area.dispatchEvent(event); return { tooltipTriggered: true }; }")
+   ```
+   ```
+   mcp__plugin_playwright_playwright__browser_snapshot
+   ```
+   - Check if tooltip content appeared in the DOM after hover simulation
+
+3. **Data Export (CSV) 기능 확인:**
+   - Find export/download button via `browser_snapshot`
+   - Click the button via `browser_click`
+   - Verify: either a download was triggered (check network) or CSV content was generated
+   - Static fallback: verify export function exists in code via Grep for "CSV" or "download" or "export"
+
+4. **Loading Skeleton 확인:**
+   ```
+   mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const skeletons = document.querySelectorAll('[data-slot=\"skeleton\"], .animate-pulse'); return { hasLoadingState: skeletons.length > 0 }; }")
+   ```
+   - Check source code for loading state handling (Grep for "isLoading" or "loading")
+   - Loading state must exist in chart components — empty skeleton while data loads
+
+5. **Screenshot evidence for each chart:**
+   ```
+   mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=".samvil/qa-evidence/dashboard-charts-pass.png")
+   ```
+
+**Fallback for dashboard:**
+Same as web-app fallback. If Playwright MCP is unavailable, fall back to:
+1. **Static code analysis** — Verify recharts imports exist, ResponsiveContainer wraps charts
+2. **TypeScript check** — `npx tsc --noEmit` passes
+3. **Import check** — Grep for `from 'recharts'` to verify chart library is imported
+4. Mark unverifiable chart ACs as PARTIAL with `"reason": "runtime_unverifiable"`
+
 ### automation — Functional Verification
 
 Automation은 Playwright 대신 `--dry-run` 실행으로 AC를 검증합니다.
@@ -899,6 +977,22 @@ Check by reading relevant code:
   ```
 - **No dead code**: All entity classes imported and used in scenes.
 - **Clean state management**: Game restart resets all state (score, positions, timers).
+
+**If critical quality issues:** Verdict = REVISE with specific issues.
+
+### dashboard — Quality Verification
+
+Dashboard는 web-app의 서브셋. web-app Quality Verification에 다음을 추가:
+
+Check by reading relevant code:
+- **Chart responsiveness**: All charts wrapped in `ResponsiveContainer` (not fixed width/height). Verify via Grep for `ResponsiveContainer` usage.
+- **Empty data states**: Charts show "No data for this period" when data array is empty. Check code for `data.length === 0` handling.
+- **Loading states**: Chart components show skeleton/placeholder during data fetch. Grep for `isLoading` or `loading` in chart components.
+- **Date handling**: All date formatting uses date-fns (not manual string manipulation). Grep for `format(` import from `date-fns`.
+- **Accessibility**: Charts have `aria-label` or title describing the data. Color is not the only indicator (patterns/labels supplement).
+- **Performance**: Chart data points limited (server-side aggregation). No >1000 data points sent to client-side charts. Check API response sizes.
+- **Export functionality**: CSV export generates valid CSV with headers. Check for proper escaping of commas/quotes in data values.
+- **Real-time**: If monitoring dashboard, verify SWR `refreshInterval` is configured. Check for memory leak prevention (mutate on unmount).
 
 **If critical quality issues:** Verdict = REVISE with specific issues.
 

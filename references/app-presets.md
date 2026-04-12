@@ -305,22 +305,64 @@
 ### analytics-dashboard
 - **Keywords**: 분석, 지표, KPI, analytics, metrics, report, BI
 - **Recommended Stack**: nextjs + recharts + date-fns
+- **Chart Library**: recharts@2.12 (React-native SVG, composable, lightweight). Alternative: Tremor (shadcn-based, higher-level API, smaller bundle for simple dashboards).
 - **Default Features**: metric-cards, time-series-chart, date-filter, data-table, csv-export
+- **Chart Types**:
+  - `line-chart`: time-series trends (revenue over time, user growth). Use `LineChart` + `XAxis type="number"` with `tickFormatter` for dates.
+  - `bar-chart`: categorical comparisons (revenue by category, users by region). Use `BarChart` with `maxBarSize={50}` to prevent oversized bars.
+  - `pie-chart`: distribution (market share, category breakdown). Use `PieChart` + `Pie` with `innerRadius/outerRadius` for donut variant. Limit to 6-8 slices max.
+  - `area-chart`: cumulative trends with fill. Use `AreaChart` with `fillOpacity={0.3}` for subtle fills.
+- **Data Fetching Pattern**:
+  ```
+  SWR or React Query for API data:
+  const { data, error, isLoading } = useSWR('/api/metrics', fetcher, {
+    refreshInterval: 0,  // no auto-refresh for analytics
+    revalidateOnFocus: false
+  })
+  ```
+- **Date Handling**: date-fns@3.6 for formatting (`format`, `parseISO`, `subDays`, `startOfMonth`). All dates in UTC internally, display in user locale.
+- **Data Model**: `{ metric: string, value: number, date: string (ISO), category?: string }`
+- **Recommended State**: zustand (date range, filter selections) + SWR (server data cache)
 - **Common Pitfalls**:
-  - Empty state — no data means blank charts
-  - No loading skeleton — user sees nothing while loading
-  - Chart tooltip broken on mobile
-  - Date filter resets on every page change
+  - Empty state — no data means blank charts → show "No data for this period" with date range suggestion
+  - No loading skeleton — user sees nothing while loading → use chart-shaped skeleton (rectangle placeholder)
+  - Chart tooltip broken on mobile → use `wrapperStyle` and `contentStyle` with responsive positioning
+  - Date filter resets on every page change → persist date range in URL query params or zustand
+  - All charts render at once → stagger rendering with `Suspense` boundaries
+  - Large datasets freeze browser → aggregate on server side, never send >1000 points to chart
 - **Pre-mortem**: "안 쓰는 이유?" → 데이터 수동 입력, 인사이트 부족, 너무 느림
 
 ### monitoring-dashboard
 - **Keywords**: 모니터링, 실시간, 상태, monitoring, realtime, status, ops
 - **Recommended Stack**: nextjs + recharts + SWR (realtime polling)
+- **Chart Library**: recharts@2.12 for metrics charts. Use `AreaChart` for system metrics (CPU, memory), `BarChart` for request counts.
 - **Default Features**: status-cards, realtime-chart, alert-list, log-viewer, health-indicators
+- **Real-time Update Pattern**:
+  - **SWR Polling** (recommended, simpler):
+    ```
+    const { data } = useSWR('/api/status', fetcher, {
+      refreshInterval: 5000,  // 5s polling
+      dedupingInterval: 4000
+    })
+    ```
+  - **WebSocket** (for sub-second updates):
+    ```
+    useEffect(() => {
+      const ws = new WebSocket(WS_URL);
+      ws.onmessage = (event) => updateData(JSON.parse(event.data));
+      return () => ws.close();
+    }, [])
+    ```
+  - Always show last-updated timestamp. Grey out stale data (>2x refresh interval).
+- **Alert Thresholds**: Define per-metric thresholds in config (`warning`, `critical`). Use color coding: green (ok) → yellow (warning) → red (critical). Show trend arrow (up/down/stable).
+- **Data Model**: `{ metric: string, value: number, timestamp: string (ISO), status: 'ok'|'warning'|'critical', unit?: string }`
+- **Recommended State**: zustand (alert filters, selected time range) + SWR (polling data)
 - **Common Pitfalls**:
-  - No auto-refresh — stale data
-  - Alert fatigue — too many false positives
-  - No severity levels — all alerts look the same
+  - No auto-refresh — stale data → always use `refreshInterval` in SWR config
+  - Alert fatigue — too many false positives → implement severity levels + mute rules + aggregation window
+  - No severity levels — all alerts look the same → use `status` field with color-coded badges
+  - Memory leak from polling → cleanup SWR cache with `mutate()` on unmount, limit data points to last 100
+  - Charts jump on update → use `isAnimationActive={false}` for real-time charts
 - **Pre-mortem**: "안 쓰는 이유?" → 거짓 경보 과다, 반응 속도 느림, 모바일 불가
 
 ---
