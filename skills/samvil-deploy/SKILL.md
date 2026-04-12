@@ -80,6 +80,29 @@ ls dist/
 
 **배포 확인**: 브라우저에서 URL 접속 → Phaser 게임이 로드되는지 확인.
 
+### dashboard
+
+Dashboard 프로젝트는 web-app과 동일한 방식으로 배포합니다. recharts bundle size 최적화에 유의:
+
+seed에 `tech_stack.deploy`가 있으면 자동 선택, 없으면 사용자에게 선택 제시:
+
+1. **Vercel** (추천) — Next.js 기본. `vercel.json` 확인 + `npx vercel --prod`
+   - recharts tree-shaking 자동 적용 (Next.js production build)
+   - `next.config.mjs`에 `output: 'standalone'` 설정으로 bundle 최적화
+
+2. **Railway** — Full-stack. `railway.toml` 확인 + `railway up`
+
+3. **Coolify** — Dockerfile 기반. Dockerfile 생성 + `coolify deploy`
+
+4. **수동** — 빌드 산출물 경로만 안내
+
+**Bundle size 안내:**
+```
+recharts 전체 import: ~450KB (gzipped ~130KB)
+→ import { LineChart, XAxis, ... } from 'recharts' 로 tree-shaking 권장
+→ @next/bundle-analyzer로 번들 크기 확인 가능
+```
+
 ### mobile-app
 
 seed에 `tech_stack.deploy`가 있으면 자동 선택, 없으면 사용자에게 선택 제시:
@@ -311,6 +334,17 @@ Output:
   Build: <EAS build URL or "pending">
   OTA: eas update --branch production
   Config: app.json에 권한/버전 확인
+```
+
+### dashboard
+
+```
+[SAMVIL] Deploy complete (dashboard)
+  Platform: <Vercel / Railway / Coolify>
+  URL: https://my-dashboard.vercel.app
+  Environment: production
+  Deploy time: 30s
+  Bundle note: recharts tree-shaking 적용됨
 ```
 
 ### automation

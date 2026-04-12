@@ -138,6 +138,38 @@ Read `interview-summary.md` and map each section.
 - `features[].depends_on`: core mechanics depend on scene setup
 - `version`: `1`
 
+#### solution_type: "dashboard"
+
+| Interview Section | Seed Field |
+|---|---|
+| Target User + Core Problem | `description` |
+| Core Experience | `core_experience` (description, primary_screen, key_interactions) |
+| Must-Have Features | `features` with priority assignment |
+| Out of Scope | `out_of_scope` |
+| Constraints | `constraints` |
+| Success Criteria | `acceptance_criteria` |
+
+**Derive automatically:**
+- `name`: kebab-case from the dashboard idea (e.g., "sales analytics dashboard" → "sales-dashboard")
+- `solution_type`: `"dashboard"`
+- `tech_stack`:
+  - `framework`: `"nextjs"`
+  - `state`: `"zustand"` if complex/multi-source data, `"useState"` if simple
+  - `ui`: `"shadcn"`
+  - `router`: `"app-router"`
+- `implementation`:
+  - `type`: `"nextjs-dashboard"`
+  - `runtime`: `"browser"`
+  - `entry_point`: `"src/app/page.tsx"`
+- `core_experience`:
+  - `description`: what the dashboard shows (1 sentence)
+  - `primary_screen`: PascalCase (e.g., "DashboardOverview")
+  - `key_interactions`: derived from chart/filter/drill-down needs (e.g., "filter by date range", "drill down into metric")
+- `features[].independent`: `true` for most dashboard features (charts, filters are usually standalone widgets)
+- **Auto-add constraint**: `"Dashboard must include at least one chart component (recharts)"`
+- **Auto-add constraint**: `"Data should refresh on interval or user action, not require page reload"`
+- `version`: `1`
+
 ### Step 2: Be Opinionated
 
 - **Don't ask the user** "zustand or redux?" — choose what's simplest.
@@ -328,6 +360,28 @@ Required fields and constraints:
 - `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
   - Game ACs should be verifiable via browser: "Player sprite moves left when left arrow is pressed", "Score increases when collectible is picked up", "GameOver screen appears when player hits enemy"
 - `constraints[]`: must include `"Game must run in browser via Phaser 3"` + any user-specified constraints
+- `out_of_scope[]`: at least 2 items
+- `version`: integer, starts at 1
+
+No extra fields beyond the schema. No comments in JSON.
+
+### dashboard
+
+Required fields and constraints:
+- `name`: kebab-case (e.g., "sales-dashboard")
+- `description`: 1-sentence string
+- `solution_type`: `"dashboard"`
+- `tech_stack`: `{ framework: "nextjs", ui: "shadcn", state: "zustand"|"useState", router: "app-router" }`
+- `core_experience`: `{ description, primary_screen (PascalCase), key_interactions[] }`
+- `implementation`:
+  - `type`: `"nextjs-dashboard"`
+  - `runtime`: `"browser"`
+  - `entry_point`: `"src/app/page.tsx"`
+- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
+  - Feature names for dashboards: "chart-widget", "data-table", "filter-panel", "kpi-cards", "date-range-picker", "export-data"
+- `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
+  - Dashboard ACs should be verifiable via browser: "Line chart renders with mock data on page load", "Date range filter updates all charts simultaneously", "KPI card shows correct aggregated value"
+- `constraints[]`: must include `"Dashboard must include at least one chart component (recharts)"` + any user-specified constraints
 - `out_of_scope[]`: at least 2 items
 - `version`: integer, starts at 1
 

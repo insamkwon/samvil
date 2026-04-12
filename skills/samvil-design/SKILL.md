@@ -129,6 +129,64 @@ Create `project.blueprint.json` with game-specific structure:
 - **key_libraries**: Always `["phaser"]`. No other game libraries.
 - **state_management**: `"phaser-scene"` — Phaser scenes manage their own state via `init()`, `create()`, `update()` lifecycle.
 
+### solution_type: "dashboard"
+
+Create `project.blueprint.json` based on the web-app blueprint, extended with dashboard-specific fields:
+
+```json
+{
+  "screens": ["DashboardOverview", "DetailPage"],
+  "data_model": {
+    "MetricName": {
+      "id": "string",
+      "value": "number",
+      "timestamp": "string (ISO 8601)"
+    }
+  },
+  "api_routes": [],
+  "state_management": "zustand | useState",
+  "auth_strategy": "none | supabase | custom",
+  "key_libraries": ["recharts", "date-fns", "lucide-react"],
+  "component_structure": {
+    "shared_ui": ["Card", "Button", "Input", "Modal"],
+    "feature_components": {
+      "charts": ["LineChart", "BarChart", "PieChart", "AreaChart"],
+      "widgets": ["KpiCard", "DataTable", "FilterPanel"]
+    }
+  },
+  "routing": {
+    "/": "DashboardOverview",
+    "/detail/:id": "DetailPage"
+  },
+  "chart_components": ["LineChart", "BarChart"],
+  "data_sources": [
+    { "name": "primary", "type": "localStorage|api|supabase", "refresh_interval": null }
+  ],
+  "refresh_interval": null,
+  "alert_thresholds": []
+}
+```
+
+#### Dashboard Blueprint Decision Rules
+
+- **screens**: `DashboardOverview` as primary (shows all charts/widgets at a glance). Add `DetailPage` if drill-down features exist.
+- **chart_components**: Derived from seed.features:
+  - trend/time-series data → `["LineChart", "AreaChart"]`
+  - comparison data → `["BarChart"]`
+  - composition data → `["PieChart", "DonutChart"]`
+  - KPI/summary → `["KpiCard"]`
+  - tabular data → `["DataTable"]`
+- **data_sources**: Derived from seed. Default `[{ "name": "primary", "type": "localStorage", "refresh_interval": null }]`. If seed mentions external API, set `type: "api"`.
+- **refresh_interval**: `null` by default. Set if seed.constraints or features mention real-time/auto-refresh (e.g., `30000` for 30 seconds).
+- **alert_thresholds**: Empty by default. Add if seed mentions notifications/alerts.
+- **key_libraries**: Always include `"recharts"`. Add based on features:
+  - date filtering → `+ ["date-fns"]`
+  - export → `+ ["xlsx"]` or `+ ["papaparse"]`
+  - complex tables → `+ ["@tanstack/react-table"]`
+- **state_management**: `"zustand"` if multi-source data or 3+ chart widgets. `"useState"` if simple single-page dashboard.
+- **component_structure.feature_components.charts**: One component per chart type from `chart_components`.
+- **component_structure.feature_components.widgets**: Non-chart UI components (filters, tables, KPI cards).
+
 #### Automation Blueprint Decision Rules
 
 - **entry_point**:
@@ -390,6 +448,37 @@ Decision rules for each field:
 - `scene_flow`: Standard game loop chain
 - `key_libraries`: Always `["phaser"]`
 - `state_management`: Always `"phaser-scene"`
+
+### dashboard
+
+```json
+{
+  "screens": ["<PascalCase name>"],
+  "data_model": { "<Entity>": { "id": "string", "value": "number", "timestamp": "string" } },
+  "api_routes": [],
+  "state_management": "zustand | useState",
+  "auth_strategy": "none | supabase | custom",
+  "key_libraries": ["recharts", "<additional>"],
+  "component_structure": {
+    "shared_ui": ["<Component>"],
+    "feature_components": { "charts": ["<ChartComponent>"], "widgets": ["<WidgetComponent>"] }
+  },
+  "routing": { "/": "<DashboardScreen>" },
+  "chart_components": ["<ChartType>"],
+  "data_sources": [{ "name": "<source>", "type": "localStorage|api|supabase", "refresh_interval": null }],
+  "refresh_interval": null,
+  "alert_thresholds": [],
+  "mobile_considerations": {}
+}
+```
+
+Decision rules for each field:
+- `screens`: `DashboardOverview` as primary + optional detail page
+- `chart_components`: Derived from features (LineChart, BarChart, PieChart, AreaChart, KpiCard, DataTable)
+- `data_sources`: Default localStorage. API/Supabase if seed specifies.
+- `key_libraries`: Always includes `"recharts"`. Add date-fns, xlsx, @tanstack/react-table as needed.
+- `state_management`: "zustand" if multi-source or 3+ widgets. "useState" if simple.
+- `refresh_interval`: null unless seed mentions real-time updates.
 
 ### mobile-app
 
