@@ -155,6 +155,14 @@ chore: 설정, 버전, 구조 변경
 4. **배포 준비** — next.config.mjs에 output:'standalone'. QA 완료 후 Vercel/Railway/수동 배포 옵션 제시.
 5. **Council 간접 토론** — Round 1 결과에서 논쟁점(consensus/debate/blind_spots) 추출 → Round 2 prompt에 주입.
 
+## v2.0.0 변경 내역 (v1.0.0 → v2.0.0) — Universal Builder
+
+1. **Seed Schema v2** — `solution_type` 필드 추가 (web-app/automation/game/mobile-app/dashboard). `mode` deprecated, 자동 마이그레이션. `tech_stack.framework` enum 확장 (phaser/expo/python-script/node-script). `core_experience` oneOf (screen + core_flow 패턴). `implementation` object 추가 (type/runtime/entry_point).
+2. **3-Layer solution_type 감지** — 오케스트레이터 Step 2에 L1 키워드 매칭 + L2 컨텍스트 추론 + L3 인터뷰 검증 로직 추가. 감지된 타입을 인터뷰에 컨텍스트로 전달.
+3. **validate_seed 확장** — MCP seed_manager가 새 프레임워크, solution_type, core_flow 패턴 검증 지원. 레거시 mode 자동 마이그레이션.
+4. **Dependency Matrix 확장** — python-script, phaser-game, expo-mobile 스택 엔트리 추가.
+5. **App Presets 확장** — Automation(5종), Game(3종), Mobile(3종), Dashboard(2종) 프리셋 카테고리 추가. solution_type별 매칭 규칙 추가.
+
 ## 디렉토리 구조
 
 ```

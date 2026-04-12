@@ -176,6 +176,155 @@
 
 ---
 
+## Automation Presets
+
+### data-pipeline
+- **Keywords**: ETL, 크롤링, 수집, 파이프라인, scraping, pipeline, extract, transform
+- **Recommended Stack**: python-script
+- **Default Features**: data-fetch, transform, store/output, logging, error-retry
+- **Common Pitfalls**:
+  - No --dry-run mode — tests hit real API
+  - No rate limiting — gets IP banned
+  - No resume capability — large jobs restart from scratch
+  - Hardcoded config — can't change without code edit
+- **Pre-mortem**: "실패 이유?" → API 변경 감지 못함, 메모리 부족, 에러 무시
+
+### slack-bot
+- **Keywords**: 슬랙봇, 알림, Slack, bot, notification, reminder
+- **Recommended Stack**: python-script or node-script
+- **Default Features**: message-send, message-receive, command-handler, schedule
+- **Common Pitfalls**:
+  - No message formatting — plain text only
+  - Bot token hardcoded — leaks to git
+  - No rate limit handling — Slack API 429 errors
+- **Pre-mortem**: "안 쓰는 이유?" → 너무 시끄러움, 중복 알림, 무시당함
+
+### file-processor
+- **Keywords**: 변환, 배치, 파일처리, convert, batch, process, CSV, Excel
+- **Recommended Stack**: python-script
+- **Default Features**: input-read, transform, output-write, progress-tracking
+- **Common Pitfalls**:
+  - No encoding detection — UTF-8以外的 파일 깨짐
+  - No batch size limit — OOM on large files
+  - Overwrites without backup
+- **Pre-mortem**: "실패 이유?" → 파일 포맷 다름, 인코딩 문제, 처리 느림
+
+### api-integration
+- **Keywords**: webhook, sync, 연동, integration, connector, API
+- **Recommended Stack**: python-script or node-script
+- **Default Features**: endpoint-handler, data-map, retry-logic, auth-management
+- **Common Pitfalls**:
+  - No retry with backoff — transient failures kill the job
+  - No auth token refresh — expired tokens crash everything
+  - No payload validation — malformed data causes silent errors
+- **Pre-mortem**: "실패 이유?" → API 스펙 변경, 인증 만료, 타임아웃
+
+### email-responder
+- **Keywords**: 이메일, 자동답변, email, auto-reply, mail, SMTP
+- **Recommended Stack**: python-script
+- **Default Features**: email-read, classify, template-select, send-reply
+- **Common Pitfalls**:
+  - No spam detection — replies to spam
+  - No rate limiting — SMTP provider blocks you
+  - Template too generic — feels robotic
+- **Pre-mortem**: "실패 이유?" → 스팸 처리 안 됨, 답변 품질 낮음, 법적 문제
+
+---
+
+## Game Presets
+
+### platformer
+- **Keywords**: 점프, 플랫포머, jump, platformer, run, 달리기
+- **Recommended Stack**: phaser (Vite + vanilla-ts)
+- **Default Features**: player-movement, gravity-physics, obstacle-generation, score-system, game-over
+- **Common Pitfalls**:
+  - Jump height inconsistent — physics not tuned
+  - No coyote time — feels unfair
+  - Collision boxes too precise — frustrating gameplay
+  - No game over screen — just freezes
+- **Pre-mortem**: "재미없는 이유?" → 조작이 불편함, 너무 어려움, 변화 없음
+
+### puzzle
+- **Keywords**: 퍼즐, match-3, 소코반, tetris, puzzle, match, blocks
+- **Recommended Stack**: phaser (Vite + vanilla-ts)
+- **Default Features**: grid-system, piece-interaction, match-logic, score-combo, level-system
+- **Common Pitfalls**:
+  - Match detection bugged — false positives/negatives
+  - No animation — pieces just teleport
+  - Difficulty curve too steep or too flat
+- **Pre-mortem**: "재미없는 이유?" → 너무 쉬움/어려움, 피드백 없음, 패턴 단조로움
+
+### arcade
+- **Keywords**: 슈팅, 피하기, 사격, shooting, dodge, arcade, space invaders
+- **Recommended Stack**: phaser (Vite + vanilla-ts)
+- **Default Features**: player-control, projectile-system, enemy-spawn, collision-detect, score-multiplier
+- **Common Pitfalls**:
+  - Bullet hell too dense — impossible
+  - No invincibility frames — instant death chain
+  - Enemy patterns predictable — boring after 1 minute
+- **Pre-mortem**: "재미없는 이유?" → 불공평한 난이도, 시각적 피드백 부족, 진전 없음
+
+---
+
+## Mobile Presets
+
+### tracker
+- **Keywords**: 트래커, 건강, 운동, 습관, tracker, health, fitness, habit
+- **Recommended Stack**: expo (React Native)
+- **Default Features**: item-list, daily-check, streak-counter, statistics, local-storage
+- **Common Pitfalls**:
+  - No offline support — useless without connection
+  - No notification reminder — user forgets
+  - Too many taps to log — friction too high
+- **Pre-mortem**: "삭제 이유?" → 귀찮음, 알림 과다, 데이터 동기화 안 됨
+
+### social-feed
+- **Keywords**: 소셜, 피드, SNS, social, feed, timeline, post
+- **Recommended Stack**: expo (React Native)
+- **Default Features**: feed-list, post-create, like-comment, profile, image-upload
+- **Common Pitfalls**:
+  - Infinite scroll without virtualization — OOM
+  - Image upload without compression — slow
+  - No pull-to-refresh — stale content
+- **Pre-mortem**: "삭제 이유?" → 콘텐츠 없음, 느림, 크래시 잦음
+
+### utility-app
+- **Keywords**: 유틸리티, 도구, 계산기, 변환기, utility, tool, converter
+- **Recommended Stack**: expo (React Native)
+- **Default Features**: input-form, calculation, result-display, history, share
+- **Common Pitfalls**:
+  - Keyboard covers input — no scroll adjustment
+  - No haptic feedback — feels unresponsive
+  - Result not shareable — user has to screenshot
+- **Pre-mortem**: "삭제 이유?" → 내장 앱이 더 나음, 기능 부족, 느림
+
+---
+
+## Dashboard Presets
+
+### analytics-dashboard
+- **Keywords**: 분석, 지표, KPI, analytics, metrics, report, BI
+- **Recommended Stack**: nextjs + recharts + date-fns
+- **Default Features**: metric-cards, time-series-chart, date-filter, data-table, csv-export
+- **Common Pitfalls**:
+  - Empty state — no data means blank charts
+  - No loading skeleton — user sees nothing while loading
+  - Chart tooltip broken on mobile
+  - Date filter resets on every page change
+- **Pre-mortem**: "안 쓰는 이유?" → 데이터 수동 입력, 인사이트 부족, 너무 느림
+
+### monitoring-dashboard
+- **Keywords**: 모니터링, 실시간, 상태, monitoring, realtime, status, ops
+- **Recommended Stack**: nextjs + recharts + SWR (realtime polling)
+- **Default Features**: status-cards, realtime-chart, alert-list, log-viewer, health-indicators
+- **Common Pitfalls**:
+  - No auto-refresh — stale data
+  - Alert fatigue — too many false positives
+  - No severity levels — all alerts look the same
+- **Pre-mortem**: "안 쓰는 이유?" → 거짓 경보 과다, 반응 속도 느림, 모바일 불가
+
+---
+
 ## Custom Presets (사용자 정의 프리셋)
 
 빌트인 프리셋에 없는 앱 유형을 사용자가 직접 등록할 수 있다.
@@ -271,9 +420,10 @@
 
 ### 2단계: 빌트인 프리셋 매칭
 
+#### Web-App Presets (solution_type: web-app)
+
 ```
 "할일" / "todo" / "task" → todo
-"대시보드" / "dashboard" / "analytics" → dashboard
 "랜딩" / "landing" / "소개 페이지" → landing-page
 "블로그" / "blog" / "글" → blog
 "쇼핑" / "상점" / "e-commerce" → e-commerce
@@ -285,6 +435,39 @@
 "AI" / "챗봇" / "작성" / "생성" / "assistant" → ai-tool
 "관리" / "CRM" / "협업" / "프로젝트" / "admin" / "팀" → admin
 "예약" / "캘린더" / "스케줄" / "booking" / "달력" → booking
+```
+
+#### Dashboard Presets (solution_type: dashboard)
+
+```
+"대시보드" / "dashboard" / "analytics" → analytics-dashboard
+"모니터링" / "실시간" / "상태" / "monitoring" → monitoring-dashboard
+```
+
+#### Automation Presets (solution_type: automation)
+
+```
+"ETL" / "크롤링" / "수집" / "파이프라인" → data-pipeline
+"슬랙봇" / "알림봇" / "bot" → slack-bot
+"변환" / "배치" / "파일처리" → file-processor
+"webhook" / "sync" / "연동" → api-integration
+"이메일" / "자동답변" → email-responder
+```
+
+#### Game Presets (solution_type: game)
+
+```
+"점프" / "플랫포머" / "platformer" → platformer
+"퍼즐" / "match-3" / "소코반" → puzzle
+"슈팅" / "피하기" / "arcade" → arcade
+```
+
+#### Mobile Presets (solution_type: mobile-app)
+
+```
+"트래커" / "건강" / "운동" / "습관" → tracker
+"소셜" / "피드" / "SNS" → social-feed
+"유틸리티" / "도구앱" / "변환기앱" → utility-app
 ```
 
 ### 3단계: 매칭 실패 시

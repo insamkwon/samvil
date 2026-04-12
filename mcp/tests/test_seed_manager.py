@@ -11,6 +11,7 @@ def test_valid_seed():
     seed = {
         "name": "my-app",
         "description": "A simple task management application",
+        "solution_type": "web-app",
         "mode": "web",
         "tech_stack": {"framework": "nextjs", "ui": "tailwind"},
         "core_experience": {
@@ -42,6 +43,7 @@ def test_invalid_name_format():
     seed = {
         "name": "My App!",
         "description": "x" * 20,
+        "solution_type": "web-app",
         "tech_stack": {"framework": "nextjs"},
         "core_experience": {
             "description": "x" * 20,
@@ -63,6 +65,7 @@ def test_invalid_framework():
     seed = {
         "name": "my-app",
         "description": "x" * 20,
+        "solution_type": "web-app",
         "tech_stack": {"framework": "django"},
         "core_experience": {
             "description": "x" * 20,
@@ -84,6 +87,7 @@ def test_empty_features():
     seed = {
         "name": "my-app",
         "description": "x" * 20,
+        "solution_type": "web-app",
         "tech_stack": {"framework": "nextjs"},
         "core_experience": {
             "description": "x" * 20,
@@ -105,6 +109,7 @@ def test_depends_on_nonexistent_feature():
     seed = {
         "name": "my-app",
         "description": "x" * 20,
+        "solution_type": "web-app",
         "tech_stack": {"framework": "nextjs"},
         "core_experience": {
             "description": "x" * 20,

@@ -1,3 +1,3 @@
 """SAMVIL MCP Server — persistence layer for the AI vibe-coding harness."""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
