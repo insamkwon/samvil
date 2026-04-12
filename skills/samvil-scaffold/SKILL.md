@@ -112,6 +112,7 @@ Read `seed.tech_stack.framework` to determine which CLI to use:
 | `astro` | `astro` | `npm create astro@6.1.5 -- --template minimal` | 정적, 빠른 로딩 |
 | `python-script` | `python-script` | `python3 -m venv .venv` | 자동화 스크립트 |
 | `node-script` | `node-script` | `npm init -y && npx tsc --init` | Node.js 자동화 |
+| `phaser` | `phaser-game` | `npm create vite@5.4.21 -- --template vanilla-ts` | Phaser 3 웹 게임 |
 | `cc-skill` | `cc-skill` | (파일 직접 생성) | CC 스킬 전용 |
 
 기본값: `nextjs` (seed에 명시 없으면)
@@ -573,6 +574,339 @@ main().then(process.exit).catch((e) => {
 }
 ```
 
+#### Phaser Game
+
+```bash
+cd ~/dev
+npm create vite@5.4.21 <seed.name> -- --template vanilla-ts
+cd ~/dev/<seed.name>
+npm install
+npm install phaser@3.87.0
+```
+
+**디렉토리 구조 생성:**
+```bash
+mkdir -p ~/dev/<seed.name>/public/assets/sprites
+mkdir -p ~/dev/<seed.name>/public/assets/images
+mkdir -p ~/dev/<seed.name>/public/assets/audio
+mkdir -p ~/dev/<seed.name>/src/scenes
+mkdir -p ~/dev/<seed.name>/src/entities
+mkdir -p ~/dev/<seed.name>/src/config
+```
+
+**`index.html`** — Vite entry point:
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><seed.name></title>
+  <style>
+    * { margin: 0; padding: 0; }
+    body { background: #000; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
+```
+
+**`src/main.ts`** — Phaser boot + config:
+```typescript
+import Phaser from "phaser";
+import { BootScene } from "./scenes/BootScene";
+import { MenuScene } from "./scenes/MenuScene";
+import { GameScene } from "./scenes/GameScene";
+import { GameOverScene } from "./scenes/GameOverScene";
+import { GAME_CONFIG } from "./config/game-config";
+
+const config: Phaser.Types.Core.GameConfig = {
+  type: Phaser.AUTO,
+  width: GAME_CONFIG.width,
+  height: GAME_CONFIG.height,
+  physics: {
+    default: GAME_CONFIG.physics,
+    arcade: {
+      gravity: { x: 0, y: 0 },
+      debug: false,
+    },
+  },
+  scene: [BootScene, MenuScene, GameScene, GameOverScene],
+  parent: undefined,
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+};
+
+new Phaser.Game(config);
+```
+
+**`src/config/game-config.ts`** — Game configuration from seed:
+```typescript
+export const GAME_CONFIG = {
+  width: 800,
+  height: 600,
+  physics: "arcade",
+  input: "keyboard",
+} as const;
+
+export const COLORS = {
+  bg: 0x1a1a2e,
+  player: 0x00ff88,
+  enemy: 0xff4444,
+  collectible: 0xffdd44,
+  text: 0xffffff,
+} as const;
+```
+
+**`src/scenes/BootScene.ts`** — Asset preloading:
+```typescript
+import Phaser from "phaser";
+
+export class BootScene extends Phaser.Scene {
+  constructor() {
+    super({ key: "BootScene" });
+  }
+
+  preload(): void {
+    // Add asset loading here when external assets are used
+    // For code-generated graphics, no preload needed
+  }
+
+  create(): void {
+    this.scene.start("MenuScene");
+  }
+}
+```
+
+**`src/scenes/MenuScene.ts`** — Start screen:
+```typescript
+import Phaser from "phaser";
+import { GAME_CONFIG, COLORS } from "../config/game-config";
+
+export class MenuScene extends Phaser.Scene {
+  constructor() {
+    super({ key: "MenuScene" });
+  }
+
+  create(): void {
+    const { width, height } = GAME_CONFIG;
+
+    this.add.text(width / 2, height / 2 - 50, "<seed.name>", {
+      fontSize: "48px",
+      color: "#ffffff",
+    }).setOrigin(0.5);
+
+    this.add.text(width / 2, height / 2 + 50, "Press SPACE or Click to Start", {
+      fontSize: "20px",
+      color: "#aaaaaa",
+    }).setOrigin(0.5);
+
+    this.input.keyboard!.once("keydown-SPACE", () => {
+      this.scene.start("GameScene");
+    });
+
+    this.input.once("pointerdown", () => {
+      this.scene.start("GameScene");
+    });
+  }
+}
+```
+
+**`src/scenes/GameScene.ts`** — Main gameplay (skeleton):
+```typescript
+import Phaser from "phaser";
+import { GAME_CONFIG, COLORS } from "../config/game-config";
+import { Player } from "../entities/Player";
+
+export class GameScene extends Phaser.Scene {
+  private player!: Player;
+  private score = 0;
+  private scoreText!: Phaser.GameObjects.Text;
+
+  constructor() {
+    super({ key: "GameScene" });
+  }
+
+  create(): void {
+    const { width, height } = GAME_CONFIG;
+
+    // Background
+    this.cameras.main.setBackgroundColor(COLORS.bg);
+
+    // Player
+    this.player = new Player(this, width / 2, height / 2);
+
+    // Score display
+    this.scoreText = this.add.text(16, 16, "Score: 0", {
+      fontSize: "24px",
+      color: "#ffffff",
+    });
+
+    // TODO: Add enemies, collectibles, collision, scoring per seed.features
+  }
+
+  update(_time: number, _delta: number): void {
+    this.player.update();
+  }
+
+  addScore(points: number): void {
+    this.score += points;
+    this.scoreText.setText("Score: " + this.score);
+  }
+
+  gameOver(): void {
+    this.scene.start("GameOverScene", { score: this.score });
+  }
+}
+```
+
+**`src/scenes/GameOverScene.ts`** — Game over screen:
+```typescript
+import Phaser from "phaser";
+import { GAME_CONFIG } from "../config/game-config";
+
+export class GameOverScene extends Phaser.Scene {
+  constructor() {
+    super({ key: "GameOverScene" });
+  }
+
+  create(data: { score: number }): void {
+    const { width, height } = GAME_CONFIG;
+
+    this.add.text(width / 2, height / 2 - 80, "Game Over", {
+      fontSize: "48px",
+      color: "#ff4444",
+    }).setOrigin(0.5);
+
+    this.add.text(width / 2, height / 2, "Score: " + (data.score ?? 0), {
+      fontSize: "32px",
+      color: "#ffffff",
+    }).setOrigin(0.5);
+
+    this.add.text(width / 2, height / 2 + 80, "Press SPACE or Click to Restart", {
+      fontSize: "20px",
+      color: "#aaaaaa",
+    }).setOrigin(0.5);
+
+    this.input.keyboard!.once("keydown-SPACE", () => {
+      this.scene.start("MenuScene");
+    });
+
+    this.input.once("pointerdown", () => {
+      this.scene.start("MenuScene");
+    });
+  }
+}
+```
+
+**`src/entities/Player.ts`** — Player entity (skeleton):
+```typescript
+import Phaser from "phaser";
+import { COLORS } from "../config/game-config";
+
+export class Player extends Phaser.GameObjects.Container {
+  private sprite: Phaser.GameObjects.Graphics;
+  private cursors: Phaser.Types.Input.Keyboard.CursorKeys;
+  private speed = 200;
+
+  constructor(scene: Phaser.Scene, x: number, y: number) {
+    super(scene, x, y);
+
+    // Create player sprite using graphics (no external asset)
+    this.sprite = scene.add.graphics();
+    this.sprite.fillStyle(COLORS.player);
+    this.sprite.fillRoundedRect(-16, -16, 32, 32, 4);
+    this.add(this.sprite);
+
+    // Physics body
+    scene.physics.add.existing(this);
+    const body = this.body as Phaser.Physics.Arcade.Body;
+    body.setCollideWorldBounds(true);
+
+    // Input
+    this.cursors = scene.input.keyboard!.createCursorKeys();
+
+    scene.add.existing(this);
+  }
+
+  update(): void {
+    const body = this.body as Phaser.Physics.Arcade.Body;
+    body.setVelocity(0);
+
+    if (this.cursors.left.isDown) {
+      body.setVelocityX(-this.speed);
+    } else if (this.cursors.right.isDown) {
+      body.setVelocityX(this.speed);
+    }
+
+    if (this.cursors.up.isDown) {
+      body.setVelocityY(-this.speed);
+    } else if (this.cursors.down.isDown) {
+      body.setVelocityY(this.speed);
+    }
+  }
+}
+```
+
+**`tsconfig.json`** — Update for Phaser:
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "lib": ["ES2020", "DOM"]
+  },
+  "include": ["src"]
+}
+```
+
+**`vite.config.ts`** — Ensure Vite config is correct:
+```typescript
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  build: {
+    outDir: "dist",
+    assetsDir: "assets",
+  },
+});
+```
+
+**`package.json`** — Update scripts:
+```json
+{
+  "name": "<seed.name>",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "phaser": "^3.87.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}
+```
+
 #### CC Skill (automation)
 
 No project scaffolding needed. Create only a `SKILL.md` file:
@@ -855,6 +1189,29 @@ process.exit(ok ? 0 : 1);
 3. Log fix to `.samvil/fix-log.md`
 4. Retry build
 5. Still fails after 2 retries? → **STOP** and report to user
+
+#### game
+
+**Phaser:**
+```bash
+cd ~/dev/<seed.name>
+npx tsc --noEmit > .samvil/build.log 2>&1
+echo "TypeScript check exit code: $?"
+npm run build >> .samvil/build.log 2>&1
+echo "Vite build exit code: $?"
+```
+
+**If game build succeeds:**
+```
+[SAMVIL] Stage 3/5: Scaffold ✓
+  Project: ~/dev/<seed.name>/
+  Type: game
+  Stack: Phaser 3 + Vite + TypeScript
+  Build: passing
+```
+
+**If game build fails — Circuit Breaker (MAX_RETRIES=2):**
+Same as web-app: read error, diagnose, fix, retry, MAX_RETRIES=2.
 
 #### automation
 

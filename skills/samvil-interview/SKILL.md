@@ -164,6 +164,30 @@ options:
 3. **실행 트리거**: "이 자동화는 언제 실행되나요?" (multiSelect: false)
    - 보기: 수동 실행 (명령어로 직접) / 정기 실행 (cron, 매일/매주) / 웹훅 (외부 이벤트 수신) / 파일 변경 감지 / Other
 
+#### solution_type: "game"
+
+**안내 메시지 (최초 1회 표시):**
+```
+[SAMVIL] 게임 모드로 진행합니다.
+  Claude Code는 Unity, Unreal Engine, Godot 등의 네이티브 게임 엔진을 실행할 수 없습니다.
+  대신 Phaser 3 (웹 기반 2D 게임 엔진)로 브라우저에서 동작하는 게임을 만듭니다.
+  - 가능: 2D platformer, puzzle, arcade, 간단한 RPG
+  - 불가능: 3D 게임, 복잡한 물리 시뮬레이션, 대형 MMORPG
+```
+
+1. **장르**: "어떤 장르의 게임인가요?"
+   - 보기: platformer (점프/달리기) / puzzle (퍼즐/매칭) / arcade (슈팅/회피) / 간단한 RPG / Other
+
+2. **조작 방식**: "플레이어 조작은 어떻게 하나요?" (multiSelect: true)
+   - 보기: keyboard (방향키/WASD) / mouse (클릭/드래그) / touch (모바일 터치) / Other
+
+3. **게임 목표**: "게임의 핵심 목표는 무엇인가요?"
+   - 보기: 점수 달성 (score attack) / 시간 생존 (survival) / 레벨 클리어 (level completion) / 아이템 수집 (collection) / Other
+
+4. **그래픽 스타일**: "그래픽 스타일은 어떻게 할까요?"
+   - 보기: pixel art (8-bit/16-bit) / simple shapes (원, 사각형 기반) / minimal flat / Other
+   - **안내**: "Phaser 3는 2D 스프라이트 기반입니다. 3D 모델링은 불가능합니다. 복잡한 애니메이션은 코드로 생성하는 simple shapes를 추천합니다."
+
 ### Phase 2: Scope Definition (2-3 questions)
 
 #### solution_type: "web-app" (기본)
@@ -206,6 +230,27 @@ options:
      - label: "필요 없어요"
        description: "외부 API 없이 자체 데이터만 사용합니다."
    ```
+
+#### solution_type: "game"
+
+4. **게임 요소** (multiSelect: true):
+   - 보기: 적 (enemy) / 아이템/수집품 (collectible) / 장애물 (obstacle) / 점수 시스템 (scoring) / 타이머 (timer) / 레벨/스테이지 (levels) / Other
+
+5. **게임 난이도**:
+   ```
+   question: "게임 난이도를 어떻게 할까요?"
+   header: "난이도"
+   options:
+     - label: "쉬움 (casual)"
+       description: "누구나 쉽게 즐길 수 있는 난이도. 클론 코딩 수준."
+     - label: "보통 (normal)"
+       description: "일반적인 게임 난이도. 약간의 도전."
+     - label: "어려움 (hard)"
+       description: "하드코어 게이머 대상. 정밀한 조작 필요."
+   ```
+
+6. **제약 조건** (multiSelect: true):
+   - 보기: 모바일 터치 지원 필수 / 외부 에셋 사용 안 함 (코드로 생성) / 사운드 포함 / Other
 
 #### solution_type: "automation"
 
@@ -354,6 +399,23 @@ Seed에서 `tech_stack.framework`에 매핑:
 - Vite + React → `"vite-react"`
 - Astro → `"astro"`
 
+#### solution_type: "game"
+
+```
+question: "게임 기술 스택을 추천합니다."
+header: "스택"
+options:
+  - label: "Phaser 3 + Vite + TypeScript (추천)"
+    description: "2D 웹 게임 표준. Canvas/WebGL 렌더링. 모든 브라우저 지원."
+  - label: "Phaser 3 + Vite + JavaScript"
+    description: "TypeScript 없이 순수 JavaScript. 더 간단한 설정."
+```
+
+선택 결과를 interview-summary.md에 `추천 스택: <선택>` 으로 저장.
+Seed에서 `tech_stack.framework`에 매핑:
+- Phaser 3 + TypeScript → `"phaser"`
+- Phaser 3 + JavaScript → `"phaser"`
+
 #### solution_type: "automation"
 
 Phase 2에서 선택한 실행 환경 기반으로 스택 확정:
@@ -412,6 +474,37 @@ Seed에서 `tech_stack.framework`에 매핑:
 
 가정 사항:
   - <가정>
+```
+
+#### game 요약
+
+```
+[SAMVIL] 인터뷰 요약 (Game)
+━━━━━━━━━━━━━━━━━━━━
+
+장르: <platformer/puzzle/arcade/RPG>
+조작: <keyboard/mouse/touch>
+목표: <score/survival/level completion>
+그래픽: <pixel art/simple shapes/minimal flat>
+
+게임 요소:
+  - <적, 아이템, 장애물 등>
+난이도: <casual/normal/hard>
+
+필수 기능 (P1):
+  1. <기능>
+  ...
+
+제약 조건:
+  - <제약>
+  ...
+
+성공 기준:
+  1. <testable 기준>
+  ...
+
+추천 스택: Phaser 3 + Vite + TypeScript
+런타임: 브라우저 (Canvas/WebGL)
 ```
 
 #### automation 요약
@@ -555,6 +648,59 @@ Write `~/dev/<project>/interview-summary.md` with these sections (Korean):
 
 ## 코딩 컨벤션 (brownfield only)
 <detected conventions>
+```
+
+### game
+
+```markdown
+# Interview Summary
+
+## 솔루션 타입
+game
+
+## 장르
+<platformer/puzzle/arcade/RPG>
+
+## 조작 방식
+<keyboard/mouse/touch>
+
+## 게임 목표
+<score/survival/level completion/collection>
+
+## 그래픽 스타일
+<pixel art/simple shapes/minimal flat>
+
+## 게임 요소
+- <적, 아이템, 장애물, 점수, 타이머, 레벨 등>
+
+## 난이도
+<casual/normal/hard>
+
+## 앱 유형
+<preset name or "커스텀">
+
+## 필수 기능 (P1)
+1. <feature>
+...
+
+## 제외 항목
+- <excluded item>
+...
+
+## 제약 조건
+- <constraint>
+...
+
+## 성공 기준
+1. <testable criterion>
+...
+
+## 추천 스택
+Phaser 3 + Vite + TypeScript
+
+## 가정 사항
+- <assumption>
+...
 ```
 
 ### automation

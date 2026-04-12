@@ -91,6 +91,32 @@ echo "Exit code: $?"
   Build: passing
 ```
 
+### solution_type: "game"
+
+The seed's `core_experience` defines the game's core mechanic. **Build the core gameplay first.**
+
+1. Read `seed.core_experience`
+2. Create the Player entity: `src/entities/Player.ts`
+3. Set up GameScene with physics world, player, and basic input handling
+4. Implement the core mechanic from `game_config.input` (keyboard/mouse/touch)
+5. Implement score display and scene transition to GameOverScene
+6. **Build verify (INV-2):**
+   ```bash
+   cd ~/dev/<seed.name>
+   npx tsc --noEmit > .samvil/build.log 2>&1
+   echo "Exit code: $?"
+   ```
+   Circuit Breaker: MAX_RETRIES=2. Same as web-app.
+
+7. Update `project.state.json`: note core game mechanic complete
+
+```
+[SAMVIL] Stage 4/5: Core Game Mechanic built ✓
+  Entity: Player
+  Scene: GameScene
+  Build: passing
+```
+
 ### solution_type: "automation"
 
 The seed's `core_flow` defines the main processing pipeline. **Build this first.**
@@ -204,6 +230,37 @@ Automation features map to modules, not UI components. Each feature becomes a pr
 5. **Dry-run verify**: `python src/main.py --dry-run` (must still pass after each module)
 
 **Circuit breaker**: Same MAX_RETRIES=2 per module.
+
+### solution_type: "game" — Mechanic-based Build
+
+Game features map to game mechanics within Phaser scenes. Each feature modifies or extends the game's scene lifecycle (preload → create → update):
+
+| Feature | Implementation | File |
+|---------|---------------|------|
+| player-movement | Player entity with input | `src/entities/Player.ts` |
+| enemy-spawn | Enemy factory in GameScene | `src/entities/Enemy.ts` |
+| collision-detection | Physics overlap/collide in GameScene | GameScene |
+| scoring-system | Score tracking + display | GameScene |
+| level-progression | Difficulty scaling or scene change | GameScene / LevelManager |
+| collectibles | Collectible entity + overlap logic | `src/entities/Collectible.ts` |
+| timer | Countdown timer + GameOver trigger | GameScene |
+
+**Build each mechanic:**
+1. Create/modify entity class in `src/entities/` (follows Phaser GameObject pattern)
+2. Wire into GameScene's `create()` (setup) and `update()` (game loop) methods
+3. Add collision/overlap handlers via `this.physics.add.overlap()` or `this.physics.add.collider()`
+4. **Build verify**: `npx tsc --noEmit` (TypeScript strict mode)
+5. **Runtime verify**: `npm run dev` → Playwright canvas check
+
+**Key patterns:**
+- Phaser scene lifecycle: `preload()` → `create()` → `update(time, delta)`
+- Entities extend `Phaser.GameObjects.Container` with physics body
+- Collision: `this.physics.add.collider(player, enemies, callback)`
+- Overlap (collectibles): `this.physics.add.overlap(player, collectibles, callback)`
+- Keyboard input: `this.input.keyboard!.createCursorKeys()` or `this.input.keyboard!.addKey()`
+- Touch/mouse: `this.input.on("pointerdown", callback)`
+
+**Circuit breaker**: MAX_RETRIES=2 per mechanic. TypeScript strict — no `any`.
 
 ### solution_type: "web-app" — Component-based Build (기존)
 
@@ -500,6 +557,15 @@ After all chunks complete:
   Modules: N/M implemented
   Failed: [list or "none"]
   Dry-run: passing
+  Build: passing
+```
+
+#### game
+
+```
+[SAMVIL] Stage 4/5: Build complete (game)
+  Mechanics: N/M implemented
+  Failed: [list or "none"]
   Build: passing
 ```
 

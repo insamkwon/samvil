@@ -74,6 +74,42 @@ Read `interview-summary.md` and map each section.
 - `features[].independent`: `true` for most automation features (they're usually standalone processing steps)
 - `version`: `1`
 
+### solution_type: "game"
+
+| Interview Section | Seed Field |
+|---|---|
+| 장르 | `description` |
+| 게임 요소 | `core_experience` (description, game_config, game_states) |
+| 게임 요소/기능 | `features` with priority assignment |
+| Out of Scope | `out_of_scope` |
+| Constraints | `constraints` |
+| Success Criteria | `acceptance_criteria` |
+
+**Derive automatically:**
+- `name`: kebab-case from the game idea (e.g., "simple jump game" → "jump-game")
+- `solution_type`: `"game"`
+- `core_experience`:
+  - `description`: what the player does (e.g., "Jump over obstacles and collect coins")
+  - `game_config`: `{ width: 800, height: 600, physics: "arcade", input: "keyboard" }`
+    - `width`/`height`: from interview (default 800x600)
+    - `physics`: `"arcade"` (default) — only arcade physics supported
+    - `input`: from interview answer (keyboard/mouse/touch)
+  - `game_states`: `["Menu", "Play", "GameOver"]` — standard 3-state game loop
+  - `key_interactions`: derived from genre (e.g., platformer → ["jump", "move-left", "move-right"])
+- `tech_stack`:
+  - `framework`: `"phaser"`
+  - No `ui`, `state`, `router` fields (game doesn't need them)
+- `implementation`:
+  - `type`: `"phaser-game"`
+  - `runtime`: `"browser"`
+  - `entry_point`: `"src/main.ts"`
+- **Auto-add constraints**:
+  - `"Game must run in browser via Phaser 3 — no native executable"`
+  - `"All assets must be generated in code (no external asset files unless user provided)"`
+- `features[].independent`: `false` for game mechanics (they share scene lifecycle, physics world)
+- `features[].depends_on`: core mechanics depend on scene setup
+- `version`: `1`
+
 ### Step 2: Be Opinionated
 
 - **Don't ask the user** "zustand or redux?" — choose what's simplest.
@@ -238,6 +274,32 @@ Required fields and constraints:
 - `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
 - `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
 - `constraints[]`: must include `"Script must support --dry-run mode with fixtures/ for testing without real API calls"` + any user-specified constraints
+- `out_of_scope[]`: at least 2 items
+- `version`: integer, starts at 1
+
+No extra fields beyond the schema. No comments in JSON.
+
+### game
+
+Required fields and constraints:
+- `name`: kebab-case (e.g., "jump-game")
+- `description`: 1-sentence string
+- `solution_type`: `"game"`
+- `tech_stack`: `{ framework: "phaser" }` — no ui/state/router
+- `core_experience`:
+  - `description`: what the player does
+  - `game_config`: `{ width: 800, height: 600, physics: "arcade", input: "keyboard" }`
+  - `game_states`: `["Menu", "Play", "GameOver"]`
+  - `key_interactions`: `["<interaction>", ...]`
+- `implementation`:
+  - `type`: `"phaser-game"`
+  - `runtime`: `"browser"`
+  - `entry_point`: `"src/main.ts"`
+- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
+  - Feature names are game mechanics: "player-movement", "enemy-spawn", "collision-detection", "scoring-system", "level-progression"
+- `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
+  - Game ACs should be verifiable via browser: "Player sprite moves left when left arrow is pressed", "Score increases when collectible is picked up", "GameOver screen appears when player hits enemy"
+- `constraints[]`: must include `"Game must run in browser via Phaser 3"` + any user-specified constraints
 - `out_of_scope[]`: at least 2 items
 - `version`: integer, starts at 1
 

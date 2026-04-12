@@ -79,6 +79,56 @@ Create `project.blueprint.json` with automation-specific structure:
 }
 ```
 
+### solution_type: "game"
+
+Create `project.blueprint.json` with game-specific structure:
+
+```json
+{
+  "scenes": ["BootScene", "MenuScene", "GameScene", "GameOverScene"],
+  "entities": ["Player", "Enemy", "Collectible"],
+  "game_config": {
+    "width": 800,
+    "height": 600,
+    "physics": "arcade",
+    "input": "keyboard"
+  },
+  "assets": {
+    "sprites": [],
+    "audio": []
+  },
+  "scene_flow": {
+    "BootScene": "MenuScene",
+    "MenuScene": "GameScene",
+    "GameScene": "GameOverScene",
+    "GameOverScene": "MenuScene"
+  },
+  "key_libraries": ["phaser"],
+  "state_management": "phaser-scene",
+  "component_structure": {
+    "scenes": ["BootScene", "MenuScene", "GameScene", "GameOverScene"],
+    "entities": ["Player", "Enemy", "Collectible"],
+    "config": ["game-config"]
+  }
+}
+```
+
+#### Game Blueprint Decision Rules
+
+- **scenes**: Always include BootScene (asset preloading), MenuScene (start/restart), GameScene (main gameplay), GameOverScene (score + restart). Additional scenes for levels.
+- **entities**: Derived from seed.features — each game mechanic maps to an entity class:
+  - player-movement → Player entity
+  - enemy-spawn → Enemy entity
+  - collision-detection → physics config between entities
+  - scoring-system → ScoreManager (scene-level)
+  - level-progression → LevelManager (scene-level)
+- **game_config**: Copied from `seed.core_experience.game_config`. Defaults: `{ width: 800, height: 600, physics: "arcade", input: "keyboard" }`
+- **assets.sprites**: If `seed.core_experience.graphics` = "pixel art" → note that pixel art sprites need to be generated in code (no external files). If "simple shapes" → all graphics via Phaser graphics primitives.
+- **assets.audio**: Empty by default (sound is optional). Add if seed.constraints include sound.
+- **scene_flow**: Standard game loop. BootScene → MenuScene → GameScene → GameOverScene → (restart) → MenuScene.
+- **key_libraries**: Always `["phaser"]`. No other game libraries.
+- **state_management**: `"phaser-scene"` — Phaser scenes manage their own state via `init()`, `create()`, `update()` lifecycle.
+
 #### Automation Blueprint Decision Rules
 
 - **entry_point**:
@@ -316,6 +366,30 @@ Decision rules for each field:
 - `dependencies`: Derived from features and I/O requirements
 - `error_handling`: From interview Phase 2 answer, default `"retry_with_logging"`
 - `execution.type`: Mapped from `seed.core_flow.trigger`
+
+### game
+
+```json
+{
+  "scenes": ["BootScene", "MenuScene", "GameScene", "GameOverScene"],
+  "entities": ["<Entity>"],
+  "game_config": { "width": 800, "height": 600, "physics": "arcade", "input": "keyboard" },
+  "assets": { "sprites": [], "audio": [] },
+  "scene_flow": { "BootScene": "MenuScene", "MenuScene": "GameScene", "GameScene": "GameOverScene", "GameOverScene": "MenuScene" },
+  "key_libraries": ["phaser"],
+  "state_management": "phaser-scene",
+  "component_structure": { "scenes": [], "entities": [], "config": [] }
+}
+```
+
+Decision rules for each field:
+- `scenes`: Always BootScene + MenuScene + GameScene + GameOverScene minimum
+- `entities`: Derived from seed.features (Player, Enemy, Collectible, etc.)
+- `game_config`: From `seed.core_experience.game_config`
+- `assets`: Empty arrays by default. All graphics generated in code.
+- `scene_flow`: Standard game loop chain
+- `key_libraries`: Always `["phaser"]`
+- `state_management`: Always `"phaser-scene"`
 
 ## Anti-Patterns
 

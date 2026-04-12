@@ -186,6 +186,23 @@ Check:
 
 **If Pass 1 fails:** Verdict = REVISE with specific errors. Skip Pass 2 and 3.
 
+### game
+
+```bash
+cd ~/dev/<seed.name>
+npx tsc --noEmit > .samvil/build.log 2>&1
+echo "TypeScript check exit code: $?"
+npm run build >> .samvil/build.log 2>&1
+echo "Vite build exit code: $?"
+```
+
+Check:
+- `tsc --noEmit` exits with code 0 (TypeScript strict mode, no errors)
+- `vite build` succeeds (valid bundle output)
+- No import errors for Phaser or scene modules
+
+**If Pass 1 fails:** Verdict = REVISE with specific errors. Skip Pass 2 and 3.
+
 ## Pass 1b: Playwright Smoke Run (빌드 통과 후)
 
 ### web-app
@@ -291,6 +308,48 @@ Check:
 - stderr does not contain real API URLs (no actual API calls in dry-run)
 
 **If dry-run fails:** Verdict = REVISE. Skip Pass 2 and 3.
+
+### game
+
+Game 프로젝트는 Playwright로 canvas 렌더링과 Phaser game state를 검증합니다.
+
+**1. Start dev server:**
+```bash
+cd ~/dev/<seed.name> && npm run dev &
+```
+
+**2. Navigate to the game:**
+```
+mcp__plugin_playwright_playwright__browser_navigate(url="http://localhost:5173")
+```
+
+**3. Check canvas rendering:**
+```
+mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const canvas = document.querySelector('canvas'); return canvas !== null && canvas.width > 0 && canvas.height > 0; }")
+```
+- Canvas exists and has dimensions: PASS
+- No canvas found: FAIL
+
+**4. Check Phaser game state:**
+```
+mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const canvas = document.querySelector('canvas'); return { hasCanvas: !!canvas, width: canvas?.width, height: canvas?.height, bodyChildren: document.body.children.length }; }")
+```
+
+**5. Check for console errors:**
+```
+mcp__plugin_playwright_playwright__browser_console_messages(level="error")
+```
+- Phaser/WebGL errors are critical FAIL
+- Warning-level messages are acceptable
+
+**6. Take screenshot:**
+```
+mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=".samvil/qa-evidence/smoke-game-pass.png")
+```
+
+**Keep dev server running** — Pass 2 needs it.
+
+**If canvas check fails:** Verdict = REVISE with specific issues.
 
 ## QA Execution Mode by Tier
 
@@ -541,6 +600,79 @@ After all ACs are verified, stop the dev server:
 kill $(lsof -ti:3000) 2>/dev/null
 ```
 
+### game — Functional Verification
+
+Game은 Playwright로 canvas 렌더링, scene 전환, 점수 업데이트, keyboard input 응답을 검증합니다.
+
+**Pass 2-A: Canvas 렌더링 검증**
+
+Dev server should be running from Pass 1b. Navigate if needed:
+```bash
+# If not already running
+cd ~/dev/<seed.name> && npm run dev &
+```
+
+For **EACH** item in `seed.acceptance_criteria`:
+
+1. **Verify canvas renders game content:**
+   ```
+   mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const canvas = document.querySelector('canvas'); const ctx = canvas?.getContext('2d'); if (!ctx) return { error: 'no canvas' }; const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height); const pixels = imageData.data; let nonBlack = 0; for (let i = 0; i < pixels.length; i += 4) { if (pixels[i] > 0 || pixels[i+1] > 0 || pixels[i+2] > 0) nonBlack++; } return { hasContent: nonBlack > 100, totalPixels: pixels.length / 4, nonBlackPixels: nonBlack }; }")
+   ```
+   - nonBlackPixels > 100: Canvas has rendered content (PASS)
+   - nonBlackPixels <= 100: Empty/black canvas (FAIL)
+
+2. **Verify Phaser game state via page.evaluate:**
+   ```
+   mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const game = window.Phaser?.Game; return { phaserLoaded: typeof Phaser !== 'undefined', gameExists: !!document.querySelector('canvas') }; }")
+   ```
+
+3. **Verify scene transitions:**
+   - Start at MenuScene (initial load)
+   - Press SPACE to transition to GameScene:
+     ```
+     mcp__plugin_playwright_playwright__browser_press_key(key="Space")
+     ```
+   - Wait for scene change:
+     ```
+     mcp__plugin_playwright_playwright__browser_wait_for(time=2)
+     ```
+   - Verify GameScene is active (score text visible):
+     ```
+     mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const canvas = document.querySelector('canvas'); if (!canvas) return { error: 'no canvas' }; const ctx = canvas.getContext('2d'); const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height); return { hasContent: true, width: canvas.width, height: canvas.height }; }")
+     ```
+
+4. **Verify keyboard input response:**
+   ```
+   mcp__plugin_playwright_playwright__browser_press_key(key="ArrowLeft")
+   mcp__plugin_playwright_playwright__browser_wait_for(time=0.5)
+   mcp__plugin_playwright_playwright__browser_press_key(key="ArrowRight")
+   ```
+   - After pressing keys, take screenshot to verify player moved:
+     ```
+     mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=".samvil/qa-evidence/game-input-response.png")
+     ```
+
+5. **Verify score counter updates:**
+   ```
+   mcp__plugin_playwright_playwright__browser_evaluate(function="() => { const canvas = document.querySelector('canvas'); if (!canvas) return { error: 'no canvas' }; const ctx = canvas.getContext('2d'); const imageData = ctx.getImageData(0, 0, canvas.width, 50); const pixels = imageData.data; let hasWhitePixels = false; for (let i = 0; i < pixels.length; i += 4) { if (pixels[i] > 200 && pixels[i+1] > 200 && pixels[i+2] > 200) { hasWhitePixels = true; break; } } return { scoreAreaHasContent: hasWhitePixels }; }")
+     ```
+
+6. **Verify GameOver transition:**
+   - Trigger game over (scenario depends on game type)
+   - Verify GameOver screen appears with "Game Over" text rendered
+
+7. **Screenshot evidence for each AC:**
+   ```
+   mcp__plugin_playwright_playwright__browser_take_screenshot(type="png", filename=".samvil/qa-evidence/<ac-name>-pass.png")
+   ```
+
+### Fallback for game
+
+If Playwright MCP is unavailable, fall back to:
+1. **Static code analysis** — Verify all scenes exist, entities have physics bodies, collision handlers are wired
+2. **TypeScript check** — `npx tsc --noEmit` passes
+3. Mark unverifiable ACs as PARTIAL with `"reason": "runtime_unverifiable"`
+
 ### automation — Functional Verification
 
 Automation은 Playwright 대신 `--dry-run` 실행으로 AC를 검증합니다.
@@ -647,6 +779,32 @@ mcp__plugin_playwright_playwright__browser_take_screenshot(
 **CONCERN 규칙**: 성능 CONCERN(First Load > 100KB 등)이 있으면 CONCERN으로만 표시하지 말고 **REVISE로 처리**. CONCERN은 무시되기 쉬움 — 발견했으면 수정해야 함.
 
 **If critical quality issues or any CONCERN:** Verdict = REVISE with specific issues.
+
+### game — Quality Verification
+
+Check by reading relevant code:
+- **Scene lifecycle**: Every scene has `create()` method. GameScene has `update()` method.
+- **TypeScript strict**: No `any` types. Proper interfaces for game objects.
+- **Physics**: Arcade physics properly configured. No NaN velocities.
+- **Asset loading**: All referenced assets are either loaded in `preload()` or generated in code.
+- **No 404 assets**: Check browser network tab for failed asset loads.
+- **Performance**: FPS 30+ during gameplay (check via `page.evaluate`):
+  ```
+  mcp__plugin_playwright_playwright__browser_evaluate(function="() => { let lastTime = performance.now(); let frames = 0; return new Promise(resolve => { function count() { frames++; if (performance.now() - lastTime >= 1000) { resolve({ fps: frames }); return; } requestAnimationFrame(count); } count(); }); })")
+  ```
+  - FPS >= 30: PASS
+  - FPS < 30: CONCERN (may need optimization)
+
+- **Mobile viewport**: Touch input works on mobile viewport:
+  ```
+  mcp__plugin_playwright_playwright__browser_resize(width=375, height=667)
+  mcp__plugin_playwright_playwright__browser_evaluate(function="() => { return { canvasVisible: !!document.querySelector('canvas'), touchEnabled: 'ontouchstart' in window }; }")
+  mcp__plugin_playwright_playwright__browser_resize(width=1280, height=720)
+  ```
+- **No dead code**: All entity classes imported and used in scenes.
+- **Clean state management**: Game restart resets all state (score, positions, timers).
+
+**If critical quality issues:** Verdict = REVISE with specific issues.
 
 ### automation — Quality Verification
 
