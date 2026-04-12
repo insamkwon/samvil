@@ -19,7 +19,8 @@ description: "Socratic interview with app presets, unknown-unknown probing, and 
    - 각 파일의 `name`과 `keywords` 필드 파싱
    - 감지된 커스텀 프리셋이 있으면 목록 저장
 5. The app idea is in the conversation context (from orchestrator)
-6. **MCP (best-effort):** Save interview start event:
+6. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+7. **MCP (best-effort):** Save interview start event:
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_start", stage="interview", data='{"tier":"<selected_tier>","custom_presets":<N>}')
    ```

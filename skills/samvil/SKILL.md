@@ -10,8 +10,8 @@ You are the SAMVIL orchestrator. Take the user's one-line app idea and guide it 
 ## Pipeline
 
 ```
-[1] Interview → [2] Seed → [Gate A] Council → [Design] Blueprint → [3] Scaffold → [4] Build → [5] QA → [Evolve] → [Auto] Retro
-                              ↑ Council skip if minimal    ↑ Gate B if thorough+    ↑ parallel if standard+  ↑ optional
+[1] Interview → [2] Seed → [Gate A] Council → [Design] Blueprint → [3] Scaffold → [4] Build → [5] QA → [6] Deploy → [Evolve] → [Auto] Retro
+                              ↑ Council skip if minimal    ↑ Gate B if thorough+    ↑ parallel if standard+  ↑ QA PASS시  ↑ optional
 ```
 
 ## How to Run
@@ -362,7 +362,7 @@ Resume이 확정되면:
 
 **파이프라인 스테이지 순서** (체인 복구용):
 ```
-interview → seed → council → design → scaffold → build → qa → evolve → retro
+interview → seed → council → design → scaffold → build → qa → deploy → evolve → retro
 ```
 
 `completed_stages`의 마지막 스테이지 다음 순서의 스킬을 invoke.
@@ -439,6 +439,7 @@ TaskCreate: "Design — 아키텍처 결정"
 TaskCreate: "Scaffold — 프로젝트 뼈대 생성"
 TaskCreate: "Build — 기능 구현"
 TaskCreate: "QA — 3단계 검증"
+TaskCreate: "Deploy — 배포"
 TaskCreate: "Retro — 회고"
 ```
 
@@ -472,295 +473,27 @@ mcp__samvil_mcp__save_event(
 )
 ```
 
-**MCP Event Rule (모든 스킬 공통) — Dual-Write Pattern:**
-각 스킬이 상태를 변경할 때마다 다음 순서로 이벤트를 기록:
-
-1. **항상 파일에 먼저 기록** — `.samvil/events.jsonl`에 append (절대 실패하지 않음)
-2. **MCP는 best-effort** — `mcp__samvil_mcp__save_event` 호출 시도. 성공하면 좋고, 실패해도 파이프라인 계속 진행
-3. **실패 시 기록** — MCP 호출이 실패하면 `.samvil/mcp-health.jsonl`에 `{status:"fail", tool:"<name>", error:"<msg>", timestamp:"..."}` append
-
-```
-# 파일 기록 (항상 실행)
-append to .samvil/events.jsonl: {"event_type":"<type>","stage":"<stage>","data":{...},"timestamp":"<ISO>"}
-
-# MCP 호출 (best-effort)
-try:
-  mcp__samvil_mcp__save_event(session_id=..., event_type=..., stage=..., data=...)
-except:
-  append to .samvil/mcp-health.jsonl: {"status":"fail","tool":"save_event","error":"<error>"}
-```
-
-**Retro에서 MCP 건강 리포트를 출력** — `.samvil/mcp-health.jsonl`이 있으면 성공률 집계.
+**MCP Event Rule + Graceful Degradation:** See `references/graceful-degradation.md` for Dual-Write Pattern and MCP fallback rules.
 
 Invoke the Skill tool: `samvil-interview`
 
 The chain continues from there — each skill invokes the next (INV-4).
 
-**Metrics Tracking (INV-5)** — 각 스테이지 시작/종료 시 `.samvil/metrics.json` 업데이트:
+**Metrics Tracking (INV-5):** See `references/metrics-tracking.md` for stage metrics recording rules.
 
-이 지시는 체인의 모든 스킬이 따라야 한다:
+### Plugin System (INV-8) — Planned
 
-```
-# 스테이지 시작 시 (각 스킬의 Boot Sequence에서):
-metrics.json을 읽기
-metrics.stages.<stage>.started_at = <ISO timestamp now>
-metrics.json에 저장
+> **Status: 정의만 완료, 스킬에 연결 전.** 상세 스펙은 `references/plugin-system.md` 참조.
 
-# 스테이지 종료 시 (각 스킬이 다음 스킬 invoke 직전):
-metrics.json을 읽기
-metrics.stages.<stage>.ended_at = <ISO timestamp now>
-metrics.stages.<stage>.duration_ms = ended_at - started_at (milliseconds)
-# 스테이지별 추가 메트릭 기록 (아래 참고)
-metrics.json에 저장
-```
-
-**스테이지별 메트릭 필드:**
-
-| Stage | Fields |
-|-------|--------|
-| `interview` | `questions_asked` (int) |
-| `seed` | _(duration만)_ |
-| `council` | `agents_spawned` (int), `rounds_completed` (int) |
-| `design` | `agents_spawned` (int), `blueprint_generated` (bool) |
-| `scaffold` | `stack` (string), `files_created` (int) |
-| `build` | `features_total` (int), `features_passed` (int), `features_failed` (int), `builds_run` (int), `agents_spawned` (int) |
-| `qa` | `pass_rate` (float 0~1), `iterations` (int), `verdict` (PASS/REVISE/FAIL) |
-| `evolve` | `cycles_run` (int), `seed_versions_created` (int) |
-
-**체인 종료 시 (Retro 직전)** — 오케스트레이터 또는 마지막 스킬이:
-
-```
-metrics.json을 읽기
-metrics.total_duration_ms = now - metrics.timestamp (milliseconds)
-metrics.json에 저장
-```
-
-### Plugin System (INV-8)
-
-사용자가 파이프라인의 특정 스테이지에 커스텀 로직을 끼워 넣을 수 있는 플러그인 시스템.
-
-**핵심 원칙: Plugin is best-effort.** 플러그인 실패는 하네스 실행에 영향 없음. 경고만 출력하고 계속 진행.
-
-#### Hook Points
-
-파이프라인의 6개 스테이지 전후에 hook 포인트가 존재한다:
-
-```
-before_scaffold → [Scaffold] → after_scaffold
-before_build    → [Build]    → after_build
-before_qa       → [QA]       → after_qa
-```
-
-| Hook | Timing | 입력 (stdin JSON) | 기대 출력 |
-|------|--------|-------------------|-----------|
-| `before_scaffold` | scaffold 실행 직전 | `seed.json` 경로 | 없음 (종료 코드만 확인) |
-| `after_scaffold` | scaffold 완료 직후 | `seed.json` 경로, 생성된 파일 목록 | 없음 |
-| `before_build` | build 실행 직전 | `seed.json` 경로, features 배열 | 없음 |
-| `after_build` | build 완료 직후 | 빌드 결과 (pass/fail, features 요약) | `pass` / `fail` |
-| `before_qa` | QA 실행 직전 | `seed.json` 경로, features 배열 | 없음 |
-| `after_qa` | QA 완료 직후 | QA 결과 (verdict, pass_rate) | `pass` / `fail` |
-
-#### 플러그인 로딩 프로세스
-
-각 스테이지 시작/종료 시 오케스트레이터가 수행하는 절차:
-
-```bash
-# 1. 플러그인 디렉토리 확인
-PLUGIN_DIR=~/.samvil/plugins
-if [ ! -d "$PLUGIN_DIR" ]; then
-  # 플러그인 없음 → 바로 다음 스테이지 진행
-  return
-fi
-
-# 2. 각 플러그인의 plugin.json 읽기
-for plugin_manifest in "$PLUGIN_DIR"/*/plugin.json; do
-  [ -f "$plugin_manifest" ] || continue
-  plugin_name=$(basename $(dirname "$plugin_manifest"))
-  
-  # 3. 해당 hook에 등록된 명령어 확인
-  command=$(python3 -c "
-import json, sys
-m = json.load(open('$plugin_manifest'))
-hooks = m.get('hooks', {})
-hook_config = hooks.get('$HOOK_NAME', {})
-print(hook_config.get('command', ''))
-" 2>/dev/null)
-  
-  # 4. command가 없으면 스킵
-  [ -z "$command" ] && continue
-  
-  # 5. 명령어 실행 (stdin으로 JSON 입력 전달)
-  echo "$INPUT_JSON" | eval "$command" > ".samvil/plugin-output/${plugin_name}-${HOOK_NAME}.log" 2>".samvil/plugin-output/${plugin_name}-${HOOK_NAME}.err"
-  exit_code=$?
-  
-  # 6. 결과 기록
-  if [ $exit_code -ne 0 ]; then
-    echo "[SAMVIL] Plugin '$plugin_name' ($HOOK_NAME) failed (exit $exit_code). Continuing..."
-  else
-    echo "[SAMVIL] Plugin '$plugin_name' ($HOOK_NAME) completed."
-  fi
-done
-```
-
-**의사코드 (스킬 내부 동작):**
-
-```
-function run_plugin_hook(hook_name, input_data):
-    plugin_dir = expand("~/.samvil/plugins")
-    if not exists(plugin_dir):
-        return  # 플러그인 없음 → 스킵
-    
-    output_dir = ".samvil/plugin-output"
-    mkdir -p(output_dir)
-    
-    for each plugin_manifest in glob("$plugin_dir/*/plugin.json"):
-        plugin_name = basename(dirname(plugin_manifest))
-        manifest = read_json(plugin_manifest)
-        hook_config = manifest.get("hooks", {}).get(hook_name)
-        
-        if not hook_config or not hook_config.get("command"):
-            continue  # 이 hook에 등록 안 됨
-        
-        command = hook_config["command"]
-        
-        try:
-            result = bash(f'echo \'{to_json(input_data)}\' | {command}')
-            write(f'{output_dir}/{plugin_name}-{hook_name}.log', result.stdout)
-            
-            # state.json에 플러그인 결과 기록
-            state = read_json("project.state.json")
-            state.setdefault("plugin_results", {})
-            state["plugin_results"][f"{plugin_name}:{hook_name}"] = {
-                "exit_code": 0,
-                "timestamp": iso_now()
-            }
-            write_json("project.state.json", state)
-            
-            print(f"[SAMVIL] Plugin '{plugin_name}' ({hook_name}) completed.")
-        except:
-            print(f"[SAMVIL] Plugin '{plugin_name}' ({hook_name}) failed. Continuing...")
-            write(f'{output_dir}/{plugin_name}-{hook_name}.err', error_message)
-```
-
-#### 체인 내 호출 시점
-
-오케스트레이터는 각 스테이지 스킬을 invoke 하기 직전과 직후에 plugin hook을 실행한다:
-
-```
-[Scaffold 스테이지]
-  run_plugin_hook("before_scaffold", {"seed_path": "..."})
-  → Invoke samvil-scaffold
-  run_plugin_hook("after_scaffold", {"seed_path": "...", "files": [...]})
-
-[Build 스테이지]
-  run_plugin_hook("before_build", {"seed_path": "...", "features": [...]})
-  → Invoke samvil-build
-  run_plugin_hook("after_build", {"result": "pass", "features_passed": N, ...})
-
-[QA 스테이지]
-  run_plugin_hook("before_qa", {"seed_path": "...", "features": [...]})
-  → Invoke samvil-qa
-  run_plugin_hook("after_qa", {"verdict": "PASS", "pass_rate": 0.95})
-```
-
-**참고:** 현재(M2)는 오케스트레이터가 체인을 시작(samvil-interview invoke)한 후 각 스킬이 자체적으로 다음 스킬을 invoke하므로, plugin hook 호출은 **각 스킬(scaffold, build, qa) 내부**에서도 수행되어야 한다:
-
-- **scaffold 스킬**: Boot Sequence 시작 전 `before_scaffold`, Chain 종료 후 `after_scaffold`
-- **build 스킬**: Boot Sequence 시작 전 `before_build`, Chain 종료 후 `after_build`
-- **qa 스킬**: Boot Sequence 시작 전 `before_qa`, Chain 종료 후 `after_qa`
-
-각 스킬의 SKILL.md에도 plugin hook 호출 지점을 추가해야 한다 (별도 작업).
-
-#### state.json 플러그인 결과 기록
-
-```json
-{
-  "plugin_results": {
-    "my-plugin:after_scaffold": {
-      "exit_code": 0,
-      "timestamp": "2024-01-01T00:05:00Z"
-    },
-    "my-plugin:after_build": {
-      "exit_code": 1,
-      "error": "command not found",
-      "timestamp": "2024-01-01T00:10:00Z"
-    }
-  }
-}
-```
-
-#### 플러그인 검색 우선순위
-
-1. `~/.samvil/plugins/<plugin-name>/plugin.json` (사용자 글로벌 플러그인)
-2. `.samvil/plugins/<plugin-name>/plugin.json` (프로젝트 로컬 플러그인)
-
-프로젝트 로컬이 글로벌보다 우선. 같은 이름의 플러그인이 양쪽에 있으면 로컬만 실행.
+6개 hook 포인트 (`before/after_scaffold`, `before/after_build`, `before/after_qa`) 정의됨.
+플러그인은 `~/.samvil/plugins/*/plugin.json`에 배치. Best-effort, 실패해도 파이프라인 계속 진행.
+**TODO:** scaffold, build, qa 스킬에 `run_plugin_hook` 호출 지점 추가 필요.
 
 ### Graceful Degradation (INV-7)
 
-MCP 서버가 다운되거나 응답하지 않을 때 파일 기반으로 폴백하는 규칙.
+> **Full spec:** `references/graceful-degradation.md`
 
-**핵심 원칙:** `project.state.json`, `.samvil/metrics.json`, `.samvil/events.jsonl`은 항상 파일에 먼저 기록. MCP는 보조 채널.
-
-#### MCP 장애 감지
-
-MCP 호출 시 다음 증상이 나타나면 장애로 판단:
-- `mcp__samvil_mcp__*` 도구가 응답하지 않음 (timeout)
-- MCP 도구 호출 시 에러 반환
-- `mcp__samvil_mcp__health_check` 실패
-
-**초기 감지** (Health Check 시):
-```bash
-# MCP health check (best-effort)
-# MCP 도구가 보이지 않으면 자동으로 파일 모드로 전환
-```
-
-장애 감지 시 출력:
-```
-[SAMVIL] MCP 서버 응답 없음. 파일 기반 추적으로 전환합니다.
-  상태 파일: project.state.json
-  메트릭: .samvil/metrics.json
-  이벤트: .samvil/events.jsonl
-```
-
-#### 파일 기반 폴백 규칙
-
-| 데이터 | MCP 도구 | 파일 폴백 |
-|--------|----------|-----------|
-| 세션 상태 | `create_session` / `get_session` | `project.state.json` |
-| 이벤트 기록 | `save_event` | `.samvil/events.jsonl` (append) |
-| 메트릭 | 없음 | `.samvil/metrics.json` (overwrite) |
-| Seed 버전 | `save_seed_version` | `.samvil/seed-history/<version>.json` |
-| 인터뷰 상태 | `score_ambiguity` | 인라인 계산 (threshold만 사용) |
-
-**이벤트 파일 기록 형식:**
-```
-# .samvil/events.jsonl (한 줄에 하나의 JSON)
-{"event_type":"stage_start","stage":"interview","data":{},"timestamp":"2024-01-01T00:00:00Z"}
-{"event_type":"stage_end","stage":"interview","data":{"questions_asked":5},"timestamp":"2024-01-01T00:05:00Z"}
-```
-
-**MCP 건강 로깅** — MCP 호출 실패 시마다 `.samvil/mcp-health.jsonl`에 기록:
-```
-{"status":"fail","tool":"save_event","error":"connection refused","timestamp":"..."}
-{"status":"fail","tool":"create_session","error":"timeout","timestamp":"..."}
-```
-
-Retro에서 `.samvil/mcp-health.jsonl`을 읽어 MCP 성공률 집계:
-```
-[SAMVIL] MCP 건강 리포트:
-  총 호출: 18회
-  성공: 15회 (83%)
-  실패: 3회 (17%)
-  실패 도구: save_event(2), create_session(1)
-```
-
-#### MCP 복구
-
-체인 실행 중 MCP가 복구되면 자동으로 전환:
-1. MCP 호출이 다시 성공하면 파일 기반 로깅과 병행
-2. 파일에 기록된 이벤트를 MCP에 백필하지 않음 (중복 방지)
-3. 이후 이벤트는 Dual-Write 패턴 유지
+MCP 장애 시 파일 기반 폴백. 핵심 원칙: 항상 파일에 먼저 기록, MCP는 best-effort.
 
 ### Error Recovery
 

@@ -30,6 +30,7 @@ Improve the seed based on QA feedback. Spawn wonder + reflect agents, generate a
 3. Read `project.config.json` → `evolve_max_cycles`, `evolve_mode`, `max_total_builds`
 4. Read `.samvil/qa-report.md` → QA results
 5. Read `decisions.log` → binding decisions (if exists)
+6. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
 ## Step 0: Mode Selection
 

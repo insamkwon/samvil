@@ -13,7 +13,7 @@ SAMVIL is a CC Plugin that generates full web applications from a one-line promp
 
 GitHub: https://github.com/insamkwon/samvil
 
-## Skills (11개, 체인 순서)
+## Skills (13개, 체인 순서)
 
 ```
 samvil          ← 오케스트레이터 (Health Check → Tier 선택 → 체인 시작)
@@ -24,8 +24,10 @@ samvil-design    ← blueprint.json 생성 + Gate B
 samvil-scaffold  ← Next.js 14 + shadcn/ui 프로젝트 생성
 samvil-build     ← 기능 구현 (sequential or parallel)
 samvil-qa        ← 3-pass 검증 (Mechanical → Functional → Quality)
+samvil-deploy    ← QA PASS 후 배포 (Vercel/Railway/Coolify)
 samvil-evolve    ← 시드 진화 (Wonder → Reflect → 수렴)
 samvil-retro     ← 하네스 자체 개선 제안
+samvil-analyze   ← 기존 프로젝트 분석 (Brownfield 모드)
 samvil-update    ← GitHub에서 최신 버전 업데이트
 ```
 
@@ -41,7 +43,7 @@ samvil-update    ← GitHub에서 최신 버전 업데이트
 - **현재 (adopted role)**: 스킬의 인라인 행동 규칙이 실행됨. `agents/*.md`는 참조용.
 - **Council/Worker spawn 시**: `agents/*.md` 내용을 Agent tool prompt에 포함해서 전달.
 - **양쪽 다 개선해야 함**: 규칙 변경 시 스킬 인라인 + agent 파일 모두 업데이트.
-- 36개 에이전트, 4 Tier (minimal 10 / standard 20 / thorough 30 / full 36)
+- 37개 에이전트, 4 Tier (minimal 10 / standard 20 / thorough 30 / full 36)
 
 ## Key Rules
 
@@ -168,9 +170,9 @@ samvil/
 ├── .claude-plugin/plugin.json  # 플러그인 매니페스트 + 버전
 ├── CLAUDE.md                   # 이 파일 (프로젝트 규칙)
 ├── README.md                   # 사용자 가이드 (한국어)
-├── skills/                     # 11개 스킬
-├── agents/                     # 36개 에이전트 페르소나
-├── references/                 # 8개 참조 문서
+├── skills/                     # 13개 스킬
+├── agents/                     # 37개 에이전트 페르소나
+├── references/                 # 참조 문서
 │   ├── app-presets.md          # 10개 앱 유형 프리셋
 │   ├── design-presets.md       # 4개 디자인 테마
 │   ├── seed-schema.md          # seed.json 스키마
@@ -178,7 +180,14 @@ samvil/
 │   ├── qa-checklist.md         # QA 기준
 │   ├── tier-definitions.md     # Tier 구성 + 2-round Gate A
 │   ├── council-protocol.md     # Council 토론 규칙
-│   └── evolve-protocol.md      # 시드 진화 규칙
+│   ├── evolve-protocol.md      # 시드 진화 규칙
+│   ├── plugin-system.md        # Plugin hook 스펙 (Planned)
+│   ├── prompt-patterns.md      # 프롬프트 패턴
+│   ├── plugin-api.md           # Plugin API 레퍼런스
+│   ├── tutorial.md             # 튜토리얼
+│   ├── seed-schema.json        # Seed JSON 스키마
+│   ├── state-schema.json       # State JSON 스키마
+│   └── dependency-matrix.json  # 스택 버전 매트릭스
 ├── hooks/                      # 5개 자동화 스크립트 (plugin.json hooks로 적용)
 │   ├── setup-mcp.sh            # SessionStart: MCP 자동 설치+등록
 │   └── validate-version-sync.sh # 수동/CI: 버전 동기화 검증

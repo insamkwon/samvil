@@ -17,6 +17,7 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
 5. Read `decisions.log` → binding decisions from Council (if exists, respect them)
 6. Read `references/web-recipes.md` from this plugin directory → patterns to use
 7. Check `completed_features` in state — skip already-built features
+8. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
 ## Structured Build Event Schema
 

@@ -16,6 +16,7 @@ Generate the technical blueprint that translates the seed spec into concrete arc
 4. Read `interview-summary.md` → user context
 5. Read `decisions.log` → binding decisions from Gate A (if exists)
 6. Read `references/seed-schema.md` → blueprint schema reference
+7. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
 ## Step 1: Generate Blueprint
 

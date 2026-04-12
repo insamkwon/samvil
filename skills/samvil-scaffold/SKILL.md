@@ -17,6 +17,7 @@ You are adopting the role of **Scaffolder**. Create a project directory with a v
    - Use `key_libraries` to know which npm packages to install
    - Use `component_structure` to create feature directories
 5. **Read `references/dependency-matrix.json`** → get pinned versions for the target stack
+6. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
 ## Process
 

@@ -14,6 +14,7 @@ You are adopting the role of **QA Judge**. Verify the built app against the seed
 2. Read `project.state.json` → completed features, failed features, qa_history, `session_id`
 3. Read `project.config.json` → `qa_max_iterations`, `selected_tier`
 4. Read `references/qa-checklist.md` from this plugin directory
+5. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
 ### Seed 없는 경우 (Brownfield QA)
 
@@ -530,64 +531,6 @@ mcp__plugin_playwright_playwright__browser_take_screenshot(
 
 **If critical quality issues or any CONCERN:** Verdict = REVISE with specific issues.
 
-## Write QA Report
-
-Write results to `~/dev/<seed.name>/.samvil/qa-report.md`:
-
-```markdown
-# QA Report — Iteration <N>
-
-## Pass 1: Mechanical
-- Build: PASS/FAIL
-
-## Pass 1b: Smoke Run
-- Verification Method: Playwright / Static (Playwright unavailable)
-- Console Errors: <count> errors
-- Empty Pages: <list of routes or "none">
-
-## Pass 2: Functional (Runtime)
-### Verification Method: Playwright / Static (제한적 검증)
-
-| AC | Verdict | Method | Notes |
-|----|---------|--------|-------|
-| "<criterion>" | PASS | runtime | <what was tested + screenshot path> |
-| "<criterion>" | PARTIAL | static (Playwright unavailable) | <why runtime unverifiable> |
-| "<criterion>" | PARTIAL | static (backend-only) | <backend logic, code review based> |
-
-### Rendering Verification (Pass 2-A)
-- Empty pages: <list or "none">
-- Console errors (critical): <list or "none">
-- Missing headings/buttons: <list or "none">
-
-### Interaction Verification (Pass 2-B)
-- Button clicks: <count> tested, <count> passed
-- Form submissions: <count> tested, <count> passed
-- Navigation: <count> routes tested, <count> passed
-
-### Responsive Verification (Pass 2-C)
-- Mobile (375px): PASS/FAIL — <screenshot path>
-- Tablet (768px): PASS/FAIL — <screenshot path>
-- Desktop (1280px): PASS/FAIL — <screenshot path>
-
-## Pass 3: Quality
-- Responsive: PASS/FAIL (<count> components checked)
-- Accessibility: PASS/FAIL (<count> issues)
-- Code structure: PASS/FAIL
-- Empty states: PASS/FAIL (<count> lists checked)
-- Error states: PASS/FAIL
-- Debug code: PASS/FAIL (<count> console.log found)
-- Performance: PASS/CONCERN (First Load JS: <size>)
-
-## Evidence
-- Screenshots: `.samvil/qa-evidence/`
-- Build log: `.samvil/build.log`
-
-## Overall: PASS / REVISE / FAIL
-Issues to fix:
-- <issue 1>
-- <issue 2>
-```
-
 ## Verdict
 
 Apply the verdict matrix from `references/qa-checklist.md`:
@@ -724,11 +667,11 @@ QA passed, but quality could improve. Want to evolve the seed? (yes / no)
 ```
 
 - **yes**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="evolve", data='{"reason":"quality_improvement"}')` → invoke `samvil-evolve`
-- **no**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"qa_pass"}')` → invoke `samvil-retro`
+- **no**: **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="deploy", data='{"reason":"qa_pass"}')` → invoke `samvil-deploy`
 
-If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to retro:
-  **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"quality_excellent"}')`
-  Invoke the Skill tool with skill: `samvil-retro`
+If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to deploy:
+  **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="deploy", data='{"reason":"quality_excellent"}')`
+  Invoke the Skill tool with skill: `samvil-deploy`
 
 ## On FAIL (after 3 iterations)
 
@@ -845,7 +788,7 @@ Screenshots saved to `.samvil/qa-evidence/` with naming convention:
 ## Chain (Runtime-specific)
 
 ### Claude Code
-- On PASS: Invoke the Skill tool with skill: `samvil-retro` (or `samvil-evolve` if quality < 4/5)
+- On PASS: Invoke the Skill tool with skill: `samvil-deploy`
 - On FAIL: User chooses evolve, retro, or manual fix
 
 ### Codex CLI (future)

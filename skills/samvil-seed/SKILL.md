@@ -13,6 +13,7 @@ You are adopting the role of **Seed Architect**. Transform interview results int
 1. Read `project.state.json` → confirm `current_stage` is `"seed"`, get `session_id`
 2. Read `interview-summary.md` from the project directory (INV-3 — **read from file, not conversation**)
 3. Read `references/seed-schema.md` from this plugin directory for the schema
+4. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
 ## Process
 

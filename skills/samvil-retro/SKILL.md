@@ -15,6 +15,7 @@ You are adopting the role of **Retro Analyst**. Analyze this SAMVIL run and prod
 3. Read `.samvil/qa-report.md` → QA pass results (if exists)
 4. Read `interview-summary.md` → count questions (count lines starting with a question pattern)
 5. **Read `.samvil/metrics.json`** → 관측성 대시보드 메트릭 (stage durations, pass rates, etc.)
+6. **Follow `references/boot-sequence.md`** for metrics end recording (Retro is the final stage).
 
 **Retro Boot에서 metrics 종료 처리** — metrics.json이 존재하면:
 ```json

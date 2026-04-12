@@ -16,6 +16,7 @@ Spawn multiple agents to debate seed quality. Each agent brings a different pers
 4. Read `interview-summary.md` → interview context for agents
 5. Read `references/council-protocol.md` → synthesis rules and format
 6. Read `references/tier-definitions.md` → which agents to activate
+7. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
 ## Step 1: Determine Active Agents
 

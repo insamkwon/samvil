@@ -17,6 +17,7 @@ QA 통과 후 samvil-retro 전에 자동 호출 (또는 `/samvil-deploy` 수동 
 2. Read `project.seed.json` → 배포 타겟 확인 (`tech_stack.deploy`)
 3. Read `.env.example` → 필수 환경변수 파악
 4. 배포 플랫폼 감지 (seed 설정 또는 프로젝트 설정 파일)
+5. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
 ## Step 1: Pre-Deploy Check
 
