@@ -139,6 +139,8 @@ options:
 
 **한 번에 하나씩.** 답변 후 다음 질문.
 
+#### solution_type: "web-app" (기본)
+
 1. **타겟 유저**: "이 앱을 주로 누가 사용하나요?"
    - preset 있으면: preset 기반 보기
    - 없으면: 개인 도구 / 팀 협업 / 고객 서비스 / Other
@@ -151,7 +153,20 @@ options:
    - preset 있으면: preset 기본 기능 전부를 보기로
    - 없으면: 맥락 기반 보기 4개 + Other
 
+#### solution_type: "automation"
+
+1. **해결할 문제**: "이 자동화가 해결할 문제는 무엇인가요?"
+   - 보기: 반복 수작업 자동화 / 데이터 수집 및 변환 / 알림/리포트 자동 생성 / 외부 시스템 연동 / Other
+
+2. **입력과 출력**: "무엇을 넣고, 무엇을 얻고 싶나요?"
+   - 보기: API 데이터 → 정리된 리포트 / 파일(CSV/JSON) → 변환된 파일 / 이메일/메시지 → 요약 / 웹페이지 → 추출 데이터 / Other
+
+3. **실행 트리거**: "이 자동화는 언제 실행되나요?" (multiSelect: false)
+   - 보기: 수동 실행 (명령어로 직접) / 정기 실행 (cron, 매일/매주) / 웹훅 (외부 이벤트 수신) / 파일 변경 감지 / Other
+
 ### Phase 2: Scope Definition (2-3 questions)
+
+#### solution_type: "web-app" (기본)
 
 4. **필수 기능** (multiSelect: true):
    - preset 있으면: preset의 "자주 추가" 항목을 보기로
@@ -190,6 +205,57 @@ options:
        description: "API 호출 부분은 env var 패턴으로 작성, 키는 나중에 설정."
      - label: "필요 없어요"
        description: "외부 API 없이 자체 데이터만 사용합니다."
+   ```
+
+#### solution_type: "automation"
+
+4. **API 연동** (multiSelect: true):
+   ```
+   question: "어떤 외부 시스템과 연동하나요?"
+   header: "연동"
+   options:
+     - label: "REST API"
+       description: "외부 HTTP API 호출 (날씨, 주식, CRM 등)"
+     - label: "Slack / Discord"
+       description: "메시지 전송 또는 수신"
+     - label: "데이터베이스"
+       description: "PostgreSQL, MySQL, Supabase 등"
+     - label: "파일 시스템"
+       description: "CSV/JSON/Excel 파일 읽기/쓰기"
+     - label: "이메일"
+       description: "SMTP로 메일 발송"
+     - label: "Other"
+       description: "다른 시스템 (직접 입력)"
+   ```
+
+5. **에러 처리**:
+   ```
+   question: "실행 중 에러가 발생하면 어떻게 할까요?"
+   header: "에러 처리"
+   options:
+     - label: "재시도 + 로깅 (추천)"
+       description: "일시적 에러는 자동 재시도, 영구 에러는 로그 남기고 종료."
+     - label: "침묵 (건너뛰기)"
+       description: "에러 아이템은 건너뛰고 나머지 계속 처리."
+     - label: "즉시 알림"
+       description: "에러 발생 즉시 Slack/이메일로 알림."
+     - label: "Other"
+       description: "다른 방식 (직접 입력)"
+   ```
+
+6. **실행 환경**:
+   ```
+   question: "이 자동화를 어디서 실행할까요?"
+   header: "실행 환경"
+   options:
+     - label: "로컬 Python (추천)"
+       description: "Python 스크립트. API/데이터 처리에 강점. pip 설치 필요."
+     - label: "로컬 Node.js"
+       description: "TypeScript/JavaScript. JS 생태계 활용."
+     - label: "간단한 Shell"
+       description: "단순 시스템 작업 (파일 이동, 백업 등)."
+     - label: "CC 스킬"
+       description: "Claude Code 내에서 실행. AI 판단이 필요한 작업에 적합."
    ```
 
 ### Phase 2.5: Unknown Unknowns (thorough/full tier + 자동 감지)
@@ -264,6 +330,8 @@ Display: `[SAMVIL] 모호도: 0.32 → 0.18 → 0.07 → 0.04 ✓ (목표: ≤ {
 
 ### Phase 3.5: 스택 추천
 
+#### solution_type: "web-app"
+
 preset의 **추천 스택**을 기반으로 스택 제안:
 
 ```
@@ -286,7 +354,34 @@ Seed에서 `tech_stack.framework`에 매핑:
 - Vite + React → `"vite-react"`
 - Astro → `"astro"`
 
+#### solution_type: "automation"
+
+Phase 2에서 선택한 실행 환경 기반으로 스택 확정:
+
+```
+question: "자동화 기술 스택을 추천합니다."
+header: "스택"
+options:
+  - label: "Python (추천)"
+    description: "API/데이터 처리 강점. requests, pandas 등 풍부한 라이브러리."
+  - label: "Node.js (TypeScript)"
+    description: "JS 생태계 활용. Slack/Discord SDK 등 네이티브 지원."
+  - label: "Shell Script"
+    description: "간단한 시스템 작업. 파일 이동, 백업, cron 작업."
+  - label: "CC 스킬"
+    description: "Claude Code 내에서 실행. AI 판단이 필요한 작업."
+```
+
+선택 결과를 interview-summary.md에 `추천 스택: <선택>` 으로 저장.
+Seed에서 `tech_stack.framework`에 매핑:
+- Python → `"python-script"`
+- Node.js → `"node-script"`
+- Shell → `"shell-script"`
+- CC 스킬 → `"cc-skill"`
+
 ### Phase 4: 요약 & 확인
+
+#### web-app 요약
 
 ```
 [SAMVIL] 인터뷰 요약
@@ -317,6 +412,34 @@ Seed에서 `tech_stack.framework`에 매핑:
 
 가정 사항:
   - <가정>
+```
+
+#### automation 요약
+
+```
+[SAMVIL] 인터뷰 요약 (Automation)
+━━━━━━━━━━━━━━━━━━━━
+
+해결할 문제: <어떤 문제>
+입력 → 출력: <입력> → <출력>
+실행 트리거: <수동/cron/webhook/파일변경>
+연동 시스템: <API, Slack, DB 등>
+에러 처리: <재시도+로깅/침묵/알림>
+실행 환경: <Python/Node/Shell/CC skill>
+
+필수 기능 (P1):
+  1. <기능>
+  ...
+
+제약 조건:
+  - <제약>
+  ...
+
+성공 기준:
+  1. <testable 기준>
+  ...
+
+추천 스택: <python-script / node-script / shell-script / cc-skill>
 ```
 
 AskUserQuestion으로 확인:
@@ -387,6 +510,8 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_com
 
 Write `~/dev/<project>/interview-summary.md` with these sections (Korean):
 
+### web-app (기본)
+
 ```markdown
 # Interview Summary
 
@@ -430,6 +555,60 @@ Write `~/dev/<project>/interview-summary.md` with these sections (Korean):
 
 ## 코딩 컨벤션 (brownfield only)
 <detected conventions>
+```
+
+### automation
+
+```markdown
+# Interview Summary
+
+## 솔루션 타입
+automation
+
+## 해결할 문제
+<1-sentence problem statement>
+
+## 입력과 출력
+- 입력: <input description>
+- 출력: <output description>
+
+## 실행 트리거
+<수동/cron/webhook/파일변경>
+
+## 연동 시스템
+- <API, Slack, DB, 파일, 이메일 등>
+
+## 에러 처리 방식
+<재시도+로깅/침묵/알림>
+
+## 실행 환경
+<local Python/Node.js/Shell/CC skill>
+
+## 앱 유형
+<preset name or "커스텀">
+
+## 필수 기능 (P1)
+1. <feature>
+...
+
+## 제외 항목
+- <excluded item>
+...
+
+## 제약 조건
+- <constraint>
+...
+
+## 성공 기준
+1. <testable criterion>
+...
+
+## 추천 스택
+<python-script / node-script / shell-script / cc-skill>
+
+## 가정 사항
+- <assumption>
+...
 ```
 
 Each section must be non-empty. Constraints must have >= 1 item. Success criteria must have >= 3 items.

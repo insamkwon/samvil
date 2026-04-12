@@ -110,6 +110,9 @@ Read `seed.tech_stack.framework` to determine which CLI to use:
 | `nextjs` | `nextjs14` | `npx create-next-app@14.2.35` | SSR, API routes, SEO |
 | `vite-react` | `vite-react` | `npm create vite@5.4.21 -- --template react-ts` | 가벼움, SPA |
 | `astro` | `astro` | `npm create astro@6.1.5 -- --template minimal` | 정적, 빠른 로딩 |
+| `python-script` | `python-script` | `python3 -m venv .venv` | 자동화 스크립트 |
+| `node-script` | `node-script` | `npm init -y && npx tsc --init` | Node.js 자동화 |
+| `cc-skill` | `cc-skill` | (파일 직접 생성) | CC 스킬 전용 |
 
 기본값: `nextjs` (seed에 명시 없으면)
 
@@ -117,15 +120,11 @@ Read `seed.tech_stack.framework` to determine which CLI to use:
 
 **지원 스택 (Stable)**
 
-| 항목 | Next.js 14 | Vite + React | Astro |
-|---|---|---|---|
-| **장점** | SSR/SSG, API routes, SEO, 풍부한 에코시스템 | 빠른 개발 서버, 가벼운 번들, 간단한 설정 | 콘텐츠 중심, MPA, 빠른 로딩, 멀티 프레임워크 |
-| **단점** | 빌드 느림, 복잡한 라우팅, 서버 필수 | SSR 미지원, SEO 취약, 대규모 앱 한계 | 동적 인터랙션 제한, React islands 오버헤드 |
-| **UI** | shadcn/ui (풀 지원) | shadcn/ui (Tailwind v4) | 커스텀 (shadcn 수동 설정) |
-| **인증** | next-auth, supabase-auth | supabase-auth | supabase-auth |
-| **DB** | supabase, prisma | supabase | supabase |
-| **배포** | Vercel, Railway | Vercel, Netlify | Vercel, Netlify |
-| **추천 사례** | 풀스택 웹앱, 대시보드, 마켓플레이스 | 관리자 도구, 내부 툴, 프로토타입 | 블로그, 랜딩페이지, 문서 사이트 |
+| 항목 | Next.js 14 | Vite + React | Astro | Python Script | Node Script | CC Skill |
+|---|---|---|---|---|---|---|
+| **장점** | SSR/SSG, API routes, SEO | 빠른 개발, 가벼운 번들 | 콘텐츠 중심, 빠른 로딩 | API/데이터 처리 강점 | JS 생태계 | AI 판단, CC 통합 |
+| **단점** | 빌드 느림, 복잡 | SSR 미지원 | 동적 인터랙션 제한 | 웹 UI 없음 | 웹 UI 없음 | CC 의존 |
+| **배포** | Vercel, Railway | Vercel, Netlify | Vercel, Netlify | cron, serverless | cron, serverless | CronCreate |
 
 **계획 중인 스택 (Planned — 아직 scaffold 미구현)**
 
@@ -316,6 +315,317 @@ npx astro add tailwind -y
 npx astro add react -y
 ```
 
+#### Python Script (automation)
+
+No CLI scaffolding tool. Create project structure manually.
+
+```bash
+cd ~/dev
+mkdir -p <seed.name>/src <seed.name>/fixtures/input <seed.name>/fixtures/expected <seed.name>/tests <seed.name>/.samvil
+cd ~/dev/<seed.name>
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Create files:
+
+**`src/main.py`** — Entry point with `--dry-run` support:
+```python
+#!/usr/bin/env python3
+"""<seed.description>"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from processor import Processor
+from config import load_config
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="<seed.description>")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Run with fixtures/ data instead of real API calls")
+    parser.add_argument("--config", default=".env",
+                        help="Path to config file (default: .env)")
+    parser.add_argument("--output", default=None,
+                        help="Output file path (default: stdout)")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    config = load_config(args.config)
+
+    if args.dry_run:
+        config["dry_run"] = True
+        config["input_dir"] = "fixtures/input"
+        config["expected_dir"] = "fixtures/expected"
+
+    processor = Processor(config)
+    result = processor.run()
+
+    if args.output:
+        Path(args.output).write_text(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+**`src/processor.py`** — Core logic skeleton:
+```python
+"""Core processing logic."""
+
+
+class Processor:
+    def __init__(self, config: dict):
+        self.config = config
+        self.dry_run = config.get("dry_run", False)
+
+    def run(self) -> dict:
+        if self.dry_run:
+            return self._run_dry()
+        return self._run_live()
+
+    def _run_dry(self) -> dict:
+        # TODO: Implement dry-run logic using fixtures/input/
+        return {"status": "ok", "mode": "dry-run"}
+
+    def _run_live(self) -> dict:
+        # TODO: Implement real processing logic
+        return {"status": "ok", "mode": "live"}
+```
+
+**`src/config.py`** — Environment-based configuration:
+```python
+"""Configuration loader from environment / .env file."""
+
+import os
+from pathlib import Path
+
+
+def load_config(config_path: str = ".env") -> dict:
+    """Load config from .env file or environment variables."""
+    config = {}
+    env_path = Path(config_path)
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                config[key.strip()] = value.strip()
+    # Environment variables take precedence
+    for key in config:
+        if key in os.environ:
+            config[key] = os.environ[key]
+    return config
+```
+
+**`requirements.txt`** — Pinned versions from dependency-matrix.json:
+```
+# Core
+requests==2.32.3
+python-dotenv==1.1.0
+# Add project-specific dependencies from blueprint.dependencies
+```
+
+**`tests/test_dry_run.py`** — Dry-run verification:
+```python
+"""Test that --dry-run works with fixtures."""
+
+import subprocess
+import json
+import sys
+
+
+def test_dry_run_exit_code():
+    """--dry-run should exit with code 0."""
+    result = subprocess.run(
+        [sys.executable, "src/main.py", "--dry-run"],
+        capture_output=True, text=True
+    )
+    assert result.returncode == 0, f"Exit code {result.returncode}: {result.stderr}"
+
+
+def test_dry_run_valid_json():
+    """--dry-run output should be valid JSON."""
+    result = subprocess.run(
+        [sys.executable, "src/main.py", "--dry-run"],
+        capture_output=True, text=True
+    )
+    data = json.loads(result.stdout)
+    assert isinstance(data, dict)
+
+
+def test_dry_run_no_api_calls():
+    """--dry-run should not make real API calls (check logs)."""
+    result = subprocess.run(
+        [sys.executable, "src/main.py", "--dry-run"],
+        capture_output=True, text=True
+    )
+    # stderr should not contain real API URLs
+    assert "api.openweathermap.org" not in result.stderr
+    assert "api.slack.com" not in result.stderr
+```
+
+**`.env.example`**:
+```
+# API Keys
+API_KEY=your-api-key-here
+API_BASE_URL=https://api.example.com
+
+# Output
+OUTPUT_DIR=./output
+```
+
+#### Node Script (automation)
+
+```bash
+cd ~/dev
+mkdir -p <seed.name>/src <seed.name>/fixtures/input <seed.name>/fixtures/expected <seed.name>/tests <seed.name>/.samvil
+cd ~/dev/<seed.name>
+npm init -y
+npm install -D typescript @types/node tsx
+npx tsc --init
+```
+
+**`tsconfig.json`** updates:
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true
+  }
+}
+```
+
+**`src/main.ts`** — Entry point with `--dry-run`:
+```typescript
+import { config } from "./config";
+import { Processor } from "./processor";
+
+interface Args {
+  dryRun: boolean;
+  config: string;
+  output?: string;
+}
+
+function parseArgs(): Args {
+  const args = process.argv.slice(2);
+  return {
+    dryRun: args.includes("--dry-run"),
+    config: args.includes("--config")
+      ? args[args.indexOf("--config") + 1]
+      : ".env",
+    output: args.includes("--output")
+      ? args[args.indexOf("--output") + 1]
+      : undefined,
+  };
+}
+
+async function main(): Promise<number> {
+  const args = parseArgs();
+  const cfg = config.load(args.config);
+
+  if (args.dryRun) {
+    cfg.dryRun = true;
+  }
+
+  const processor = new Processor(cfg);
+  const result = await processor.run();
+
+  const output = JSON.stringify(result, null, 2);
+  if (args.output) {
+    require("fs").writeFileSync(args.output, output);
+  } else {
+    console.log(output);
+  }
+
+  return 0;
+}
+
+main().then(process.exit).catch((e) => {
+  console.error("Fatal error:", e.message);
+  process.exit(1);
+});
+```
+
+**`package.json`** scripts:
+```json
+{
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "dry-run": "tsx src/main.ts --dry-run",
+    "build": "tsc",
+    "test": "tsx tests/test_dry_run.ts"
+  }
+}
+```
+
+#### CC Skill (automation)
+
+No project scaffolding needed. Create only a `SKILL.md` file:
+
+```bash
+cd ~/dev
+mkdir -p <seed.name> <seed.name>/.samvil
+```
+
+**`SKILL.md`** — Generated based on seed spec:
+```markdown
+---
+name: <seed.name>
+description: "<seed.description>"
+---
+
+# <seed.name>
+
+## What it does
+<seed.description>
+
+## When to use
+<seed.core_flow.trigger>
+
+## Usage
+```
+/<seed.name> [--dry-run]
+```
+
+## Process
+
+### Step 1: Read Config
+Read environment variables from `.env`.
+
+### Step 2: <Fetch / Read / Receive>
+<seed.core_flow.input>
+
+### Step 3: Process
+<seed.features P1 items>
+
+### Step 4: Output
+<seed.core_flow.output>
+
+## Output Format
+<JSON or text format>
+
+## Error Handling
+<seed.constraints error handling>
+
+## Requirements
+- Environment variables: <list from .env.example>
+```
+
 #### Nuxt 3 (🚧 Planned — 아직 구현되지 않음)
 
 > **Nuxt support coming soon.** 아래는 설계만 포함하며, 실제 scaffold 로직은 후속 버전에서 구현 예정.
@@ -366,7 +676,7 @@ cd ~/dev/<seed.name>
 
 ### Step 3: Common Setup
 
-모든 스택 공통:
+#### web-app 공통 설정
 
 1. **디렉토리 생성**:
    ```bash
@@ -491,6 +801,8 @@ cd ~/dev/<seed.name>
 
 ### Step 4: Build Verification — Circuit Breaker (INV-2)
 
+#### web-app
+
 ```bash
 cd ~/dev/<seed.name>
 npm run build > .samvil/build.log 2>&1
@@ -544,6 +856,47 @@ process.exit(ok ? 0 : 1);
 4. Retry build
 5. Still fails after 2 retries? → **STOP** and report to user
 
+#### automation
+
+**Python:**
+```bash
+cd ~/dev/<seed.name>
+source .venv/bin/activate
+python -m py_compile src/main.py > .samvil/build.log 2>&1
+python -m py_compile src/processor.py >> .samvil/build.log 2>&1
+python -m py_compile src/config.py >> .samvil/build.log 2>&1
+echo "Exit code: $?"
+pip install -r requirements.txt > .samvil/deps-install.log 2>&1
+python -c "import src.main" >> .samvil/build.log 2>&1
+echo "Import check exit code: $?"
+```
+
+**Node:**
+```bash
+cd ~/dev/<seed.name>
+npx tsc --noEmit > .samvil/build.log 2>&1
+echo "Exit code: $?"
+npm ls >> .samvil/build.log 2>&1
+```
+
+**CC skill:**
+```bash
+# No build step needed. Just verify SKILL.md exists.
+ls ~/dev/<seed.name>/SKILL.md
+```
+
+**If automation build succeeds:**
+```
+[SAMVIL] Stage 3/5: Scaffold ✓
+  Project: ~/dev/<seed.name>/
+  Type: automation
+  Stack: <python-script|node-script|cc-skill>
+  Build: passing
+```
+
+**If automation build fails — Circuit Breaker (MAX_RETRIES=2):**
+Same as web-app: read error, diagnose, fix, retry, MAX_RETRIES=2.
+
 ### Step 5: Update State and Chain (INV-4)
 
 **MCP (best-effort):** Save scaffold completion:
@@ -560,6 +913,8 @@ Invoke the Skill tool with skill: `samvil-build`
 
 ## Output Format
 
+### web-app
+
 Files created in `~/dev/<seed.name>/`:
 - Scaffolded project via CLI (Next.js / Vite / Astro — based on `seed.tech_stack.framework`)
 - `lib/utils.ts` (or `src/lib/utils.ts`): `cn()` utility using clsx + tailwind-merge
@@ -569,6 +924,38 @@ Files created in `~/dev/<seed.name>/`:
 - `.samvil/`: build logs, shadcn init log
 - `app/globals.css`: HSL CSS variables (NOT oklch — shadcn overwrite prevention)
 - `tailwind.config.ts` (Next.js only): HSL `hsl(var(--...))` color tokens
+
+### automation
+
+**Python:**
+Files created in `~/dev/<seed.name>/`:
+- `src/main.py`: Entry point with argparse + `--dry-run` flag
+- `src/processor.py`: Core logic skeleton with `_run_dry()` and `_run_live()`
+- `src/config.py`: Env-based configuration loader
+- `fixtures/input/`: Directory for test input fixtures
+- `fixtures/expected/`: Directory for expected output fixtures
+- `tests/test_dry_run.py`: Dry-run verification tests
+- `.env.example`: Environment variable templates
+- `requirements.txt`: Pinned dependencies from dependency-matrix.json
+- `.samvil/`: Build logs
+
+**Node:**
+Files created in `~/dev/<seed.name>/`:
+- `src/main.ts`: Entry point with `--dry-run` flag
+- `src/processor.ts`: Core logic skeleton
+- `src/config.ts`: Env-based configuration
+- `src/fixtures.ts`: Fixture loading + comparison utilities
+- `fixtures/input/`, `fixtures/expected/`: Test fixtures
+- `tests/test_dry_run.ts`: Dry-run verification
+- `.env.example`: Environment variable templates
+- `package.json`, `tsconfig.json`: Project config with pinned deps
+- `.samvil/`: Build logs
+
+**CC skill:**
+Files created in `~/dev/<seed.name>/`:
+- `SKILL.md`: Skill definition with process, output format, error handling
+- `.env.example`: Environment variable templates
+- `.samvil/`: State directory
 
 Verification output:
 - `npm run build` exit code 0

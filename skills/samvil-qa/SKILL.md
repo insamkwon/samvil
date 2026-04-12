@@ -139,6 +139,8 @@ QA 완료 후 `.samvil/qa-results.json` 갱신:
 
 ## Pass 1: Mechanical Verification
 
+### web-app
+
 ```bash
 cd ~/dev/<seed.name>
 npm run build > .samvil/build.log 2>&1
@@ -152,7 +154,41 @@ Check:
 
 **If Pass 1 fails:** Verdict = REVISE with specific build errors. Skip Pass 1b, Pass 2 and 3.
 
+### automation
+
+**Python:**
+```bash
+cd ~/dev/<seed.name>
+source .venv/bin/activate
+python -m py_compile src/main.py > .samvil/build.log 2>&1
+python -m py_compile src/processor.py >> .samvil/build.log 2>&1
+python -m py_compile src/config.py >> .samvil/build.log 2>&1
+echo "Compile exit code: $?"
+pip check >> .samvil/build.log 2>&1
+echo "Dependency check exit code: $?"
+```
+
+**Node:**
+```bash
+cd ~/dev/<seed.name>
+npx tsc --noEmit > .samvil/build.log 2>&1
+echo "TypeScript check exit code: $?"
+npm ls >> .samvil/build.log 2>&1
+echo "Dependency check exit code: $?"
+```
+
+**CC skill:** No compilation step. Skip to Pass 2.
+
+Check:
+- `py_compile`/`tsc` exits with code 0 (no syntax/type errors)
+- `pip check`/`npm ls` reports no dependency conflicts
+- No import errors in output
+
+**If Pass 1 fails:** Verdict = REVISE with specific errors. Skip Pass 2 and 3.
+
 ## Pass 1b: Playwright Smoke Run (빌드 통과 후)
+
+### web-app
 
 Build가 성공하면 Playwright로 dev server를 띄워서 콘솔 에러와 빈 화면을 검출:
 
@@ -231,6 +267,30 @@ Use the `mcp__plugin_playwright_playwright__browser_navigate` tool to visit the 
 **Verdict:**
 - All routes: no console errors + non-empty body → PASS → Pass 2로 진행
 - Any route: console errors OR empty body → REVISE with specific issues
+
+### automation
+
+Automation 프로젝트는 Playwright Smoke Run을 스킵합니다. 대신 dry-run 테스트를 실행:
+
+```bash
+# Python
+cd ~/dev/<seed.name>
+source .venv/bin/activate
+python src/main.py --dry-run > .samvil/dry-run-output.json 2> .samvil/dry-run-stderr.log
+echo "Dry-run exit code: $?"
+
+# Node
+cd ~/dev/<seed.name>
+npx tsx src/main.ts --dry-run > .samvil/dry-run-output.json 2> .samvil/dry-run-stderr.log
+echo "Dry-run exit code: $?"
+```
+
+Check:
+- Exit code is 0
+- Output is valid JSON
+- stderr does not contain real API URLs (no actual API calls in dry-run)
+
+**If dry-run fails:** Verdict = REVISE. Skip Pass 2 and 3.
 
 ## QA Execution Mode by Tier
 
@@ -330,6 +390,8 @@ After both independent agents return their markdown evidence:
 ---
 
 ## Pass 2: Functional Verification (Runtime-first)
+
+### web-app
 
 Dev server should still be running from Pass 1b. If not:
 ```bash
@@ -479,6 +541,59 @@ After all ACs are verified, stop the dev server:
 kill $(lsof -ti:3000) 2>/dev/null
 ```
 
+### automation — Functional Verification
+
+Automation은 Playwright 대신 `--dry-run` 실행으로 AC를 검증합니다.
+
+**Pass 2-A: Dry-run Execution**
+```bash
+# Python
+cd ~/dev/<seed.name>
+source .venv/bin/activate
+python src/main.py --dry-run 2> .samvil/qa-dry-run-stderr.log
+
+# Node
+cd ~/dev/<seed.name>
+npx tsx src/main.ts --dry-run 2> .samvil/qa-dry-run-stderr.log
+```
+
+Check:
+- Exit code is 0
+- Output is valid JSON (or expected format)
+- No real API calls detected (stderr must not contain real API domains)
+
+**Pass 2-B: Output Comparison**
+
+For each fixture pair in `fixtures/input/` and `fixtures/expected/`:
+```bash
+# Run with each fixture
+cd ~/dev/<seed.name>
+for f in fixtures/input/*.json; do
+  echo "Testing: $f"
+  python src/main.py --dry-run --input "$f" 2>/dev/null
+  # Compare output against fixtures/expected/<name>.expected.json
+done
+```
+
+Verify:
+- Each fixture input produces output matching the expected file
+- Differences are flagged as FAIL
+
+**Pass 2-C: No Real API Calls**
+
+```bash
+# Check stderr for real API calls
+grep -c "api\." .samvil/qa-dry-run-stderr.log || echo "0"
+grep -c "https://" .samvil/qa-dry-run-stderr.log || echo "0"
+```
+- 0 real API calls: PASS
+- Any real API call detected: FAIL (dry-run must not hit real APIs)
+
+**For each AC:**
+- AC about processing logic → verify output matches expected
+- AC about error handling → verify errors logged, not crashed
+- AC about output format → verify JSON structure matches spec
+
 ### Verdict
 
 Rate each criterion: **PASS** / **FAIL** / **PARTIAL** / **UNIMPLEMENTED**
@@ -506,6 +621,8 @@ Rate each criterion: **PASS** / **FAIL** / **PARTIAL** / **UNIMPLEMENTED**
 
 ## Pass 3: Quality Verification (minimal inline path)
 
+### web-app
+
 Check by reading relevant code:
 - **Responsive**: Tailwind responsive classes (`md:`, `lg:`) used for layout components
 - **Accessibility**: Interactive elements are `<button>`/`<a>` (not `<div onClick>`), have labels or `aria-label`
@@ -530,6 +647,22 @@ mcp__plugin_playwright_playwright__browser_take_screenshot(
 **CONCERN 규칙**: 성능 CONCERN(First Load > 100KB 등)이 있으면 CONCERN으로만 표시하지 말고 **REVISE로 처리**. CONCERN은 무시되기 쉬움 — 발견했으면 수정해야 함.
 
 **If critical quality issues or any CONCERN:** Verdict = REVISE with specific issues.
+
+### automation — Quality Verification
+
+Check by reading relevant code:
+
+- **Error handling**: Every external call (API, file I/O, DB) is wrapped in try-catch. Retry logic exists for transient errors.
+- **Logging**: Structured logging at appropriate levels (INFO for milestones, WARNING for recoverable issues, ERROR for failures). No print statements in production code.
+- **Configuration externalization**: All settings loaded from `.env` or environment variables. No hardcoded URLs, API keys, or file paths.
+- **README**: Usage instructions included — how to install, configure, run, and dry-run.
+- **Fixtures realism**: Test fixtures represent realistic data, not minimal stubs. At least 2 fixture pairs (happy path + edge case).
+- **No dead code**: All modules imported and used. No commented-out code blocks.
+- **Dependencies**: All pinned in requirements.txt/package.json. No `@latest` or unversioned installs.
+- **Entry point**: `--dry-run` flag works correctly. `--config` flag accepts custom config path. `--output` flag works.
+- **CC skill**: `SKILL.md` has all required sections (description, when to use, usage, process, output format, error handling, requirements).
+
+**If critical quality issues:** Verdict = REVISE with specific issues.
 
 ## Verdict
 

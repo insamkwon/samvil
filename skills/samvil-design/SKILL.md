@@ -22,6 +22,10 @@ Generate the technical blueprint that translates the seed spec into concrete arc
 
 Adopt the `agents/tech-architect.md` persona. Read it for detailed behavior.
 
+Read `seed.solution_type` to determine blueprint format.
+
+### solution_type: "web-app" (기본)
+
 Create `project.blueprint.json` based on the seed:
 
 ```json
@@ -50,6 +54,50 @@ Create `project.blueprint.json` based on the seed:
   }
 }
 ```
+
+### solution_type: "automation"
+
+Create `project.blueprint.json` with automation-specific structure:
+
+```json
+{
+  "entry_point": "src/main.py",
+  "modules": {
+    "core": ["main.py", "processor.py"],
+    "utils": ["logger.py", "config.py"]
+  },
+  "fixtures": {
+    "input": "fixtures/input/",
+    "expected": "fixtures/expected/"
+  },
+  "dependencies": ["requests"],
+  "error_handling": "retry_with_logging",
+  "execution": {
+    "type": "cli|cron|webhook|cc-skill",
+    "schedule": "0 9 * * *"
+  }
+}
+```
+
+#### Automation Blueprint Decision Rules
+
+- **entry_point**:
+  - Python: `"src/main.py"` | Node: `"src/main.ts"` | CC skill: `"SKILL.md"`
+- **modules.core**: Always include `main.py/ts` (entry + argparse) and `processor.py/ts` (core logic)
+- **modules.utils**: Always include `logger` and `config` (separation of concerns)
+- **fixtures**: Always include `input/` and `expected/` subdirectories
+- **dependencies**: Derived from `seed.features` and `seed.core_flow.input/output`
+  - API calls → `["requests"]` (Python) or `["axios"]` (Node)
+  - CSV processing → `+ ["pandas"]` or `["csv-parse"]`
+  - HTML parsing → `+ ["beautifulsoup4"]` or `["cheerio"]`
+  - Slack → `+ ["slack-sdk"]` or `["@slack/web-api"]`
+- **error_handling**: `"retry_with_logging"` (default) | `"skip_and_continue"` | `"fail_fast"` — from interview Phase 2 answer
+- **execution.type**: From `seed.core_flow.trigger`
+  - `"manual"` → `"cli"`
+  - `"cron: ..."` → `"cron"` (copy schedule)
+  - `"webhook"` → `"webhook"`
+  - CC skill → `"cc-skill"`
+- **execution.schedule**: Extracted from trigger if cron format (e.g., `"0 9 * * *"`)
 
 ### Decision Rules
 
@@ -213,6 +261,8 @@ blueprint에 `mobile_considerations` 필드를 추가하여 Build 단계에서 �
 
 Write `~/dev/<project>/project.blueprint.json` — valid JSON with these required fields:
 
+### web-app
+
 ```json
 {
   "screens": ["<PascalCase name>"],
@@ -236,6 +286,36 @@ Decision rules for each field:
 - `api_routes`: empty array if localStorage. Populate if API needed.
 - `key_libraries`: only libraries features actually need.
 - `screens`: primary_screen + one per major feature needing its own page.
+
+### automation
+
+```json
+{
+  "entry_point": "src/main.py",
+  "modules": {
+    "core": ["main.py", "processor.py"],
+    "utils": ["logger.py", "config.py"]
+  },
+  "fixtures": {
+    "input": "fixtures/input/",
+    "expected": "fixtures/expected/"
+  },
+  "dependencies": ["<dep>"],
+  "error_handling": "retry_with_logging|skip_and_continue|fail_fast",
+  "execution": {
+    "type": "cli|cron|webhook|cc-skill",
+    "schedule": "<cron expression or null>"
+  }
+}
+```
+
+Decision rules for each field:
+- `entry_point`: Python → `src/main.py`, Node → `src/main.ts`, CC skill → `SKILL.md`
+- `modules.core`: Always `main` (argparse + --dry-run) + `processor` (core logic)
+- `modules.utils`: Always `logger` + `config` (separation of concerns)
+- `dependencies`: Derived from features and I/O requirements
+- `error_handling`: From interview Phase 2 answer, default `"retry_with_logging"`
+- `execution.type`: Mapped from `seed.core_flow.trigger`
 
 ## Anti-Patterns
 

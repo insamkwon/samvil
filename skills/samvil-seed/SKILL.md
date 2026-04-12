@@ -19,7 +19,9 @@ You are adopting the role of **Seed Architect**. Transform interview results int
 
 ### Step 1: Map Interview to Seed
 
-Read `interview-summary.md` and map each section:
+Read `interview-summary.md` and map each section.
+
+#### solution_type: "web-app" (기본)
 
 | Interview Section | Seed Field |
 |---|---|
@@ -32,7 +34,8 @@ Read `interview-summary.md` and map each section:
 
 **Derive automatically:**
 - `name`: kebab-case from the app idea (e.g., "task management SaaS" → "task-manager")
-- `mode`: always `"web"`
+- `solution_type`: `"web-app"` (default)
+- `mode`: `"web"` (deprecated, kept for migration)
 - `tech_stack`: defaults unless interview specified otherwise
   - `state`: `"zustand"` if complex state (multiple entities, persistence), `"useState"` if simple
 - `core_experience.primary_screen`: PascalCase component name from core experience
@@ -40,6 +43,36 @@ Read `interview-summary.md` and map each section:
 - `features[].depends_on`: set to the dependency feature name if not independent
 - `version`: `1`
 - Note: `agent_tier` is now in `project.config.json`, not in seed
+
+#### solution_type: "automation"
+
+| Interview Section | Seed Field |
+|---|---|
+| 해결할 문제 | `description` |
+| 입력과 출력 | `core_flow` (description, input, output, trigger) |
+| Must-Have Features | `features` with priority assignment |
+| Out of Scope | `out_of_scope` |
+| Constraints | `constraints` (+ auto-added dry-run constraint) |
+| Success Criteria | `acceptance_criteria` |
+
+**Derive automatically:**
+- `name`: kebab-case from the automation idea (e.g., "daily weather slack bot" → "weather-slack-bot")
+- `solution_type`: `"automation"`
+- `core_flow`: `{ description, input, output, trigger }` — replaces `core_experience`
+  - `description`: what the automation does (1 sentence)
+  - `input`: data source description (e.g., "Weather API JSON response")
+  - `output`: expected output (e.g., "Slack message with formatted forecast")
+  - `trigger`: execution trigger (e.g., "cron: 0 9 * * *", "manual", "webhook", "file-change")
+- `tech_stack`:
+  - `framework`: `"python-script"` | `"node-script"` | `"shell-script"` | `"cc-skill"`
+  - No `ui`, `state`, `router` fields (automation doesn't need them)
+- `implementation`:
+  - `type`: `"python-automation"` | `"node-automation"` | `"cc-skill"`
+  - `runtime`: `"python"` | `"node"` | `"shell"`
+  - `entry_point`: `"src/main.py"` | `"src/main.ts"` | `"SKILL.md"`
+- **Auto-add constraint**: `"Script must support --dry-run mode with fixtures/ for testing without real API calls"`
+- `features[].independent`: `true` for most automation features (they're usually standalone processing steps)
+- `version`: `1`
 
 ### Step 2: Be Opinionated
 
@@ -169,15 +202,42 @@ Invoke the Skill tool with skill: `samvil-council`
 
 Write `~/dev/<project>/project.seed.json` — valid JSON conforming to `references/seed-schema.md`.
 
+### web-app (기본)
+
 Required fields and constraints:
 - `name`: valid npm package name, kebab-case (e.g., "task-manager")
 - `description`: 1-sentence string
-- `mode`: always `"web"`
+- `solution_type`: `"web-app"`
+- `mode`: always `"web"` (deprecated)
 - `tech_stack`: `{ framework, ui, state, router }` — use simplest valid choice
 - `core_experience`: `{ description, primary_screen (PascalCase), key_interactions[] }`
 - `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
 - `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
 - `constraints[]`: at least 1 item (default: "No backend server — client-only with localStorage")
+- `out_of_scope[]`: at least 2 items
+- `version`: integer, starts at 1
+
+No extra fields beyond the schema. No comments in JSON.
+
+### automation
+
+Required fields and constraints:
+- `name`: kebab-case (e.g., "weather-slack-bot")
+- `description`: 1-sentence string
+- `solution_type`: `"automation"`
+- `tech_stack`: `{ framework: "python-script"|"node-script"|"shell-script"|"cc-skill" }` — no ui/state/router
+- `core_flow`: `{ description, input, output, trigger }` — replaces `core_experience`
+  - `description`: what the automation does
+  - `input`: data source description
+  - `output`: expected output description
+  - `trigger`: `"manual"` | `"cron: <schedule>"` | `"webhook"` | `"file-change"`
+- `implementation`:
+  - `type`: `"python-automation"` | `"node-automation"` | `"cc-skill"`
+  - `runtime`: `"python"` | `"node"` | `"shell"`
+  - `entry_point`: `"src/main.py"` | `"src/main.ts"` | `"SKILL.md"`
+- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
+- `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
+- `constraints[]`: must include `"Script must support --dry-run mode with fixtures/ for testing without real API calls"` + any user-specified constraints
 - `out_of_scope[]`: at least 2 items
 - `version`: integer, starts at 1
 

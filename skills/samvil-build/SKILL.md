@@ -10,12 +10,16 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
 ## Boot Sequence (INV-1)
 
 0. **TaskUpdate**: "Build" task를 `in_progress`로 설정
-1. Read `project.seed.json` → know what to build
+1. Read `project.seed.json` → know what to build (check `solution_type`)
 2. Read `project.state.json` → know what's already done (resume support), get `session_id`
 3. Read `project.config.json` → `selected_tier`, `max_total_builds`
-4. Read `project.blueprint.json` → architecture decisions (screens, data model, components, routes)
+4. Read `project.blueprint.json` → architecture decisions
+   - web-app: screens, data model, components, routes
+   - automation: entry_point, modules, fixtures, dependencies
 5. Read `decisions.log` → binding decisions from Council (if exists, respect them)
-6. Read `references/web-recipes.md` from this plugin directory → patterns to use
+6. **Read recipe reference** based on `solution_type`:
+   - web-app: `references/web-recipes.md`
+   - automation: `references/automation-recipes.md`
 7. Check `completed_features` in state — skip already-built features
 8. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
@@ -32,6 +36,8 @@ Use these normalized `error_category` values everywhere build events are emitted
 Normalize `error_signature` to a brief, repeatable summary (for example: `Module not found: @/lib/utils`).
 
 ## Phase A: Core Experience
+
+### solution_type: "web-app"
 
 The seed's `core_experience` defines what the user does in the first 30 seconds. **Build this first.**
 
@@ -85,9 +91,69 @@ echo "Exit code: $?"
   Build: passing
 ```
 
+### solution_type: "automation"
+
+The seed's `core_flow` defines the main processing pipeline. **Build this first.**
+
+1. Read `seed.core_flow`
+2. Implement `processor.py/ts` — the core processing logic:
+   - `_run_live()`: real API calls + real I/O
+   - `_run_dry()`: load from `fixtures/input/`, process, compare against `fixtures/expected/`
+3. Create `fixtures/input/` with realistic test data (at least 2 samples: happy path + edge case)
+4. Create `fixtures/expected/` with matching expected outputs
+5. Implement API client / data source integration (env-based config, no hardcoded URLs)
+6. **Build verify (INV-2):**
+
+   **Python:**
+   ```bash
+   cd ~/dev/<seed.name>
+   source .venv/bin/activate
+   python -m py_compile src/processor.py > .samvil/build.log 2>&1
+   python -m py_compile src/main.py >> .samvil/build.log 2>&1
+   echo "Exit code: $?"
+   ```
+
+   **Node:**
+   ```bash
+   cd ~/dev/<seed.name>
+   npx tsc --noEmit > .samvil/build.log 2>&1
+   echo "Exit code: $?"
+   ```
+
+   **CC skill:** No build step. Verify `SKILL.md` exists and references correct modules.
+
+   **Circuit Breaker (MAX_RETRIES=2):** Same as web-app.
+   On every build failure, append to `.samvil/fix-log.md`:
+   ```
+   [core:automation] <에러 내용> → <해결 방법>
+   ```
+
+7. **Dry-run verification (automation 전용):**
+   ```bash
+   # Python
+   source .venv/bin/activate
+   python src/main.py --dry-run
+   echo "Dry-run exit code: $?"
+
+   # Node
+   npx tsx src/main.ts --dry-run
+   echo "Dry-run exit code: $?"
+   ```
+   Dry-run must exit with code 0.
+
+8. Update `project.state.json`: note core flow complete
+
+```
+[SAMVIL] Stage 4/5: Core Flow built ✓
+  Processor: <seed.name> processor
+  Dry-run: passing
+```
+
 ## Phase A.5: Dependency Pre-Resolution
 
-모든 feature를 읽고, 필요한 npm 패키지를 **한 번에** 설치한다. feature 빌드 중 하나씩 발견하며 설치하면 시간 낭비.
+모든 feature를 읽고, 필요한 패키지를 **한 번에** 설치한다. feature 빌드 중 하나씩 발견하며 설치하면 시간 낭비.
+
+### web-app
 
 ```bash
 # seed.features + blueprint.key_libraries에서 필요한 패키지 추출
@@ -95,10 +161,51 @@ echo "Exit code: $?"
 npm install <packages> --save > .samvil/deps-install.log 2>&1
 ```
 
+### automation
+
+**Python:**
+```bash
+# blueprint.dependencies에서 필요한 패키지 추출
+# requirements.txt에 추가 후 설치
+source .venv/bin/activate
+pip install -r requirements.txt > .samvil/deps-install.log 2>&1
+```
+
+**Node:**
+```bash
+npm install <packages> --save > .samvil/deps-install.log 2>&1
+```
+
+**CC skill:** No dependency installation needed.
+
 ## Phase B: Features
 
 Read `seed.features` sorted by priority (1 first, then 2).
 Read `config.selected_tier` to determine build mode.
+Read `seed.solution_type` to determine build approach.
+
+### solution_type: "automation" — Module-based Build
+
+Automation features map to modules, not UI components. Each feature becomes a processing module:
+
+| Feature | Module | File |
+|---------|--------|------|
+| API data fetch | `fetcher` | `src/fetcher.py/ts` |
+| Data transformation | `transformer` | `src/transformer.py/ts` |
+| Output formatting | `formatter` | `src/formatter.py/ts` |
+| Notification | `notifier` | `src/notifier.py/ts` |
+| Error handling | `handler` | `src/error_handler.py/ts` |
+
+**Build each module:**
+1. Implement the module with real API/I/O logic
+2. Add dry-run fallback that uses `fixtures/` data
+3. Integrate into `processor.py/ts`
+4. **Build verify**: `py_compile` / `tsc --noEmit`
+5. **Dry-run verify**: `python src/main.py --dry-run` (must still pass after each module)
+
+**Circuit breaker**: Same MAX_RETRIES=2 per module.
+
+### solution_type: "web-app" — Component-based Build (기존)
 
 ### Step 1: Classify Features into Batches
 
@@ -375,6 +482,8 @@ After all chunks complete:
 
 ### After All Features
 
+#### web-app
+
 ```
 [SAMVIL] Stage 4/5: Build complete
   Features: N/M passed (X parallel, Y sequential)
@@ -382,6 +491,16 @@ After all chunks complete:
   Build: passing
   Agents spawned: <count>
   Builds run: <count>
+```
+
+#### automation
+
+```
+[SAMVIL] Stage 4/5: Build complete (automation)
+  Modules: N/M implemented
+  Failed: [list or "none"]
+  Dry-run: passing
+  Build: passing
 ```
 
 **MCP (best-effort):** Save build stage completion with implementation rate:
@@ -401,6 +520,8 @@ Invoke the Skill tool with skill: `samvil-qa`
 
 ## Output Format
 
+### web-app
+
 Modified/created files in `~/dev/<seed.name>/`:
 - `components/<primary_screen>.tsx`: core experience component
 - `components/<feature-name>/*.tsx`: feature components (PascalCase, one per file)
@@ -411,6 +532,21 @@ Modified/created files in `~/dev/<seed.name>/`:
 Verification output per feature:
 - `[SAMVIL] Feature: <name> ✓ [N/M features complete]`
 - `npm run build` exit code 0 after each feature
+
+### automation
+
+Modified/created files in `~/dev/<seed.name>/`:
+- `src/processor.py/ts`: core processing logic with `_run_dry()` and `_run_live()`
+- `src/<module>.py/ts`: feature modules (fetcher, transformer, formatter, etc.)
+- `src/main.py/ts`: updated to wire all modules
+- `fixtures/input/`: realistic test input data
+- `fixtures/expected/`: expected output for dry-run comparison
+- `requirements.txt` / `package.json`: updated dependencies
+
+Verification output per module:
+- `[SAMVIL] Module: <name> ✓ [N/M modules complete]`
+- `py_compile` / `tsc --noEmit` exit code 0 after each module
+- `python src/main.py --dry-run` exit code 0 after integration
 
 Progress trim (parallel workers):
 ```
