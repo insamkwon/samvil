@@ -353,7 +353,8 @@ Final blueprint (post-feasibility check) looks good? Say 'go' to start building,
 [SAMVIL] Stage 3/5: Scaffolding project...
 ```
 
-4. Invoke the Skill tool with skill: `samvil-scaffold`
+4. Handoff Write → `.samvil/handoff.md`에 Design 섹션 append (Chain 섹션의 Handoff Write 포맷 참고)
+   Invoke the Skill tool with skill: `samvil-scaffold`
 
 ## 모바일 우선 입력 UX 가이드
 
@@ -578,6 +579,16 @@ Create `project.blueprint.json` with mobile-specific structure:
 ## Chain (Runtime-specific)
 
 ### Claude Code
+
+### Handoff Write
+
+`.samvil/handoff.md`에 append (**Write tool 금지, Bash `cat >>` 또는 Edit로 append**):
+- Theme: <선택된 테마>
+- Layout: <주요 레이아웃 결정>
+- Components: <핵심 컴포넌트 목록>
+- Architecture decisions: <주요 결정 사항>
+```
+
 Invoke the Skill tool with skill: `samvil-scaffold`
 
 ### Codex CLI (future)

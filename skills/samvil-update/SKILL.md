@@ -70,10 +70,44 @@ if [ -d "$MCP_VENV" ]; then
 fi
 ```
 
-### Step 5: 완료
+### Step 5: 구버전 캐시 정리
+
+업데이트 성공 시, 최신 버전 디렉토리만 남기고 나머지 구버전 삭제:
+
+```bash
+CACHE_ROOT=~/.claude/plugins/cache/samvil/samvil
+LATEST_DIR="${CACHE_ROOT}/${LATEST}"
+
+# 안전 검증: 최신 버전 디렉토리가 존재하는지 + $LATEST가 비어있지 않은지 확인
+if [ -z "$LATEST" ] || [ ! -d "$LATEST_DIR" ]; then
+  echo "[SAMVIL] ⚠️ 최신 버전 디렉토리가 없어 캐시 정리를 건너뜁니다"
+  echo "[SAMVIL] LATEST=${LATEST:-'(empty)'}"
+else
+  # 삭제 전 용량 측정
+  BEFORE_SIZE=$(du -sh "$CACHE_ROOT" 2>/dev/null | cut -f1)
+
+  # 구버전 삭제 (최신 버전 제외)
+  for dir in "$CACHE_ROOT"/*/; do
+    dirname=$(basename "$dir")
+    if [ "$dirname" != "$LATEST" ]; then
+      echo "[SAMVIL] 구버전 삭제: v${dirname}"
+      rm -rf "$dir"
+    fi
+  done
+
+  # 삭제 후 용량 측정
+  AFTER_SIZE=$(du -sh "$CACHE_ROOT" 2>/dev/null | cut -f1)
+  echo "[SAMVIL] 캐시 정리: ${BEFORE_SIZE} → ${AFTER_SIZE}"
+fi
+```
+
+**주의**: `$LATEST`가 비어있으면 `$CACHE_ROOT/*/`에서 전체 삭제 위험이 있으므로, `-z "$LATEST"` 체크가 반드시 먼저 실행되어야 함. `rm -rf`는 이중 가드(empty check + explicit match)로 보호.
+
+### Step 6: 완료
 
 ```
 [SAMVIL] ✓ 업데이트 완료! v{CURRENT} → v{LATEST}
+  캐시 정리: {BEFORE_SIZE} → {AFTER_SIZE}
   새 세션을 열면 업데이트된 SAMVIL이 로드됩니다.
 ```
 
@@ -88,7 +122,7 @@ fi
 ## Output Format
 
 Console output only (no files written):
-- Success: `[SAMVIL] ✓ 업데이트 완료! v{CURRENT} → v{LATEST}`
+- Success: `[SAMVIL] ✓ 업데이트 완료! v{CURRENT} → v{LATEST}` + cache cleanup summary
 - Already latest: `[SAMVIL] ✓ 이미 최신 버전입니다 (v{CURRENT})`
 - Failure: `[SAMVIL] ✗ 업데이트 실패` with error message and manual instructions
 

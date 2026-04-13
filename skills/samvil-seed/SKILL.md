@@ -217,34 +217,86 @@ AC JSON format:
 ```
 vague AC는 1개까지 허용. 2개 이상이면 자동으로 rewrite_hint 기반으로 재작성.
 
-### Step 4: Present to User with Preview
+### Step 4: Present to User with Structured Summary
 
-Seed의 `core_experience`와 `features`를 기반으로 **텍스트 와이어프레임**을 함께 표시:
+Seed의 모든 필드를 **실제 값**으로 채운 구조적 요약을 표시. 플레이스홀더(`<App Name>` 등) 금지.
+
+**web-app / dashboard / mobile-app:**
 
 ```
-[SAMVIL] Seed Generated — project.seed.json
+[SAMVIL] Seed Generated — {seed.name}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📋 Preview:
-┌─────────────────────────────┐
-│  <App Name>                 │
-│  ┌───────────────────────┐  │
-│  │ <Primary Screen>      │  │
-│  │  [core_experience]    │  │
-│  │  • key_interaction 1  │  │
-│  │  • key_interaction 2  │  │
-│  └───────────────────────┘  │
-│                             │
-│  Features:                  │
-│  ✓ <P1 feature 1>          │
-│  ✓ <P1 feature 2>          │
-│  ○ <P2 feature (if any)>   │
-└─────────────────────────────┘
+📝 {seed.description}
+Type: {seed.solution_type} | Stack: {seed.tech_stack.framework} + {seed.tech_stack.ui}
 
-<pretty-printed seed JSON>
+🎯 Core Experience
+   Screen: {seed.core_experience.primary_screen}
+   {seed.core_experience.description}
+   Interactions:
+   • {seed.core_experience.key_interactions[0]}
+   • {seed.core_experience.key_interactions[1]}
+   ...
+
+📦 Features ({count} total)
+   P1 (Must): {comma-separated P1 feature names}
+   P2 (Nice): {comma-separated P2 feature names, or "없음"}
+   Dependencies: {feature→dependency pairs, or "없음"}
+
+✅ Acceptance Criteria ({count})
+   1. {seed.acceptance_criteria[0]}
+   2. {seed.acceptance_criteria[1]}
+   ...
+
+🚫 Out of Scope
+   • {seed.out_of_scope[0]}
+   • {seed.out_of_scope[1]}
+   ...
+
+⚙️ Constraints
+   • {seed.constraints[0]}
+   ...
 ```
 
-Then ask: **"Seed looks good? Say 'go' to start building, or tell me what to change."**
+**automation / game (core_flow pattern):**
+
+```
+[SAMVIL] Seed Generated — {seed.name}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📝 {seed.description}
+Type: {seed.solution_type} | Runtime: {seed.implementation.runtime}
+
+🎯 Core Flow
+   {seed.core_experience.description}
+   Trigger: {seed.core_experience.trigger}
+   Input → Output: {seed.core_experience.input} → {seed.core_experience.output}
+
+📦 Features ({count} total)
+   P1 (Must): {comma-separated P1 feature names}
+   P2 (Nice): {comma-separated P2 feature names, or "없음"}
+
+✅ Acceptance Criteria ({count})
+   1. {seed.acceptance_criteria[0]}
+   ...
+
+🚫 Out of Scope
+   • {seed.out_of_scope[0]}
+   ...
+
+⚙️ Constraints
+   • {seed.constraints[0]}
+   ...
+```
+
+**vague AC 경고** (vague_words가 감지된 AC가 있으면 요약 하단에 표시):
+
+```
+⚠️ Vague AC:
+   "{ac_text}" → 제안: "{rewrite_hint}"
+```
+
+Then ask: **"이대로 진행할까요? 'go' 입력 시 빌드 시작, 수정할 부분 알려주면 반영합니다."**
 
 If user requests changes: modify the seed and re-present. Do NOT re-interview.
 
@@ -278,6 +330,21 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change"
 [SAMVIL] Council: skipped (minimal tier)
 ```
 
+### Handoff Write
+
+`.samvil/handoff.md`에 현재 단계 완료 내용을 append. **반드시 Bash `cat >>` 또는 Edit tool로 append. Write tool 사용 금지 (기존 내용 삭제됨).** 파일이 없으면 먼저 `# Handoff: <project-name>` 헤더로 생성:
+
+```markdown
+### Seed ✓ (<timestamp>)
+- name: <seed.name>
+- solution_type: <seed.solution_type>
+- features: P1 [<목록>], P2 [<목록>]
+- AC: <N>개, vague: <N>개
+- 사용자 변경: <있으면 요약, 없으면 "없음">
+```
+
+state.json과 project.seed.json 디스크 기록 완료 후 handoff.md append.
+
 Invoke the Skill tool with skill: `samvil-design`
 
 **If tier is `"standard"` or higher (council runs):**
@@ -291,6 +358,10 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change"
 [SAMVIL] Stage 2/5: Seed ✓
 [SAMVIL] Running Council Gate A...
 ```
+
+### Handoff Write
+
+동일 — handoff.md에 append 후 다음 스킬 invoke.
 
 Invoke the Skill tool with skill: `samvil-council`
 

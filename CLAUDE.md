@@ -155,6 +155,15 @@ chore: 설정, 버전, 구조 변경
 4. **배포 준비** — next.config.mjs에 output:'standalone'. QA 완료 후 Vercel/Railway/수동 배포 옵션 제시.
 5. **Council 간접 토론** — Round 1 결과에서 논쟁점(consensus/debate/blind_spots) 추출 → Round 2 prompt에 주입.
 
+## v2.1.0 변경 내역 (v2.0.0 → v2.1.0) — Handoff & UX Improvements
+
+1. **Handoff 패턴** — 각 스킬 완료 시 `.samvil/handoff.md`에 누적 append. context limit 도달 시 새 세션에서 `/samvil`로 handoff.md 읽고 복구. 7스킬 16포인트. Write tool 금지, Bash `cat >>` 또는 Edit로 append.
+2. **시드 요약 포맷** — Step 4에서 플레이스홀더 대신 실제 값으로 구조적 요약. solution_type별 분기 (screen 패턴: web-app/dashboard/mobile, flow 패턴: automation/game).
+3. **Council 결과 포맷** — 섹션별 판결(N/M APPROVE) + 에이전트별 2-3줄 근거 + 반대 의견 상세화.
+4. **Retro 개선** — suggestion에 ISS-ID + severity(CRITICAL/HIGH/MEDIUM/LOW) + target_file + reason + expected_impact 구조화. feedback.log JSON도 구조화.
+5. **구버전 캐시 자동 삭제** — samvil-update Step 5 추가. `$LATEST` empty check(`-z`) + 디렉토리 존재 check(`-d`) 이중 가드. 삭제 전후 용량 로깅.
+6. **Resume 강화** — 오케스트레이터가 state.json + handoff.md 읽어서 이전 세션 결정 사항 요약 제시.
+
 ## v2.0.0 변경 내역 (v1.0.0 → v2.0.0) — Universal Builder
 
 1. **Seed Schema v2** — `solution_type` 필드 추가 (web-app/automation/game/mobile-app/dashboard). `mode` deprecated, 자동 마이그레이션. `tech_stack.framework` enum 확장 (phaser/expo/python-script/node-script). `core_experience` oneOf (screen + core_flow 패턴). `implementation` object 추가 (type/runtime/entry_point).

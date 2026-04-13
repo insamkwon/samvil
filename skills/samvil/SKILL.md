@@ -338,10 +338,19 @@ Parse the returned `session_id` and update `project.state.json` → set `session
 
 `project.state.json`이 이미 존재하면:
 
+1. `state.json` 읽기 → `current_stage`, `completed_stages` 확인
+2. `.samvil/handoff.md` 읽기 → 이전 세션의 결정 사항과 맥락 파악
+3. 사용자에게 이전 실행 요약 제시
+
 ```
 [SAMVIL] 이전 실행을 감지했습니다: ~/dev/<project-name>/
   완료된 단계: interview, seed, scaffold
   현재 단계: build
+  이전 세션 요약 (handoff.md):
+    • Seed: game/platformer, P1 4개
+    • Council: 3/3 PROCEED
+    • Design: pixel-art theme
+    • Scaffold: Phaser 3 + Vite
   이어서 진행할까요?
 ```
 

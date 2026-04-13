@@ -1460,6 +1460,15 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="scaffold_comp
 [SAMVIL] Stage 4/5: Building core experience...
 ```
 
+### Handoff Write
+
+`.samvil/handoff.md`에 append (**Write tool 금지, Bash `cat >>` 또는 Edit로 append**):
+- Framework: <framework>
+- UI library: <tailwind | none>
+- shadcn components: <설치된 컴포넌트 목록>
+- Directory: ~/dev/<seed.name>/
+```
+
 Invoke the Skill tool with skill: `samvil-build`
 
 ## Output Format
@@ -1548,6 +1557,10 @@ Verification output:
 ## Chain (Runtime-specific)
 
 ### Claude Code
+### Handoff Write
+
+`.samvil/handoff.md`에 append (위 Step의 Handoff Write와 동일 포맷).
+
 Invoke the Skill tool with skill: `samvil-build`
 
 ### Codex CLI (future)

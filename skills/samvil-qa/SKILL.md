@@ -1168,6 +1168,17 @@ QA passed, but quality could improve. Want to evolve the seed? (yes / no)
 
 If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to deploy:
   **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="deploy", data='{"reason":"quality_excellent"}')`
+
+### Handoff Write
+
+`.samvil/handoff.md`에 append (**Write tool 금지, Bash `cat >>` 또는 Edit로 append**):
+- Verdict: <PASS | REVISE>
+- Iterations: <N>
+- Pass rates: Mechanical <N/N>, Functional <N/N>, Quality <N/N>
+- Issues fixed: <요약>
+- Remaining: <없음 또는 목록>
+```
+
   Invoke the Skill tool with skill: `samvil-deploy`
 
 ## On FAIL (after 3 iterations)
@@ -1285,6 +1296,10 @@ Screenshots saved to `.samvil/qa-evidence/` with naming convention:
 ## Chain (Runtime-specific)
 
 ### Claude Code
+### Handoff Write
+
+`.samvil/handoff.md`에 append (QA 섹션 포맷 참고).
+
 - On PASS: Invoke the Skill tool with skill: `samvil-deploy`
 - On FAIL: User chooses evolve, retro, or manual fix
 

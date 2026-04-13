@@ -945,6 +945,7 @@ Each section must be non-empty. Constraints must have >= 1 item. Success criteri
 ## Chain (Runtime-specific)
 
 ### Claude Code
+**NO COMPACT** — interview 컨텍스트가 seed 생성에 직접 필요하므로 compact 없이 바로 진행.
 Invoke the Skill tool with skill: `samvil-seed`
 
 ### Codex CLI (future)

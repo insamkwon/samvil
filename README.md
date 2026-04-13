@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v2.0.0`
+# SAMVIL — AI 바이브코딩 하네스 `v2.1.0`
 
 > **한 줄 입력 → 완성된 앱/스크립트/게임 출력**
 >
@@ -382,6 +382,17 @@ Run #3: 이전 제안 반영 + 패턴 감지 → 더 빠르고 안정적
 ---
 
 ## CHANGELOG
+
+### v2.1.0 — Handoff & UX Improvements
+
+**사용자 경험 개선 + 세션 간 연속성 보장**
+
+- **Handoff 패턴**: 각 단계 완료 시 `.samvil/handoff.md`에 누적 append. context limit 도달 시 새 세션에서 완벽 복구. 7스킬 16포인트 적용.
+- **시드 요약 개선**: 플레이스홀더 → 실제 값 구조적 요약. solution_type별 분기 (screen 패턴 vs flow 패턴). "이게 내가 원하는 앱이 맞나?" 판단 가능.
+- **Council 결과 개선**: 에이전트 1줄 → 섹션별 판결 + 에이전트별 2-3줄 근거 + 반대 의견 상세화.
+- **Retro 개선**: suggestion에 ISS-ID + severity(CRITICAL/HIGH/MEDIUM/LOW) + 대상 파일 + 근거 + 기대효과 구조화.
+- **구버전 캐시 자동 삭제**: `/samvil:update` 시 최신 버전만 남기고 나머지 삭제. 이중 가드(`-z` + `-d`) + 용량 로깅.
+- **Resume 강화**: 오케스트레이터가 handoff.md 읽어서 이전 세션 결정 사항까지 요약 제시.
 
 ### v2.0.0 — Universal Builder
 

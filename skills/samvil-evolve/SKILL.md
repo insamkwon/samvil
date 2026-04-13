@@ -263,10 +263,26 @@ If QA still fails: another wonder/reflect cycle.
 After evolve completes (converged, user stops, or max iterations):
 
 **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="retro", data='{"reason":"evolve_complete"}')`
+
+### Handoff Write
+
+`.samvil/handoff.md`에 append (**Write tool 금지, Bash `cat >>` 또는 Edit로 append**):
+- Cycles: <N>
+- Seed version: v<N> → v<N+1>
+- Similarity: <score>
+- Key changes: <변경 사항 요약>
+- Converged: <yes | no (user stopped)>
+```
+
 Invoke the Skill tool with skill: `samvil-retro`
 
 If user chose to rebuild with new seed:
 **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="scaffold", data='{"reason":"rebuild_with_evolved_seed"}')`
+
+### Handoff Write
+
+동일 — evolve 결과 handoff.md append 후 scaffold invoke.
+
 Invoke the Skill tool with skill: `samvil-scaffold`
 
 ## Output Format

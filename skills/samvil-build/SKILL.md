@@ -789,6 +789,15 @@ Update `project.state.json` with `implementation_rate`: `"implementation_rate": 
 [SAMVIL] Stage 5/5: Running QA verification...
 ```
 
+### Handoff Write
+
+`.samvil/handoff.md`에 append (**Write tool 금지, Bash `cat >>` 또는 Edit로 append**):
+- Completed: <기능 목록>
+- Failed: <기능 목록 또는 "없음">
+- Retries: <N>
+- Build errors: <해결된 에러 요약 또는 "없음">
+```
+
 Invoke the Skill tool with skill: `samvil-qa`
 
 ## Output Format
@@ -888,6 +897,10 @@ Final summary:
 ## Chain (Runtime-specific)
 
 ### Claude Code
+### Handoff Write
+
+`.samvil/handoff.md`에 append (위 Chain to QA의 Handoff Write와 동일 포맷).
+
 Invoke the Skill tool with skill: `samvil-qa`
 
 ### Codex CLI (future)
