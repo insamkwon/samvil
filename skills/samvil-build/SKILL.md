@@ -10,12 +10,19 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
 ## Boot Sequence (INV-1)
 
 0. **TaskUpdate**: "Build" task를 `in_progress`로 설정
-1. Read `project.seed.json` → know what to build
+1. Read `project.seed.json` → know what to build (check `solution_type`)
 2. Read `project.state.json` → know what's already done (resume support), get `session_id`
 3. Read `project.config.json` → `selected_tier`, `max_total_builds`
-4. Read `project.blueprint.json` → architecture decisions (screens, data model, components, routes)
+4. Read `project.blueprint.json` → architecture decisions
+   - web-app: screens, data model, components, routes
+   - automation: entry_point, modules, fixtures, dependencies
 5. Read `decisions.log` → binding decisions from Council (if exists, respect them)
-6. Read `references/web-recipes.md` from this plugin directory → patterns to use
+6. **Read recipe reference** based on `solution_type`:
+   - web-app: `references/web-recipes.md`
+   - automation: `references/automation-recipes.md`
+   - game: `references/game-recipes.md`
+   - mobile-app: `references/mobile-recipes.md`
+   - dashboard: `references/dashboard-recipes.md`
 7. Check `completed_features` in state — skip already-built features
 8. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
@@ -32,6 +39,8 @@ Use these normalized `error_category` values everywhere build events are emitted
 Normalize `error_signature` to a brief, repeatable summary (for example: `Module not found: @/lib/utils`).
 
 ## Phase A: Core Experience
+
+### solution_type: "web-app"
 
 The seed's `core_experience` defines what the user does in the first 30 seconds. **Build this first.**
 
@@ -85,9 +94,215 @@ echo "Exit code: $?"
   Build: passing
 ```
 
+### solution_type: "game"
+
+The seed's `core_experience` defines the game's core mechanic. **Build the core gameplay first.**
+
+1. Read `seed.core_experience`
+2. Create the Player entity: `src/entities/Player.ts`
+3. Set up GameScene with physics world, player, and basic input handling
+4. Implement the core mechanic from `game_config.input` (keyboard/mouse/touch)
+5. Implement score display and scene transition to GameOverScene
+6. **Build verify (INV-2):**
+   ```bash
+   cd ~/dev/<seed.name>
+   npx tsc --noEmit > .samvil/build.log 2>&1
+   echo "Exit code: $?"
+   ```
+   Circuit Breaker: MAX_RETRIES=2. Same as web-app.
+
+7. Update `project.state.json`: note core game mechanic complete
+
+```
+[SAMVIL] Stage 4/5: Core Game Mechanic built ✓
+  Entity: Player
+  Scene: GameScene
+  Build: passing
+```
+
+### solution_type: "automation"
+
+The seed's `core_flow` defines the main processing pipeline. **Build this first.**
+
+1. Read `seed.core_flow`
+2. Implement `processor.py/ts` — the core processing logic:
+   - `_run_live()`: real API calls + real I/O
+   - `_run_dry()`: load from `fixtures/input/`, process, compare against `fixtures/expected/`
+3. Create `fixtures/input/` with realistic test data (at least 2 samples: happy path + edge case)
+4. Create `fixtures/expected/` with matching expected outputs
+5. Implement API client / data source integration (env-based config, no hardcoded URLs)
+6. **Build verify (INV-2):**
+
+   **Python:**
+   ```bash
+   cd ~/dev/<seed.name>
+   source .venv/bin/activate
+   python -m py_compile src/processor.py > .samvil/build.log 2>&1
+   python -m py_compile src/main.py >> .samvil/build.log 2>&1
+   echo "Exit code: $?"
+   ```
+
+   **Node:**
+   ```bash
+   cd ~/dev/<seed.name>
+   npx tsc --noEmit > .samvil/build.log 2>&1
+   echo "Exit code: $?"
+   ```
+
+   **CC skill:** No build step. Verify `SKILL.md` exists and references correct modules.
+
+   **Circuit Breaker (MAX_RETRIES=2):** Same as web-app.
+   On every build failure, append to `.samvil/fix-log.md`:
+   ```
+   [core:automation] <에러 내용> → <해결 방법>
+   ```
+
+7. **Dry-run verification (automation 전용):**
+   ```bash
+   # Python
+   source .venv/bin/activate
+   python src/main.py --dry-run
+   echo "Dry-run exit code: $?"
+
+   # Node
+   npx tsx src/main.ts --dry-run
+   echo "Dry-run exit code: $?"
+   ```
+   Dry-run must exit with code 0.
+
+8. Update `project.state.json`: note core flow complete
+
+```
+[SAMVIL] Stage 4/5: Core Flow built ✓
+  Processor: <seed.name> processor
+  Dry-run: passing
+```
+
+### solution_type: "mobile-app"
+
+The seed's `core_experience` defines what the user does in the first 30 seconds. **Build this first.**
+
+1. Read `seed.core_experience`
+2. Create the primary screen component: `app/(tabs)/index.tsx` (update existing)
+3. Create supporting components (1-3 components, single responsibility each):
+   - Use React Native components: `View`, `Text`, `TextInput`, `ScrollView`, `TouchableOpacity`
+   - Use Tamagui or React Native Paper for UI library (if configured)
+4. Create state management with Zustand: `lib/store.ts`
+5. Wire into the tab navigation
+6. **Build verify (INV-2):**
+   ```bash
+   cd ~/dev/<seed.name>
+   npx expo export --platform web > .samvil/build.log 2>&1
+   echo "Exit code: $?"
+   ```
+
+   **Circuit Breaker (MAX_RETRIES=2):** Same as web-app.
+   On every build failure, append to `.samvil/fix-log.md`:
+   ```
+   [core:mobile] <에러 내용> → <해결 방법>
+   ```
+
+7. Update `project.state.json`: note core experience complete
+
+```
+[SAMVIL] Stage 4/5: Core Experience built ✓
+  Screen: <primary_screen>
+  Platform: web export passing
+```
+
+### solution_type: "dashboard"
+
+Dashboard is a web-app subset. The seed's `core_experience` defines the primary dashboard view. **Build the dashboard layout + first chart first.**
+
+1. Read `seed.core_experience`
+2. Create the dashboard layout component: `components/dashboard-layout.tsx`
+   - Responsive grid with sidebar (optional) + main content area
+   - Use CSS Grid: `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` for cards
+   - Include header with date range filter + export button
+3. Create metric card component: `components/metric-card.tsx`
+   - Shows KPI value, trend indicator (up/down/stable), percentage change
+   - Uses lucide-react icons (TrendingUp, TrendingDown, Minus)
+4. Create the primary chart component based on seed features:
+   - Time-series → `LineChart` or `AreaChart` from recharts
+   - Categorical → `BarChart` from recharts
+   - Distribution → `PieChart` from recharts
+5. Wire into page: update `app/page.tsx` to render dashboard layout with cards + chart
+6. **Build verify (INV-2):**
+   ```bash
+   cd ~/dev/<seed.name>
+   npm run build > .samvil/build.log 2>&1
+   echo "Exit code: $?"
+   ```
+   Circuit Breaker: MAX_RETRIES=2. Same as web-app.
+
+7. Update `project.state.json`: note core dashboard experience complete
+
+```
+[SAMVIL] Stage 4/5: Core Dashboard built ✓
+  Layout: dashboard-layout
+  Charts: <chart-type>
+  Build: passing
+```
+
+#### Dashboard Build Patterns
+
+**Chart Component Pattern** — Wrap each recharts chart in a `'use client'` component:
+```tsx
+'use client'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+
+interface ChartProps {
+  data: Array<Record<string, unknown>>
+  xKey: string
+  yKey: string
+  color?: string
+}
+
+export function MetricLineChart({ data, xKey, yKey, color = '#2563eb' }: ChartProps) {
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+        <XAxis dataKey={xKey} tick={{ fontSize: 12 }} />
+        <YAxis tick={{ fontSize: 12 }} />
+        <Tooltip />
+        <Line type="monotone" dataKey={yKey} stroke={color} strokeWidth={2} dot={false} />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+```
+
+**Data Table with Sorting/Filtering** — Use shadcn `Table` component:
+```tsx
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+// Sort with useState, filter with search input
+// Paginate with "Load more" button (simpler than pagination for v1)
+```
+
+**Filter Controls** — Date range + category selector:
+```tsx
+// Date range: two date inputs or a preset selector (7d, 30d, 90d, custom)
+// Category: shadcn Select component with "All" + unique categories
+// Filters update zustand store → charts re-render via store subscription
+```
+
+**Responsive Grid for Dashboard Cards**:
+```tsx
+<div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+  {metrics.map(m => <MetricCard key={m.label} {...m} />)}
+</div>
+<div className="grid grid-cols-1 gap-4 mt-4 lg:grid-cols-2">
+  <ChartCard title="Trend">{/* LineChart */}</ChartCard>
+  <ChartCard title="Distribution">{/* PieChart */}</ChartCard>
+</div>
+```
+
 ## Phase A.5: Dependency Pre-Resolution
 
-모든 feature를 읽고, 필요한 npm 패키지를 **한 번에** 설치한다. feature 빌드 중 하나씩 발견하며 설치하면 시간 낭비.
+모든 feature를 읽고, 필요한 패키지를 **한 번에** 설치한다. feature 빌드 중 하나씩 발견하며 설치하면 시간 낭비.
+
+### web-app
 
 ```bash
 # seed.features + blueprint.key_libraries에서 필요한 패키지 추출
@@ -95,10 +310,146 @@ echo "Exit code: $?"
 npm install <packages> --save > .samvil/deps-install.log 2>&1
 ```
 
+### automation
+
+**Python:**
+```bash
+# blueprint.dependencies에서 필요한 패키지 추출
+# requirements.txt에 추가 후 설치
+source .venv/bin/activate
+pip install -r requirements.txt > .samvil/deps-install.log 2>&1
+```
+
+**Node:**
+```bash
+npm install <packages> --save > .samvil/deps-install.log 2>&1
+```
+
+**CC skill:** No dependency installation needed.
+
 ## Phase B: Features
 
 Read `seed.features` sorted by priority (1 first, then 2).
 Read `config.selected_tier` to determine build mode.
+Read `seed.solution_type` to determine build approach.
+
+### solution_type: "automation" — Module-based Build
+
+Automation features map to modules, not UI components. Each feature becomes a processing module:
+
+| Feature | Module | File |
+|---------|--------|------|
+| API data fetch | `fetcher` | `src/fetcher.py/ts` |
+| Data transformation | `transformer` | `src/transformer.py/ts` |
+| Output formatting | `formatter` | `src/formatter.py/ts` |
+| Notification | `notifier` | `src/notifier.py/ts` |
+| Error handling | `handler` | `src/error_handler.py/ts` |
+
+**Build each module:**
+1. Implement the module with real API/I/O logic
+2. Add dry-run fallback that uses `fixtures/` data
+3. Integrate into `processor.py/ts`
+4. **Build verify**: `py_compile` / `tsc --noEmit`
+5. **Dry-run verify**: `python src/main.py --dry-run` (must still pass after each module)
+
+**Circuit breaker**: Same MAX_RETRIES=2 per module.
+
+### solution_type: "game" — Mechanic-based Build
+
+Game features map to game mechanics within Phaser scenes. Each feature modifies or extends the game's scene lifecycle (preload → create → update):
+
+| Feature | Implementation | File |
+|---------|---------------|------|
+| player-movement | Player entity with input | `src/entities/Player.ts` |
+| enemy-spawn | Enemy factory in GameScene | `src/entities/Enemy.ts` |
+| collision-detection | Physics overlap/collide in GameScene | GameScene |
+| scoring-system | Score tracking + display | GameScene |
+| level-progression | Difficulty scaling or scene change | GameScene / LevelManager |
+| collectibles | Collectible entity + overlap logic | `src/entities/Collectible.ts` |
+| timer | Countdown timer + GameOver trigger | GameScene |
+
+**Build each mechanic:**
+1. Create/modify entity class in `src/entities/` (follows Phaser GameObject pattern)
+2. Wire into GameScene's `create()` (setup) and `update()` (game loop) methods
+3. Add collision/overlap handlers via `this.physics.add.overlap()` or `this.physics.add.collider()`
+4. **Build verify**: `npx tsc --noEmit` (TypeScript strict mode)
+5. **Runtime verify**: `npm run dev` → Playwright canvas check
+
+**Key patterns:**
+- Phaser scene lifecycle: `preload()` → `create()` → `update(time, delta)`
+- Entities extend `Phaser.GameObjects.Container` with physics body
+- Collision: `this.physics.add.collider(player, enemies, callback)`
+- Overlap (collectibles): `this.physics.add.overlap(player, collectibles, callback)`
+- Keyboard input: `this.input.keyboard!.createCursorKeys()` or `this.input.keyboard!.addKey()`
+- Touch/mouse: `this.input.on("pointerdown", callback)`
+
+**Circuit breaker**: MAX_RETRIES=2 per mechanic. TypeScript strict — no `any`.
+
+### solution_type: "mobile-app" — Screen-based Build
+
+Mobile features map to screens/components. Each feature adds a screen or modifies an existing one:
+
+| Feature | Implementation | File |
+|---------|---------------|------|
+| item-list | List screen with FlatList | `app/(tabs)/index.tsx` or `components/ItemList.tsx` |
+| item-detail | Detail screen | `app/item/[id].tsx` |
+| add-item | Form screen or modal | `components/AddItemForm.tsx` |
+| settings | Settings screen | `app/(tabs)/settings.tsx` |
+| data-persistence | Zustand + AsyncStorage | `lib/store.ts` |
+| camera-access | Camera screen | `components/CameraView.tsx` |
+
+**Build each feature:**
+1. Create component in `components/` using React Native primitives:
+   - `View` (container), `Text` (display), `TextInput` (input), `ScrollView` (scrollable)
+   - `TouchableOpacity` (button), `FlatList` (list), `Image` (image)
+   - Use `StyleSheet.create()` for styles (NOT Tailwind — React Native uses StyleSheet)
+2. Add screen route in `app/` (Expo Router file-based routing)
+3. Update Zustand store if feature needs state
+4. **Build verify**: `npx expo export --platform web` (web export for fast verification)
+5. **Runtime verify**: `npx expo start` → Playwright on web preview
+
+**Key patterns:**
+- Expo Router: file-based routing. `app/(tabs)/index.tsx` → `/` tab, `app/item/[id].tsx` → `/item/:id`
+- Navigation: `router.push("/item/123")`, `router.back()`
+- Components: `import { View, Text, StyleSheet } from "react-native"`
+- Touch targets: minimum 44x44 points for interactive elements
+- State: `const items = useAppStore((s) => s.items)` — Zustand selectors
+
+**Circuit breaker**: MAX_RETRIES=2 per feature. TypeScript strict — no `any`.
+
+### solution_type: "dashboard" — Chart-based Build
+
+Dashboard is a web-app subset. Dashboard features map to chart components, data tables, and filter controls:
+
+| Feature | Implementation | File |
+|---------|---------------|------|
+| metric-cards | KPI cards with trend indicator | `components/metric-card.tsx` |
+| time-series-chart | LineChart/AreaChart with date axis | `components/charts/metric-line-chart.tsx` |
+| bar-comparison | BarChart for categorical data | `components/charts/category-bar-chart.tsx` |
+| pie-distribution | PieChart for breakdown | `components/charts/distribution-pie-chart.tsx` |
+| date-filter | Date range picker with presets | `components/date-range-filter.tsx` |
+| data-table | Table with sort + search + pagination | `components/data-table.tsx` |
+| csv-export | Download button → CSV generation | `components/csv-export-button.tsx` |
+| realtime-update | SWR polling or WebSocket | `lib/use-realtime-data.ts` |
+| alert-list | Alert cards with severity | `components/alert-list.tsx` |
+
+**Build each feature:**
+1. Create chart component in `components/charts/` — wrap recharts in `'use client'` with `ResponsiveContainer`
+2. Create data hook in `lib/` — SWR for API fetching with loading/error states
+3. Wire into dashboard layout — update grid in main page
+4. **Build verify**: `npm run build` (standard web-app verification)
+5. **Chart-specific checks**: verify recharts imports resolve, ResponsiveContainer wraps chart
+
+**Key patterns:**
+- All charts use `ResponsiveContainer width="100%" height={300}` for responsive sizing
+- Use `isAnimationActive={false}` for real-time updating charts to prevent visual jumping
+- Data hooks: `const { data, isLoading, error } = useSWR(key, fetcher)` — always handle loading/error
+- Chart colors: use CSS variables or Tailwind color classes for theme consistency
+- Date formatting: always use date-fns (`format(date, 'yyyy-MM-dd')`) — never manual string manipulation
+
+**Circuit breaker**: MAX_RETRIES=2 per feature. TypeScript strict — no `any`.
+
+### solution_type: "web-app" — Component-based Build (기존)
 
 ### Step 1: Classify Features into Batches
 
@@ -375,6 +726,8 @@ After all chunks complete:
 
 ### After All Features
 
+#### web-app
+
 ```
 [SAMVIL] Stage 4/5: Build complete
   Features: N/M passed (X parallel, Y sequential)
@@ -382,6 +735,45 @@ After all chunks complete:
   Build: passing
   Agents spawned: <count>
   Builds run: <count>
+```
+
+#### automation
+
+```
+[SAMVIL] Stage 4/5: Build complete (automation)
+  Modules: N/M implemented
+  Failed: [list or "none"]
+  Dry-run: passing
+  Build: passing
+```
+
+#### game
+
+```
+[SAMVIL] Stage 4/5: Build complete (game)
+  Mechanics: N/M implemented
+  Failed: [list or "none"]
+  Build: passing
+```
+
+#### mobile-app
+
+```
+[SAMVIL] Stage 4/5: Build complete (mobile)
+  Features: N/M implemented
+  Failed: [list or "none"]
+  Web export: passing
+  Build: passing
+```
+
+#### dashboard
+
+```
+[SAMVIL] Stage 4/5: Build complete (dashboard)
+  Charts: N implemented
+  Data hooks: N implemented
+  Failed: [list or "none"]
+  Build: passing
 ```
 
 **MCP (best-effort):** Save build stage completion with implementation rate:
@@ -401,6 +793,8 @@ Invoke the Skill tool with skill: `samvil-qa`
 
 ## Output Format
 
+### web-app
+
 Modified/created files in `~/dev/<seed.name>/`:
 - `components/<primary_screen>.tsx`: core experience component
 - `components/<feature-name>/*.tsx`: feature components (PascalCase, one per file)
@@ -411,6 +805,21 @@ Modified/created files in `~/dev/<seed.name>/`:
 Verification output per feature:
 - `[SAMVIL] Feature: <name> ✓ [N/M features complete]`
 - `npm run build` exit code 0 after each feature
+
+### automation
+
+Modified/created files in `~/dev/<seed.name>/`:
+- `src/processor.py/ts`: core processing logic with `_run_dry()` and `_run_live()`
+- `src/<module>.py/ts`: feature modules (fetcher, transformer, formatter, etc.)
+- `src/main.py/ts`: updated to wire all modules
+- `fixtures/input/`: realistic test input data
+- `fixtures/expected/`: expected output for dry-run comparison
+- `requirements.txt` / `package.json`: updated dependencies
+
+Verification output per module:
+- `[SAMVIL] Module: <name> ✓ [N/M modules complete]`
+- `py_compile` / `tsc --noEmit` exit code 0 after each module
+- `python src/main.py --dry-run` exit code 0 after integration
 
 Progress trim (parallel workers):
 ```
@@ -456,6 +865,8 @@ Final summary:
 14. **UX Writing** — placeholder 텍스트, 빈 상태 메시지, 에러 메시지, 성공 토스트를 **사용자 관점에서** 작성. "Error occurred" → "저장에 실패했어요. 다시 시도해주세요." 한국어 앱이면 한국어로.
 15. **첫 30초 가치 전달** — core_experience 구현 시 사용자가 앱을 열었을 때 **즉시 가치를 느끼도록**: 샘플 데이터 프리필, 가이드 텍스트, 또는 빈 상태에서 다음 행동 유도.
 16. **프리미엄 게이트 규칙** — 결제가 out_of_scope인데 프리미엄 UI가 있으면, "현재 모든 기능 무료" 배너를 표시하거나 게이트 자체를 비활성화. 결제 안 되는데 잠긴 UI만 보여주면 사용자가 이탈함.
+17. **React Native 컴포넌트 (mobile-app)** — `<div>` 대신 `View`, `<span>` 대신 `Text`, `<input>` 대신 `TextInput` 사용. Tailwind 대신 `StyleSheet.create()` 사용. `TouchableOpacity`로 터치 영역 44px 이상 확보.
+18. **Expo Router (mobile-app)** — 파일 기반 라우팅. `router.push()`로 네비게이션. `_layout.tsx`에 네비게이션 구조 정의.
 
 ## What NOT To Do
 

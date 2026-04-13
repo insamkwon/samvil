@@ -36,13 +36,18 @@ def validate_seed(seed: dict) -> dict:
     """
     errors = []
 
-    # Required fields
-    required = ["name", "description", "tech_stack", "core_experience",
+    # Required fields (v2: solution_type added)
+    required = ["name", "description", "solution_type", "tech_stack", "core_experience",
                 "features", "acceptance_criteria", "constraints",
                 "out_of_scope", "version"]
     for field in required:
         if field not in seed:
             errors.append(f"Missing required field: {field}")
+
+    # Auto-migrate legacy mode field
+    if "mode" in seed and "solution_type" not in seed:
+        mode_map = {"web": "web-app", "mobile": "mobile-app", "desktop": "web-app"}
+        seed["solution_type"] = mode_map.get(seed["mode"], "web-app")
 
     if errors:
         return {"valid": False, "errors": errors}
@@ -52,9 +57,15 @@ def validate_seed(seed: dict) -> dict:
     if not re.match(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$", seed.get("name", "")):
         errors.append("name must be kebab-case (lowercase, hyphens, no spaces)")
 
-    # tech_stack.framework
-    if seed.get("tech_stack", {}).get("framework") not in ("nextjs", "vite-react", "astro"):
-        errors.append("tech_stack.framework must be nextjs, vite-react, or astro")
+    # solution_type validation
+    valid_solution_types = ("web-app", "automation", "game", "mobile-app", "dashboard")
+    if seed.get("solution_type") not in valid_solution_types:
+        errors.append(f"solution_type must be one of: {', '.join(valid_solution_types)}")
+
+    # tech_stack.framework (v2: expanded to include phaser, expo, python-script, node-script)
+    valid_frameworks = ("nextjs", "vite-react", "astro", "phaser", "expo", "python-script", "node-script")
+    if seed.get("tech_stack", {}).get("framework") not in valid_frameworks:
+        errors.append(f"tech_stack.framework must be one of: {', '.join(valid_frameworks)}")
 
     # features
     features = seed.get("features", [])
@@ -71,12 +82,22 @@ def validate_seed(seed: dict) -> dict:
     if not ac:
         errors.append("acceptance_criteria must have at least 1 item")
 
-    # core_experience
+    # core_experience — supports two patterns: screen and core_flow
     ce = seed.get("core_experience", {})
-    if not ce.get("primary_screen") or not re.match(r"^[A-Z]", ce.get("primary_screen", "")):
-        errors.append("core_experience.primary_screen must be PascalCase")
-    if not ce.get("key_interactions"):
-        errors.append("core_experience.key_interactions must have at least 1 item")
+    has_screen = ce.get("primary_screen") and ce.get("key_interactions")
+    has_core_flow = ce.get("input") and ce.get("output") and ce.get("trigger")
+
+    if has_screen:
+        # Screen pattern validation (web-app, dashboard)
+        if not re.match(r"^[A-Z]", ce.get("primary_screen", "")):
+            errors.append("core_experience.primary_screen must be PascalCase")
+        if not ce.get("key_interactions"):
+            errors.append("core_experience.key_interactions must have at least 1 item")
+    elif has_core_flow:
+        # Core flow pattern validation (automation, game, mobile-app)
+        pass  # input, output, trigger all present — valid
+    else:
+        errors.append("core_experience must use screen pattern (primary_screen + key_interactions) or core_flow pattern (input + output + trigger)")
 
     # constraints and out_of_scope
     if not seed.get("constraints"):
@@ -115,8 +136,8 @@ def compare_seeds(seed_a: dict, seed_b: dict) -> dict:
         Dict with overall similarity (0.0-1.0) and per-field changes.
     """
     fields = [
-        "name", "description", "mode", "tech_stack",
-        "core_experience", "features", "acceptance_criteria",
+        "name", "description", "solution_type", "mode", "tech_stack",
+        "implementation", "core_experience", "features", "acceptance_criteria",
         "constraints", "out_of_scope",
     ]
 

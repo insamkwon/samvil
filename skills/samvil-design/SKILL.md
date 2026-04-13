@@ -22,6 +22,10 @@ Generate the technical blueprint that translates the seed spec into concrete arc
 
 Adopt the `agents/tech-architect.md` persona. Read it for detailed behavior.
 
+Read `seed.solution_type` to determine blueprint format.
+
+### solution_type: "web-app" (기본)
+
 Create `project.blueprint.json` based on the seed:
 
 ```json
@@ -50,6 +54,158 @@ Create `project.blueprint.json` based on the seed:
   }
 }
 ```
+
+### solution_type: "automation"
+
+Create `project.blueprint.json` with automation-specific structure:
+
+```json
+{
+  "entry_point": "src/main.py",
+  "modules": {
+    "core": ["main.py", "processor.py"],
+    "utils": ["logger.py", "config.py"]
+  },
+  "fixtures": {
+    "input": "fixtures/input/",
+    "expected": "fixtures/expected/"
+  },
+  "dependencies": ["requests"],
+  "error_handling": "retry_with_logging",
+  "execution": {
+    "type": "cli|cron|webhook|cc-skill",
+    "schedule": "0 9 * * *"
+  }
+}
+```
+
+### solution_type: "game"
+
+Create `project.blueprint.json` with game-specific structure:
+
+```json
+{
+  "scenes": ["BootScene", "MenuScene", "GameScene", "GameOverScene"],
+  "entities": ["Player", "Enemy", "Collectible"],
+  "game_config": {
+    "width": 800,
+    "height": 600,
+    "physics": "arcade",
+    "input": "keyboard"
+  },
+  "assets": {
+    "sprites": [],
+    "audio": []
+  },
+  "scene_flow": {
+    "BootScene": "MenuScene",
+    "MenuScene": "GameScene",
+    "GameScene": "GameOverScene",
+    "GameOverScene": "MenuScene"
+  },
+  "key_libraries": ["phaser"],
+  "state_management": "phaser-scene",
+  "component_structure": {
+    "scenes": ["BootScene", "MenuScene", "GameScene", "GameOverScene"],
+    "entities": ["Player", "Enemy", "Collectible"],
+    "config": ["game-config"]
+  }
+}
+```
+
+#### Game Blueprint Decision Rules
+
+- **scenes**: Always include BootScene (asset preloading), MenuScene (start/restart), GameScene (main gameplay), GameOverScene (score + restart). Additional scenes for levels.
+- **entities**: Derived from seed.features — each game mechanic maps to an entity class:
+  - player-movement → Player entity
+  - enemy-spawn → Enemy entity
+  - collision-detection → physics config between entities
+  - scoring-system → ScoreManager (scene-level)
+  - level-progression → LevelManager (scene-level)
+- **game_config**: Copied from `seed.core_experience.game_config`. Defaults: `{ width: 800, height: 600, physics: "arcade", input: "keyboard" }`
+- **assets.sprites**: If `seed.core_experience.graphics` = "pixel art" → note that pixel art sprites need to be generated in code (no external files). If "simple shapes" → all graphics via Phaser graphics primitives.
+- **assets.audio**: Empty by default (sound is optional). Add if seed.constraints include sound.
+- **scene_flow**: Standard game loop. BootScene → MenuScene → GameScene → GameOverScene → (restart) → MenuScene.
+- **key_libraries**: Always `["phaser"]`. No other game libraries.
+- **state_management**: `"phaser-scene"` — Phaser scenes manage their own state via `init()`, `create()`, `update()` lifecycle.
+
+### solution_type: "dashboard"
+
+Create `project.blueprint.json` based on the web-app blueprint, extended with dashboard-specific fields:
+
+```json
+{
+  "screens": ["DashboardOverview", "DetailPage"],
+  "data_model": {
+    "MetricName": {
+      "id": "string",
+      "value": "number",
+      "timestamp": "string (ISO 8601)"
+    }
+  },
+  "api_routes": [],
+  "state_management": "zustand | useState",
+  "auth_strategy": "none | supabase | custom",
+  "key_libraries": ["recharts", "date-fns", "lucide-react"],
+  "component_structure": {
+    "shared_ui": ["Card", "Button", "Input", "Modal"],
+    "feature_components": {
+      "charts": ["LineChart", "BarChart", "PieChart", "AreaChart"],
+      "widgets": ["KpiCard", "DataTable", "FilterPanel"]
+    }
+  },
+  "routing": {
+    "/": "DashboardOverview",
+    "/detail/:id": "DetailPage"
+  },
+  "chart_components": ["LineChart", "BarChart"],
+  "data_sources": [
+    { "name": "primary", "type": "localStorage|api|supabase", "refresh_interval": null }
+  ],
+  "refresh_interval": null,
+  "alert_thresholds": []
+}
+```
+
+#### Dashboard Blueprint Decision Rules
+
+- **screens**: `DashboardOverview` as primary (shows all charts/widgets at a glance). Add `DetailPage` if drill-down features exist.
+- **chart_components**: Derived from seed.features:
+  - trend/time-series data → `["LineChart", "AreaChart"]`
+  - comparison data → `["BarChart"]`
+  - composition data → `["PieChart", "DonutChart"]`
+  - KPI/summary → `["KpiCard"]`
+  - tabular data → `["DataTable"]`
+- **data_sources**: Derived from seed. Default `[{ "name": "primary", "type": "localStorage", "refresh_interval": null }]`. If seed mentions external API, set `type: "api"`.
+- **refresh_interval**: `null` by default. Set if seed.constraints or features mention real-time/auto-refresh (e.g., `30000` for 30 seconds).
+- **alert_thresholds**: Empty by default. Add if seed mentions notifications/alerts.
+- **key_libraries**: Always include `"recharts"`. Add based on features:
+  - date filtering → `+ ["date-fns"]`
+  - export → `+ ["xlsx"]` or `+ ["papaparse"]`
+  - complex tables → `+ ["@tanstack/react-table"]`
+- **state_management**: `"zustand"` if multi-source data or 3+ chart widgets. `"useState"` if simple single-page dashboard.
+- **component_structure.feature_components.charts**: One component per chart type from `chart_components`.
+- **component_structure.feature_components.widgets**: Non-chart UI components (filters, tables, KPI cards).
+
+#### Automation Blueprint Decision Rules
+
+- **entry_point**:
+  - Python: `"src/main.py"` | Node: `"src/main.ts"` | CC skill: `"SKILL.md"`
+- **modules.core**: Always include `main.py/ts` (entry + argparse) and `processor.py/ts` (core logic)
+- **modules.utils**: Always include `logger` and `config` (separation of concerns)
+- **fixtures**: Always include `input/` and `expected/` subdirectories
+- **dependencies**: Derived from `seed.features` and `seed.core_flow.input/output`
+  - API calls → `["requests"]` (Python) or `["axios"]` (Node)
+  - CSV processing → `+ ["pandas"]` or `["csv-parse"]`
+  - HTML parsing → `+ ["beautifulsoup4"]` or `["cheerio"]`
+  - Slack → `+ ["slack-sdk"]` or `["@slack/web-api"]`
+- **error_handling**: `"retry_with_logging"` (default) | `"skip_and_continue"` | `"fail_fast"` — from interview Phase 2 answer
+- **execution.type**: From `seed.core_flow.trigger`
+  - `"manual"` → `"cli"`
+  - `"cron: ..."` → `"cron"` (copy schedule)
+  - `"webhook"` → `"webhook"`
+  - CC skill → `"cc-skill"`
+- **execution.schedule**: Extracted from trigger if cron format (e.g., `"0 9 * * *"`)
 
 ### Decision Rules
 
@@ -213,6 +369,8 @@ blueprint에 `mobile_considerations` 필드를 추가하여 Build 단계에서 �
 
 Write `~/dev/<project>/project.blueprint.json` — valid JSON with these required fields:
 
+### web-app
+
 ```json
 {
   "screens": ["<PascalCase name>"],
@@ -236,6 +394,170 @@ Decision rules for each field:
 - `api_routes`: empty array if localStorage. Populate if API needed.
 - `key_libraries`: only libraries features actually need.
 - `screens`: primary_screen + one per major feature needing its own page.
+
+### automation
+
+```json
+{
+  "entry_point": "src/main.py",
+  "modules": {
+    "core": ["main.py", "processor.py"],
+    "utils": ["logger.py", "config.py"]
+  },
+  "fixtures": {
+    "input": "fixtures/input/",
+    "expected": "fixtures/expected/"
+  },
+  "dependencies": ["<dep>"],
+  "error_handling": "retry_with_logging|skip_and_continue|fail_fast",
+  "execution": {
+    "type": "cli|cron|webhook|cc-skill",
+    "schedule": "<cron expression or null>"
+  }
+}
+```
+
+Decision rules for each field:
+- `entry_point`: Python → `src/main.py`, Node → `src/main.ts`, CC skill → `SKILL.md`
+- `modules.core`: Always `main` (argparse + --dry-run) + `processor` (core logic)
+- `modules.utils`: Always `logger` + `config` (separation of concerns)
+- `dependencies`: Derived from features and I/O requirements
+- `error_handling`: From interview Phase 2 answer, default `"retry_with_logging"`
+- `execution.type`: Mapped from `seed.core_flow.trigger`
+
+### game
+
+```json
+{
+  "scenes": ["BootScene", "MenuScene", "GameScene", "GameOverScene"],
+  "entities": ["<Entity>"],
+  "game_config": { "width": 800, "height": 600, "physics": "arcade", "input": "keyboard" },
+  "assets": { "sprites": [], "audio": [] },
+  "scene_flow": { "BootScene": "MenuScene", "MenuScene": "GameScene", "GameScene": "GameOverScene", "GameOverScene": "MenuScene" },
+  "key_libraries": ["phaser"],
+  "state_management": "phaser-scene",
+  "component_structure": { "scenes": [], "entities": [], "config": [] }
+}
+```
+
+Decision rules for each field:
+- `scenes`: Always BootScene + MenuScene + GameScene + GameOverScene minimum
+- `entities`: Derived from seed.features (Player, Enemy, Collectible, etc.)
+- `game_config`: From `seed.core_experience.game_config`
+- `assets`: Empty arrays by default. All graphics generated in code.
+- `scene_flow`: Standard game loop chain
+- `key_libraries`: Always `["phaser"]`
+- `state_management`: Always `"phaser-scene"`
+
+### dashboard
+
+```json
+{
+  "screens": ["<PascalCase name>"],
+  "data_model": { "<Entity>": { "id": "string", "value": "number", "timestamp": "string" } },
+  "api_routes": [],
+  "state_management": "zustand | useState",
+  "auth_strategy": "none | supabase | custom",
+  "key_libraries": ["recharts", "<additional>"],
+  "component_structure": {
+    "shared_ui": ["<Component>"],
+    "feature_components": { "charts": ["<ChartComponent>"], "widgets": ["<WidgetComponent>"] }
+  },
+  "routing": { "/": "<DashboardScreen>" },
+  "chart_components": ["<ChartType>"],
+  "data_sources": [{ "name": "<source>", "type": "localStorage|api|supabase", "refresh_interval": null }],
+  "refresh_interval": null,
+  "alert_thresholds": [],
+  "mobile_considerations": {}
+}
+```
+
+Decision rules for each field:
+- `screens`: `DashboardOverview` as primary + optional detail page
+- `chart_components`: Derived from features (LineChart, BarChart, PieChart, AreaChart, KpiCard, DataTable)
+- `data_sources`: Default localStorage. API/Supabase if seed specifies.
+- `key_libraries`: Always includes `"recharts"`. Add date-fns, xlsx, @tanstack/react-table as needed.
+- `state_management`: "zustand" if multi-source or 3+ widgets. "useState" if simple.
+- `refresh_interval`: null unless seed mentions real-time updates.
+
+### mobile-app
+
+```json
+{
+  "screens": ["<PascalCase name>"],
+  "navigation": {
+    "type": "tabs|drawer|stack",
+    "tabs": [{ "name": "<Tab>", "screen": "<Screen>", "icon": "<icon>" }]
+  },
+  "data_model": { "<Entity>": { "id": "string", "<field>": "<type>" } },
+  "state_management": "zustand",
+  "native_modules": ["<expo-module>"],
+  "key_libraries": ["expo-router", "zustand"],
+  "component_structure": {
+    "shared_ui": ["<Component>"],
+    "feature_components": { "<feature>": ["<Component>"] }
+  }
+}
+```
+
+Decision rules for each field:
+- `screens`: primary_screen + one per major feature needing its own page
+- `navigation.type`: from seed.implementation.navigation, default `"tabs"`
+- `native_modules`: from seed.implementation.native_features, mapped to expo packages
+- `key_libraries`: always `["expo-router", "zustand"]` + feature-specific additions
+- `state_management`: always `"zustand"`
+
+### solution_type: "mobile-app"
+
+Create `project.blueprint.json` with mobile-specific structure:
+
+```json
+{
+  "screens": ["HomeScreen", "SettingsScreen"],
+  "navigation": {
+    "type": "tabs",
+    "tabs": [
+      { "name": "Home", "screen": "HomeScreen", "icon": "home" },
+      { "name": "Settings", "screen": "SettingsScreen", "icon": "settings" }
+    ]
+  },
+  "data_model": {
+    "EntityName": {
+      "id": "string",
+      "field": "type",
+      "createdAt": "string (ISO 8601)"
+    }
+  },
+  "state_management": "zustand",
+  "native_modules": [],
+  "key_libraries": ["expo-router", "zustand"],
+  "component_structure": {
+    "shared_ui": ["Button", "Card", "Input"],
+    "feature_components": {
+      "feature-name": ["Component1", "Component2"]
+    }
+  }
+}
+```
+
+#### Mobile Blueprint Decision Rules
+
+- **screens**: Derive from seed.core_experience.primary_screen + one per major feature. Each screen maps to an Expo Router page in `app/`.
+- **navigation.type**: From `seed.implementation.navigation`. Default `"tabs"`.
+  - `"tabs"` → `app/(tabs)/_layout.tsx` with BottomTabNavigator
+  - `"drawer"` → `app/(drawer)/_layout.tsx` with DrawerNavigator
+  - `"stack"` → `app/_layout.tsx` with StackNavigator
+- **native_modules**: From `seed.implementation.native_features`.
+  - camera → `expo-camera`
+  - gps → `expo-location`
+  - push → `expo-notifications`
+  - sensors → `expo-sensors`
+- **key_libraries**: Always `["expo-router", "zustand"]`. Add based on features:
+  - offline → `+ ["@react-native-async-storage/async-storage"]`
+  - maps → `+ ["react-native-maps"]`
+  - forms → `+ ["react-hook-form"]`
+- **state_management**: `"zustand"` for all mobile apps (same pattern as web-app).
+- **component_structure**: Same pattern as web-app but uses React Native components (View, Text, TextInput, ScrollView) instead of HTML elements.
 
 ## Anti-Patterns
 

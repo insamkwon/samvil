@@ -139,6 +139,8 @@ options:
 
 **한 번에 하나씩.** 답변 후 다음 질문.
 
+#### solution_type: "web-app" (기본)
+
 1. **타겟 유저**: "이 앱을 주로 누가 사용하나요?"
    - preset 있으면: preset 기반 보기
    - 없으면: 개인 도구 / 팀 협업 / 고객 서비스 / Other
@@ -151,7 +153,64 @@ options:
    - preset 있으면: preset 기본 기능 전부를 보기로
    - 없으면: 맥락 기반 보기 4개 + Other
 
+#### solution_type: "automation"
+
+1. **해결할 문제**: "이 자동화가 해결할 문제는 무엇인가요?"
+   - 보기: 반복 수작업 자동화 / 데이터 수집 및 변환 / 알림/리포트 자동 생성 / 외부 시스템 연동 / Other
+
+2. **입력과 출력**: "무엇을 넣고, 무엇을 얻고 싶나요?"
+   - 보기: API 데이터 → 정리된 리포트 / 파일(CSV/JSON) → 변환된 파일 / 이메일/메시지 → 요약 / 웹페이지 → 추출 데이터 / Other
+
+3. **실행 트리거**: "이 자동화는 언제 실행되나요?" (multiSelect: false)
+   - 보기: 수동 실행 (명령어로 직접) / 정기 실행 (cron, 매일/매주) / 웹훅 (외부 이벤트 수신) / 파일 변경 감지 / Other
+
+#### solution_type: "game"
+
+**안내 메시지 (최초 1회 표시):**
+```
+[SAMVIL] 게임 모드로 진행합니다.
+  Claude Code는 Unity, Unreal Engine, Godot 등의 네이티브 게임 엔진을 실행할 수 없습니다.
+  대신 Phaser 3 (웹 기반 2D 게임 엔진)로 브라우저에서 동작하는 게임을 만듭니다.
+  - 가능: 2D platformer, puzzle, arcade, 간단한 RPG
+  - 불가능: 3D 게임, 복잡한 물리 시뮬레이션, 대형 MMORPG
+```
+
+1. **장르**: "어떤 장르의 게임인가요?"
+   - 보기: platformer (점프/달리기) / puzzle (퍼즐/매칭) / arcade (슈팅/회피) / 간단한 RPG / Other
+
+2. **조작 방식**: "플레이어 조작은 어떻게 하나요?" (multiSelect: true)
+   - 보기: keyboard (방향키/WASD) / mouse (클릭/드래그) / touch (모바일 터치) / Other
+
+3. **게임 목표**: "게임의 핵심 목표는 무엇인가요?"
+   - 보기: 점수 달성 (score attack) / 시간 생존 (survival) / 레벨 클리어 (level completion) / 아이템 수집 (collection) / Other
+
+4. **그래픽 스타일**: "그래픽 스타일은 어떻게 할까요?"
+   - 보기: pixel art (8-bit/16-bit) / simple shapes (원, 사각형 기반) / minimal flat / Other
+   - **안내**: "Phaser 3는 2D 스프라이트 기반입니다. 3D 모델링은 불가능합니다. 복잡한 애니메이션은 코드로 생성하는 simple shapes를 추천합니다."
+
+#### solution_type: "mobile-app"
+
+**안내 메시지 (최초 1회 표시):**
+```
+[SAMVIL] 모바일 앱 모드로 진행합니다.
+  Claude Code는 네이티브 iOS/Android 앱을 직접 빌드할 수 없습니다.
+  대신 Expo (React Native)로 크로스 플랫폼 앱을 만듭니다.
+  - 가능: iOS + Android 동시 지원, 카메라/GPS/푸시알림 접근, 웹 미리보기
+  - 불가능: Swift/Kotlin 전용 기능, App Store 직접 제출 (가이드만 제공)
+```
+
+1. **플랫폼**: "어떤 플랫폼을 타겟으로 하나요?"
+   - 보기: iOS만 / Android만 / 둘 다 (추천) / Other
+
+2. **핵심 경험**: "앱을 열면 첫 30초에 사용자가 할 행동은?"
+   - 보기: 앱 아이디어 기반 보기 3개 + Other
+
+3. **성공 기준**: "반드시 동작해야 하는 것은?" (multiSelect: true)
+   - 보기: 맥락 기반 보기 4개 + Other
+
 ### Phase 2: Scope Definition (2-3 questions)
+
+#### solution_type: "web-app" (기본)
 
 4. **필수 기능** (multiSelect: true):
    - preset 있으면: preset의 "자주 추가" 항목을 보기로
@@ -190,6 +249,127 @@ options:
        description: "API 호출 부분은 env var 패턴으로 작성, 키는 나중에 설정."
      - label: "필요 없어요"
        description: "외부 API 없이 자체 데이터만 사용합니다."
+   ```
+
+#### solution_type: "game"
+
+4. **게임 요소** (multiSelect: true):
+   - 보기: 적 (enemy) / 아이템/수집품 (collectible) / 장애물 (obstacle) / 점수 시스템 (scoring) / 타이머 (timer) / 레벨/스테이지 (levels) / Other
+
+5. **게임 난이도**:
+   ```
+   question: "게임 난이도를 어떻게 할까요?"
+   header: "난이도"
+   options:
+     - label: "쉬움 (casual)"
+       description: "누구나 쉽게 즐길 수 있는 난이도. 클론 코딩 수준."
+     - label: "보통 (normal)"
+       description: "일반적인 게임 난이도. 약간의 도전."
+     - label: "어려움 (hard)"
+       description: "하드코어 게이머 대상. 정밀한 조작 필요."
+   ```
+
+6. **제약 조건** (multiSelect: true):
+   - 보기: 모바일 터치 지원 필수 / 외부 에셋 사용 안 함 (코드로 생성) / 사운드 포함 / Other
+
+#### solution_type: "automation"
+
+4. **API 연동** (multiSelect: true):
+   ```
+   question: "어떤 외부 시스템과 연동하나요?"
+   header: "연동"
+   options:
+     - label: "REST API"
+       description: "외부 HTTP API 호출 (날씨, 주식, CRM 등)"
+     - label: "Slack / Discord"
+       description: "메시지 전송 또는 수신"
+     - label: "데이터베이스"
+       description: "PostgreSQL, MySQL, Supabase 등"
+     - label: "파일 시스템"
+       description: "CSV/JSON/Excel 파일 읽기/쓰기"
+     - label: "이메일"
+       description: "SMTP로 메일 발송"
+     - label: "Other"
+       description: "다른 시스템 (직접 입력)"
+   ```
+
+5. **에러 처리**:
+   ```
+   question: "실행 중 에러가 발생하면 어떻게 할까요?"
+   header: "에러 처리"
+   options:
+     - label: "재시도 + 로깅 (추천)"
+       description: "일시적 에러는 자동 재시도, 영구 에러는 로그 남기고 종료."
+     - label: "침묵 (건너뛰기)"
+       description: "에러 아이템은 건너뛰고 나머지 계속 처리."
+     - label: "즉시 알림"
+       description: "에러 발생 즉시 Slack/이메일로 알림."
+     - label: "Other"
+       description: "다른 방식 (직접 입력)"
+   ```
+
+6. **실행 환경**:
+   ```
+   question: "이 자동화를 어디서 실행할까요?"
+   header: "실행 환경"
+   options:
+     - label: "로컬 Python (추천)"
+       description: "Python 스크립트. API/데이터 처리에 강점. pip 설치 필요."
+     - label: "로컬 Node.js"
+       description: "TypeScript/JavaScript. JS 생태계 활용."
+     - label: "간단한 Shell"
+       description: "단순 시스템 작업 (파일 이동, 백업 등)."
+     - label: "CC 스킬"
+       description: "Claude Code 내에서 실행. AI 판단이 필요한 작업에 적합."
+   ```
+
+#### solution_type: "mobile-app"
+
+4. **네이티브 기능** (multiSelect: true):
+   ```
+   question: "네이티브 기능이 필요한가요?"
+   header: "네이티브"
+   options:
+     - label: "카메라"
+       description: "사진 촬영, QR 코드 스캔"
+     - label: "GPS / 위치"
+       description: "현재 위치, 지도 연동"
+     - label: "푸시 알림"
+       description: "원격 푸시 알림 수신"
+     - label: "센서"
+       description: "가속도, 자이로, 생체인증 등"
+     - label: "필요 없어요"
+       description: "일반적인 UI 앱"
+     - label: "Other"
+       description: "다른 네이티브 기능 (직접 입력)"
+   ```
+
+5. **네비게이션**:
+   ```
+   question: "앱의 기본 네비게이션 구조는?"
+   header: "네비게이션"
+   options:
+     - label: "탭바 (추천)"
+       description: "하단 탭으로 화면 전환. 대부분의 앱에 적합."
+     - label: "드로어"
+       description: "사이드 메뉴. 설정이 많은 앱에 적합."
+     - label: "스택"
+       description: "화면 위에 화면 쌓기. 상세 페이지 중심."
+     - label: "Other"
+       description: "다른 네비게이션 (직접 입력)"
+   ```
+
+6. **오프라인 지원**:
+   ```
+   question: "오프라인에서도 동작해야 하나요?"
+   header: "오프라인"
+   options:
+     - label: "아니요, 온라인만"
+       description: "인터넷 연결 필수. 구현 단순."
+     - label: "네, 기본 오프라인"
+       description: "캐싱으로 이전 데이터 표시. 온라인 복구 시 동기화."
+     - label: "네, 완전 오프라인"
+       description: "모든 기능 오프라인 동작. 로컬 DB 필요."
    ```
 
 ### Phase 2.5: Unknown Unknowns (thorough/full tier + 자동 감지)
@@ -264,6 +444,8 @@ Display: `[SAMVIL] 모호도: 0.32 → 0.18 → 0.07 → 0.04 ✓ (목표: ≤ {
 
 ### Phase 3.5: 스택 추천
 
+#### solution_type: "web-app"
+
 preset의 **추천 스택**을 기반으로 스택 제안:
 
 ```
@@ -286,7 +468,70 @@ Seed에서 `tech_stack.framework`에 매핑:
 - Vite + React → `"vite-react"`
 - Astro → `"astro"`
 
+#### solution_type: "game"
+
+```
+question: "게임 기술 스택을 추천합니다."
+header: "스택"
+options:
+  - label: "Phaser 3 + Vite + TypeScript (추천)"
+    description: "2D 웹 게임 표준. Canvas/WebGL 렌더링. 모든 브라우저 지원."
+  - label: "Phaser 3 + Vite + JavaScript"
+    description: "TypeScript 없이 순수 JavaScript. 더 간단한 설정."
+```
+
+선택 결과를 interview-summary.md에 `추천 스택: <선택>` 으로 저장.
+Seed에서 `tech_stack.framework`에 매핑:
+- Phaser 3 + TypeScript → `"phaser"`
+- Phaser 3 + JavaScript → `"phaser"`
+
+#### solution_type: "automation"
+
+Phase 2에서 선택한 실행 환경 기반으로 스택 확정:
+
+```
+question: "자동화 기술 스택을 추천합니다."
+header: "스택"
+options:
+  - label: "Python (추천)"
+    description: "API/데이터 처리 강점. requests, pandas 등 풍부한 라이브러리."
+  - label: "Node.js (TypeScript)"
+    description: "JS 생태계 활용. Slack/Discord SDK 등 네이티브 지원."
+  - label: "Shell Script"
+    description: "간단한 시스템 작업. 파일 이동, 백업, cron 작업."
+  - label: "CC 스킬"
+    description: "Claude Code 내에서 실행. AI 판단이 필요한 작업."
+```
+
+선택 결과를 interview-summary.md에 `추천 스택: <선택>` 으로 저장.
+Seed에서 `tech_stack.framework`에 매핑:
+- Python → `"python-script"`
+- Node.js → `"node-script"`
+- Shell → `"shell-script"`
+- CC 스킬 → `"cc-skill"`
+
+#### solution_type: "mobile-app"
+
+```
+question: "모바일 기술 스택을 추천합니다."
+header: "스택"
+options:
+  - label: "Expo + React Native + TypeScript (추천)"
+    description: "iOS + Android 동시 지원. Expo로 빠른 개발. Claude Code에서 웹 미리보기 가능."
+  - label: "Expo + React Native + JavaScript"
+    description: "TypeScript 없이 순수 JavaScript. 더 간단한 설정."
+```
+
+**안내**: "Expo는 Claude Code가 네이티브 앱을 직접 빌드할 수 없는 환경에서 유일하게 사용 가능한 모바일 프레임워크입니다. 웹 버전으로 미리보기하고 EAS Build로 실제 APK/IPA를 생성합니다."
+
+선택 결과를 interview-summary.md에 `추천 스택: <선택>` 으로 저장.
+Seed에서 `tech_stack.framework`에 매핑:
+- Expo + TypeScript → `"expo"`
+- Expo + JavaScript → `"expo"`
+
 ### Phase 4: 요약 & 확인
+
+#### web-app 요약
 
 ```
 [SAMVIL] 인터뷰 요약
@@ -317,6 +562,92 @@ Seed에서 `tech_stack.framework`에 매핑:
 
 가정 사항:
   - <가정>
+```
+
+#### game 요약
+
+```
+[SAMVIL] 인터뷰 요약 (Game)
+━━━━━━━━━━━━━━━━━━━━
+
+장르: <platformer/puzzle/arcade/RPG>
+조작: <keyboard/mouse/touch>
+목표: <score/survival/level completion>
+그래픽: <pixel art/simple shapes/minimal flat>
+
+게임 요소:
+  - <적, 아이템, 장애물 등>
+난이도: <casual/normal/hard>
+
+필수 기능 (P1):
+  1. <기능>
+  ...
+
+제약 조건:
+  - <제약>
+  ...
+
+성공 기준:
+  1. <testable 기준>
+  ...
+
+추천 스택: Phaser 3 + Vite + TypeScript
+런타임: 브라우저 (Canvas/WebGL)
+```
+
+#### automation 요약
+
+```
+[SAMVIL] 인터뷰 요약 (Automation)
+━━━━━━━━━━━━━━━━━━━━
+
+해결할 문제: <어떤 문제>
+입력 → 출력: <입력> → <출력>
+실행 트리거: <수동/cron/webhook/파일변경>
+연동 시스템: <API, Slack, DB 등>
+에러 처리: <재시도+로깅/침묵/알림>
+실행 환경: <Python/Node/Shell/CC skill>
+
+필수 기능 (P1):
+  1. <기능>
+  ...
+
+제약 조건:
+  - <제약>
+  ...
+
+성공 기준:
+  1. <testable 기준>
+  ...
+
+추천 스택: <python-script / node-script / shell-script / cc-skill>
+```
+
+#### mobile-app 요약
+
+```
+[SAMVIL] 인터뷰 요약 (Mobile)
+━━━━━━━━━━━━━━━━━━━━
+
+플랫폼: <iOS만/Android만/둘 다>
+네이티브 기능: <카메라, GPS, 푸시, 센서, 없음>
+네비게이션: <탭바/드로어/스택>
+오프라인: <온라인만/기본 오프라인/완전 오프라인>
+
+필수 기능 (P1):
+  1. <기능>
+  ...
+
+제약 조건:
+  - <제약>
+  ...
+
+성공 기준:
+  1. <testable 기준>
+  ...
+
+추천 스택: Expo + React Native + TypeScript
+런타임: hybrid (Expo web preview + native)
 ```
 
 AskUserQuestion으로 확인:
@@ -387,6 +718,8 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_com
 
 Write `~/dev/<project>/interview-summary.md` with these sections (Korean):
 
+### web-app (기본)
+
 ```markdown
 # Interview Summary
 
@@ -430,6 +763,160 @@ Write `~/dev/<project>/interview-summary.md` with these sections (Korean):
 
 ## 코딩 컨벤션 (brownfield only)
 <detected conventions>
+```
+
+### game
+
+```markdown
+# Interview Summary
+
+## 솔루션 타입
+game
+
+## 장르
+<platformer/puzzle/arcade/RPG>
+
+## 조작 방식
+<keyboard/mouse/touch>
+
+## 게임 목표
+<score/survival/level completion/collection>
+
+## 그래픽 스타일
+<pixel art/simple shapes/minimal flat>
+
+## 게임 요소
+- <적, 아이템, 장애물, 점수, 타이머, 레벨 등>
+
+## 난이도
+<casual/normal/hard>
+
+## 앱 유형
+<preset name or "커스텀">
+
+## 필수 기능 (P1)
+1. <feature>
+...
+
+## 제외 항목
+- <excluded item>
+...
+
+## 제약 조건
+- <constraint>
+...
+
+## 성공 기준
+1. <testable criterion>
+...
+
+## 추천 스택
+Phaser 3 + Vite + TypeScript
+
+## 가정 사항
+- <assumption>
+...
+```
+
+### automation
+
+```markdown
+# Interview Summary
+
+## 솔루션 타입
+automation
+
+## 해결할 문제
+<1-sentence problem statement>
+
+## 입력과 출력
+- 입력: <input description>
+- 출력: <output description>
+
+## 실행 트리거
+<수동/cron/webhook/파일변경>
+
+## 연동 시스템
+- <API, Slack, DB, 파일, 이메일 등>
+
+## 에러 처리 방식
+<재시도+로깅/침묵/알림>
+
+## 실행 환경
+<local Python/Node.js/Shell/CC skill>
+
+## 앱 유형
+<preset name or "커스텀">
+
+## 필수 기능 (P1)
+1. <feature>
+...
+
+## 제외 항목
+- <excluded item>
+...
+
+## 제약 조건
+- <constraint>
+...
+
+## 성공 기준
+1. <testable criterion>
+...
+
+## 추천 스택
+<python-script / node-script / shell-script / cc-skill>
+
+## 가정 사항
+- <assumption>
+...
+```
+
+### mobile-app
+
+```markdown
+# Interview Summary
+
+## 솔루션 타입
+mobile-app
+
+## 플랫폼
+<iOS만/Android만/둘 다>
+
+## 네이티브 기능
+- <카메라, GPS, 푸시 알림, 센서 등 또는 "없음">
+
+## 네비게이션
+<탭바/드로어/스택>
+
+## 오프라인 지원
+<온라인만/기본 오프라인/완전 오프라인>
+
+## 앱 유형
+<preset name or "커스텀">
+
+## 필수 기능 (P1)
+1. <feature>
+...
+
+## 제외 항목
+- <excluded item>
+...
+
+## 제약 조건
+- <constraint>
+...
+
+## 성공 기준
+1. <testable criterion>
+...
+
+## 추천 스택
+Expo + React Native + TypeScript
+
+## 가정 사항
+- <assumption>
+...
 ```
 
 Each section must be non-empty. Constraints must have >= 1 item. Success criteria must have >= 3 items.

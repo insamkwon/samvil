@@ -1,10 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "samvil://seed-schema/v1",
+  "$id": "samvil://seed-schema/v2",
   "title": "SAMVIL Seed Schema",
   "description": "Immutable specification for SAMVIL project generation. Version starts at 1, increments on evolve.",
   "type": "object",
-  "required": ["name", "description", "tech_stack", "core_experience", "features", "acceptance_criteria", "constraints", "out_of_scope", "version"],
+  "required": ["name", "description", "solution_type", "tech_stack", "core_experience", "features", "acceptance_criteria", "constraints", "out_of_scope", "version"],
   "additionalProperties": false,
   "properties": {
     "name": {
@@ -23,7 +23,34 @@
     "mode": {
       "type": "string",
       "enum": ["web", "mobile", "desktop"],
-      "default": "web"
+      "default": "web",
+      "description": "DEPRECATED — use solution_type instead. Auto-migrated: mode:web → solution_type:web-app"
+    },
+    "solution_type": {
+      "type": "string",
+      "enum": ["web-app", "automation", "game", "mobile-app", "dashboard"],
+      "default": "web-app",
+      "description": "Solution type determines pipeline branching"
+    },
+    "implementation": {
+      "type": "object",
+      "description": "Implementation details (optional, auto-filled by seed stage)",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "e.g., nextjs-webapp, python-automation, phaser-game, expo-mobile"
+        },
+        "runtime": {
+          "type": "string",
+          "enum": ["node", "python", "browser", "hybrid"],
+          "description": "Primary runtime environment"
+        },
+        "entry_point": {
+          "type": "string",
+          "description": "e.g., app/page.tsx, src/main.py, src/game.ts"
+        }
+      },
+      "additionalProperties": false
     },
     "tech_stack": {
       "type": "object",
@@ -32,49 +59,83 @@
       "properties": {
         "framework": {
           "type": "string",
-          "enum": ["nextjs", "vite-react", "astro"],
+          "enum": ["nextjs", "vite-react", "astro", "phaser", "expo", "python-script", "node-script"],
           "description": "Target framework"
         },
         "ui": {
           "type": "string",
           "enum": ["tailwind", "css-modules", "styled-components"],
-          "default": "tailwind"
+          "default": "tailwind",
+          "description": "UI library (optional — automation/game may not need one)"
         },
         "state": {
           "type": "string",
           "enum": ["zustand", "useState", "jotai", "none"],
-          "default": "useState"
+          "default": "useState",
+          "description": "State management (optional — automation scripts may not need one)"
         },
         "router": {
           "type": "string",
           "enum": ["app-router", "pages-router", "react-router"],
-          "default": "app-router"
+          "default": "app-router",
+          "description": "Router (optional — automation/game may not need one)"
         }
       }
     },
     "core_experience": {
-      "type": "object",
-      "required": ["description", "primary_screen", "key_interactions"],
-      "additionalProperties": false,
-      "properties": {
-        "description": {
-          "type": "string",
-          "minLength": 20,
-          "description": "What user does in first 30 seconds"
+      "description": "Core user experience — screen-based (web-app/dashboard) or flow-based (automation/game/mobile-app)",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "screen",
+          "required": ["description", "primary_screen", "key_interactions"],
+          "additionalProperties": false,
+          "properties": {
+            "description": {
+              "type": "string",
+              "minLength": 20,
+              "description": "What user does in first 30 seconds"
+            },
+            "primary_screen": {
+              "type": "string",
+              "pattern": "^[A-Z][a-zA-Z0-9]*$",
+              "description": "PascalCase component name for primary screen"
+            },
+            "key_interactions": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 3 },
+              "minItems": 1,
+              "maxItems": 10,
+              "description": "Verb-noun format interaction descriptions"
+            }
+          }
         },
-        "primary_screen": {
-          "type": "string",
-          "pattern": "^[A-Z][a-zA-Z0-9]*$",
-          "description": "PascalCase component name for primary screen"
-        },
-        "key_interactions": {
-          "type": "array",
-          "items": { "type": "string", "minLength": 3 },
-          "minItems": 1,
-          "maxItems": 10,
-          "description": "Verb-noun format interaction descriptions"
+        {
+          "type": "object",
+          "title": "core_flow",
+          "required": ["description", "input", "output", "trigger"],
+          "additionalProperties": false,
+          "properties": {
+            "description": {
+              "type": "string",
+              "minLength": 20,
+              "description": "What this automation/game/mobile flow accomplishes"
+            },
+            "input": {
+              "type": "string",
+              "description": "What goes in — data source, trigger payload, user action"
+            },
+            "output": {
+              "type": "string",
+              "description": "What comes out — result, side effect, transformed data"
+            },
+            "trigger": {
+              "type": "string",
+              "description": "How it starts — manual, cron schedule, webhook, user event"
+            }
+          }
         }
-      }
+      ]
     },
     "features": {
       "type": "array",

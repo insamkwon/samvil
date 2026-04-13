@@ -19,7 +19,9 @@ You are adopting the role of **Seed Architect**. Transform interview results int
 
 ### Step 1: Map Interview to Seed
 
-Read `interview-summary.md` and map each section:
+Read `interview-summary.md` and map each section.
+
+#### solution_type: "web-app" (기본)
 
 | Interview Section | Seed Field |
 |---|---|
@@ -32,7 +34,8 @@ Read `interview-summary.md` and map each section:
 
 **Derive automatically:**
 - `name`: kebab-case from the app idea (e.g., "task management SaaS" → "task-manager")
-- `mode`: always `"web"`
+- `solution_type`: `"web-app"` (default)
+- `mode`: `"web"` (deprecated, kept for migration)
 - `tech_stack`: defaults unless interview specified otherwise
   - `state`: `"zustand"` if complex state (multiple entities, persistence), `"useState"` if simple
 - `core_experience.primary_screen`: PascalCase component name from core experience
@@ -40,6 +43,132 @@ Read `interview-summary.md` and map each section:
 - `features[].depends_on`: set to the dependency feature name if not independent
 - `version`: `1`
 - Note: `agent_tier` is now in `project.config.json`, not in seed
+
+#### solution_type: "mobile-app"
+
+| Interview Section | Seed Field |
+|---|---|
+| 타겟 유저 + 핵심 경험 | `description` |
+| 핵심 경험 | `core_experience` (description, primary_screen, key_interactions) |
+| 필수 기능 | `features` with priority assignment |
+| 제외 항목 | `out_of_scope` |
+| 제약 조건 | `constraints` |
+| 성공 기준 | `acceptance_criteria` |
+
+**Derive automatically:**
+- `name`: kebab-case from the app idea (e.g., "todo tracker app" → "todo-tracker")
+- `solution_type`: `"mobile-app"`
+- `tech_stack`: `{ framework: "expo", state: "zustand" }` — Expo always, Zustand for state
+- `implementation`:
+  - `type`: `"expo-app"`
+  - `runtime`: `"hybrid"`
+  - `entry_point`: `"App.tsx"`
+  - `platforms`: from interview (`["ios", "android"]` default)
+  - `native_features`: from interview (camera, gps, push, sensors)
+  - `navigation`: from interview (tabs, drawer, stack)
+  - `offline_support`: from interview
+- `core_experience.primary_screen`: PascalCase component name
+- `features[].independent`: `true` for most mobile features (they're usually standalone screens)
+- `version`: `1`
+- **Auto-add constraint**: `"Expo web preview for development — native build via EAS"`
+
+#### solution_type: "automation"
+
+| Interview Section | Seed Field |
+|---|---|
+| 해결할 문제 | `description` |
+| 입력과 출력 | `core_flow` (description, input, output, trigger) |
+| Must-Have Features | `features` with priority assignment |
+| Out of Scope | `out_of_scope` |
+| Constraints | `constraints` (+ auto-added dry-run constraint) |
+| Success Criteria | `acceptance_criteria` |
+
+**Derive automatically:**
+- `name`: kebab-case from the automation idea (e.g., "daily weather slack bot" → "weather-slack-bot")
+- `solution_type`: `"automation"`
+- `core_flow`: `{ description, input, output, trigger }` — replaces `core_experience`
+  - `description`: what the automation does (1 sentence)
+  - `input`: data source description (e.g., "Weather API JSON response")
+  - `output`: expected output (e.g., "Slack message with formatted forecast")
+  - `trigger`: execution trigger (e.g., "cron: 0 9 * * *", "manual", "webhook", "file-change")
+- `tech_stack`:
+  - `framework`: `"python-script"` | `"node-script"` | `"shell-script"` | `"cc-skill"`
+  - No `ui`, `state`, `router` fields (automation doesn't need them)
+- `implementation`:
+  - `type`: `"python-automation"` | `"node-automation"` | `"cc-skill"`
+  - `runtime`: `"python"` | `"node"` | `"shell"`
+  - `entry_point`: `"src/main.py"` | `"src/main.ts"` | `"SKILL.md"`
+- **Auto-add constraint**: `"Script must support --dry-run mode with fixtures/ for testing without real API calls"`
+- `features[].independent`: `true` for most automation features (they're usually standalone processing steps)
+- `version`: `1`
+
+### solution_type: "game"
+
+| Interview Section | Seed Field |
+|---|---|
+| 장르 | `description` |
+| 게임 요소 | `core_experience` (description, game_config, game_states) |
+| 게임 요소/기능 | `features` with priority assignment |
+| Out of Scope | `out_of_scope` |
+| Constraints | `constraints` |
+| Success Criteria | `acceptance_criteria` |
+
+**Derive automatically:**
+- `name`: kebab-case from the game idea (e.g., "simple jump game" → "jump-game")
+- `solution_type`: `"game"`
+- `core_experience`:
+  - `description`: what the player does (e.g., "Jump over obstacles and collect coins")
+  - `game_config`: `{ width: 800, height: 600, physics: "arcade", input: "keyboard" }`
+    - `width`/`height`: from interview (default 800x600)
+    - `physics`: `"arcade"` (default) — only arcade physics supported
+    - `input`: from interview answer (keyboard/mouse/touch)
+  - `game_states`: `["Menu", "Play", "GameOver"]` — standard 3-state game loop
+  - `key_interactions`: derived from genre (e.g., platformer → ["jump", "move-left", "move-right"])
+- `tech_stack`:
+  - `framework`: `"phaser"`
+  - No `ui`, `state`, `router` fields (game doesn't need them)
+- `implementation`:
+  - `type`: `"phaser-game"`
+  - `runtime`: `"browser"`
+  - `entry_point`: `"src/main.ts"`
+- **Auto-add constraints**:
+  - `"Game must run in browser via Phaser 3 — no native executable"`
+  - `"All assets must be generated in code (no external asset files unless user provided)"`
+- `features[].independent`: `false` for game mechanics (they share scene lifecycle, physics world)
+- `features[].depends_on`: core mechanics depend on scene setup
+- `version`: `1`
+
+#### solution_type: "dashboard"
+
+| Interview Section | Seed Field |
+|---|---|
+| Target User + Core Problem | `description` |
+| Core Experience | `core_experience` (description, primary_screen, key_interactions) |
+| Must-Have Features | `features` with priority assignment |
+| Out of Scope | `out_of_scope` |
+| Constraints | `constraints` |
+| Success Criteria | `acceptance_criteria` |
+
+**Derive automatically:**
+- `name`: kebab-case from the dashboard idea (e.g., "sales analytics dashboard" → "sales-dashboard")
+- `solution_type`: `"dashboard"`
+- `tech_stack`:
+  - `framework`: `"nextjs"`
+  - `state`: `"zustand"` if complex/multi-source data, `"useState"` if simple
+  - `ui`: `"shadcn"`
+  - `router`: `"app-router"`
+- `implementation`:
+  - `type`: `"nextjs-dashboard"`
+  - `runtime`: `"browser"`
+  - `entry_point`: `"src/app/page.tsx"`
+- `core_experience`:
+  - `description`: what the dashboard shows (1 sentence)
+  - `primary_screen`: PascalCase (e.g., "DashboardOverview")
+  - `key_interactions`: derived from chart/filter/drill-down needs (e.g., "filter by date range", "drill down into metric")
+- `features[].independent`: `true` for most dashboard features (charts, filters are usually standalone widgets)
+- **Auto-add constraint**: `"Dashboard must include at least one chart component (recharts)"`
+- **Auto-add constraint**: `"Data should refresh on interval or user action, not require page reload"`
+- `version`: `1`
 
 ### Step 2: Be Opinionated
 
@@ -169,15 +298,114 @@ Invoke the Skill tool with skill: `samvil-council`
 
 Write `~/dev/<project>/project.seed.json` — valid JSON conforming to `references/seed-schema.md`.
 
+### web-app (기본)
+
 Required fields and constraints:
 - `name`: valid npm package name, kebab-case (e.g., "task-manager")
 - `description`: 1-sentence string
-- `mode`: always `"web"`
+- `solution_type`: `"web-app"`
+- `mode`: always `"web"` (deprecated)
 - `tech_stack`: `{ framework, ui, state, router }` — use simplest valid choice
 - `core_experience`: `{ description, primary_screen (PascalCase), key_interactions[] }`
 - `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
 - `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
 - `constraints[]`: at least 1 item (default: "No backend server — client-only with localStorage")
+- `out_of_scope[]`: at least 2 items
+- `version`: integer, starts at 1
+
+No extra fields beyond the schema. No comments in JSON.
+
+### automation
+
+Required fields and constraints:
+- `name`: kebab-case (e.g., "weather-slack-bot")
+- `description`: 1-sentence string
+- `solution_type`: `"automation"`
+- `tech_stack`: `{ framework: "python-script"|"node-script"|"shell-script"|"cc-skill" }` — no ui/state/router
+- `core_flow`: `{ description, input, output, trigger }` — replaces `core_experience`
+  - `description`: what the automation does
+  - `input`: data source description
+  - `output`: expected output description
+  - `trigger`: `"manual"` | `"cron: <schedule>"` | `"webhook"` | `"file-change"`
+- `implementation`:
+  - `type`: `"python-automation"` | `"node-automation"` | `"cc-skill"`
+  - `runtime`: `"python"` | `"node"` | `"shell"`
+  - `entry_point`: `"src/main.py"` | `"src/main.ts"` | `"SKILL.md"`
+- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
+- `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
+- `constraints[]`: must include `"Script must support --dry-run mode with fixtures/ for testing without real API calls"` + any user-specified constraints
+- `out_of_scope[]`: at least 2 items
+- `version`: integer, starts at 1
+
+No extra fields beyond the schema. No comments in JSON.
+
+### game
+
+Required fields and constraints:
+- `name`: kebab-case (e.g., "jump-game")
+- `description`: 1-sentence string
+- `solution_type`: `"game"`
+- `tech_stack`: `{ framework: "phaser" }` — no ui/state/router
+- `core_experience`:
+  - `description`: what the player does
+  - `game_config`: `{ width: 800, height: 600, physics: "arcade", input: "keyboard" }`
+  - `game_states`: `["Menu", "Play", "GameOver"]`
+  - `key_interactions`: `["<interaction>", ...]`
+- `implementation`:
+  - `type`: `"phaser-game"`
+  - `runtime`: `"browser"`
+  - `entry_point`: `"src/main.ts"`
+- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
+  - Feature names are game mechanics: "player-movement", "enemy-spawn", "collision-detection", "scoring-system", "level-progression"
+- `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
+  - Game ACs should be verifiable via browser: "Player sprite moves left when left arrow is pressed", "Score increases when collectible is picked up", "GameOver screen appears when player hits enemy"
+- `constraints[]`: must include `"Game must run in browser via Phaser 3"` + any user-specified constraints
+- `out_of_scope[]`: at least 2 items
+- `version`: integer, starts at 1
+
+No extra fields beyond the schema. No comments in JSON.
+
+### dashboard
+
+Required fields and constraints:
+- `name`: kebab-case (e.g., "sales-dashboard")
+- `description`: 1-sentence string
+- `solution_type`: `"dashboard"`
+- `tech_stack`: `{ framework: "nextjs", ui: "shadcn", state: "zustand"|"useState", router: "app-router" }`
+- `core_experience`: `{ description, primary_screen (PascalCase), key_interactions[] }`
+- `implementation`:
+  - `type`: `"nextjs-dashboard"`
+  - `runtime`: `"browser"`
+  - `entry_point`: `"src/app/page.tsx"`
+- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
+  - Feature names for dashboards: "chart-widget", "data-table", "filter-panel", "kpi-cards", "date-range-picker", "export-data"
+- `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
+  - Dashboard ACs should be verifiable via browser: "Line chart renders with mock data on page load", "Date range filter updates all charts simultaneously", "KPI card shows correct aggregated value"
+- `constraints[]`: must include `"Dashboard must include at least one chart component (recharts)"` + any user-specified constraints
+- `out_of_scope[]`: at least 2 items
+- `version`: integer, starts at 1
+
+No extra fields beyond the schema. No comments in JSON.
+
+### mobile-app
+
+Required fields and constraints:
+- `name`: kebab-case (e.g., "todo-tracker")
+- `description`: 1-sentence string
+- `solution_type`: `"mobile-app"`
+- `tech_stack`: `{ framework: "expo", state: "zustand" }` — no ui/router (Expo Router handles routing)
+- `core_experience`: `{ description, primary_screen (PascalCase), key_interactions[] }`
+- `implementation`:
+  - `type`: `"expo-app"`
+  - `runtime`: `"hybrid"`
+  - `entry_point`: `"App.tsx"`
+  - `platforms`: `["ios", "android"]` (or subset)
+  - `native_features`: `[]` (camera, gps, push, sensors if needed)
+  - `navigation`: `"tabs"` | `"drawer"` | `"stack"`
+  - `offline_support`: `"none"` | `"basic"` | `"full"`
+- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
+- `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
+- `constraints[]`: must include `"Expo web preview for development — native build via EAS"` + any user-specified constraints
 - `out_of_scope[]`: at least 2 items
 - `version`: integer, starts at 1
 

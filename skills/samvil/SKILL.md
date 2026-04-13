@@ -197,6 +197,67 @@ The user invoked `/samvil` with a prompt (e.g., `/samvil "todo app"`). Extract t
 
 If no argument provided, ask: "뭘 만들까요? 한 줄로 설명해주세요."
 
+#### 2.1: Detect solution_type (3-Layer Detection)
+
+Before starting the interview, detect the solution type from the app idea using a 3-layer approach:
+
+**L1: Keyword Matching (Fast First Filter)**
+
+Scan the user's prompt for these keywords:
+
+| Keywords | → solution_type |
+|----------|----------------|
+| "자동화", "스크립트", "크롤링", "봇", "cron", "automation", "bot", "scraper" | `automation` |
+| "게임", "game", "phaser", "플랫포머", "platformer", "퍼즐", "슈팅" | `game` |
+| "모바일", "iOS", "Android", "앱스토어", "Play Store", "스마트폰" | `mobile-app` |
+| "대시보드", "dashboard", "차트", "chart", "분석", "analytics", "모니터링" | `dashboard` |
+| Everything else | `web-app` (default) |
+
+> Note: "앱" alone is ambiguous (could be web-app or mobile-app). Use L2 context to disambiguate.
+
+**L2: Context Inference (Semantic Analysis)**
+
+If L1 is inconclusive or ambiguous, analyze the sentence meaning:
+
+| Context Patterns | → solution_type |
+|-----------------|----------------|
+| "자동으로", "주기적으로", "트리거", "스케줄", "이메일 들어오면", "webhook" | `automation` |
+| "플레이", "점수", "레벨", "보스", "아이템", "캐릭터" | `game` |
+| "앱스토어", "스마트폰에서", "푸시 알림", "네이티브" | `mobile-app` |
+| "지표", "실시간", "그래프", "KPI", "리포트" | `dashboard` |
+
+**L3: Interview Verification (Confirmation)**
+
+As the **first question** of the interview, confirm the detected type:
+
+```
+[SAMVIL] 프로젝트 타입 감지: <detected_type>
+  감지 근거: "<matched keywords/context>"
+
+  이 프로젝트는 <detected_type 설명>인가요?
+  - 웹 앱 (브라우저에서 동작)
+  - 자동화 스크립트 (백그라운드 실행)
+  - 게임 (Phaser/Canvas 기반)
+  - 모바일 앱 (iOS/Android)
+  - 대시보드 (데이터 시각화)
+```
+
+User can change the type. Final confirmed type is passed to interview as context.
+
+**solution_type → Pipeline Branching:**
+
+```
+[App Idea] → L1 Keyword → L2 Context → L3 Interview Confirm
+     ↓
+[solution_type: web-app]     → standard pipeline (Next.js/Vite/Astro)
+[solution_type: automation]  → Python/Node scaffold, dry-run QA, no UI
+[solution_type: game]        → Phaser scaffold, canvas QA, browser deploy
+[solution_type: mobile-app]  → Expo scaffold, RN components, EAS deploy
+[solution_type: dashboard]   → Next.js + Recharts, chart QA, web deploy
+```
+
+The detected `solution_type` is saved to `project.state.json` and passed to the interview skill as context.
+
 ### Step 3: Create Project Directory (Mode A만)
 
 Derive a kebab-case project name from the app idea.

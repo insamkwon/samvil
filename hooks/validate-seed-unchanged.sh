@@ -2,6 +2,7 @@
 # SAMVIL Hook: Validate seed hasn't been modified during build/QA phases
 # Triggers: PreToolCall on Write/Edit tools
 # Purpose: Prevent accidental seed modification during build
+# v2: Recognizes solution_type field (web-app, automation, game, mobile-app, dashboard)
 
 # Get the file being written/edited from the tool input
 FILE_PATH="$1"
@@ -16,6 +17,23 @@ if [[ "$FILE_PATH" == *"project.seed.json"* ]]; then
       echo "[SAMVIL] ⚠️ WARNING: Attempting to modify seed during $STAGE phase."
       echo "Seed is immutable during build/QA. If you need changes, run samvil:evolve after QA."
       exit 1
+    fi
+  fi
+
+  # v2: Validate solution_type if present (warn on unknown types, don't block)
+  if command -v python3 &>/dev/null; then
+    SOLUTION_TYPE=$(python3 -c "
+import json, sys
+try:
+    seed = json.load(open('$FILE_PATH'))
+    print(seed.get('solution_type', 'web-app'))
+except: sys.exit(1)
+" 2>/dev/null)
+    if [[ -n "$SOLUTION_TYPE" ]]; then
+      VALID_TYPES="web-app automation game mobile-app dashboard"
+      if ! echo "$VALID_TYPES" | grep -qw "$SOLUTION_TYPE"; then
+        echo "[SAMVIL] ⚠️ WARNING: Unknown solution_type '$SOLUTION_TYPE'. Valid: $VALID_TYPES"
+      fi
     fi
   fi
 fi
