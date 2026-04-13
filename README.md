@@ -1,14 +1,18 @@
 # SAMVIL — AI 바이브코딩 하네스 `v2.0.0`
 
-> **한 줄 입력 → 완성된 웹앱 출력**
+> **한 줄 입력 → 완성된 앱/스크립트/게임 출력**
 >
 > "뿌리의 힘으로 벼려내다" (Sam=인삼 + Vil=모루)
 
 ```
-/samvil "할일 관리 앱 with 칸반보드"
-  → 인터뷰 → 설계 → 제작 → 검증 → 완성
-  → npm run dev → localhost:3000 🎉
+/samvil "할일 관리 앱"        → Next.js 웹앱
+/samvil "매일 날씨 슬랙봇"    → Python 자동화 스크립트
+/samvil "간단한 점프 게임"    → Phaser 웹 게임
+/samvil "습관 트래커 모바일"  → Expo 모바일 앱
+/samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v2.0 "Universal Builder"** — 웹앱, 자동화, 게임, 모바일, 대시보드 5가지 타입을 한 줄로 감지해서 자동 생성.
 
 ---
 
@@ -56,7 +60,7 @@ Claude Code에서 **한 줄**로 앱 아이디어를 말하면, AI가 알아서:
 5. 제대로 됐는지 **검증하고** (QA)
 6. 다음번엔 더 잘하도록 **반성해** (회고)
 
-결과: **동작하는 웹앱** (Next.js, Vite+React, 또는 Astro)이 `~/dev/` 폴더에 생성돼요.
+결과: **동작하는 앱/스크립트/게임**이 `~/dev/` 폴더에 생성돼요.
 
 ---
 
@@ -222,7 +226,7 @@ AI가 자동으로 분석해요:
 | **시드** | 인터뷰 결과를 설계서(JSON)로 정리 + 와이어프레임 미리보기 | 기획서 작성 |
 | **Council** | AI 3~7명이 설계서 품질 토론 (과정 투명 공개) | 팀 회의 |
 | **디자인** | 화면 구조, 데이터 모델, 아키텍처 결정 + blueprint feasibility 점검 | 설계 회의 |
-| **스캐폴드** | CLI로 프로젝트 뼈대 생성 (Next.js / Vite / Astro) | 공사장 세팅 |
+| **스캐폴드** | CLI로 프로젝트 뼈대 생성 (Next.js / Vite / Astro / Python / Phaser / Expo) | 공사장 세팅 |
 | **빌드** | 기능별 코드 작성 (독립 기능은 병렬) + Drift 경고 | 실제 공사 |
 | **QA** | 3단계 검증: 빌드 → Playwright Smoke Run → 기능 → 품질 | 품질 검사 |
 | **진화** | spec-only 모드로 설계서 수렴 후 최종 빌드 (선택). 시드 버전 히스토리 + diff 자동 저장. 빌드/QA 이벤트 trace를 분석해 반복 패턴 식별 | 피드백 반영 |
@@ -235,9 +239,21 @@ AI가 자동으로 분석해요:
 
 ---
 
-## 10개 앱 유형 자동 감지
+## 5가지 솔루션 타입 + 10개 앱 프리셋
 
-"할일 앱"이라고만 말해도 SAMVIL이 자동으로 인식:
+### 자동 타입 감지
+
+"할일 앱"이면 웹앱, "매일 날씨 봇"이면 자동화 — SAMVIL이 자동으로 판단:
+
+| 타입 | 감지 키워드 | 생성 결과 |
+|------|-----------|----------|
+| **web-app** | 할일, 블로그, 쇼핑몰, 랜딩 | Next.js + shadcn/ui |
+| **automation** | 자동화, 스크립트, 크롤링, 봇, cron | Python/Node + --dry-run |
+| **game** | 게임, game, phaser, 점프 | Phaser 3 + Vite + TS |
+| **mobile-app** | 모바일, iOS, Android | Expo + React Native |
+| **dashboard** | 대시보드, 차트, 분석 | Next.js + Recharts |
+
+### 앱 프리셋 (웹앱)
 
 | 키워드 | 자동 포함 기능 |
 |--------|-------------|
@@ -287,7 +303,7 @@ shadcn/ui 기반이라 컴포넌트가 기본적으로 프로 수준입니다.
 
 ---
 
-## 36명 AI 에이전트
+## 49명 AI 에이전트
 
 | 역할 | 에이전트 수 | 하는 일 |
 |------|-----------|---------|
@@ -298,7 +314,18 @@ shadcn/ui 기반이라 컴포넌트가 기본적으로 프로 수준입니다.
 | 진화 | 3명 | 부족한 점 분석, 개선 제안 |
 | 회고 | 1명 | 하네스 자체 개선 |
 
-Tier에 따라 필요한 만큼만 활성화. 간단한 앱에 36명이 달려들진 않아요.
+Tier에 따라 필요한 만큼만 활성화. 간단한 앱에 49명이 달려들진 않아요.
+
+### 타입별 전문 에이전트 (v2.0)
+
+`solution_type`에 따라 해당 타입의 전문 에이전트가 활성화:
+
+| 타입 | 전문 에이전트 | 특화 분야 |
+|------|-------------|----------|
+| **automation** | 4명 (interviewer, architect, engineer, qa) | Python/Node dry-run, fixtures, 로깅 |
+| **game** | 4명 (interviewer, architect, developer, qa) | Phaser scene lifecycle, physics, canvas QA |
+| **mobile** | 4명 (interviewer, architect, developer, qa) | Expo Router, React Native, touch QA |
+| **dashboard** | 기존 web 에이전트 + dashboard 레시피 | Recharts, data table, CSV export |
 
 **QA Tier 차이**: `minimal`은 기존처럼 메인 세션에서 3-pass를 직접 실행. `standard` 이상은 Pass 2/3를 독립 에이전트가 검증하고 메인 세션이 최종 verdict를 종합합니다 ("Independent Evidence, Central Verdict" 원칙).
 
@@ -343,16 +370,33 @@ Run #3: 이전 제안 반영 + 패턴 감지 → 더 빠르고 안정적
 | 구성 | 기술 |
 |------|------|
 | 플러그인 | Claude Code Plugin (Markdown + hooks) |
-| 생성 앱 | Next.js 14 / Vite+React / Astro + Tailwind + shadcn/ui + TypeScript |
+| **웹앱** | Next.js 14 / Vite+React / Astro + Tailwind + shadcn/ui + TypeScript |
+| **자동화** | Python 3.12 / Node.js + argparse + --dry-run + fixtures/ |
+| **게임** | Phaser 3 + Vite + TypeScript (Arcade Physics) |
+| **모바일** | Expo + React Native + Expo Router + TypeScript |
+| **대시보드** | Next.js + Recharts + date-fns + lucide-react |
 | 영속성 | Python MCP Server + SQLite (선택) |
-| 컴포넌트 | shadcn/ui (40+ 컴포넌트) |
+| 에이전트 | 49명 (타입별 전문 에이전트 12명 포함) |
 | 모델 라우팅 | config.json으로 작업별 모델 지정 (opus/sonnet/haiku) |
 
 ---
 
 ## CHANGELOG
 
-### v0.12.0 — Phase 3: Scale
+### v2.0.0 — Universal Builder
+
+**한 줄로 웹앱/자동화/게임/모바일/대시보드 5가지 타입 자동 감지 → 생성**
+
+- **5가지 solution_type**: web-app, automation, game, mobile-app, dashboard
+- **3-layer 자동 감지**: L1 키워드 → L2 컨텍스트 → L3 인터뷰 검증
+- **자동화 (Python/Node)**: --dry-run 패턴, fixtures/, argparse, API 클라이언트
+- **게임 (Phaser 3)**: Scene lifecycle, Arcade Physics, Playwright canvas QA
+- **모바일 (Expo)**: React Native, Expo Router, EAS Build 배포
+- **대시보드 (Recharts)**: 차트 컴포넌트, data table, CSV export
+- **12개 전문 에이전트**: 타입당 4명 (interviewer, architect, engineer, qa)
+- **Seed Schema v2**: solution_type, implementation, core_flow 패턴
+- **총 에이전트 49명** (기존 37 + 신규 12)
+- **4개 레시피 문서**: automation(610줄), game(435줄), mobile(478줄), dashboard(841줄)
 
 - 병렬 Agent 동시 실행 제한 (MAX_PARALLEL=2). CPU 100% 이슈 해결
 - Council R1: Haiku, QA: Sonnet, Evolve 2사이클+: Sonnet. Opus 사용 80% 감소
