@@ -23,7 +23,7 @@
   },
 
   "vite-react": {
-    "cli_command": "npm create vite@5.4.21 -- --template react-ts",
+    "cli_command": "npm create vite@5 -- --template react-ts",
     "framework": "vite@5.4.21",
     "react": "react@18.3.1",
     "react_dom": "react-dom@18.3.1",
@@ -70,7 +70,7 @@
   },
 
   "phaser-game": {
-    "cli_command": "npm create vite@5.4.21 -- --template vanilla-ts",
+    "cli_command": "npm create vite@5 -- --template vanilla-ts",
     "framework": "phaser@3.80",
     "vite": "vite@5.4.21",
     "typescript": "typescript@5.7.3",
