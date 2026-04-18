@@ -195,3 +195,71 @@ def simple_decompose_suggestion(ac_description: str) -> list[str]:
         if all(len(p) > 5 for p in parts):
             return parts
     return []  # No suggestion — needs LLM
+
+
+def is_branch_complete(node: ACNode) -> bool:
+    """All leaves under this branch have terminal status."""
+    if node.is_leaf:
+        return node.status in ("pass", "skipped")
+    return all(is_branch_complete(c) for c in node.children)
+
+
+def all_done(node: ACNode) -> bool:
+    """All leaves are in a terminal state (pass/fail/skipped)."""
+    return all(
+        n.status in ("pass", "fail", "skipped")
+        for n in walk(node)
+        if n.is_leaf
+    )
+
+
+def next_buildable_leaves(
+    node: ACNode,
+    completed: set[str],
+    max_parallel: int = 2,
+) -> list[ACNode]:
+    """Get next ACs that can be built in parallel.
+
+    Respects tree order and max_parallel limit.
+    Skips already-completed or externally satisfied leaves.
+    """
+    buildable = []
+    for leaf_node in leaves(node):
+        if leaf_node.id in completed:
+            continue
+        if leaf_node.status in ("pass", "fail", "skipped"):
+            continue
+        # Check if parent branch dependencies met (parent or siblings)
+        if leaf_node.parent_id:
+            parent = _find_by_id(node, leaf_node.parent_id)
+            if parent and parent.status == "blocked":
+                continue
+        buildable.append(leaf_node)
+        if len(buildable) >= max_parallel:
+            break
+    return buildable
+
+
+def _find_by_id(root: ACNode, node_id: str) -> Optional["ACNode"]:
+    """Find a node by ID in the tree."""
+    for n in walk(root):
+        if n.id == node_id:
+            return n
+    return None
+
+
+def tree_progress(node: ACNode) -> dict:
+    """Compute progress stats for the tree."""
+    all_leaves = leaves(node)
+    total = len(all_leaves)
+    done = sum(1 for l in all_leaves if l.status in ("pass", "fail", "skipped"))
+    passed = sum(1 for l in all_leaves if l.status == "pass")
+    failed = sum(1 for l in all_leaves if l.status == "fail")
+    return {
+        "total_leaves": total,
+        "completed": done,
+        "passed": passed,
+        "failed": failed,
+        "pending": total - done,
+        "progress_pct": round(done / total * 100, 1) if total > 0 else 0,
+    }

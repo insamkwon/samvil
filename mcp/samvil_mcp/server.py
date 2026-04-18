@@ -985,6 +985,170 @@ async def suggest_ac_decomposition(ac_description: str) -> str:
         return json.dumps({"suggested_children": [], "needs_llm": True, "error": str(e)})
 
 
+# ── v3.0.0 T1.1: AC Tree traversal tools ──────────────────────
+
+
+@mcp.tool()
+async def next_buildable_leaves(
+    ac_tree_json: str,
+    completed_ids_json: str = "[]",
+    max_parallel: int = 2,
+) -> str:
+    """Return next AC leaves that can be built in parallel.
+
+    Args:
+        ac_tree_json: ACNode dict
+        completed_ids_json: JSON array of already-completed leaf IDs
+        max_parallel: max concurrent workers (default 2)
+
+    Returns: {leaves: [ACNode dict, ...], count: int, max_parallel: int}
+    """
+    try:
+        from .ac_tree import ACNode, next_buildable_leaves as _nbl
+        node = ACNode.from_dict(json.loads(ac_tree_json))
+        completed = set(json.loads(completed_ids_json))
+        batch = _nbl(node, completed, max_parallel=max_parallel)
+        return json.dumps({
+            "leaves": [l.to_dict() for l in batch],
+            "count": len(batch),
+            "max_parallel": max_parallel,
+        })
+    except Exception as e:
+        _log_mcp_health("fail", "next_buildable_leaves", str(e))
+        return json.dumps({"error": str(e), "leaves": [], "count": 0})
+
+
+@mcp.tool()
+async def tree_progress(ac_tree_json: str) -> str:
+    """Compute leaf-level progress stats.
+
+    Args:
+        ac_tree_json: ACNode dict
+
+    Returns: {total_leaves, completed, passed, failed, pending, progress_pct, all_done}
+    """
+    try:
+        from .ac_tree import ACNode, tree_progress as _tp, all_done as _all_done
+        node = ACNode.from_dict(json.loads(ac_tree_json))
+        stats = _tp(node)
+        stats["all_done"] = _all_done(node)
+        return json.dumps(stats)
+    except Exception as e:
+        _log_mcp_health("fail", "tree_progress", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def update_leaf_status(
+    ac_tree_json: str,
+    leaf_id: str,
+    status: str,
+    evidence_json: str = "[]",
+) -> str:
+    """Update a leaf's status (and optional evidence) in the AC tree.
+
+    Args:
+        ac_tree_json: ACNode dict
+        leaf_id: target leaf ID
+        status: new status (pending/in_progress/pass/fail/blocked/skipped)
+        evidence_json: JSON array of evidence strings to append
+
+    Returns: updated ACNode dict + {found: bool}
+    """
+    try:
+        from .ac_tree import ACNode, walk
+        valid = {"pending", "in_progress", "pass", "fail", "blocked", "skipped"}
+        if status not in valid:
+            return json.dumps({"error": f"invalid status: {status}", "found": False})
+        node = ACNode.from_dict(json.loads(ac_tree_json))
+        evidence = json.loads(evidence_json)
+        found = False
+        for n in walk(node):
+            if n.id == leaf_id:
+                n.status = status  # type: ignore[assignment]
+                if evidence:
+                    n.evidence.extend(evidence)
+                found = True
+                break
+        result = node.to_dict()
+        result["found"] = found
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "update_leaf_status", str(e))
+        return json.dumps({"error": str(e), "found": False})
+
+
+# ── v3.0.0 T1.4: Seed migration tools ─────────────────────────
+
+
+@mcp.tool()
+async def migrate_seed(
+    seed_json: str,
+    from_version: str = "2",
+    to_version: str = "3",
+) -> str:
+    """Migrate a seed between schema versions (currently v2→v3).
+
+    Args:
+        seed_json: seed dict as JSON
+        from_version: source major version (default "2")
+        to_version: target major version (default "3")
+
+    Returns: {migrated: seed dict, from, to, migrated_version}
+    """
+    try:
+        from .migrations import migrate_seed_v2_to_v3
+        seed = json.loads(seed_json)
+        if str(from_version).startswith("2") and str(to_version).startswith("3"):
+            migrated = migrate_seed_v2_to_v3(seed)
+        else:
+            return json.dumps({
+                "error": f"Unsupported migration path: {from_version} → {to_version}",
+            })
+        return json.dumps({
+            "migrated": migrated,
+            "from": from_version,
+            "to": to_version,
+            "migrated_version": migrated.get("schema_version", "3.0"),
+        })
+    except Exception as e:
+        _log_mcp_health("fail", "migrate_seed", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def migrate_seed_file(seed_path: str) -> str:
+    """Migrate an on-disk seed file v2 → v3, creating a .v2.backup.json next to it.
+
+    Idempotent: if already v3, returns without rewriting.
+
+    Args:
+        seed_path: absolute path to project.seed.json
+
+    Returns: {status, path, backup_path, schema_version, already_v3: bool}
+    """
+    try:
+        from .migrations import migrate_with_backup
+        p = Path(seed_path)
+        if not p.exists():
+            return json.dumps({"error": f"Seed not found: {seed_path}"})
+        # detect pre-state
+        pre = json.loads(p.read_text())
+        already_v3 = str(pre.get("schema_version", "")).startswith("3.")
+        migrated = migrate_with_backup(str(p))
+        backup = p.with_suffix(".v2.backup.json")
+        return json.dumps({
+            "status": "ok",
+            "path": str(p),
+            "backup_path": str(backup) if backup.exists() else "",
+            "schema_version": migrated.get("schema_version", "3.0"),
+            "already_v3": already_v3,
+        })
+    except Exception as e:
+        _log_mcp_health("fail", "migrate_seed_file", str(e))
+        return json.dumps({"error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 

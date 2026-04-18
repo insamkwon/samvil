@@ -9,3 +9,4 @@ mcp/samvil_mcp/__pycache__/
 mcp/.pytest_cache/
 mcp/tests/__pycache__/
 .worktrees/
+.samvil/
