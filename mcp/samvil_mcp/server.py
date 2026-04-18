@@ -83,6 +83,11 @@ async def health_check() -> str:
 async def create_session(project_name: str, agent_tier: str = "standard") -> str:
     """Create a new SAMVIL session for a project. Returns session ID."""
     try:
+        from .security import sanitize_filename, detect_dangerous
+        detected = detect_dangerous(project_name)
+        if detected:
+            return json.dumps({"session_id": None, "error": f"Blocked patterns: {detected}"})
+        project_name = sanitize_filename(project_name, max_len=100)
         store = await get_store()
         session = await store.create_session(project_name, agent_tier)
         return json.dumps({"session_id": session.id, "project_name": project_name, "tier": agent_tier})
