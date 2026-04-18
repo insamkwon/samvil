@@ -91,9 +91,16 @@ After Phase 6, write `project.pm-seed.json` to disk.
    mcp__samvil_mcp__save_event(event_type="pm_seed_converted", data='{"features":<len>}')
    ```
 
-## Chain to next skill
+## Chain to next skill (INV-4)
 
-After conversion, invoke `samvil-council` (if tier ≥ thorough) or `samvil-design` directly. Council/design always read `project.seed.json`, which is now populated.
+After `project.seed.json` is written, invoke the next stage via the Skill tool. Council and Design both read `project.seed.json`; nothing else needs to be passed.
+
+- If `config.selected_tier` is `thorough` or `full`:
+  Invoke the Skill tool with skill: `samvil-council`
+- If tier is `minimal` or `standard`:
+  Invoke the Skill tool with skill: `samvil-design`
+
+If `project.config.json` is missing or tier is unset, default to `samvil-design` and emit a `tier_missing` event (best-effort).
 
 ## Anti-patterns
 

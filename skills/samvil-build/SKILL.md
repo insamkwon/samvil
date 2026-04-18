@@ -370,13 +370,31 @@ Emit: `mcp__samvil_mcp__save_event(event_type="feature_tree_start", data='{"feat
 
 ### Step 2: Resume from checkpoint (if any)
 
+Checkpoint carries **all** feature-local state, so a resume picks up mid-feature:
+
 ```
-ckpt = mcp__samvil_mcp__load_checkpoint(seed_id=<session_id>)
-if ckpt.found and ckpt.phase == "build" and ckpt.state.feature == feature.name:
-    completed_ids = ckpt.state.completed_ids  # list[str]
+ckpt_json = mcp__samvil_mcp__load_checkpoint(seed_id=<session_id>)
+ckpt = json.loads(ckpt_json)
+
+if ckpt.get("found") and ckpt.get("phase") == "build":
+    state = ckpt.get("state", {})
+    if state.get("feature") == feature["name"]:
+        completed_ids = list(state.get("completed_ids", []))
+        consecutive_fail_batches = int(state.get("consecutive_fail_batches", 0))
+        # Restore tree with leaf statuses from the checkpoint, not from seed
+        if state.get("tree_json"):
+            tree_json = state["tree_json"]
+    else:
+        completed_ids = []
+        consecutive_fail_batches = 0
 else:
     completed_ids = []
+    consecutive_fail_batches = 0
 ```
+
+If no checkpoint is found, the fresh `tree_json` from Step 1 is used as-is and
+both counters start at zero. This keeps Step 3d's "`tree_json` is SSOT"
+contract intact across interrupted sessions.
 
 ### Step 2.5: Dependency Planning (v3.0.0 T2, optional)
 
@@ -583,10 +601,17 @@ After all features in the seed:
 
 - Step 3b acquires a slot before each Agent spawn.
 - Step 3d releases after each Agent returns.
-- At the **start of a fresh session** (no checkpoint for this seed), reset:
+- **Always reset at the start of a samvil-build invocation**, even when
+  resuming from a checkpoint. A previous session that crashed mid-chunk
+  may have left stale `acquire` events without matching `release`s; the
+  tree state (which is what resume depends on) lives in the checkpoint,
+  not in the rate-budget log. Resetting is safe.
   ```
   mcp__samvil_mcp__rate_budget_reset(budget_path="<cwd>/.samvil/rate-budget.jsonl")
   ```
+  If the reset result's `previous.active > 0`, emit a
+  `rate_budget_stale_recovery` event with that count — it tells retro a
+  session was interrupted.
 - At the **end of each feature**, emit a summary event:
   ```
   stats = json.loads(mcp__samvil_mcp__rate_budget_stats(
