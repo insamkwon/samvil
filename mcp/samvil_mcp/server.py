@@ -694,6 +694,37 @@ async def list_checkpoints(base_dir: str = "") -> str:
         return json.dumps({"seed_ids": [], "error": str(e)})
 
 
+# ── Stall Detection tool (v2.6.0, #24) ───────────────────────
+
+
+@mcp.tool()
+async def check_stall(
+    events_path: str,
+    timeout: float = 300.0,
+    retry_count: int = 0,
+) -> str:
+    """Check if pipeline is stalled based on last event timestamp.
+
+    Args:
+        events_path: Path to .samvil/events.jsonl
+        timeout: Seconds before stall declared (default 300 = 5 min)
+        retry_count: Current retry attempt count
+    """
+    try:
+        from .stall_detector import detect_stall
+        status = detect_stall(events_path, timeout, retry_count)
+        return json.dumps({
+            "is_stalled": status.is_stalled,
+            "last_event_age_seconds": status.last_event_age_seconds,
+            "last_event_type": status.last_event_type,
+            "retry_count": status.retry_count,
+            "should_retry": status.should_retry,
+        })
+    except Exception as e:
+        _log_mcp_health("fail", "check_stall", str(e))
+        return json.dumps({"is_stalled": False, "error": str(e)})
+
+
 # ── Phase 4: Evolve Gates tools (v2.5.0) ──────────────────────
 
 

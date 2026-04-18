@@ -525,6 +525,17 @@ If SOME ACs are satisfied → build only unsatisfied ACs.
    [SAMVIL] ⟳ Checkpoint saved
    ```
    Circuit Breaker: MAX_RETRIES=2. 2 failures on a feature → mark as `failed`, continue to next feature.
+   **Stall Detection (v2.6.0+, #24)**: Before each Worker spawn, check for stall:
+   ```
+   stall = mcp__samvil_mcp__check_stall(events_path=".samvil/events.jsonl", timeout=300.0, retry_count=<N>)
+   if stall.is_stalled:
+       mcp__samvil_mcp__save_event(event_type="stall_detected", ...)
+       if stall.should_retry:
+           checkpoint = mcp__samvil_mcp__load_checkpoint(seed_id=<session_id>)
+           → Resume from checkpoint, increment retry_count
+       else:
+           → Abandon feature (stall_abandoned event)
+   ```
    On every build failure, **MCP (best-effort):**
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_fail", stage="build", data='{"attempt":<N>,"scope":"feature:<name>","error_signature":"<brief>","error_category":"<enum>","touched_files":["<paths>"]}')
