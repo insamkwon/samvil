@@ -109,3 +109,52 @@ def test_checklist_from_dict_roundtrip():
     assert cl.ac_id == "AC-1"
     assert cl.verdict == "PARTIAL"
     assert cl.items[0].evidence == ("x:1",)
+
+
+def test_ac_check_item_with_verification_questions():
+    item = ACCheckItem(
+        description="x",
+        passed=True,
+        evidence=("src/a.ts:1",),
+        verification_questions=("Q1?", "Q2?"),
+    )
+    assert len(item.verification_questions) == 2
+    d = item.to_dict()
+    assert d["verification_questions"] == ["Q1?", "Q2?"]
+
+
+def test_ac_check_item_without_verification_questions():
+    item = ACCheckItem(description="x", passed=True)
+    assert item.verification_questions == ()
+    d = item.to_dict()
+    assert d["verification_questions"] == []
+
+
+def test_checklist_from_dict_with_verification_questions():
+    data = {
+        "ac_id": "AC-1",
+        "ac_description": "desc",
+        "items": [
+            {
+                "description": "i1",
+                "passed": True,
+                "evidence": ["x:1"],
+                "rationale": "",
+                "verification_questions": ["실제 API 호출인가?"],
+            },
+        ],
+    }
+    cl = checklist_from_dict(data)
+    assert cl.items[0].verification_questions == ("실제 API 호출인가?",)
+
+
+def test_checklist_from_dict_missing_verification_questions():
+    data = {
+        "ac_id": "AC-1",
+        "ac_description": "desc",
+        "items": [
+            {"description": "i1", "passed": True, "evidence": ["x:1"]},
+        ],
+    }
+    cl = checklist_from_dict(data)
+    assert cl.items[0].verification_questions == ()

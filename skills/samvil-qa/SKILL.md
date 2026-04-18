@@ -993,6 +993,32 @@ result = mcp__samvil_mcp__semantic_check(code=snippet, context_hint=<AC descript
 - **Final: FAIL** ✗ (Reward Hacking HIGH → 자동 downgrade per E1/P1)
 ```
 
+### Verification Questions in Checklist Items (v2.6.0+)
+
+When building checklists via `build_checklist`, include `verification_questions` from `semantic_check`:
+
+```
+items_json: [
+  {
+    "description": "Stripe 세션 생성",
+    "passed": true,
+    "evidence": ["src/lib/stripe.ts:18"],
+    "verification_questions": ["실제 Stripe SDK 호출인가, test mode는 아닌가?"]
+  }
+]
+```
+
+Report format for each AC item with verification questions:
+
+```
+- [✓] Description
+    Evidence: file:line
+    Verification: "질문 내용"  ← 있을 때만 표시
+- [✗] Description
+    Evidence: 없음
+    Verification: "존재하는가?"
+```
+
 ### Fallback (INV-5)
 
 MCP 실패 시:

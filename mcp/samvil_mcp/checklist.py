@@ -25,6 +25,7 @@ class ACCheckItem:
     passed: bool
     evidence: tuple[str, ...] = ()  # file:line references
     rationale: str = ""
+    verification_questions: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -32,6 +33,7 @@ class ACCheckItem:
             "passed": self.passed,
             "evidence": list(self.evidence),
             "rationale": self.rationale,
+            "verification_questions": list(self.verification_questions),
         }
 
 
@@ -138,6 +140,7 @@ def checklist_from_dict(data: dict) -> ACChecklist:
             passed=bool(i.get("passed", False)),
             evidence=tuple(i.get("evidence", [])),
             rationale=i.get("rationale", ""),
+            verification_questions=tuple(i.get("verification_questions", [])),
         )
         for i in data.get("items", [])
     )

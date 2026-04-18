@@ -502,6 +502,7 @@ async def build_checklist(ac_id: str, ac_description: str, items_json: str) -> s
                 passed=bool(i.get("passed", False)),
                 evidence=tuple(i.get("evidence", [])),
                 rationale=i.get("rationale", ""),
+                verification_questions=tuple(i.get("verification_questions", [])),
             )
             for i in items_data
         )
