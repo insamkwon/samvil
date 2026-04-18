@@ -628,6 +628,34 @@ async def merge_llm_result(heuristic_json: str, llm_response_json: str) -> str:
         return heuristic_json
 
 
+# ── Research WebFetch tools (v2.7.0, PATH 4) ─────────────────
+
+
+@mcp.tool()
+async def extract_query(question: str) -> str:
+    """Extract searchable query from a research-routed question.
+
+    Strips common prefixes like 'What are...', '최신...' to produce
+    a concise search query.
+    """
+    from .research import extract_research_query
+    return json.dumps({"query": extract_research_query(question)})
+
+
+@mcp.tool()
+async def format_research(results_json: str) -> str:
+    """Format Tavily search results for user confirmation.
+
+    Args:
+        results_json: JSON array of search results from Tavily
+
+    Returns: {has_results, summary_markdown, sources[], count}
+    """
+    from .research import format_research_results
+    results = json.loads(results_json)
+    return json.dumps(format_research_results(results))
+
+
 # ── Skip Externally Satisfied ACs tools (v2.6.0, #08) ────────
 
 
