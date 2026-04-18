@@ -507,6 +507,45 @@ After all features in the seed:
 - `MAX_PARALLEL` is still determined by the same Dynamic Parallelism logic (see legacy Phase B below).
 - `next_buildable_leaves` already honors blocked parents, terminal statuses, and the completed set; no separate independence-check is needed across leaves of the same feature — they share a folder so conflicts are handled by the worker contract (one leaf per Agent, no shared-file edits outside `components/<feature>/`).
 
+### Shared API rate budget (v3.0.0 T3)
+
+Before spawning a worker, cooperatively acquire a slot from the session's shared budget so multiple skills (build, QA, council) don't exceed the API concurrency cap.
+
+```
+# Before spawning each worker in a chunk
+for leaf in batch.leaves:
+    ack = mcp__samvil_mcp__rate_budget_acquire(
+        budget_path="<cwd>/.samvil/rate-budget.jsonl",
+        worker_id=f"build-{leaf.id}",
+        max_concurrent=MAX_PARALLEL,
+    )
+    if not ack.acquired:
+        # Budget exhausted → wait for a release from an in-flight agent
+        # (main session is single-threaded; this is a slot check, not a lock)
+        sleep 1; retry up to 30s; then log warning and continue anyway
+```
+
+After each worker returns (pass or fail), release immediately:
+
+```
+mcp__samvil_mcp__rate_budget_release(
+    budget_path="<cwd>/.samvil/rate-budget.jsonl",
+    worker_id=f"build-{leaf.id}",
+)
+```
+
+At the end of the feature tree loop, emit one summary event with the stats:
+
+```
+st = mcp__samvil_mcp__rate_budget_stats(budget_path="<cwd>/.samvil/rate-budget.jsonl")
+mcp__samvil_mcp__save_event(event_type="rate_budget_summary", data=st)
+```
+
+When starting a fresh session, reset the budget file first:
+```
+mcp__samvil_mcp__rate_budget_reset(budget_path="<cwd>/.samvil/rate-budget.jsonl")
+```
+
 ### Backward compatibility
 
 - If a migrated v2 seed had only flat strings, every leaf is top-level and the tree is effectively flat. Everything above still works.

@@ -1189,6 +1189,62 @@ async def analyze_ac_dependencies(
         return json.dumps({"error": str(e)})
 
 
+# ── v3.0.0 T3: Shared Rate Budget ─────────────────────────────
+
+
+@mcp.tool()
+async def rate_budget_acquire(
+    budget_path: str,
+    worker_id: str,
+    max_concurrent: int = 2,
+) -> str:
+    """Cooperatively acquire a slot in the shared worker budget.
+
+    Appends an `acquire` event to budget_path (JSONL) iff current < max.
+    Returns {acquired: bool, current, max_concurrent}.
+    """
+    try:
+        from .rate_budget import acquire as _acquire
+        result = _acquire(budget_path, worker_id, max_concurrent)
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "rate_budget_acquire", str(e))
+        return json.dumps({"error": str(e), "acquired": False})
+
+
+@mcp.tool()
+async def rate_budget_release(budget_path: str, worker_id: str) -> str:
+    """Append a `release` event for worker_id. Idempotent."""
+    try:
+        from .rate_budget import release as _release
+        return json.dumps(_release(budget_path, worker_id))
+    except Exception as e:
+        _log_mcp_health("fail", "rate_budget_release", str(e))
+        return json.dumps({"error": str(e), "released": False})
+
+
+@mcp.tool()
+async def rate_budget_stats(budget_path: str) -> str:
+    """Return budget stats {active, peak, total_acquired, total_released}."""
+    try:
+        from .rate_budget import stats as _stats
+        return json.dumps(_stats(budget_path))
+    except Exception as e:
+        _log_mcp_health("fail", "rate_budget_stats", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def rate_budget_reset(budget_path: str) -> str:
+    """Truncate the budget log. Returns pre-reset stats."""
+    try:
+        from .rate_budget import reset as _reset
+        return json.dumps(_reset(budget_path))
+    except Exception as e:
+        _log_mcp_health("fail", "rate_budget_reset", str(e))
+        return json.dumps({"error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 
