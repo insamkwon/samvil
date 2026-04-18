@@ -64,47 +64,104 @@ options:
 
 **커스텀 프리셋이 없는 경우**: 이 단계를 건너뛰고 Step 1로 진행
 
-## Step 0.7: Rhythm Guard + Tracks 스캐폴드 (v2.3.0+, P2/P4)
+## Step 0.7: PATH Routing + Rhythm Guard + Tracks (v2.4.0+, P2/P4)
 
-**현재 v2.3.0에서는 스키마 스캐폴드만 준비.** 실제 작동은 v2.4.0 (Phase 2 PATH routing)부터.
+**v2.4.0부터 실제 활성화.** 상세 규칙은 `references/path-routing-guide.md` 참조.
 
-### ai_answer_streak 카운터 (P2 Description vs Prescription)
+### 0.7a. 초기 스캔 (1회)
 
-`project.state.json`에 `ai_answer_streak: 0` 필드 초기화.
+인터뷰 시작 시 프로젝트 manifest 스캔:
 
-**규칙** (v2.4.0부터 실제 강제):
-- AI가 코드/manifest에서 자동 답변 → streak +1
-- AI가 웹 리서치로 답변 → streak +1
-- 사용자가 직접 답변 → streak = 0 (reset)
-- **streak ≥ 3**이면 다음 질문은 **무조건 사용자에게** (코드로 답할 수 있어도 강제 PATH 2)
-
-**사용자에게 표시** (Rhythm Guard 발동 시):
 ```
-⚠️ [SAMVIL] 연속 3회 자동 확정. 이번 질문은 직접 답변해주세요.
+manifest_facts = mcp__samvil_mcp__scan_manifest(project_path="<CWD>")
 ```
 
-**이유**: AI 독주 방지. 대화는 사람과 해야 함 (Socratic dialectic 원칙).
+결과를 state.json에 `manifest_facts` 필드로 저장 (향후 재사용).
 
-### interview_tracks 리스트 (P4 Breadth First)
+Brownfield인 경우 사용자에게 표시:
+```
+[SAMVIL] 🔍 프로젝트 스캔 중...
+[SAMVIL] ℹ️ 자동 감지: Next.js 14.2.0, TypeScript, Prisma+PostgreSQL
+         출처: package.json, prisma/schema.prisma
+```
 
-`project.state.json`에 `interview_tracks: []` 초기화.
+### 0.7b. 각 질문마다 라우팅
 
-**규칙** (v2.4.0부터 실제 강제):
-- 인터뷰 시작 시 기능 단위로 tracks 초기화
-- 각 track의 `rounds_focused`, `is_resolved` 추적
-- 한 track에 3라운드 이상 몰리면 자동 리마인드:
-  ```
-  ℹ️ [SAMVIL] 결제 모듈에 집중하는 동안, auth/admin은 아직 미정입니다.
-     계속 파고들까요, 잠시 다른 tracks를 정리할까요?
-  ```
+모든 인터뷰 질문은 다음 프로세스:
 
-**이유**: Tunnel vision 방지. 한 토픽 편향으로 다른 영역 누락되지 않게.
+```
+1. 현재 streak 읽기: streak = state.get("ai_answer_streak", 0)
+2. Rhythm Guard 체크: force_user = streak >= 3
+3. 라우팅:
+   result = mcp__samvil_mcp__route_question(
+       question=<질문>,
+       manifest_facts=<JSON>,
+       force_user=force_user
+   )
+4. Path별 액션 (아래 표)
+5. 답변 후 streak 업데이트:
+   source = mcp__samvil_mcp__extract_answer_source(answer)
+   result = mcp__samvil_mcp__update_answer_streak(streak, source)
+   state["ai_answer_streak"] = result["new_streak"]
+```
 
-### 현재 v2.3.0 행동
+| Path | 액션 |
+|------|------|
+| `auto_confirm` | 사용자 미개입. `[from-code][auto-confirmed]` 바로 기록 + ℹ️ 표시 |
+| `code_confirm` | AskUserQuestion Y/N. Yes → `[from-code]`, No → 수정 입력 `[from-user][correction]` |
+| `user` | 일반 AskUserQuestion. `[from-user]` |
+| `research` | Tavily 검색 → 사용자 Y/N 확인 → `[from-research]` or `[from-user][correction]` |
+| `forced_user` | ⚠️ Rhythm Guard 메시지 + AskUserQuestion. `[from-user]` |
 
-- 필드만 state-schema에 추가됨 (값은 0/[] 유지)
-- UI/로직 변경 없음
-- **Phase 2에서 실제 강제** (PATH routing 도입과 함께)
+### 0.7c. Tracks 관리 (Breadth-Keeper, P4)
+
+Features 파악 후 초기화:
+```
+tracks = mcp__samvil_mcp__manage_tracks(action="init", features=<JSON>)
+state["interview_tracks"] = tracks
+```
+
+매 라운드마다 active track 업데이트 + Breadth check:
+```
+tracks = mcp__samvil_mcp__manage_tracks(action="update", tracks_json=..., track_name=<current>)
+verdict = mcp__samvil_mcp__manage_tracks(action="check", tracks_json=...)
+
+if verdict["force_breadth"]:
+    # 다른 tracks로 전환 리마인드
+    ask: "{reason} — 이 중 먼저 정할 게 있나요?"
+```
+
+토픽 완료 시:
+```
+tracks = mcp__samvil_mcp__manage_tracks(action="resolve", tracks_json=..., track_name=<done>)
+```
+
+### 0.7d. Milestone 시각화 (#05)
+
+`score_ambiguity` 결과에 v2.4.0+ 추가 필드:
+- `milestone` — INITIAL / PROGRESS / REFINED / READY
+- `floors_passed` — 모든 component floor 통과 여부
+- `floor_violations` — 위반 리스트
+- `missing_items` — 아직 없는 필드 목록
+
+매 라운드 끝 사용자에게 표시:
+```
+[SAMVIL] 진행: PROGRESS (0.35 → 0.22)
+  ┌─ Goal Clarity        0.92 ✓
+  ├─ Constraint Clarity  0.58 ⚠ (floor 0.65 미달)
+  └─ Success Criteria    0.85 ✓
+  
+  약한 부분: Constraint
+  미정: {missing_items 중 상위 3개}
+```
+
+### 0.7e. Fallback (MCP 실패 시 — INV-5)
+
+MCP 호출 실패하면:
+- `scan_manifest` 실패 → facts={} (greenfield로 간주)
+- `route_question` 실패 → path="user" (안전하게 사용자에게)
+- `update_answer_streak` 실패 → streak 유지, guard 비활성
+- 파이프라인은 중단하지 않음
 
 ## Step 1: Preset 매칭
 

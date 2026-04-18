@@ -4,6 +4,58 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [2.4.0] — 2026-04-18 — Phase 2: Interview 심화
+
+인터뷰 피로도 감소 + 명료화 강화. PATH routing 활성화로 1인 개발자 체감 큰 변화.
+
+### Added
+
+- **#01 PATH Routing 실구현** — 5가지 경로 자동 분기
+  - `mcp/samvil_mcp/path_router.py` (신규, 338줄)
+  - PATH 1a (auto_confirm), 1b (code_confirm), 2 (user), 3 (hybrid), 4 (research), forced_user
+  - Description vs Prescription 원칙 (P2) 코드 수준 구현
+
+- **#02 Rhythm Guard 활성화** — AI 독주 방지 장치
+  - 연속 3회 AI 자동답변 → 다음 질문은 강제로 사용자에게
+  - `interview_engine.update_streak()` 함수
+  - `answer_source` prefix로 출처 추적
+
+- **#05 Milestones + Component Floors** — 다차원 모호도
+  - INITIAL → PROGRESS → REFINED → READY 4단계 마일스톤
+  - Component floor (goal 0.75 / constraint 0.65 / criteria 0.70) 강제
+  - `missing_items` 자동 추출 → UI 피드백
+
+- **#P4 Breadth-Keeper Tracks** — 인터뷰 편향 방지 (간소화)
+  - `interview_tracks` 필드 실제 작동
+  - 한 토픽 3라운드 이상 몰리면 자동 리마인드
+  - `manage_tracks` MCP tool (init/update/resolve/check)
+
+### Changed
+
+- `mcp/samvil_mcp/interview_engine.py` — score_ambiguity 반환에 milestone/floors/missing_items 추가 (하위호환 유지)
+- `mcp/samvil_mcp/server.py` — 5개 신규 MCP tool (scan_manifest, route_question, update_answer_streak, manage_tracks, extract_answer_source)
+- `skills/samvil-interview/SKILL.md` — Step 0.7 실제 작동 로직 기술
+
+### Added files
+
+- `mcp/samvil_mcp/path_router.py` (신규)
+- `mcp/tests/test_path_router.py` (14 test cases)
+- `mcp/tests/test_interview_engine_v2.py` (20 test cases)
+- `references/path-routing-guide.md` (신규)
+
+### Tests
+
+- 34개 신규 테스트 전부 통과
+- 기존 테스트 6개 + 신규 34 = 40 interview-related tests passing
+- 전체 MCP 테스트 99 passed / 1 failed (기존 이슈, Phase 2 무관 — scaffold cli_command 검증)
+
+### Behavior change
+
+- **1인 개발자 체감**: Brownfield 프로젝트에서 Framework/Language/DB 질문 자동 확정. 인터뷰 질문 **70% 감소 예상**.
+- **안전 장치**: MCP 실패 시 전부 user path fallback (INV-5 Graceful Degradation).
+
+---
+
 ## [2.3.0] — 2026-04-18 — Phase 1: Quick Wins
 
 Phase 1 of the Ouroboros absorption plan. Additive changes only — no breaking.

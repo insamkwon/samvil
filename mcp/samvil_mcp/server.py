@@ -300,11 +300,151 @@ async def score_ambiguity(interview_state: str, tier: str = "standard") -> str:
     """Score interview ambiguity. interview_state is JSON with keys:
     target_user, core_problem, core_experience, features, exclusions,
     constraints, acceptance_criteria. tier: minimal(0.10), standard(0.05),
-    thorough(0.02), full(0.01). Returns ambiguity score (0=clear, 1=ambiguous)."""
+    thorough(0.02), full(0.01). Returns ambiguity score + milestone + floors + missing_items (v2.4.0)."""
     from .interview_engine import score_ambiguity as _score
     state = json.loads(interview_state)
     result = _score(state, tier=tier)
     return json.dumps(result)
+
+
+# ── PATH Routing tools (v2.4.0, Ouroboros #01) ──────────────────
+
+
+@mcp.tool()
+async def scan_manifest(project_path: str) -> str:
+    """Scan project manifest files (package.json, pyproject.toml, prisma/schema.prisma)
+    to extract facts. Returns dict with framework, language, database, etc.
+    Used by PATH 1a auto-confirm routing."""
+    try:
+        from .path_router import scan_manifest as _scan
+        facts = _scan(project_path)
+        return json.dumps(facts)
+    except Exception as e:
+        _log_mcp_health("fail", "scan_manifest", str(e))
+        return json.dumps({"detected": False, "error": str(e)})
+
+
+@mcp.tool()
+async def route_question(
+    question: str,
+    manifest_facts: str = "{}",
+    force_user: bool = False,
+) -> str:
+    """Determine the routing path for an interview question.
+
+    Args:
+        question: The question text
+        manifest_facts: JSON string from scan_manifest()
+        force_user: If true (Rhythm Guard active), force PATH 2 (user)
+
+    Returns: {path, rationale, auto_answer, icon}
+
+    Paths:
+        - auto_confirm (PATH 1a): AI auto-answers from manifest
+        - code_confirm (PATH 1b): AI proposes, user Y/N confirms
+        - user (PATH 2): direct user judgment
+        - hybrid (PATH 3): code + user decision
+        - research (PATH 4): web search needed
+        - forced_user: Rhythm Guard override
+    """
+    try:
+        from .path_router import detect_routing_path as _route
+        facts = json.loads(manifest_facts) if manifest_facts else {}
+        result = _route(question, manifest_facts=facts, force_user=force_user)
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "route_question", str(e))
+        # Safe fallback: always route to user
+        return json.dumps({
+            "path": "user",
+            "rationale": f"Error in routing, fallback to user: {e}",
+            "auto_answer": None,
+            "icon": "💬",
+        })
+
+
+@mcp.tool()
+async def update_answer_streak(current_streak: int, answer_source: str) -> str:
+    """Update AI answer streak counter (Rhythm Guard).
+
+    Args:
+        current_streak: Current streak value
+        answer_source: 'from-code', 'from-code-auto', 'from-user',
+                       'from-user-correction', 'from-research'
+
+    Returns: {new_streak, force_user_next, reason}
+    """
+    try:
+        from .interview_engine import update_streak as _update
+        result = _update(current_streak, answer_source)
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "update_answer_streak", str(e))
+        return json.dumps({
+            "new_streak": current_streak,
+            "force_user_next": False,
+            "error": str(e),
+        })
+
+
+@mcp.tool()
+async def manage_tracks(
+    action: str,
+    tracks_json: str = "[]",
+    track_name: str = "",
+    features: str = "[]",
+) -> str:
+    """Manage interview tracks (Breadth-Keeper).
+
+    Actions:
+        - 'init': Initialize tracks from features list. Returns new tracks.
+        - 'update': Increment rounds_focused for track_name. Returns updated tracks.
+        - 'resolve': Mark track_name as resolved. Returns updated tracks.
+        - 'check': Check if Breadth-Keeper should intervene. Returns verdict.
+
+    Args:
+        action: One of 'init', 'update', 'resolve', 'check'
+        tracks_json: Current tracks as JSON array
+        track_name: Track name (for update/resolve)
+        features: Features list as JSON array (for init)
+    """
+    try:
+        from .interview_engine import (
+            initialize_tracks as _init,
+            update_track as _update,
+            mark_track_resolved as _resolve,
+            should_force_breadth as _check,
+        )
+        if action == "init":
+            feats = json.loads(features)
+            return json.dumps(_init(feats))
+        if action == "update":
+            tracks = json.loads(tracks_json)
+            return json.dumps(_update(tracks, track_name))
+        if action == "resolve":
+            tracks = json.loads(tracks_json)
+            return json.dumps(_resolve(tracks, track_name))
+        if action == "check":
+            tracks = json.loads(tracks_json)
+            return json.dumps(_check(tracks))
+        return json.dumps({"error": f"Unknown action: {action}"})
+    except Exception as e:
+        _log_mcp_health("fail", "manage_tracks", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def extract_answer_source(answer: str) -> str:
+    """Extract source prefix from a prefixed answer string.
+
+    Returns one of: 'from-code-auto', 'from-code', 'from-user',
+                    'from-user-correction', 'from-research'
+    Unprefixed → 'from-user' (safe default)"""
+    try:
+        from .path_router import extract_answer_source as _extract
+        return json.dumps({"source": _extract(answer)})
+    except Exception as e:
+        return json.dumps({"source": "from-user", "error": str(e)})
 
 
 # ── Schema validation tools (Inter-Stage Contract) ────────────
