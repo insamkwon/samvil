@@ -111,6 +111,61 @@ fi
   새 세션을 열면 업데이트된 SAMVIL이 로드됩니다.
 ```
 
+### Step 7: 프로젝트 Seed Migration 체크 (v3.0.0+)
+
+업데이트 후, 현재 CWD에 `project.seed.json`이 있고 schema가 v3 미만이면 migration을 제안한다.
+
+```bash
+CWD_SEED="$(pwd)/project.seed.json"
+if [ -f "$CWD_SEED" ]; then
+  CURRENT_SCHEMA=$(python3 -c "import json; print(json.load(open('$CWD_SEED')).get('schema_version', 'unknown'))" 2>/dev/null)
+  echo "[SAMVIL] 현재 seed 스키마: $CURRENT_SCHEMA"
+fi
+```
+
+`CURRENT_SCHEMA`가 `3.*`로 시작하지 **않으면** 사용자에게 물어본다 (AskUserQuestion):
+
+```
+질문: "SAMVIL v3.0.0은 AC Tree 기반입니다. 현재 프로젝트의 seed (v{CURRENT_SCHEMA})를 v3로 마이그레이션할까요?
+
+- Yes: 백업(project.v2.backup.json) 후 AC tree 구조로 변환
+- No:  v2.x 유지 (v3의 tree build/QA 기능은 사용 불가)
+- Later: 다음에 `/samvil:update --migrate`로 실행"
+
+옵션: [Yes, No, Later]
+```
+
+**Yes 선택 시** — MCP tool로 migration 실행:
+```
+mcp__samvil_mcp__migrate_seed_file(seed_path="$CWD_SEED")
+```
+결과:
+```
+[SAMVIL] ✓ Migration 완료
+  Backup:         project.v2.backup.json
+  Schema:         v{CURRENT_SCHEMA} → v3.0
+  AC tree leaves: <tree_progress.total_leaves>
+```
+
+**No/Later 선택 시** — 안내만:
+```
+[SAMVIL] Migration 건너뜀. 언제든 `/samvil:update --migrate` 또는
+         직접 `mcp__samvil_mcp__migrate_seed_file(seed_path=...)` 실행 가능.
+```
+
+### `/samvil:update --migrate` — 명시적 migration 모드
+
+`--migrate` 플래그가 주어지면 Step 1~6을 건너뛰고 Step 7만 실행한다 (이미 최신 버전인 프로젝트에서 seed만 변환하고 싶을 때).
+
+```
+/samvil:update --migrate
+```
+
+동작:
+1. CWD에 `project.seed.json`이 없으면 에러 출력 후 종료.
+2. 이미 `3.*` 스키마라면 `[SAMVIL] ✓ 이미 v3 스키마입니다` 출력 후 종료.
+3. 그 외는 Step 7의 Yes 분기를 강제 실행 (backup + migrate).
+
 ### 실패 시
 
 ```
