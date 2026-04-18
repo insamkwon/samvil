@@ -67,6 +67,40 @@
       "type": "integer",
       "minimum": 0,
       "default": 0
+    },
+    "ai_answer_streak": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Consecutive AI auto-answered questions in interview. Resets when user answers directly (PATH 2). Triggers Rhythm Guard at 3. (v2.3.0+ scaffold, v2.4.0 full wiring)"
+    },
+    "interview_tracks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "rounds_focused": { "type": "integer", "minimum": 0 },
+          "is_resolved": { "type": "boolean" }
+        }
+      },
+      "default": [],
+      "description": "Unresolved ambiguity tracks during interview. Breadth-Keeper uses for zoom-out reminders. (v2.3.0+ scaffold, v2.4.0 full wiring)"
+    },
+    "failed_acs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ac_id": { "type": "string" },
+          "feature": { "type": "string" },
+          "reason": { "type": "string" },
+          "cycle": { "type": "integer" }
+        }
+      },
+      "default": [],
+      "description": "Accumulated failed ACs across cycles. Fed to Evolve Wonder as learning signal (P6 Fail-Fast Learn Later). (v2.3.0+ scaffold, v2.6.0 full wiring)"
     }
   }
 }

@@ -1,5 +1,34 @@
 # QA Checklist
 
+## 🔑 Evidence Mandatory (v2.2.0+, P1)
+
+**모든 PASS는 파일 증거를 동반해야 한다. 증거 없는 PASS는 자동 FAIL.**
+
+- 각 AC 판정에 **file:line** 참조 필수 (최소 1개, 권장 2~3개)
+- Tier와 무관하게 **모든 단계에서 강제**
+- 증거 포맷:
+  - `src/auth.ts:15` (최소)
+  - `src/auth.ts:15 (zod emailSchema)` (권장 — 간단 rationale)
+- Evidence 누락 시: Verdict 자동 FAIL + "No evidence provided" 경고
+
+### 예시
+
+```markdown
+✓ AC-1 사용자 회원가입 [PASS]
+  증거: src/lib/auth.ts:15 (zod emailSchema)
+  증거: prisma/schema.prisma:12 (@@unique([email]))
+  근거: 검증 + 중복 방지 모두 코드에서 확인
+
+✗ AC-2 결제 [FAIL]
+  증거: 없음 — "PASS"는 되었으나 실제 구현 미확인
+  → Evidence-mandatory 정책에 따라 자동 FAIL
+```
+
+**구현 시점**: Phase 3 (v2.5.0)에서 QA 스킬 + MCP에 실제 검증 로직 구현.
+현재 v2.2.0은 **규약 선언**만.
+
+---
+
 ## Pass 1: Mechanical (all must pass)
 
 - [ ] `npm run build` exits with code 0
@@ -59,6 +88,44 @@ Overall: All PASS or PARTIAL = PASS, any UNIMPLEMENTED = REVISE, any FAIL = REVI
 
 ## QA Report Format (.samvil/qa-report.md)
 
+### v2.5.0+ (Evidence-mandatory 실구현 이후)
+
+```markdown
+# QA Report — Iteration N
+
+## Pass 1: Mechanical
+- Build: PASS/FAIL
+- TS Errors: 0
+- Evidence: .samvil/build.log:1-12
+
+## Pass 2: Functional
+
+### AC-1 "User can create tasks" [PASS]
+  증거: src/components/CreateTask.tsx:8 (form handler)
+  증거: src/lib/store.ts:22 (setTasks store)
+  근거: 폼 입력 + state 반영 모두 확인
+
+### AC-2 "AI generates summary" [UNIMPLEMENTED]
+  증거 요구됨: LLM API 호출 코드
+  증거 찾음: src/lib/ai.ts:5 — `return "summary here"` (하드코딩)
+  근거: Reward Hacking 탐지 — 실제 API 호출 없음
+
+### AC-3 "Tasks persist on refresh" [FAIL]
+  증거 요구됨: localStorage 또는 DB 쓰기
+  증거 찾음: 없음
+  근거: persistence 로직 부재
+
+## Pass 3: Quality
+- Responsive: PASS (tailwind md:/lg: in app/page.tsx:12-20)
+- Accessibility: PARTIAL (aria-label 일부 누락)
+- Code structure: PASS
+
+## Overall: REVISE
+Issues to fix: [AC-2 real API, AC-3 add localStorage]
+```
+
+### v2.2.0~v2.4.0 (선언만, 기존 포맷 유지)
+
 ```markdown
 # QA Report — Iteration N
 
@@ -70,13 +137,10 @@ Overall: All PASS or PARTIAL = PASS, any UNIMPLEMENTED = REVISE, any FAIL = REVI
 | AC | Verdict | Notes |
 |----|---------|-------|
 | "User can create tasks" | PASS | CreateTask component exists |
-| "AI generates summary" | UNIMPLEMENTED | Hardcoded sample text — needs real API |
-| "Tasks persist on refresh" | FAIL | No localStorage logic found |
 
 ## Pass 3: Quality
 - Responsive: PASS/FAIL
 - Accessibility: PASS/FAIL
-- Code structure: PASS/FAIL
 
 ## Overall: PASS / REVISE / FAIL
 Issues to fix: [list]

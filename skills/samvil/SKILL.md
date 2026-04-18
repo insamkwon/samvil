@@ -84,10 +84,16 @@ gh api repos/insamkwon/samvil/contents/.claude-plugin/plugin.json --jq '.content
 - 업데이트 있음 → AskUserQuestion: "새 버전 v{latest} 있음. 업데이트할까?" → "지금" or "나중에"
 - 확인 실패 → 무시하고 진행
 
-**7. MCP 서버** — SessionStart hook이 자동 설치. 여기서는 결과만 확인:
+**7. MCP 서버 + Deferred Loading (v2.3.0+)** — SessionStart hook이 자동 설치. 여기서는 결과 확인 + ToolSearch 로드:
 
-- ✅ 연결됨 → `[SAMVIL] ✓ MCP 서버 연결됨`
-- ⚠️ 없음 → `[SAMVIL] ⚠️ MCP 없음 (기본 모드)` → 멈추지 않고 바로 진행
+```
+ToolSearch query: "+samvil event"
+```
+
+- 결과 있음 → `[SAMVIL] ✓ MCP 서버 연결됨 (deferred tools loaded)`
+- 결과 없음 → `[SAMVIL] ⚠️ MCP 없음 (기본 모드 — 파일 fallback)` → 멈추지 않고 바로 진행
+
+**원칙**: MCP는 best-effort. 파일 기반 동작이 항상 가능해야 함 (INV-5 Graceful Degradation).
 
 **8. 이전 프로젝트 확인**
 

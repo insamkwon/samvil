@@ -2,6 +2,57 @@
 
 모든 SAMVIL 스킬이 시작 시 따라야 하는 공통 부트 시퀀스.
 
+## 0a. Decision Boundary 표시 (v2.3.0+, P3)
+
+스킬 시작 직후 사용자에게 **종료 조건**을 투명하게 표시:
+
+```
+[SAMVIL] 🔵 Phase: <Stage Name> (Stage N/5)
+[SAMVIL] 종료 조건: <boundary>
+```
+
+### Stage별 boundary
+
+| Stage | 종료 조건 |
+|-------|----------|
+| interview | `ambiguity_score ≤ tier 임계값` (minimal 0.10 / standard 0.05 / thorough 0.02 / full 0.01) |
+| seed | seed.json 스키마 검증 통과 + 사용자 검토 |
+| council | Round 2 판결 수집 완료 |
+| design | blueprint.json 생성 + Gate B (if thorough+) |
+| scaffold | Next.js/Vite/Astro 스캐폴드 빌드 통과 |
+| build | 모든 features의 leaf AC 구현 + lint/typecheck |
+| qa | 3-pass 모두 PASS + evidence 존재 (P1) |
+| evolve | similarity ≥ 0.95 + regression 0 + 5 gates 통과 (P5) |
+| deploy | 사용자 명시적 승인 (P10 — Irreversible action) |
+| retro | feedback.log 기록 완료 |
+
+**원칙**: 사용자는 "언제 끝나는지" 숫자로 알 수 있어야 함 (P3 Decision Boundary).
+
+## 0. MCP Tool Loading (v2.3.0+, P8 Graceful Degradation)
+
+SAMVIL MCP tools는 **deferred tools**로 등록될 수 있어 즉시 사용 불가.
+첫 MCP 호출 전에 `ToolSearch`로 로드:
+
+```
+ToolSearch query: "+samvil <operation>"
+
+Examples:
+- Interview:  "+samvil score"       → score_ambiguity
+- Seed:       "+samvil seed"        → save_seed, validate_seed
+- Council/Design/Scaffold/Build: "+samvil event" → save_event
+- QA:         "+samvil qa"          → save_qa_result
+- Evolve:     "+samvil convergence" → compare_seeds, check_convergence
+- Retro:      "+samvil retro"       → generate_retro
+- Any stage:  "+samvil event"       → save_event (공통)
+```
+
+**판단 로직**:
+1. ToolSearch 결과 있음 → Path A (MCP 사용)
+2. ToolSearch 결과 없음 → **Path B (파일 fallback)** per INV-5
+3. MCP 호출 시 에러 → 1회 재시도 → 실패 시 fallback
+
+**IMPORTANT**: 스킬이 MCP 없이 동작 불가하다고 가정하지 말 것. 파일 기반 fallback이 항상 가능해야 함 (INV-5).
+
 ## 1. 파일 읽기
 
 ```

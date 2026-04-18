@@ -64,6 +64,48 @@ options:
 
 **커스텀 프리셋이 없는 경우**: 이 단계를 건너뛰고 Step 1로 진행
 
+## Step 0.7: Rhythm Guard + Tracks 스캐폴드 (v2.3.0+, P2/P4)
+
+**현재 v2.3.0에서는 스키마 스캐폴드만 준비.** 실제 작동은 v2.4.0 (Phase 2 PATH routing)부터.
+
+### ai_answer_streak 카운터 (P2 Description vs Prescription)
+
+`project.state.json`에 `ai_answer_streak: 0` 필드 초기화.
+
+**규칙** (v2.4.0부터 실제 강제):
+- AI가 코드/manifest에서 자동 답변 → streak +1
+- AI가 웹 리서치로 답변 → streak +1
+- 사용자가 직접 답변 → streak = 0 (reset)
+- **streak ≥ 3**이면 다음 질문은 **무조건 사용자에게** (코드로 답할 수 있어도 강제 PATH 2)
+
+**사용자에게 표시** (Rhythm Guard 발동 시):
+```
+⚠️ [SAMVIL] 연속 3회 자동 확정. 이번 질문은 직접 답변해주세요.
+```
+
+**이유**: AI 독주 방지. 대화는 사람과 해야 함 (Socratic dialectic 원칙).
+
+### interview_tracks 리스트 (P4 Breadth First)
+
+`project.state.json`에 `interview_tracks: []` 초기화.
+
+**규칙** (v2.4.0부터 실제 강제):
+- 인터뷰 시작 시 기능 단위로 tracks 초기화
+- 각 track의 `rounds_focused`, `is_resolved` 추적
+- 한 track에 3라운드 이상 몰리면 자동 리마인드:
+  ```
+  ℹ️ [SAMVIL] 결제 모듈에 집중하는 동안, auth/admin은 아직 미정입니다.
+     계속 파고들까요, 잠시 다른 tracks를 정리할까요?
+  ```
+
+**이유**: Tunnel vision 방지. 한 토픽 편향으로 다른 영역 누락되지 않게.
+
+### 현재 v2.3.0 행동
+
+- 필드만 state-schema에 추가됨 (값은 0/[] 유지)
+- UI/로직 변경 없음
+- **Phase 2에서 실제 강제** (PATH routing 도입과 함께)
+
 ## Step 1: Preset 매칭
 
 앱 아이디어에서 키워드로 매칭. **커스텀 프리셋 > 빌트인 프리셋** 순서로 검색.

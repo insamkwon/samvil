@@ -9,6 +9,15 @@ description: "기존 프로젝트 코드 분석. 구조 파악 → 역방향 see
 
 **모든 대화는 한국어로.** 코드와 기술 용어만 영어.
 
+## MCP Prerequisites (v2.3.0+, P8)
+
+시작 전 ToolSearch로 MCP 도구 로드:
+```
+ToolSearch query: "+samvil event"
+```
+- 결과 있음 → MCP 경로 (create_session, save_event 사용)
+- 결과 없음 → 파일 fallback (`.samvil/events.jsonl` 직접 기록)
+
 ## 언제 사용
 
 - `/samvil` → "기존 프로젝트 개선" 선택 시 자동 호출

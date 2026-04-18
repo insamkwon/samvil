@@ -4,6 +4,36 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [2.3.0] — 2026-04-18 — Phase 1: Quick Wins
+
+Phase 1 of the Ouroboros absorption plan. Additive changes only — no breaking.
+
+### Added
+
+- **Deferred MCP Loading (#14)** — `references/boot-sequence.md` Section 0 추가. 모든 스킬이 자동으로 상속. samvil 오케스트레이터 + samvil-analyze에도 별도 명시.
+- **Icon-based Output Format (#P7)** — `references/output-format.md` 신규. ℹ️/💬/🔍 아이콘으로 AI 행동 출처 구분 (v3 P7 Explicit over Implicit).
+- **Decision Boundary Display (#P3)** — `references/boot-sequence.md` Section 0a. 각 스킬 시작 시 종료 조건을 사용자에게 표시.
+- **Evidence-Mandatory Rule (#P1, 선언만)** — `references/qa-checklist.md` 최상단에 Evidence 필수 섹션 추가. 실제 구현은 v2.5.0 (Phase 3).
+- **Rhythm Guard Scaffold (#02)** — `references/state-schema.json`에 `ai_answer_streak`, `interview_tracks`, `failed_acs` 필드 추가. samvil-interview SKILL에 Step 0.7 규칙 명시. 실제 강제는 v2.4.0 (Phase 2).
+
+### Notes
+
+- 기존 스킬 행동 변화 없음 (문서/스키마 추가만)
+- 실제 강제는 Phase 2+ (PATH routing, Reward Hacking 등)에서 시작
+- v3.0.0 목표까지 12주 로드맵 진행 중
+
+### Files Changed
+
+- `references/boot-sequence.md` (+MCP Loading +Decision Boundary)
+- `references/output-format.md` (신규)
+- `references/qa-checklist.md` (+Evidence-mandatory 섹션)
+- `references/state-schema.json` (+3 필드 스캐폴드)
+- `skills/samvil/SKILL.md` (+ToolSearch in Health Check)
+- `skills/samvil-analyze/SKILL.md` (+MCP Prerequisites)
+- `skills/samvil-interview/SKILL.md` (+Step 0.7 Rhythm Guard scaffold)
+
+---
+
 ## [2.2.0] — 2026-04-18 — Manifesto v3 (Philosophy)
 
 문서 전용 릴리즈. 코드 변경 없음. 철학 명문화 + Ouroboros 흡수 계획 수립.
