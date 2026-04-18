@@ -33,13 +33,21 @@ def validate_seed(seed: dict) -> dict:
 
     Returns dict with 'valid' bool and 'errors' list.
     Uses jsonschema if available, falls back to manual checks.
+
+    v3.0.0 (schema_version starts with "3."): features[i].acceptance_criteria
+    is the SSOT. Root-level `acceptance_criteria` is no longer required;
+    tree leaves inside features satisfy the "at least one AC" guarantee.
     """
     errors = []
 
-    # Required fields (v2: solution_type added)
+    is_v3 = str(seed.get("schema_version", "")).startswith("3.")
+
+    # Required fields
     required = ["name", "description", "solution_type", "tech_stack", "core_experience",
-                "features", "acceptance_criteria", "constraints",
-                "out_of_scope", "version"]
+                "features", "constraints", "out_of_scope", "version"]
+    if not is_v3:
+        # v2.x kept a root-level acceptance_criteria list
+        required.append("acceptance_criteria")
     for field in required:
         if field not in seed:
             errors.append(f"Missing required field: {field}")
@@ -78,9 +86,31 @@ def validate_seed(seed: dict) -> dict:
             errors.append(f"features[{i}].priority must be >= 1")
 
     # acceptance_criteria
-    ac = seed.get("acceptance_criteria", [])
-    if not ac:
-        errors.append("acceptance_criteria must have at least 1 item")
+    if is_v3:
+        # v3: at least one AC across all features (tree leaves count)
+        total_leaves = 0
+        for feat in features:
+            acs = feat.get("acceptance_criteria", [])
+            for ac in acs:
+                if isinstance(ac, dict):
+                    # count leaves (nodes with no children)
+                    if not ac.get("children"):
+                        total_leaves += 1
+                    else:
+                        total_leaves += sum(
+                            1 for child in ac.get("children", [])
+                            if not child.get("children")
+                        )
+                else:
+                    total_leaves += 1
+        if total_leaves == 0:
+            errors.append(
+                "v3 seed must have at least 1 AC leaf across features[].acceptance_criteria"
+            )
+    else:
+        ac = seed.get("acceptance_criteria", [])
+        if not ac:
+            errors.append("acceptance_criteria must have at least 1 item")
 
     # core_experience — supports two patterns: screen and core_flow
     ce = seed.get("core_experience", {})

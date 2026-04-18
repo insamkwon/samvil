@@ -44,22 +44,24 @@ Manifesto: see `~/docs/ouroboros-absorb/MANIFESTO-v3.md`
 | **P9** | Circuit of Self-Correction | 실패→학습→재시도 루프 내재화. |
 | **P10** | Reversibility Awareness | Reversible은 빠르게, Irreversible은 사용자 확인. |
 
-## Skills (13개, 체인 순서)
+## Skills (15개, 체인 순서)
 
 ```
-samvil          ← 오케스트레이터 (Health Check → Tier 선택 → 체인 시작)
-samvil-interview ← 소크라틱 인터뷰 (preset 매칭, Phase 2.5, Zero-Question)
+samvil           ← 오케스트레이터 (Health Check → Tier 선택 → 체인 시작)
+samvil-interview ← 엔지니어링 중심 소크라틱 인터뷰 (preset 매칭, Phase 2.5, Zero-Question)
+samvil-pm-interview ← [v3.0.0] PM 중심 인터뷰 (vision → epics → tasks → ACs)
 samvil-seed      ← 인터뷰 → seed.json 변환
 samvil-council   ← Council Gate A (2-round: Research → Review)
 samvil-design    ← blueprint.json 생성 + Gate B
 samvil-scaffold  ← Next.js 14 + shadcn/ui 프로젝트 생성
-samvil-build     ← 기능 구현 (sequential or parallel)
-samvil-qa        ← 3-pass 검증 (Mechanical → Functional → Quality)
+samvil-build     ← [v3.0.0] AC Tree leaf-level 기능 구현
+samvil-qa        ← [v3.0.0] Tree aggregation 기반 3-pass 검증
 samvil-deploy    ← QA PASS 후 배포 (Vercel/Railway/Coolify)
 samvil-evolve    ← 시드 진화 (Wonder → Reflect → 수렴)
 samvil-retro     ← 하네스 자체 개선 제안
 samvil-analyze   ← 기존 프로젝트 분석 (Brownfield 모드)
-samvil-update    ← GitHub에서 최신 버전 업데이트
+samvil-doctor    ← 환경/플러그인 진단
+samvil-update    ← [v3.0.0] GitHub 업데이트 + --migrate 지원
 ```
 
 ## Architectural Invariants (절대 규칙)
@@ -218,6 +220,56 @@ chore: 설정, 버전, 구조 변경
 4. **배포 준비** — next.config.mjs에 output:'standalone'. QA 완료 후 Vercel/Railway/수동 배포 옵션 제시.
 5. **Council 간접 토론** — Round 1 결과에서 논쟁점(consensus/debate/blind_spots) 추출 → Round 2 prompt에 주입.
 
+## v3.0.0 변경 내역 (v2.7.0 → v3.0.0) — 🌳 AC Tree Era (BREAKING)
+
+### ⚠️ Breaking changes
+
+- `seed.features[].acceptance_criteria`가 tree 구조 `{id, description, children[], status, evidence[]}`로 변경
+- `seed.schema_version` 필수 (기본 "3.0"). v2.x seed는 samvil-build 진입 시 자동 migrate (backup: `project.v2.backup.json`)
+- Build/QA가 leaf 단위 순회 — flat v2 AC는 single-leaf branches로 migration됨
+
+### T1 — AC Tree Build/QA (4 commits)
+
+- `ac_tree.py`: `is_branch_complete`, `all_done`, `next_buildable_leaves`, `tree_progress` 헬퍼 추가
+- `migrations.py`: `migrate_seed_v2_to_v3` + `migrate_with_backup` (idempotent, `.v2.backup.json` 자동)
+- MCP tool 5개 신규: `next_buildable_leaves`, `tree_progress`, `update_leaf_status`, `migrate_seed`, `migrate_seed_file`
+- `samvil-build`: Phase B-Tree가 기존 feature-batch dispatch 대체 (legacy Phase B는 참고용으로 유지)
+- `samvil-qa`: Pass 2가 leaves 순회 + `aggregate_status`로 branch 집계 + tree 렌더링
+- `samvil-update`: Step 7 v2 seed 감지 + `--migrate` 플래그
+
+### T2 — LLM Dependency Planning
+
+- `dependency_analyzer.py`: Kahn's toposort + cycle detection + serial_only 처리
+- `analyze_ac_dependencies` MCP tool
+- `samvil-build` Phase B-Tree Step 2.5: tier ≥ thorough & ≥5 ACs일 때 plan 적용
+
+### T3 — Shared Rate Budget
+
+- `rate_budget.py`: 파일 기반 cooperative slot tracker (`.samvil/rate-budget.jsonl`)
+- MCP tool 4개: `rate_budget_acquire/release/stats/reset`
+
+### T4 — PM Interview Mode
+
+- 신규 스킬 `samvil-pm-interview` (vision → users → metrics → epics → tasks → ACs)
+- `pm_seed.py`: `validate_pm_seed` + `pm_seed_to_eng_seed` (epics/tasks → features[])
+- `references/pm-seed-schema.md` 작성
+- MCP tool 2개: `validate_pm_seed`, `pm_seed_to_eng_seed`
+
+### Validation 수정 (v3 호환)
+
+- `seed_manager.validate_seed`: `schema_version`가 "3."로 시작하면 root-level `acceptance_criteria` 미필수. 대신 `features[i].acceptance_criteria`의 leaf 개수로 최소 1개 AC 보장 체크.
+
+### 테스트
+
+- 254 → 315 (+61): 24 tree+migration, 14 dependency, 8 rate, 10 PM, 5 v3 seed validation
+
+### Migration
+
+- `/samvil:update --migrate`로 CWD 프로젝트 seed 변환 (standalone path)
+- `references/migration-v2-to-v3.md` 문서 참조
+
+---
+
 ## v2.2.0 변경 내역 (v2.1.0 → v2.2.0) — Manifesto v3 (Philosophy)
 
 1. **Identity 명문화** — 5가지 정체성 (Solo Developer / Universal Builder / Robustness First / Converge-then-Evolve / Self-Contained).
@@ -257,7 +309,7 @@ samvil/
 ├── .claude-plugin/plugin.json  # 플러그인 매니페스트 + 버전
 ├── CLAUDE.md                   # 이 파일 (프로젝트 규칙)
 ├── README.md                   # 사용자 가이드 (한국어)
-├── skills/                     # 13개 스킬
+├── skills/                     # 15개 스킬
 ├── agents/                     # 37개 에이전트 페르소나
 ├── references/                 # 참조 문서
 │   ├── app-presets.md          # 10개 앱 유형 프리셋
