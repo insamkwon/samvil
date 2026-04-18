@@ -80,9 +80,10 @@ def test_cli_commands_are_valid(matrix):
         assert cli.startswith(("npx ", "npm ")), (
             f"Stack '{stack}' cli_command must start with npx or npm: {cli}"
         )
-        # Must contain a versioned package (@x.y.z or @scope/pkg@x.y.z)
-        assert re.search(r"@\d+\.\d+", cli), (
-            f"Stack '{stack}' cli_command must include pinned version: {cli}"
+        # Must contain at least a major-version pin (@X or @X.Y or @X.Y.Z).
+        # Note: some CLI scaffolders (e.g. create-vite) only accept major pins.
+        assert re.search(r"@\d+", cli), (
+            f"Stack '{stack}' cli_command must include a pinned version (at least major): {cli}"
         )
 
 
