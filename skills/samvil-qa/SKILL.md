@@ -1157,11 +1157,17 @@ Apply the verdict matrix from `references/qa-checklist.md`:
 Pass 1 (Mechanical): PASS ✓ / FAIL ✗
 Pass 2 (Functional):
   - "<AC 1>" → PASS ✓
-  - "<AC 2>" → FAIL ✗
+  - "<AC 2>" → SATISFIED_EXTERNALLY ⏭ (Pre-existing: src/auth.ts:15)
+  - "<AC 3>" → FAIL ✗
   ...
 Pass 3 (Quality): PASS ✓ / FAIL ✗
 
 Overall Verdict: PASS / REVISE / FAIL
+
+SATISFIED_EXTERNALLY handling (v2.6.0+):
+  - Score: 1.0 (PASS equivalent)
+  - Notes: "Pre-existing (<evidence>)"
+  - Counted as passed in aggregation
 ```
 
 ## Event Log (MCP 필수)

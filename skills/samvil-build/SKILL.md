@@ -469,6 +469,23 @@ Batch 4: Dependent P2 features (sequential)
 
 Build features one at a time (same as v1):
 
+**Skip Externally Satisfied ACs (v2.6.0+, #08):**
+
+Before building, check for externally satisfied ACs:
+
+```
+result = mcp__samvil_mcp__load_external_satisfactions(project_path=<CWD>)
+if result is not empty:
+    For each feature's AC:
+        if ac.external_satisfied == true:
+            emit: "⏭ [SAMVIL] AC '{ac.description}' SATISFIED_EXTERNALLY — {ac.external_evidence}"
+            MCP: save_event(event_type="ac_satisfied_externally", data={"ac": ac.description, "evidence": ac.external_evidence})
+            skip this AC
+```
+
+If ALL ACs in a feature are externally satisfied → skip entire feature.
+If SOME ACs are satisfied → build only unsatisfied ACs.
+
 **For each feature:**
 
 1. **Re-read Context Kernel (INV-1)** — Re-read `project.seed.json` + `project.state.json` before every feature. Context may have been compressed — files are the truth. **Also read `.samvil/fix-log.md`** (if exists) to prevent repeating the same errors.

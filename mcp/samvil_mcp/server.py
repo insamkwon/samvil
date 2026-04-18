@@ -579,6 +579,56 @@ async def semantic_check(code: str, context_hint: str = "") -> str:
         return json.dumps({"risk_level": "LOW", "error": str(e)})
 
 
+# ── Skip Externally Satisfied ACs tools (v2.6.0, #08) ────────
+
+
+@mcp.tool()
+async def mark_externally_satisfied(seed_json: str, project_path: str) -> str:
+    """Mark ACs that are already satisfied by existing code (from analysis.json).
+
+    Args:
+        seed_json: Full seed as JSON string
+        project_path: Project root path containing .samvil/analysis.json
+
+    Returns: Updated seed JSON with external_satisfied annotations
+    """
+    try:
+        from .skip_ac import mark_seed_with_external
+        seed = json.loads(seed_json)
+        seed = mark_seed_with_external(seed, project_path)
+        return json.dumps(seed)
+    except Exception as e:
+        _log_mcp_health("fail", "mark_externally_satisfied", str(e))
+        return seed_json  # Return unchanged on failure (INV-5)
+
+
+@mcp.tool()
+async def load_external_satisfactions(project_path: str) -> str:
+    """Load existing feature matches from .samvil/analysis.json.
+
+    Args:
+        project_path: Project root path
+
+    Returns: JSON array of ExternalSatisfaction objects
+    """
+    try:
+        from .skip_ac import load_analysis
+        sats = load_analysis(project_path)
+        return json.dumps([
+            {
+                "ac_description": s.ac_description,
+                "evidence": s.evidence,
+                "commit": s.commit,
+                "reason": s.reason,
+                "detected_at": s.detected_at,
+            }
+            for s in sats
+        ])
+    except Exception as e:
+        _log_mcp_health("fail", "load_external_satisfactions", str(e))
+        return json.dumps([])
+
+
 # ── Phase 4: Evolve Gates tools (v2.5.0) ──────────────────────
 
 
