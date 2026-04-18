@@ -1245,6 +1245,38 @@ async def rate_budget_reset(budget_path: str) -> str:
         return json.dumps({"error": str(e)})
 
 
+# ── v3.0.0 T4: PM Interview Mode ──────────────────────────────
+
+
+@mcp.tool()
+async def validate_pm_seed(pm_seed_json: str) -> str:
+    """Validate a PM seed structure. Returns {valid, errors}."""
+    try:
+        from .pm_seed import validate_pm_seed as _validate
+        pm_seed = json.loads(pm_seed_json)
+        errors = _validate(pm_seed)
+        return json.dumps({"valid": not errors, "errors": errors})
+    except Exception as e:
+        _log_mcp_health("fail", "validate_pm_seed", str(e))
+        return json.dumps({"valid": False, "errors": [str(e)]})
+
+
+@mcp.tool()
+async def pm_seed_to_eng_seed(pm_seed_json: str) -> str:
+    """Convert a PM seed to an engineering seed (features[]).
+
+    Output includes schema_version: "3.0" and preserves vision / users / metrics.
+    """
+    try:
+        from .pm_seed import pm_seed_to_eng_seed as _convert
+        pm_seed = json.loads(pm_seed_json)
+        eng_seed = _convert(pm_seed)
+        return json.dumps(eng_seed)
+    except Exception as e:
+        _log_mcp_health("fail", "pm_seed_to_eng_seed", str(e))
+        return json.dumps({"error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 
