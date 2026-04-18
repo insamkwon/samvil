@@ -1,6 +1,6 @@
-# SAMVIL — AI 바이브코딩 하네스 `v2.1.0`
+# SAMVIL — AI 바이브코딩 하네스 `v2.2.0`
 
-> **한 줄 입력 → 완성된 앱/스크립트/게임 출력**
+> **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
 > "뿌리의 힘으로 벼려내다" (Sam=인삼 + Vil=모루)
 
@@ -12,7 +12,17 @@
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
 
-**v2.0 "Universal Builder"** — 웹앱, 자동화, 게임, 모바일, 대시보드 5가지 타입을 한 줄로 감지해서 자동 생성.
+**v2.2 "Manifesto v3"** — 1인 개발자를 위한 범용 하네스. 견고성(Robustness) 우선, 완성 후 자가 진화(Converge-then-Evolve).
+
+## 🧬 정체성 (Identity)
+
+1. **Solo Developer First** — 1인 개발자 타겟
+2. **Universal Builder** — 웹앱/자동화/게임/모바일/대시보드 5가지
+3. **Robustness First** — 견고성 > 속도
+4. **Converge, Then Evolve** — 3-level 완성 (Build → QA → Evolve 수렴)
+5. **Self-Contained** — 단독 하네스 (외부 MCP Bridge는 future)
+
+상세 철학: [Manifesto v3](~/docs/ouroboros-absorb/MANIFESTO-v3.md) 참조.
 
 ---
 

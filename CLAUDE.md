@@ -1,17 +1,48 @@
 # SAMVIL — AI Vibe-Coding Harness
 
 > "Shape it on the anvil, root it like ginseng."
+> "뿌리의 힘으로 벼려내다" (Sam=인삼 + Vil=모루)
 
 ## What is this?
 
-SAMVIL is a CC Plugin that generates full web applications from a one-line prompt.
+SAMVIL is a CC Plugin that generates full applications (web/automation/game/mobile/dashboard) from a one-line prompt. Built for **1인 개발자**. Prioritizes **robustness over speed** via self-correcting convergence loops.
 
 ```
 /samvil "할일 관리 앱"
-  → Interview → Seed → [Council] → Design → Scaffold → Build → QA → [Evolve] → Retro
+  → Interview → Seed → [Council] → Design → Scaffold → Build → QA → Evolve → Retro
+  
+Completion levels:
+  L1: Build passes      (npm run build success)
+  L2: QA passes         (3-pass verification + evidence)
+  L3: Evolve converges  (first cycle + 5 gates passed)
+  Optional: Deploy
 ```
 
 GitHub: https://github.com/insamkwon/samvil
+Manifesto: see `~/docs/ouroboros-absorb/MANIFESTO-v3.md`
+
+## 🧬 Identity (v3)
+
+1. **Solo Developer First** — 1인 개발자 타겟. 팀 feature는 범위 밖.
+2. **Universal Builder** — 5가지 solution_type (web/automation/game/mobile/dashboard).
+3. **Robustness First** — 견고성 > 속도. tier로 trade-off 조절.
+4. **Converge, Then Evolve** — 3-level 완성 (Build / QA / Evolve).
+5. **Self-Contained** — 단독 하네스. 외부 MCP Bridge는 future.
+
+## ⚖️ 10 Core Principles (v3)
+
+| # | 원칙 | 의미 |
+|---|------|------|
+| **P1** | Evidence-based Assertions | 모든 PASS는 file:line 증거 필수. 없으면 FAIL. |
+| **P2** | Description vs Prescription | 사실(manifest)은 AI, 결정(목표/AC)은 사용자. |
+| **P3** | Decision Boundary | "충분함"을 숫자로 명시. 감으로 결정 금지. |
+| **P4** | Breadth First, Depth Second | tracks 리스트로 인터뷰 편향 방지. |
+| **P5** | Regression Intolerance | 이전 세대 대비 퇴화 감지 시 수렴 거부. |
+| **P6** | Fail-Fast, Learn Later | 빠른 포기 + 다음 cycle의 Wonder 재료로. |
+| **P7** | Explicit over Implicit | 아이콘으로 AI 행동 표시 (ℹ️ 💬 🔍). |
+| **P8** | Graceful Degradation | 일부 실패해도 전체 파이프라인 계속. |
+| **P9** | Circuit of Self-Correction | 실패→학습→재시도 루프 내재화. |
+| **P10** | Reversibility Awareness | Reversible은 빠르게, Irreversible은 사용자 확인. |
 
 ## Skills (13개, 체인 순서)
 
@@ -33,10 +64,11 @@ samvil-update    ← GitHub에서 최신 버전 업데이트
 
 ## Architectural Invariants (절대 규칙)
 
-1. **INV-1: File is SSOT** — seed.json + state.json을 디스크에서 읽는다. 대화 컨텍스트 의존 금지.
+1. **INV-1: File is SSOT** — seed.json + state.json + handoff.md + qa-results.json + events.jsonl 5개 파일이 truth. 대화 컨텍스트 의존 금지.
 2. **INV-2: Build logs to files** — `npm run build > .samvil/build.log 2>&1`. 에러 시에만 읽기.
 3. **INV-3: Interview to file** — interview-summary.md로 저장. seed가 파일에서 읽음.
 4. **INV-4: Chain pattern** — 각 스킬이 다음 스킬을 Skill tool로 invoke. state.json으로 복구 가능.
+5. **INV-5: Graceful Degradation** — 일부 컴포넌트 실패해도 전체 파이프라인 계속. MCP 실패 시 파일 fallback. (v2.2.0 승격, P8 철학 반영)
 
 ## Agent 사용 규칙
 
@@ -50,8 +82,39 @@ samvil-update    ← GitHub에서 최신 버전 업데이트
 1. **Seed is SSOT** — 모든 단계가 seed.json을 먼저 읽음
 2. **Build must never break** — npm run build가 항상 통과해야 함
 3. **Circuit Breaker** — MAX_RETRIES=2, 그 후 중단하고 사용자에게 보고
-4. **User Checkpoints** — 사용자 승인 없이 다음 단계 진행 금지
+4. **User Checkpoints** — 인터뷰/시드 단계는 checkpoint 필수. 그 이후는 실패 시에만 개입 (자가복구 지향).
 5. **한국어 대화** — 모든 사용자 대화는 한국어. 코드/커밋/기술 용어만 영어.
+6. **Evidence Mandatory (v3)** — 모든 PASS 판정에 file:line 증거 필수 (P1).
+7. **Description vs Prescription (v3)** — 기술 스택은 AI 자동 확인, 비즈니스 결정은 사용자 (P2, N3).
+8. **Stub = FAIL (v3)** — Stub/Mock/하드코딩 자동 탐지 시 FAIL 처리 (Reward Hacking Detection, E1).
+
+## Decision Boundaries (수치 기준)
+
+| 단계 | 종료 조건 |
+|------|----------|
+| Interview | `ambiguity_score ≤ tier 임계값` (minimal 0.10 / standard 0.05 / thorough 0.02 / full 0.01) |
+| Build | `npm run build` 성공 + typecheck 통과 |
+| QA | 3-pass 모두 PASS + evidence 존재 |
+| Evolve 수렴 | similarity ≥ 0.95 + regression 0 + 5 gates 통과 |
+| Circuit Breaker | 동일 실패 2회 연속 |
+| Stall Detection | 5분간 이벤트 없음 |
+| Rhythm Guard | AI 자동답변 3회 연속 → 다음은 강제 사용자 개입 |
+
+## Error Philosophy (K3)
+
+| 유형 | 취급 | 예시 |
+|------|------|------|
+| **Mechanical 실패** | 버그 (즉시 수정) | build 실패, lint, typecheck |
+| **Semantic 실패** | 정보 (Wonder 입력) | AC FAIL, Reward Hacking, 의도 불일치 |
+
+## Anti-Patterns (하지 말 것)
+
+1. **Stub/Mock/하드코딩으로 AC 통과** → Reward Hacking이 자동 FAIL
+2. **Evidence 없는 PASS 선언** → P1 위반, 자동 FAIL
+3. **Blind convergence** → 5 gates 중 하나라도 실패 시 수렴 거부 (P5)
+4. **사용자 대신 결정** → P2 위반. Rhythm Guard로 방어.
+5. **요청 범위 외 코드 수정** → Zero-Refactor Rule (동호님 개인 CLAUDE.md 상속)
+6. **Irreversible action without confirmation** → Deploy/push는 사용자 승인 필수 (P10)
 
 ## Target Output
 
@@ -154,6 +217,21 @@ chore: 설정, 버전, 구조 변경
 3. **실제 연동 기본화** — 인터뷰에 DB/Auth/API 질문 추가. Supabase 클라이언트 자동 설정. 스텁/하드코딩 금지. .env.example 자동 생성.
 4. **배포 준비** — next.config.mjs에 output:'standalone'. QA 완료 후 Vercel/Railway/수동 배포 옵션 제시.
 5. **Council 간접 토론** — Round 1 결과에서 논쟁점(consensus/debate/blind_spots) 추출 → Round 2 prompt에 주입.
+
+## v2.2.0 변경 내역 (v2.1.0 → v2.2.0) — Manifesto v3 (Philosophy)
+
+1. **Identity 명문화** — 5가지 정체성 (Solo Developer / Universal Builder / Robustness First / Converge-then-Evolve / Self-Contained).
+2. **10대 원칙 도입** — P1~P10 (Evidence / Description vs Prescription / Decision Boundary / Breadth First / Regression Intolerance / Fail-Fast+Learn / Explicit / Graceful Degradation / Self-Correction / Reversibility).
+3. **INV-5 Graceful Degradation 승격** — 기존 INV-7(내부)을 INV-5로 정식 승격. 전 단계 적용.
+4. **3-Level Completion 정의** — L1 Build / L2 QA / L3 Evolve 수렴. Deploy는 optional.
+5. **Decision Boundaries 수치화** — 각 단계 종료 조건 명시 (ambiguity, similarity, timeout 등).
+6. **Error Philosophy (K3)** — Mechanical=버그, Semantic=정보 (Wonder 입력).
+7. **Anti-Patterns 명시** — Stub=FAIL, Evidence 없는 PASS=FAIL, Blind convergence 금지 등.
+8. **흡수 계획** — Ouroboros v0.28.7 참고, 15개 기능 순차 흡수 (ROADMAP.md 참조).
+
+**참고 문서**: `~/docs/ouroboros-absorb/` (MANIFESTO-v3.md, IMPLEMENTATION-PLAN.md, ROADMAP.md, 15개 feature 문서)
+
+**주의**: v2.2.0은 문서 개정만. 코드 변경은 v2.3.0(Sprint 1 Quick Wins)부터 시작.
 
 ## v2.1.0 변경 내역 (v2.0.0 → v2.1.0) — Handoff & UX Improvements
 
