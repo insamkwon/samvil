@@ -79,21 +79,47 @@ du -sh /Users/kwondongho/dev/samvil/.samvil 2>/dev/null || echo "project .samvil
 tail -10 ~/.samvil/mcp-health.jsonl 2>/dev/null || echo "No mcp-health log"
 ```
 
+### 9. v3.0.0 tool coverage
+
+Verify every v3 tool is registered on the server (not just the 9 core
+tools that older doctor versions checked):
+
+```bash
+cd /Users/kwondongho/dev/samvil/mcp && source .venv/bin/activate && python3 -c "
+from samvil_mcp.server import mcp
+import asyncio
+tools = {t.name for t in asyncio.run(mcp.list_tools())}
+expected = {
+  'next_buildable_leaves','tree_progress','update_leaf_status',
+  'migrate_seed','migrate_seed_file',
+  'analyze_ac_dependencies',
+  'rate_budget_acquire','rate_budget_release','rate_budget_stats','rate_budget_reset',
+  'validate_pm_seed','pm_seed_to_eng_seed',
+}
+missing = expected - tools
+print('v3 tools present:', len(expected - missing), '/', len(expected))
+if missing: print('MISSING:', sorted(missing))
+"
+```
+
+Expect: `v3 tools present: 12 / 12`, no `MISSING:` line.
+
 ## Output Format
 
 ```
-[SAMVIL Doctor v2.7.0]
+[SAMVIL Doctor v3.0.0]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ✓ Node.js v20.x.x
 ✓ npm v10.x.x
 ✓ Python 3.12.x
 ✓ venv OK
-✓ Version sync: 2.7.0
-✓ MCP tests: 254 passed
+✓ Version sync: 3.0.0
+✓ MCP tests: 340 passed
 ✓ MCP server responsive
 ✓ Plugin cache: <path> (<N> .py files)
 ✓ Disk: ~/.samvil <size>
+✓ v3 tools: 12 / 12 registered
 ⚠ MCP errors: <count> in last 24h
   - <error details>
 

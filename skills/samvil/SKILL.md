@@ -568,9 +568,26 @@ mcp__samvil_mcp__save_event(
 
 **MCP Event Rule + Graceful Degradation:** See `references/graceful-degradation.md` for Dual-Write Pattern and MCP fallback rules.
 
-Invoke the Skill tool: `samvil-interview`
+### Interview mode selection (v3.0.0+)
 
-The chain continues from there — each skill invokes the next (INV-4).
+Two interview paths exist. Pick based on the user's intent in the input
+message (one-line prompt to `/samvil`):
+
+- **PM mode** — product/vision language: "MVP", "vision", "user
+  segments", "metrics", "epics", "PM mode", "/samvil pm ...", or the user
+  is clearly a founder/PM rather than an engineer.
+  → Invoke the Skill tool with skill: `samvil-pm-interview`.
+  It collects vision → users → metrics → epics → tasks → ACs and writes
+  both `project.pm-seed.json` and `project.seed.json` (via
+  `pm_seed_to_eng_seed`, defaults filled so validate_seed passes).
+
+- **Engineering mode** (default) — feature/behavior language, or no PM
+  signal detected.
+  → Invoke the Skill tool: `samvil-interview`.
+
+If the request is ambiguous, default to engineering mode.
+
+The chain continues from whichever interview skill ran — each skill invokes the next (INV-4).
 
 **Metrics Tracking (INV-5):** See `references/metrics-tracking.md` for stage metrics recording rules.
 

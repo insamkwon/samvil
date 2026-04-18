@@ -156,7 +156,21 @@ Apply reflect-proposer's recommendations to create seed v(N+1):
    mkdir -p ~/dev/<seed.name>/seed_history
    cp ~/dev/<seed.name>/project.seed.json ~/dev/<seed.name>/seed_history/v${N}.json
    ```
-3. Apply proposed changes
+3. Apply proposed changes — **preserve AC tree structure (v3.0.0+)**:
+   - If the current seed has `schema_version` starting with `"3."`:
+     - Keep `features[].acceptance_criteria[]` as tree nodes
+       (`{id, description, children[], status, evidence}`). Never collapse
+       to flat strings.
+     - Adding an AC → append a new leaf with a fresh `id` (e.g.
+       `AC-<feature>-<next-idx>`), `children: []`, `status: "pending"`,
+       `evidence: []`.
+     - Splitting an AC into sub-ACs → convert the target leaf into a
+       branch by populating `children[]` with new leaf nodes; the branch
+       itself loses its terminal status (becomes `pending`).
+     - Removing an AC → drop the node (and any children) entirely.
+     - **Never** drop `schema_version` on evolve; preserve the `"3.x"` tag.
+   - If the seed is v2 (missing or `"2.*"` schema_version), do not
+     migrate during evolve — evolve is idempotent on schema version.
 4. Increment version: `version: N+1`
 4. **MCP (best-effort):** Validate evolved seed:
    ```

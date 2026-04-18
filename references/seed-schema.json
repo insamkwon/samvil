@@ -1,12 +1,17 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "samvil://seed-schema/v2",
+  "$id": "samvil://seed-schema/v3",
   "title": "SAMVIL Seed Schema",
-  "description": "Immutable specification for SAMVIL project generation. Version starts at 1, increments on evolve.",
+  "description": "Immutable specification for SAMVIL project generation. v3.0.0 introduces AC Tree structure; root-level acceptance_criteria is optional when schema_version starts with \"3.\" — tree leaves inside features[] satisfy the \"at least 1 AC\" guarantee.",
   "type": "object",
-  "required": ["name", "description", "solution_type", "tech_stack", "core_experience", "features", "acceptance_criteria", "constraints", "out_of_scope", "version"],
-  "additionalProperties": false,
+  "required": ["name", "description", "solution_type", "tech_stack", "core_experience", "features", "constraints", "out_of_scope", "version"],
+  "additionalProperties": true,
   "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+",
+      "description": "Major version governs validation path (\"3.x\" → tree validation; missing or \"2.*\" → legacy root-AC path)."
+    },
     "name": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",

@@ -527,6 +527,7 @@ GAP (누락 가능성):
   "name": "<project-name>",
   "description": "<package.json description 또는 추론>",
   "mode": "web",
+  "schema_version": "3.0",
   "tech_stack": {
     "framework": "<감지된 프레임워크>",
     "ui": "<감지된 UI 라이브러리>",
@@ -539,9 +540,22 @@ GAP (누락 가능성):
     "key_interactions": ["<감지된 인터랙션>"]
   },
   "features": [
-    { "name": "<감지된 기능>", "priority": 1, "independent": true, "status": "existing" }
+    {
+      "name": "<감지된 기능>",
+      "priority": 1,
+      "independent": true,
+      "status": "existing",
+      "acceptance_criteria": [
+        {
+          "id": "AC-<feature>-1",
+          "description": "<기존 기능 기반 AC>",
+          "children": [],
+          "status": "pass",
+          "evidence": ["<파일:줄번호>"]
+        }
+      ]
+    }
   ],
-  "acceptance_criteria": ["<기존 기능 기반 AC>"],
   "constraints": ["<감지된 제약>"],
   "out_of_scope": [],
   "version": 1,
@@ -554,7 +568,10 @@ GAP (누락 가능성):
 }
 ```
 
-**주의: features에 `"status": "existing"` 추가** — 기존에 있는 기능과 새로 추가할 기능 구분.
+**주의 (v3.0.0+):**
+- `schema_version: "3.0"` 필수 — 없으면 다음 실행 때 auto-migration이 백업을 생성한다.
+- Brownfield에서 역생성하는 AC는 **이미 구현된 기능** 이므로 `status: "pass"`로 시작하고 `evidence`에 file:line을 채운다. 새로 추가할 AC만 `status: "pending"`.
+- `features`에 `"status": "existing"`를 유지해서 기존 기능과 새로 추가할 기능 구분.
 
 ## Step 6: 유저 검토
 

@@ -68,6 +68,13 @@ From the files above, extract:
 | **Build failure rate** | **metrics.json: stages.build (features_total - features_passed) / features_total** |
 | **Total pipeline duration** | **metrics.json: total_duration_ms** |
 | **Agents spawned per stage** | **metrics.json: stages.\*.agents_spawned** |
+| **v3 AC leaf stats** | **events.jsonl: count of `ac_leaf_complete` events, grouped by `data.status`** |
+| **v3 feature tree progress** | **events.jsonl: last `feature_tree_complete` per feature (`passed`, `failed`, `total_leaves`)** |
+| **v3 rate budget usage** | **events.jsonl: `rate_budget_summary` events — peak, total_acquired per feature** |
+| **v3 interrupted sessions** | **events.jsonl: any `rate_budget_stale_recovery` event with its `previous.active` count** |
+| **v3 schema migration** | **events.jsonl: `seed_migrated` events** |
+
+If the run was a v3 tree build (schema_version starts with "3." in project.seed.json), surface these v3 metrics in the Observability block alongside stage durations. Absence of leaf-level events on a v3 seed means Phase B-Tree didn't fire — flag this as a REGRESSION in the suggestion list.
 
 #### Step 1b: 관측성 대시보드 분석
 
