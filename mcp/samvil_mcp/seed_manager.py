@@ -87,22 +87,21 @@ def validate_seed(seed: dict) -> dict:
 
     # acceptance_criteria
     if is_v3:
-        # v3: at least one AC across all features (tree leaves count)
+        # v3: at least one AC leaf (recursive walk, any depth up to MAX_DEPTH)
+        from .ac_tree import ACNode, leaves as _tree_leaves
         total_leaves = 0
         for feat in features:
-            acs = feat.get("acceptance_criteria", [])
-            for ac in acs:
+            for ac in feat.get("acceptance_criteria", []):
                 if isinstance(ac, dict):
-                    # count leaves (nodes with no children)
-                    if not ac.get("children"):
-                        total_leaves += 1
-                    else:
-                        total_leaves += sum(
-                            1 for child in ac.get("children", [])
-                            if not child.get("children")
-                        )
+                    try:
+                        node = ACNode.from_dict(ac)
+                        total_leaves += len(_tree_leaves(node))
+                    except Exception:
+                        # malformed node — still count as contributing if description present
+                        if ac.get("description"):
+                            total_leaves += 1
                 else:
-                    total_leaves += 1
+                    total_leaves += 1  # flat string (pre-migration edge case)
         if total_leaves == 0:
             errors.append(
                 "v3 seed must have at least 1 AC leaf across features[].acceptance_criteria"

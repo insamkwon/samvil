@@ -546,12 +546,15 @@ Before iterating ACs, convert each feature's `acceptance_criteria` into an AC tr
    ```
    # run the Playwright / runtime flow described below on leaf.description
    status = "pass" if evidence confirms behavior else "fail"
-   tree_json = mcp__samvil_mcp__update_leaf_status(
+   update_json = mcp__samvil_mcp__update_leaf_status(
        ac_tree_json=tree_json,
        leaf_id=leaf.id,
        status=status,
        evidence_json=json.dumps([screenshot_path, ...]),
    )
+   u = json.loads(update_json)
+   assert u["found"] is True, f"leaf {leaf.id} not in tree"
+   tree_json = json.dumps(u["tree"])   # ← v3.0.0 return shape: {found, tree, leaf_id, status}
    mcp__samvil_mcp__save_event(
        event_type="ac_verdict",
        data='{"feature":"<name>","leaf_id":"<id>","status":"<status>"}'

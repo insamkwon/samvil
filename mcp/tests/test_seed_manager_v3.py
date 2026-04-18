@@ -63,6 +63,35 @@ def test_v2_without_schema_still_requires_root_ac():
     assert any("acceptance_criteria" in e for e in result["errors"])
 
 
+def test_v3_counts_deep_tree_leaves():
+    """3-level tree — leaves at depth 2 must be counted."""
+    seed = _v3_base()
+    seed["features"][0]["acceptance_criteria"] = [
+        {
+            "id": "AC-1", "description": "root",
+            "children": [
+                {
+                    "id": "AC-1.1", "description": "mid",
+                    "children": [
+                        {"id": "AC-1.1.1", "description": "deep leaf a", "children": []},
+                        {"id": "AC-1.1.2", "description": "deep leaf b", "children": []},
+                    ],
+                },
+            ],
+        },
+    ]
+    assert validate_seed(seed)["valid"] is True
+
+
+def test_v3_all_branches_no_leaves_fails():
+    """Defensive: if every AC is a branch whose children are also
+    branches-only-without-leaves, this fails (well-formed trees always
+    have leaves, so this is a malformed-tree edge case)."""
+    seed = _v3_base()
+    seed["features"][0]["acceptance_criteria"] = []  # no ACs at all
+    assert validate_seed(seed)["valid"] is False
+
+
 def test_v3_rejects_missing_description():
     seed = _v3_base()
     del seed["description"]

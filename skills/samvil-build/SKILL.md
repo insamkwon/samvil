@@ -403,10 +403,14 @@ llm_deps = []
 if tier == "full":
     llm_deps = <spawn Haiku/Sonnet call with acs as prompt; parse JSON>
 
-# 3. Build the plan.
+# 3. Build the plan. llm_mode default "augment" keeps structured deps
+#    and adds LLM-inferred ones. Pass llm_mode="replace" only when the
+#    LLM's output should fully override structured deps for mentioned ACs
+#    (use when structured metadata is known to be stale).
 plan = mcp__samvil_mcp__analyze_ac_dependencies(
     acs_json=json.dumps(acs_for_analysis),
     llm_deps_json=json.dumps(llm_deps),
+    llm_mode="augment",
 )
 # plan = {nodes, execution_levels: [[id, id], [id], ...], is_parallelizable, total_levels, total_acs}
 ```

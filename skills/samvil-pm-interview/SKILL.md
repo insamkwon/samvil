@@ -66,9 +66,20 @@ After Phase 6, write `project.pm-seed.json` to disk.
    ```
    If `result.valid` is false, report each error and resume Phase 4–6 to fix.
 
-2. Convert:
+2. Convert. If you already know engineering-only choices (tech stack, solution_type, visual direction), pass them as `defaults_json`; otherwise the tool fills conservative placeholders (`solution_type="web-app"`, `tech_stack.framework="nextjs"`, etc.) that validate_seed will accept and Council/Design can refine later.
    ```
+   # Minimal — use defaults
    eng_seed_json = mcp__samvil_mcp__pm_seed_to_eng_seed(pm_seed_json=<json>)
+
+   # With known overrides
+   eng_seed_json = mcp__samvil_mcp__pm_seed_to_eng_seed(
+       pm_seed_json=<json>,
+       defaults_json=json.dumps({
+           "solution_type": "dashboard",
+           "tech_stack": {"framework": "vite-react"},
+           # Any of: description, core_experience, constraints, out_of_scope, version
+       }),
+   )
    ```
    Output already has `schema_version: "3.0"` and `features[]` populated from epics/tasks.
 
