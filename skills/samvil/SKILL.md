@@ -95,6 +95,23 @@ ToolSearch query: "+samvil event"
 
 **원칙**: MCP는 best-effort. 파일 기반 동작이 항상 가능해야 함 (INV-5 Graceful Degradation).
 
+**8. Progress Visualization (v2.5.0+, Double Diamond)** — 각 스테이지 완료 시 progress.md 업데이트:
+
+```
+mcp__samvil_mcp__update_progress(
+    project_path=<CWD>,
+    state_json=<project.state.json>,
+    features_json=<per-feature AC progress JSON>
+)
+```
+
+생성되는 `.samvil/progress.md`:
+- Double Diamond 다이어그램 (Discover/Define/Develop/Deliver 4-phase)
+- 각 stage status (✓/⟳/⏸/✗)
+- Feature별 AC progress (있을 경우)
+
+사용자는 언제든 `cat .samvil/progress.md`로 진행 상황 확인 가능.
+
 **8. 이전 프로젝트 확인**
 
 같은 이름의 프로젝트가 `~/dev/`에 있는지 → Step 3 (Resume)에서 처리.

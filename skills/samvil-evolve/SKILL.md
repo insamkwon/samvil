@@ -214,12 +214,79 @@ Apply this evolution? (yes / no / edit)
 - **no**: Keep current seed, stop evolving
 - **edit**: User modifies, then save
 
-## Step 6: Save and Check Convergence
+## Step 6: Save and Check Convergence (v2.5.0 — 5-Gate Validation)
 
 1. Write updated `project.seed.json`
-2. **수렴 판정**: 새 seed와 이전 seed를 비교.
-   - features, acceptance_criteria, constraints가 **모두 동일**이면 → 수렴
-   - **MCP (best-effort):** `mcp__samvil_mcp__check_convergence(seed_history='<JSON array of seed dicts>')`
+2. **수렴 판정**: 레거시 similarity 체크 + **5-Gate Validation** (v2.5.0+ 필수)
+
+### Step 6a: Similarity Check (legacy, Phase 1 지속)
+
+- features, acceptance_criteria, constraints가 **모두 동일**이면 → 수렴 후보
+- **MCP (best-effort):** `mcp__samvil_mcp__check_convergence(seed_history='<JSON array of seed dicts>')`
+
+### Step 6b: 5-Gate Validation (v2.5.0, Manifesto v3 P5)
+
+Similarity가 충분해도 5개 독립 게이트 중 하나라도 실패하면 **수렴 거부**.
+
+```
+verdict = mcp__samvil_mcp__check_convergence_gates(
+    eval_result_json=<현 cycle의 eval 결과 JSON>,
+    history_json=<이전 cycles의 ac_states + mutations JSON>
+)
+```
+
+반환값:
+- `converged`: bool — 모든 gate 통과해야 true
+- `blocked_by`: [gate names] — 차단한 gate 목록
+- `reasons`: [str] — 사용자에게 표시할 이유
+- `regressions`: [ACRegression] — 퇴화한 AC 상세
+
+**5개 Gates**:
+1. **Eval Gate** — score ≥ 0.7 AND final_approved
+2. **Per-AC Gate** — 모든 AC PASS (mode="all")
+3. **Regression Gate** — 이전 cycle에서 PASS였던 AC가 지금 FAIL이면 차단 (P5)
+4. **Evolution Gate** — 최소 1번 이상 mutation 발생 (stagnant loop 방지)
+5. **Validation Gate** — validation 단계가 skipped/error 아님
+
+**차단 시 사용자에게 표시**:
+
+```
+🛡 [SAMVIL] 수렴 차단 — 2개 게이트 실패:
+  [regression] AC-3 (결제): Cycle 2 PASS → Cycle 3 FAIL
+  [per_ac] 1/5 AC failing
+
+선택지:
+  1. 이전 세대로 롤백
+  2. 실패한 AC 재설계 후 추가 cycle
+  3. 수렴 강제 (권장 안 함)
+  4. 중단하고 수동 개입
+```
+
+### Step 6c: Self-Correction Circuit 활성화 (v2.5.0, P9)
+
+Wonder 다음 cycle 입력을 위해 실패한 AC 누적:
+
+```
+# 현 cycle의 QA 실패를 영속화
+for each failed AC:
+    mcp__samvil_mcp__record_qa_failure(
+        project_path=<CWD>,
+        ac_id=<id>,
+        ac_description=<desc>,
+        cycle=<N>,
+        reason=<why failed>,
+        suggestions_json=<array of suggestions>
+    )
+```
+
+다음 cycle 시작 시 Wonder에 자동 주입:
+
+```
+wonder_input = mcp__samvil_mcp__load_failures_for_wonder(project_path=<CWD>)
+# wonder_input["summary"]가 구조화된 Wonder prompt
+```
+
+**체감**: 실패가 그냥 에러 아니라 **"다음 세대의 진화 연료"**가 됨.
 
 ### If Converged (seed 변경 없음)
 

@@ -4,6 +4,110 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [2.5.0] — 2026-04-18 — Phase 3+4+5+6 통합 (QA, Evolve, Resilience, AC Tree)
+
+단일 릴리즈로 나머지 모든 Phase 통합. Ouroboros 15개 기능 중 **핵심 9개 실구현 완료**.
+
+### Phase 3: QA 강화 (P1/#04/#08)
+
+- **Per-AC Checklist Aggregator** (`checklist.py`) — ACCheckItem/ACChecklist/RunFeedback 구조
+- **Evidence Mandatory 실구현** (`evidence_validator.py`) — file:line 파싱 + 검증
+- **Reward Hacking Detection** (`semantic_checker.py`) — stub/mock/하드코딩/empty catch 패턴 탐지
+- **QA skill Pass 2.5 추가** — Evidence validation + Semantic check + Downgrade rules
+  - HIGH risk → 자동 FAIL (E1 "Stub=FAIL")
+  - MEDIUM risk → PARTIAL + Socratic Questions
+  - LOW risk → PASS 유지
+- **QA report 구조화** — per-AC checklist, evidence tracking
+
+### Phase 4: Evolve Gates + Self-Correction (P5/#03/#P9)
+
+- **Regression Detector** (`regression_detector.py`) — PASS→FAIL 전환 감지
+- **5-Gate Convergence** (`convergence_gate.py`) — Eval/Per-AC/Regression/Evolution/Validation
+  - 하나라도 실패하면 수렴 거부 (blind convergence 제거)
+  - Fail-fast: 모든 이유를 사용자에게 투명하게 표시
+- **Self-Correction Circuit** (`self_correction.py`) — 실패가 다음 cycle의 Wonder 입력이 됨
+  - `.samvil/qa-failures.json` (current cycle)
+  - `.samvil/failed_acs.json` (accumulated)
+  - Wonder에 구조화된 summary 자동 주입
+
+### Phase 5: Resilience — Progress Viz (#15)
+
+- **Double Diamond Renderer** (`progress_renderer.py`) — ASCII 진행 상황
+  - Discover/Define/Develop/Deliver 4-phase
+  - Stage status: ✓/⟳/⏸/✗
+  - Feature별 AC progress 추가 표시 가능
+- `.samvil/progress.md` 자동 업데이트 (매 stage 완료 시)
+
+### Phase 6: AC Tree Infrastructure (#06, backward-compat)
+
+- **ACNode Tree 구조** (`ac_tree.py`) — recursive, MAX_DEPTH=3
+- **Status Aggregation** — branch = aggregate of children
+- **ASCII HUD Renderer**
+- **Backward-compatible Loader** — string/dict 자동 변환
+- **Seed Schema 확장** — flat + tree 혼합 허용
+- **Heuristic Decomposition Suggestion** (LLM 없이)
+- 실제 Build/QA tree 순회는 **v2.6+ 이후** (v2.5.0은 infrastructure only)
+
+### MCP Tools 추가 (11개)
+
+Phase 3:
+- `build_checklist`, `aggregate_run_feedback`, `validate_evidence`, `semantic_check`
+
+Phase 4:
+- `check_convergence_gates`, `detect_ac_regressions`, `record_qa_failure`, `load_failures_for_wonder`
+
+Phase 5:
+- `update_progress`
+
+Phase 6:
+- `parse_ac_tree`, `render_ac_tree_hud`, `suggest_ac_decomposition`
+
+### 신규 MCP 모듈 (7개)
+
+- `checklist.py` — Per-AC checklist data structures
+- `evidence_validator.py` — file:line parser + validator
+- `semantic_checker.py` — Reward Hacking detection
+- `convergence_gate.py` — 5-gate validation
+- `regression_detector.py` — AC regression detection
+- `self_correction.py` — failed_acs.json handling
+- `progress_renderer.py` — ASCII Double Diamond
+- `ac_tree.py` — Recursive AC Tree
+
+### 테스트 (81개 신규)
+
+- `test_checklist.py` (10)
+- `test_semantic_checker.py` (11)
+- `test_convergence_gate.py` (17)
+- `test_ac_tree.py` (13)
+- `test_progress_renderer.py` (6)
+- `test_evidence_validator.py` (10)
+- `test_self_correction.py` (8)
+
+누적 전체 MCP 테스트: **179 passed / 2 failed** (둘 다 phase와 무관한 기존 이슈)
+
+### 스킬 업데이트
+
+- `samvil-qa/SKILL.md` — Pass 2.5 (Semantic Verification) 추가
+- `samvil-evolve/SKILL.md` — Step 6 전면 개편 (5-gate + self-correction)
+- `samvil/SKILL.md` — Progress visualization 자동 호출
+
+### References 신규
+
+- `references/ac-tree-guide.md` — AC Tree 사용 가이드
+- `references/reversibility-guide.md` — P10 Reversibility Awareness
+
+### Seed Schema 변경
+
+- `acceptance_criteria` — flat + ACNode tree 혼합 허용 (backward-compat)
+
+### v2.5.0은 실질적으로 v3.0.0 수준의 개선
+
+- 9/15 Ouroboros 기능 실구현 (나머지 6개는 infrastructure 또는 future)
+- 10개 중 9개 원칙(P1~P10) 코드 수준에서 적용
+- 단, AC Tree는 infrastructure만 — 실제 build/qa 순회는 v2.6+에서
+
+---
+
 ## [2.4.0] — 2026-04-18 — Phase 2: Interview 심화
 
 인터뷰 피로도 감소 + 명료화 강화. PATH routing 활성화로 1인 개발자 체감 큰 변화.

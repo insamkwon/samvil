@@ -185,11 +185,34 @@
               "vague_words": { "type": "array", "items": { "type": "string" }, "description": "Words flagged as ambiguous during interview" },
               "rewrite_hint": { "type": "string", "description": "Suggested rewrite to remove ambiguity" }
             }
+          },
+          {
+            "type": "object",
+            "description": "AC Tree node (v2.5.0+). See references/ac-tree-guide.md. Backward-compat: strings/criterion objects still work.",
+            "required": ["description"],
+            "properties": {
+              "id": { "type": "string", "description": "Hierarchical ID (AC-1.2.1 style). Auto-assigned if omitted." },
+              "description": { "type": "string", "minLength": 5 },
+              "children": {
+                "type": "array",
+                "items": { "$ref": "#/properties/acceptance_criteria/items" },
+                "description": "Sub-ACs. Max depth 3."
+              },
+              "status": {
+                "type": "string",
+                "enum": ["pending", "in_progress", "pass", "fail", "blocked", "skipped"],
+                "default": "pending"
+              },
+              "evidence": {
+                "type": "array",
+                "items": { "type": "string", "description": "file:line reference" }
+              }
+            }
           }
         ]
       },
       "minItems": 1,
-      "description": "Testable statements that define done"
+      "description": "Testable statements that define done. v2.5.0+ supports AC Tree (recursive) — flat strings and tree nodes can coexist."
     },
     "constraints": {
       "type": "array",

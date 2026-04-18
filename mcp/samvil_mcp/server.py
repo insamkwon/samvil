@@ -479,6 +479,283 @@ async def check_db_integrity() -> str:
     return json.dumps(result)
 
 
+# ── Phase 3: QA Enhancement tools (v2.5.0) ────────────────────
+
+
+@mcp.tool()
+async def build_checklist(ac_id: str, ac_description: str, items_json: str) -> str:
+    """Build an ACChecklist from item dicts.
+
+    Args:
+        ac_id: AC identifier
+        ac_description: AC text
+        items_json: JSON array of {description, passed, evidence[], rationale}
+
+    Returns: dict with verdict, passed_count, total_count, violations[]
+    """
+    try:
+        from .checklist import ACCheckItem, ACChecklist, validate_evidence_mandatory
+        items_data = json.loads(items_json)
+        items = tuple(
+            ACCheckItem(
+                description=i.get("description", ""),
+                passed=bool(i.get("passed", False)),
+                evidence=tuple(i.get("evidence", [])),
+                rationale=i.get("rationale", ""),
+            )
+            for i in items_data
+        )
+        checklist = ACChecklist(ac_id=ac_id, ac_description=ac_description, items=items)
+        violations = validate_evidence_mandatory(checklist)
+        result = checklist.to_dict()
+        result["violations"] = violations
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "build_checklist", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_run_feedback(checklists_json: str) -> str:
+    """Aggregate multiple ACChecklists into RunFeedback.
+
+    Args:
+        checklists_json: JSON array of checklist dicts (from build_checklist)
+
+    Returns: RunFeedback dict with overall_verdict
+    """
+    try:
+        from .checklist import aggregate, checklist_from_dict
+        data = json.loads(checklists_json)
+        checklists = [checklist_from_dict(c) for c in data]
+        feedback = aggregate(checklists)
+        return json.dumps(feedback.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_run_feedback", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def validate_evidence(evidences_json: str, project_root: str) -> str:
+    """Validate a list of file:line evidence strings against project files.
+
+    Args:
+        evidences_json: JSON array of evidence strings ("src/auth.ts:15")
+        project_root: Absolute project path
+
+    Returns: {all_valid, valid_count, total, results[]}
+    """
+    try:
+        from .evidence_validator import validate_evidence_list
+        evidences = json.loads(evidences_json)
+        result = validate_evidence_list(evidences, project_root)
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "validate_evidence", str(e))
+        return json.dumps({"all_valid": False, "error": str(e)})
+
+
+@mcp.tool()
+async def semantic_check(code: str, context_hint: str = "") -> str:
+    """Detect reward hacking signals in a code snippet.
+
+    Args:
+        code: Source code to analyze
+        context_hint: Optional AC description for context
+
+    Returns: {risk_level: LOW|MEDIUM|HIGH, findings[], socratic_questions[]}
+    """
+    try:
+        from .semantic_checker import analyze_code_snippet
+        return json.dumps(analyze_code_snippet(code, context_hint))
+    except Exception as e:
+        _log_mcp_health("fail", "semantic_check", str(e))
+        return json.dumps({"risk_level": "LOW", "error": str(e)})
+
+
+# ── Phase 4: Evolve Gates tools (v2.5.0) ──────────────────────
+
+
+@mcp.tool()
+async def check_convergence_gates(eval_result_json: str, history_json: str = "[]") -> str:
+    """Run 5-gate convergence check.
+
+    Args:
+        eval_result_json: Current eval result (score, ac_states, validation_status, ...)
+        history_json: Array of prior cycle snapshots
+
+    Returns: ConvergenceVerdict with converged, blocked_by[], reasons[], regressions[]
+    """
+    try:
+        from .convergence_gate import check_all_gates, GateConfig
+        eval_result = json.loads(eval_result_json)
+        history = json.loads(history_json)
+        verdict = check_all_gates(eval_result, history, GateConfig())
+        return json.dumps(verdict.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "check_convergence_gates", str(e))
+        return json.dumps({"converged": False, "error": str(e)})
+
+
+@mcp.tool()
+async def detect_ac_regressions(current_states_json: str, history_json: str) -> str:
+    """Detect ACs that regressed (PASS → FAIL) across cycles.
+
+    Args:
+        current_states_json: {ac_id: "PASS" | "FAIL" | "PARTIAL"}
+        history_json: Array of cycle snapshots
+
+    Returns: list of ACRegression dicts
+    """
+    try:
+        from .regression_detector import detect_regressions
+        current = json.loads(current_states_json)
+        history = json.loads(history_json)
+        regressions = detect_regressions(current, history)
+        return json.dumps([r.to_dict() for r in regressions])
+    except Exception as e:
+        _log_mcp_health("fail", "detect_ac_regressions", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def record_qa_failure(
+    project_path: str,
+    ac_id: str,
+    ac_description: str,
+    cycle: int,
+    reason: str,
+    suggestions_json: str = "[]",
+) -> str:
+    """Record a QA failure for the Self-Correction Circuit.
+
+    Args:
+        project_path: Project root
+        ac_id, ac_description, cycle, reason: failure details
+        suggestions_json: JSON array of suggestion strings
+
+    Returns: {path, total_failures}
+    """
+    try:
+        from .self_correction import record_qa_failure as _record
+        suggestions = json.loads(suggestions_json)
+        result = _record(project_path, ac_id, ac_description, cycle, reason, suggestions)
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "record_qa_failure", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def load_failures_for_wonder(project_path: str) -> str:
+    """Load accumulated failures + summary for Evolve Wonder stage.
+
+    Args:
+        project_path: Project root
+
+    Returns: {failures: [...], summary: str}
+    """
+    try:
+        from .self_correction import load_failed_acs_for_wonder, summarize_for_wonder
+        failures = load_failed_acs_for_wonder(project_path)
+        summary = summarize_for_wonder(failures)
+        return json.dumps({"failures": failures, "summary": summary})
+    except Exception as e:
+        _log_mcp_health("fail", "load_failures_for_wonder", str(e))
+        return json.dumps({"failures": [], "summary": "", "error": str(e)})
+
+
+# ── Phase 5: Resilience tools (v2.5.0) ────────────────────────
+
+
+@mcp.tool()
+async def update_progress(project_path: str, state_json: str, features_json: str = "[]") -> str:
+    """Render Double Diamond + AC progress to .samvil/progress.md.
+
+    Args:
+        project_path: Project root
+        state_json: Current state.json content
+        features_json: Optional per-feature AC progress
+
+    Returns: {path, bytes}
+    """
+    try:
+        from .progress_renderer import update_progress_file
+        state = json.loads(state_json)
+        features = json.loads(features_json) if features_json else None
+        result = update_progress_file(project_path, state, features)
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "update_progress", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── Phase 6: AC Tree tools (v2.5.0, backward-compat) ──────────
+
+
+@mcp.tool()
+async def parse_ac_tree(ac_data_json: str) -> str:
+    """Parse AC from either flat string or tree dict.
+
+    Args:
+        ac_data_json: JSON of either a string or ACNode dict
+
+    Returns: ACNode dict
+    """
+    try:
+        from .ac_tree import load_ac_from_schema, count_nodes
+        data = json.loads(ac_data_json)
+        node = load_ac_from_schema(data)
+        result = node.to_dict()
+        result["counts"] = count_nodes(node)
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "parse_ac_tree", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def render_ac_tree_hud(ac_tree_json: str) -> str:
+    """Render AC tree as ASCII HUD.
+
+    Args:
+        ac_tree_json: ACNode dict
+
+    Returns: {ascii: str, counts: {...}}
+    """
+    try:
+        from .ac_tree import ACNode, render_tree_ascii, count_nodes
+        data = json.loads(ac_tree_json)
+        node = ACNode.from_dict(data)
+        return json.dumps({
+            "ascii": render_tree_ascii(node),
+            "counts": count_nodes(node),
+        })
+    except Exception as e:
+        _log_mcp_health("fail", "render_ac_tree_hud", str(e))
+        return json.dumps({"error": str(e), "ascii": ""})
+
+
+@mcp.tool()
+async def suggest_ac_decomposition(ac_description: str) -> str:
+    """Heuristic suggestion for AC decomposition (pre-LLM).
+
+    Args:
+        ac_description: The AC text
+
+    Returns: {suggested_children: [str], needs_llm: bool}
+    """
+    try:
+        from .ac_tree import simple_decompose_suggestion
+        suggestions = simple_decompose_suggestion(ac_description)
+        return json.dumps({
+            "suggested_children": suggestions,
+            "needs_llm": len(suggestions) == 0,
+        })
+    except Exception as e:
+        return json.dumps({"suggested_children": [], "needs_llm": True, "error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 

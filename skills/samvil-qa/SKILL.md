@@ -925,6 +925,98 @@ Rate each criterion: **PASS** / **FAIL** / **PARTIAL** / **UNIMPLEMENTED**
 
 **If any criterion is FAIL or UNIMPLEMENTED:** Verdict = REVISE with the failing criteria listed.
 
+## Pass 2.5: Semantic Verification (v2.5.0, Reward Hacking Detection)
+
+**목적**: AI가 AC를 만족시키려고 stub/mock/하드코딩한 건 아닌지 자동 탐지. Manifesto v3 P1 (Evidence) + Anti-Pattern "Stub=FAIL" (E1) 구현.
+
+### 프로세스
+
+Pass 2에서 PASS/PARTIAL 판정된 각 AC에 대해:
+
+**1. Evidence 검증 (P1 Evidence-mandatory)**
+
+모든 PASS 판정에 file:line evidence 확인:
+
+```
+mcp__samvil_mcp__validate_evidence(
+    evidences_json=<JSON array of "src/file:line" strings>,
+    project_root=<CWD>
+)
+```
+
+- `all_valid=false` → Evidence 누락 or 잘못된 file/line → **자동 FAIL로 downgrade**
+- `valid_count < 1` → 증거 없음 → **자동 FAIL**
+
+**2. Reward Hacking 탐지**
+
+각 AC의 Evidence 파일 읽고 semantic_check 호출:
+
+```
+snippet = read file:line ± 3 lines context
+result = mcp__samvil_mcp__semantic_check(code=snippet, context_hint=<AC description>)
+```
+
+반환값:
+- `risk_level`: LOW / MEDIUM / HIGH
+- `findings`: [{pattern, severity, line_number, code_excerpt, explanation}]
+- `socratic_questions`: 사용자에게 확인할 질문들
+
+**3. Downgrade 규칙**
+
+| Original Verdict | Risk Level | Final Verdict |
+|------------------|-----------|---------------|
+| PASS | LOW | PASS |
+| PASS | MEDIUM | PARTIAL (Socratic Questions 사용자 제시) |
+| PASS | HIGH | **FAIL** (자동) |
+| PARTIAL | HIGH | **FAIL** |
+| FAIL | any | FAIL (unchanged) |
+
+### Pass 2.5 리포트 포맷
+
+```markdown
+## Pass 2.5 — Semantic Verification
+
+### AC-1 사용자 회원가입
+- Pass 2: PASS
+- Evidence: src/auth.ts:15, prisma/schema.prisma:12 (모두 valid)
+- Semantic Check: LOW risk (0 findings)
+- **Final: PASS** ✓
+
+### AC-2 결제 처리
+- Pass 2: PASS (UI renders)
+- Evidence: src/lib/payment.ts:42
+- Semantic Check: **HIGH risk**
+  - [return_constant] Line 42: `return { status: "succeeded", id: "mock_123" }`
+  - [sample_data] Line 5: `const sampleOrders = [...]`
+- Socratic Questions:
+  - "결제 모듈이 실제 Stripe 호출 없이 mock 반환. 의도된 데모인가요?"
+- **Final: FAIL** ✗ (Reward Hacking HIGH → 자동 downgrade per E1/P1)
+```
+
+### Fallback (INV-5)
+
+MCP 실패 시:
+- `validate_evidence` 실패 → evidence 검증 skip (WARNING 표시)
+- `semantic_check` 실패 → risk_level=LOW로 간주 (보수적)
+- Pipeline은 계속 진행
+
+### Per-AC Checklist Aggregation (#08)
+
+Pass 2 + 2.5 결과를 MCP로 aggregate:
+
+```
+checklists = [mcp__samvil_mcp__build_checklist(...) for each AC]
+feedback = mcp__samvil_mcp__aggregate_run_feedback(checklists_json=...)
+```
+
+`feedback`:
+- `overall_verdict`: PASS / PARTIAL / FAIL
+- `ac_full_pass`, `ac_partial`, `ac_fail` counts
+- `item_pass_rate`
+- `missing_evidence_count` (P1 감시)
+
+이 결과를 `.samvil/qa-results.json`에 저장.
+
 ## Pass 3: Quality Verification (minimal inline path)
 
 ### web-app
