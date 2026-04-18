@@ -327,7 +327,156 @@ npm install <packages> --save > .samvil/deps-install.log 2>&1
 
 **CC skill:** No dependency installation needed.
 
+## Phase B Mode Selection (v3.0.0+)
+
+Detect seed schema version, then route to the correct Phase B body.
+
+1. Read `seed.schema_version` from `project.seed.json`.
+2. If it starts with `"3."` → jump to **Phase B-Tree** below.
+3. Otherwise (missing or `"2.*"`) → auto-migrate in place, then use Phase B-Tree:
+   ```
+   mcp__samvil_mcp__migrate_seed_file(seed_path="<cwd>/project.seed.json")
+   ```
+   - Writes a backup to `project.v2.backup.json` next to the seed.
+   - Re-read the migrated seed before continuing.
+   - MCP (best-effort) event: `seed_migrated` with `{"from":"2.x","to":"3.0"}`.
+
+The legacy feature-batch build (`## Phase B: Features`) is retained below as documentation only. v3.0.0 seeds always take the tree path. Legacy `minimal`/`standard`/`parallel` classification rules apply _within_ each leaf batch (see Phase B-Tree Step 3).
+
+## Phase B-Tree: AC Tree Execution (v3.0.0+)
+
+For each `feature` in `seed.features` (priority 1 first, then 2):
+
+### Step 1: Parse AC tree
+
+```
+tree_json = mcp__samvil_mcp__parse_ac_tree(
+    ac_data_json=json.dumps(feature.acceptance_criteria)
+)
+```
+
+Migrated v2 ACs become flat leaves (one leaf per AC). Genuine v3 seeds may have 2–3 levels.
+
+Emit: `mcp__samvil_mcp__save_event(event_type="feature_tree_start", data='{"feature":"<name>","leaves":<N>}')`.
+
+### Step 2: Resume from checkpoint (if any)
+
+```
+ckpt = mcp__samvil_mcp__load_checkpoint(seed_id=<session_id>)
+if ckpt.found and ckpt.phase == "build" and ckpt.state.feature == feature.name:
+    completed_ids = ckpt.state.completed_ids  # list[str]
+else:
+    completed_ids = []
+```
+
+### Step 3: Tree loop (until `tree_progress.all_done` is true)
+
+```
+while True:
+    batch = mcp__samvil_mcp__next_buildable_leaves(
+        ac_tree_json=<current tree_json>,
+        completed_ids_json=json.dumps(completed_ids),
+        max_parallel=MAX_PARALLEL,
+    )
+    if batch.count == 0:
+        break
+
+    # 3a. Spawn workers — one Agent per leaf in the batch, in ONE message
+    #     (same chunk-dispatch pattern as Phase B Legacy).
+    for leaf in batch.leaves:
+        Agent(
+          description: "SAMVIL Build: AC <leaf.id>",
+          subagent_type: "general-purpose",
+          prompt:
+            <compact persona from agents/frontend-dev.md>
+            Context (≤2000 tokens): project path, Stack, architecture
+            Feature: <feature.name>
+            AC (leaf): <leaf.id> — <leaf.description>
+            Parent AC context: <leaf.parent_id description, 1 line>
+            Rules: create components under components/<feature-name>/;
+                   run `npx tsc --noEmit` + `npx eslint . --quiet`;
+                   report files_created, files_modified, typecheck_ok.
+        )
+
+    # 3b. Wait for the chunk
+
+    # 3c. Update tree + checkpoint from results
+    for leaf, result in zip(batch.leaves, worker_results):
+        status = "pass" if result.typecheck_ok and result.files_created else "fail"
+        tree_json = mcp__samvil_mcp__update_leaf_status(
+            ac_tree_json=tree_json,
+            leaf_id=leaf.id,
+            status=status,
+            evidence_json=json.dumps(result.files_created + result.files_modified),
+        )
+        completed_ids.append(leaf.id)
+        mcp__samvil_mcp__save_event(
+            event_type="ac_leaf_complete",
+            data='{"feature":"<name>","leaf_id":"<id>","status":"<status>"}'
+        )
+
+    # 3d. HUD
+    hud = mcp__samvil_mcp__render_ac_tree_hud(ac_tree_json=tree_json)
+    print(hud.ascii)
+
+    # 3e. Checkpoint
+    mcp__samvil_mcp__save_checkpoint(
+        seed_id=<session_id>,
+        phase="build",
+        state_json=json.dumps({
+            "feature": feature.name,
+            "completed_ids": completed_ids,
+        }),
+    )
+
+    # 3f. Circuit breaker — two consecutive fail batches → stop this feature
+    if last_two_batches_all_failed:
+        emit event build_feature_fail
+        break
+```
+
+### Step 4: Integration build per feature
+
+Run `npm run build > .samvil/build.log 2>&1` **once per feature** (not once per leaf). This is cheaper than the legacy per-feature build because the tree loop already ran `tsc --noEmit` inside each worker.
+
+### Step 5: Persist tree into seed
+
+Write `tree_json` (minus transient fields) back into `seed.features[i].acceptance_criteria`. Status is now the source of truth for QA.
+
+### Step 6: Progress report
+
+```
+progress = mcp__samvil_mcp__tree_progress(ac_tree_json=tree_json)
+# -> {"total_leaves": N, "passed": P, "failed": F, "progress_pct": X, "all_done": true}
+mcp__samvil_mcp__save_event(event_type="feature_tree_complete", data=json.dumps({
+    "feature": feature.name,
+    **progress,
+}))
+```
+
+After all features in the seed:
+```
+[SAMVIL] Stage 4/5: Tree Build complete
+  Features: N/M  Leaves: X/Y passed  Failed leaves: F
+  Build: passing  Agents spawned: <S>
+```
+
+### Parallelism rules
+
+- `MAX_PARALLEL` is still determined by the same Dynamic Parallelism logic (see legacy Phase B below).
+- `next_buildable_leaves` already honors blocked parents, terminal statuses, and the completed set; no separate independence-check is needed across leaves of the same feature — they share a folder so conflicts are handled by the worker contract (one leaf per Agent, no shared-file edits outside `components/<feature>/`).
+
+### Backward compatibility
+
+- If a migrated v2 seed had only flat strings, every leaf is top-level and the tree is effectively flat. Everything above still works.
+- If a seed has `schema_version` missing, `Phase B Mode Selection` migrates it before the loop.
+
 ## Phase B: Features
+
+> **Note (v3.0.0+):** This section is retained as legacy documentation for older
+> runners. The active code path is **Phase B-Tree** above. The text below still
+> describes useful patterns (MAX_PARALLEL, independence verification, worker
+> context budget) that Phase B-Tree reuses verbatim.
 
 Read `seed.features` sorted by priority (1 first, then 2).
 Read `config.selected_tier` to determine build mode.
