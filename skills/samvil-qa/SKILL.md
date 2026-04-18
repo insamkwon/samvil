@@ -528,6 +528,65 @@ After both independent agents return their markdown evidence:
 
 ## Pass 2: Functional Verification (Runtime-first)
 
+### Pass 2 Tree Setup (v3.0.0+)
+
+Before iterating ACs, convert each feature's `acceptance_criteria` into an AC tree and drive Pass 2 by tree **leaves**, not by flat list.
+
+1. For each `feature` in `seed.features`:
+   ```
+   tree_json = mcp__samvil_mcp__parse_ac_tree(
+       ac_data_json=json.dumps(feature.acceptance_criteria)
+   )
+   ```
+   (Migrated v2 seeds yield flat trees — one leaf per AC.)
+
+2. Pass 2 iterates every leaf (not every feature). Branch nodes are **not** verified directly; their verdict is aggregated from children after all leaves complete.
+
+3. For each leaf:
+   ```
+   # run the Playwright / runtime flow described below on leaf.description
+   status = "pass" if evidence confirms behavior else "fail"
+   tree_json = mcp__samvil_mcp__update_leaf_status(
+       ac_tree_json=tree_json,
+       leaf_id=leaf.id,
+       status=status,
+       evidence_json=json.dumps([screenshot_path, ...]),
+   )
+   mcp__samvil_mcp__save_event(
+       event_type="ac_verdict",
+       data='{"feature":"<name>","leaf_id":"<id>","status":"<status>"}'
+   )
+   ```
+
+4. After all leaves for a feature resolve, branch nodes are automatically aggregated (`aggregate_status` inside `render_ac_tree_hud` / `tree_progress`). **No manual branch verdict**.
+
+5. Emit tree HUD to stdout and append to `qa-report.md`:
+   ```
+   hud = mcp__samvil_mcp__render_ac_tree_hud(ac_tree_json=tree_json)
+   print(hud.ascii)
+   ```
+
+6. Write the final tree JSON (per feature) into `.samvil/qa-results.json`:
+   ```json
+   {
+     "schema_version": "3.0",
+     "features": [
+       {
+         "name": "<feature>",
+         "ac_tree": <tree_json with status populated>,
+         "progress": <tree_progress output>
+       }
+     ]
+   }
+   ```
+
+7. Feature-level verdict:
+   - `tree_progress.passed == total_leaves` → feature PASS
+   - any `failed > 0` → feature FAIL (plus REVISE if failure is fixable)
+   - mixed with pending → REVISE (loop should have completed before this point)
+
+The flow below still applies **per leaf** — navigate to the relevant route, snapshot, interact, verify. The only change is the iteration granularity.
+
 ### web-app
 
 Dev server should still be running from Pass 1b. If not:
@@ -537,7 +596,7 @@ cd ~/dev/<seed.name> && npm run dev &
 
 ### Runtime Verification with Playwright MCP
 
-For **EACH** item in `seed.acceptance_criteria`:
+For **each leaf** of the AC tree (see Pass 2 Tree Setup above):
 
 1. **Understand the AC** — What user action would prove this criterion?
 2. **Navigate to the right page** — Use `browser_navigate` to the relevant route
