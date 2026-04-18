@@ -492,6 +492,14 @@ If SOME ACs are satisfied → build only unsatisfied ACs.
    - **Context Compression**: seed에서 해당 feature만 추출하여 작업. 전체 seed를 컨텍스트에 유지하지 않음.
    - **Include**: feature_name, description, acceptance_criteria, ui_hints
    - **Exclude**: interview_summary, evolve_history, other features' details
+   - **Checkpoint Resume (v2.6.0+)**: Check for existing checkpoint:
+     ```
+     result = mcp__samvil_mcp__load_checkpoint(seed_id=<session_id>)
+     if result.found and result.phase == "build":
+         completed = result.state.get("completed_features", [])
+         skip_set = set(completed)
+         inform user: "⟳ Resuming build from {len(completed)} completed features"
+     ```
 2. **MCP (best-effort):** Log feature start:
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_feature_start", stage="build", data='{"feature":"<name>"}')
@@ -506,6 +514,15 @@ If SOME ACs are satisfied → build only unsatisfied ACs.
    On build success, **MCP (best-effort):**
    ```
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_pass", stage="build", data='{"attempt":1,"scope":"feature:<name>"}')
+   ```
+   **Save checkpoint after each feature (v2.6.0+):**
+   ```
+   mcp__samvil_mcp__save_checkpoint(
+       seed_id="<session_id>",
+       phase="build",
+       state_json=json.dumps({"completed_features": [...], "in_progress": null, "build_retries": N})
+   )
+   [SAMVIL] ⟳ Checkpoint saved
    ```
    Circuit Breaker: MAX_RETRIES=2. 2 failures on a feature → mark as `failed`, continue to next feature.
    On every build failure, **MCP (best-effort):**

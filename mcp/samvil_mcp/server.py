@@ -629,6 +629,71 @@ async def load_external_satisfactions(project_path: str) -> str:
         return json.dumps([])
 
 
+# ── Checkpoint Store tools (v2.6.0, #07) ─────────────────────
+
+
+@mcp.tool()
+async def save_checkpoint(
+    seed_id: str,
+    phase: str,
+    state_json: str,
+    base_dir: str = "",
+) -> str:
+    """Save a checkpoint for crash recovery.
+
+    Args:
+        seed_id: Session/seed identifier
+        phase: Current pipeline phase (build, qa, etc.)
+        state_json: State to persist (completed features, progress, etc.)
+        base_dir: Checkpoint storage directory (default: ~/.samvil/checkpoints/)
+    """
+    try:
+        from .checkpoint import CheckpointData, CheckpointStore
+        base = Path(base_dir) if base_dir else Path.home() / ".samvil" / "checkpoints"
+        store = CheckpointStore(base)
+        state = json.loads(state_json)
+        cp = CheckpointData.create(seed_id, phase, state)
+        store.save(cp)
+        return json.dumps({"saved": True, "timestamp": cp.timestamp})
+    except Exception as e:
+        _log_mcp_health("fail", "save_checkpoint", str(e))
+        return json.dumps({"saved": False, "error": str(e)})
+
+
+@mcp.tool()
+async def load_checkpoint(seed_id: str, base_dir: str = "") -> str:
+    """Load latest valid checkpoint for crash recovery."""
+    try:
+        from .checkpoint import CheckpointStore
+        base = Path(base_dir) if base_dir else Path.home() / ".samvil" / "checkpoints"
+        store = CheckpointStore(base)
+        cp = store.load(seed_id)
+        if cp is None:
+            return json.dumps({"found": False})
+        return json.dumps({
+            "found": True,
+            "seed_id": cp.seed_id,
+            "phase": cp.phase,
+            "state": cp.state,
+            "timestamp": cp.timestamp,
+        })
+    except Exception as e:
+        _log_mcp_health("fail", "load_checkpoint", str(e))
+        return json.dumps({"found": False, "error": str(e)})
+
+
+@mcp.tool()
+async def list_checkpoints(base_dir: str = "") -> str:
+    """List all sessions with checkpoints."""
+    try:
+        from .checkpoint import CheckpointStore
+        base = Path(base_dir) if base_dir else Path.home() / ".samvil" / "checkpoints"
+        store = CheckpointStore(base)
+        return json.dumps({"seed_ids": store.list_checkpoints()})
+    except Exception as e:
+        return json.dumps({"seed_ids": [], "error": str(e)})
+
+
 # ── Phase 4: Evolve Gates tools (v2.5.0) ──────────────────────
 
 
