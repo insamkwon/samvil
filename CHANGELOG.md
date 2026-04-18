@@ -4,6 +4,58 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.0.0] — 2026-04-19 — 🌳 AC Tree Era (BREAKING)
+
+Sprint 3 converts SAMVIL's acceptance-criteria handling from flat lists to a
+tree structure with leaf-level build/QA execution. **v2.x seeds need
+migration** — see `references/migration-v2-to-v3.md`.
+
+### ⚠️ Breaking changes
+
+- `seed.features[].acceptance_criteria` is now a tree of `{id, description, children[], status, evidence[]}` nodes.
+- `seed.schema_version` is required and defaults to `"3.0"`. v2.x seeds still load but Phase B auto-migrates them (backup written to `project.v2.backup.json`).
+- Build/QA iterate **leaves**, not features. Flat v2 ACs become single-leaf branches after migration, so visible behavior is unchanged for simple seeds.
+
+### T1 — AC Tree Build/QA (4 commits)
+
+- **Tree traversal helpers** (`mcp/samvil_mcp/ac_tree.py`): `is_branch_complete`, `all_done`, `next_buildable_leaves`, `tree_progress`. Honors blocked parents, completed sets, `max_parallel`.
+- **Migration module** (`mcp/samvil_mcp/migrations.py`): `migrate_seed_v2_to_v3` + `migrate_with_backup` (idempotent, writes sidecar backup).
+- **MCP tools** (server.py): `next_buildable_leaves`, `tree_progress`, `update_leaf_status`, `migrate_seed`, `migrate_seed_file`.
+- **samvil-build rewrite** (`skills/samvil-build/SKILL.md`): Phase B-Tree replaces feature-batch dispatch. Legacy Phase B retained as documentation for Dynamic Parallelism / Independence Check / Worker Context Budget (all reused by tree path).
+- **samvil-qa aggregation** (`skills/samvil-qa/SKILL.md`): Pass 2 iterates leaves; branch verdicts come from `aggregate_status`; report renders the tree; `qa-results.json` stores `schema_version: "3.0"`.
+- **samvil-update --migrate** (`skills/samvil-update/SKILL.md`): post-update Step 7 detects v2.x seeds and offers migration; `--migrate` flag runs migration standalone.
+
+### T2 — LLM Dependency Planning
+
+- `mcp/samvil_mcp/dependency_analyzer.py`: Kahn's toposort with serial-only stage splitting, cycle detection, structured + LLM-inferred dep merging.
+- MCP tool `analyze_ac_dependencies` (JSON-in / plan-out).
+- samvil-build Phase B-Tree Step 2.5: optional plan for tier ≥ thorough and ≥ 5 ACs. `full` tier invokes LLM from the skill layer.
+
+### T3 — Shared Rate Budget
+
+- `mcp/samvil_mcp/rate_budget.py`: file-based cooperative slot tracker (`acquire`, `release`, `stats`, `reset`).
+- MCP tools: `rate_budget_acquire`, `rate_budget_release`, `rate_budget_stats`, `rate_budget_reset`.
+- samvil-build Phase B-Tree: acquire before spawn, release after return, summary event at feature end.
+
+### T4 — PM Interview Mode
+
+- New optional entry point skill `samvil-pm-interview` (vision → users → metrics → epics → tasks → ACs).
+- `mcp/samvil_mcp/pm_seed.py`: `validate_pm_seed` + `pm_seed_to_eng_seed` (flattens epics/tasks into v3 features).
+- `references/pm-seed-schema.md` documents the PM spec shape.
+- MCP tools: `validate_pm_seed`, `pm_seed_to_eng_seed`.
+
+### Tests
+
+- 254 → 310 (+56): 24 AC tree helpers / migrations, 14 dependency analyzer, 8 rate budget, 10 PM seed.
+
+### Migration
+
+- `/samvil:update --migrate` runs `migrate_seed_file` standalone in the current project directory.
+- Backup is written to `project.v2.backup.json` before rewrite; re-running is idempotent.
+- See `references/migration-v2-to-v3.md` for manual recovery.
+
+---
+
 ## [2.5.0] — 2026-04-18 — Phase 3+4+5+6 통합 (QA, Evolve, Resilience, AC Tree)
 
 단일 릴리즈로 나머지 모든 Phase 통합. Ouroboros 15개 기능 중 **핵심 9개 실구현 완료**.
