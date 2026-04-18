@@ -1149,6 +1149,46 @@ async def migrate_seed_file(seed_path: str) -> str:
         return json.dumps({"error": str(e)})
 
 
+# ── v3.0.0 T2: Dependency Planning ────────────────────────────
+
+
+@mcp.tool()
+async def analyze_ac_dependencies(
+    acs_json: str,
+    llm_deps_json: str = "[]",
+) -> str:
+    """Build a dependency DAG from ACs and return the execution plan.
+
+    Args:
+        acs_json: JSON list of AC dicts. Each may include
+            id, description, depends_on, prerequisites,
+            shared_runtime_resources, serial_only.
+        llm_deps_json: JSON list of LLM-inferred dependency entries of the
+            form {"ac_id": str, "depends_on": [str], "reason": str}.
+            Defaults to no LLM input.
+
+    Returns: execution plan dict with nodes / execution_levels /
+             is_parallelizable / total_levels / total_acs
+    """
+    try:
+        from .dependency_analyzer import (
+            analyze_structured,
+            build_plan,
+            compute_execution_levels,
+            merge_llm,
+        )
+        acs = json.loads(acs_json)
+        llm_deps = json.loads(llm_deps_json) if llm_deps_json else []
+        structured = analyze_structured(acs)
+        merged = merge_llm(structured, llm_deps)
+        levels = compute_execution_levels(merged)
+        plan = build_plan(merged, levels)
+        return json.dumps(plan)
+    except Exception as e:
+        _log_mcp_health("fail", "analyze_ac_dependencies", str(e))
+        return json.dumps({"error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 

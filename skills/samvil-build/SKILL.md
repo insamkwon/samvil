@@ -369,6 +369,47 @@ else:
     completed_ids = []
 ```
 
+### Step 2.5: Dependency Planning (v3.0.0 T2, optional)
+
+For `tier ∈ {thorough, full}` **and** `feature.acceptance_criteria` has `len >= 5`, compute a leaf-level dependency DAG before entering the tree loop. This lets parallel chunks respect implicit AC ordering (e.g., "login" before "profile view").
+
+```
+# 1. Flatten the tree's leaves into an AC list the analyzer understands.
+leaf_nodes = <walk tree_json and keep nodes with empty children>
+acs_for_analysis = [
+    {
+        "id": leaf.id,
+        "description": leaf.description,
+        "depends_on": leaf.get("depends_on", []),         # user-set
+        "prerequisites": leaf.get("prerequisites", []),   # alias
+        "serial_only": leaf.get("serial_only", False),
+        "shared_runtime_resources": leaf.get("shared_runtime_resources", []),
+    }
+    for leaf in leaf_nodes
+]
+
+# 2. (full tier only) Call LLM for implicit deps. Return a JSON list of:
+#    [{"ac_id": "<id>", "depends_on": ["<id>", ...], "reason": "..."}]
+llm_deps = []
+if tier == "full":
+    llm_deps = <spawn Haiku/Sonnet call with acs as prompt; parse JSON>
+
+# 3. Build the plan.
+plan = mcp__samvil_mcp__analyze_ac_dependencies(
+    acs_json=json.dumps(acs_for_analysis),
+    llm_deps_json=json.dumps(llm_deps),
+)
+# plan = {nodes, execution_levels: [[id, id], [id], ...], is_parallelizable, total_levels, total_acs}
+```
+
+If `analyze_ac_dependencies` returns `{"error": "..."}` (cycle detected, duplicate IDs), fall back to plain `next_buildable_leaves` iteration (Step 3) and log a warning event.
+
+When a plan is available:
+- `completed_ids` is seeded with IDs of all ACs that were already `pass`/`skipped`.
+- Step 3 uses `plan.execution_levels` **as a hint**: each batch is the intersection of the next level and `next_buildable_leaves(tree, completed_ids, MAX_PARALLEL)`. The tree-level traversal remains the source of truth; the plan just prevents speculative parallelism across stages.
+
+Emit a single event: `dependency_plan_built` with `{feature, total_levels, is_parallelizable, used_llm: tier == "full"}`.
+
 ### Step 3: Tree loop (until `tree_progress.all_done` is true)
 
 ```
