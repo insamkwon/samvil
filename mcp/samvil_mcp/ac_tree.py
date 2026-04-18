@@ -221,7 +221,8 @@ def next_buildable_leaves(
     """Get next ACs that can be built in parallel.
 
     Respects tree order and max_parallel limit.
-    Skips already-completed or externally satisfied leaves.
+    Skips already-completed / terminal leaves and any leaf whose ancestor
+    chain (parent, grandparent, …) contains a `blocked` node.
     """
     buildable = []
     for leaf_node in leaves(node):
@@ -229,15 +230,25 @@ def next_buildable_leaves(
             continue
         if leaf_node.status in ("pass", "fail", "skipped"):
             continue
-        # Check if parent branch dependencies met (parent or siblings)
-        if leaf_node.parent_id:
-            parent = _find_by_id(node, leaf_node.parent_id)
-            if parent and parent.status == "blocked":
-                continue
+        if _has_blocked_ancestor(node, leaf_node):
+            continue
         buildable.append(leaf_node)
         if len(buildable) >= max_parallel:
             break
     return buildable
+
+
+def _has_blocked_ancestor(root: ACNode, leaf: ACNode) -> bool:
+    """Walk parent chain from leaf up to root; return True if any is blocked."""
+    current_parent_id = leaf.parent_id
+    while current_parent_id:
+        ancestor = _find_by_id(root, current_parent_id)
+        if ancestor is None:
+            return False
+        if ancestor.status == "blocked":
+            return True
+        current_parent_id = ancestor.parent_id
+    return False
 
 
 def _find_by_id(root: ACNode, node_id: str) -> Optional["ACNode"]:

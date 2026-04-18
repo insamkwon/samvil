@@ -139,6 +139,40 @@ def test_build_plan_non_parallelizable():
     assert plan["total_levels"] == 2
 
 
+def test_merge_llm_replace_mode_clears_structured_deps_for_mentioned_acs():
+    structured = analyze_structured([
+        {"id": "A", "description": "a"},
+        {"id": "B", "description": "b", "depends_on": ["A"]},
+    ])
+    merged = merge_llm(structured, [
+        {"ac_id": "B", "depends_on": []},
+    ], mode="replace")
+    b = next(n for n in merged if n.id == "B")
+    assert b.depends_on == []
+
+
+def test_merge_llm_replace_mode_leaves_unmentioned_acs_intact():
+    structured = analyze_structured([
+        {"id": "A", "description": "a"},
+        {"id": "B", "description": "b", "depends_on": ["A"]},
+        {"id": "C", "description": "c", "depends_on": ["A"]},
+    ])
+    merged = merge_llm(structured, [
+        {"ac_id": "B", "depends_on": []},
+    ], mode="replace")
+    b = next(n for n in merged if n.id == "B")
+    c = next(n for n in merged if n.id == "C")
+    assert b.depends_on == []
+    assert c.depends_on == ["A"]  # untouched
+
+
+def test_merge_llm_invalid_mode_raises():
+    structured = analyze_structured([{"id": "A", "description": "a"}])
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        merge_llm(structured, [], mode="bogus")
+
+
 def test_acdepnode_roundtrip_dict():
     node = ACDepNode(id="A", description="a", depends_on=["B"])
     d = node.to_dict()

@@ -149,6 +149,53 @@ def test_tree_progress_branch_not_counted_as_leaf():
     assert stats["passed"] == 0
 
 
+def test_next_buildable_leaves_skips_when_grandparent_blocked():
+    tree = load_ac_from_schema({
+        "id": "AC-1",
+        "description": "root",
+        "status": "blocked",
+        "children": [
+            {
+                "id": "AC-1.1",
+                "description": "mid",
+                "children": [
+                    {"id": "AC-1.1.1", "description": "leaf a"},
+                    {"id": "AC-1.1.2", "description": "leaf b"},
+                ],
+            }
+        ],
+    })
+    batch = next_buildable_leaves(tree, completed=set(), max_parallel=3)
+    # grandparent blocked → no leaves should be buildable
+    assert batch == []
+
+
+def test_next_buildable_leaves_skips_when_only_one_branch_blocked():
+    tree = load_ac_from_schema({
+        "id": "AC-1",
+        "description": "root",
+        "children": [
+            {
+                "id": "AC-1.1",
+                "description": "blocked branch",
+                "status": "blocked",
+                "children": [
+                    {"id": "AC-1.1.1", "description": "under-blocked leaf"},
+                ],
+            },
+            {
+                "id": "AC-1.2",
+                "description": "open branch",
+                "children": [
+                    {"id": "AC-1.2.1", "description": "free leaf"},
+                ],
+            },
+        ],
+    })
+    batch = next_buildable_leaves(tree, completed=set(), max_parallel=3)
+    assert [l.id for l in batch] == ["AC-1.2.1"]
+
+
 def test_next_buildable_leaves_deep_tree():
     tree = load_ac_from_schema({
         "id": "AC-1",

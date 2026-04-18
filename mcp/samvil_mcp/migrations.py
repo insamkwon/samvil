@@ -48,21 +48,25 @@ def migrate_seed_v2_to_v3(seed: dict) -> dict:
 
 
 def migrate_with_backup(seed_path: str) -> dict:
-    """Migrate a seed file with automatic backup."""
+    """Migrate a seed file with automatic backup.
+
+    - Reads the seed first.
+    - Creates `.v2.backup.json` **only** when an actual migration happens
+      (so re-running on a v3 seed doesn't produce a stale pre-v3 sidecar).
+    - Never overwrites an existing backup.
+    """
     p = Path(seed_path)
     if not p.exists():
         raise FileNotFoundError(f"Seed not found: {seed_path}")
 
-    # Backup
-    backup = p.with_suffix(f".v2.backup.json")
-    if not backup.exists():
-        shutil.copy2(p, backup)
-
     seed = json.loads(p.read_text())
 
-    # Already v3?
     if seed.get("schema_version", "").startswith("3."):
         return seed
+
+    backup = p.with_suffix(".v2.backup.json")
+    if not backup.exists():
+        shutil.copy2(p, backup)
 
     migrated = migrate_seed_v2_to_v3(seed)
     p.write_text(json.dumps(migrated, indent=2, ensure_ascii=False))

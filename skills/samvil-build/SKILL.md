@@ -327,9 +327,13 @@ npm install <packages> --save > .samvil/deps-install.log 2>&1
 
 **CC skill:** No dependency installation needed.
 
+## Phase A ↔ Phase B boundary (v3.0.0)
+
+**Phase A (Core Experience) stays feature-less**: it builds exactly one primary screen / entry point from `seed.core_experience`. AC tree granularity is **not** applied here — `core_experience` is defined as a single artifact across all `solution_type`s, so leaf-level decomposition is noise. The tree path starts at Phase B.
+
 ## Phase B Mode Selection (v3.0.0+)
 
-Detect seed schema version, then route to the correct Phase B body.
+Detect seed schema version, then pick the active Phase B body.
 
 1. Read `seed.schema_version` from `project.seed.json`.
 2. If it starts with `"3."` → jump to **Phase B-Tree** below.
@@ -337,11 +341,16 @@ Detect seed schema version, then route to the correct Phase B body.
    ```
    mcp__samvil_mcp__migrate_seed_file(seed_path="<cwd>/project.seed.json")
    ```
-   - Writes a backup to `project.v2.backup.json` next to the seed.
+   - Creates `project.v2.backup.json` next to the seed (skipped if already v3).
    - Re-read the migrated seed before continuing.
    - MCP (best-effort) event: `seed_migrated` with `{"from":"2.x","to":"3.0"}`.
 
-The legacy feature-batch build (`## Phase B: Features`) is retained below as documentation only. v3.0.0 seeds always take the tree path. Legacy `minimal`/`standard`/`parallel` classification rules apply _within_ each leaf batch (see Phase B-Tree Step 3).
+**Per `solution_type`:**
+
+- `web-app` and `dashboard` → **Phase B-Tree** (leaf-level dispatch).
+- `automation`, `game`, `mobile-app` → use the legacy Phase B body below. Their "feature = module / mechanic / screen" unit is already the correct granularity and tree decomposition adds friction without gain. Migration still runs so `schema_version = 3.0` regardless.
+
+The `## Phase B: Features` section below is **active** for the three solution types just listed and **reference** for web-app / dashboard (it still documents MAX_PARALLEL, Independence Check, and Worker Context Budget — all reused verbatim by Phase B-Tree).
 
 ## Phase B-Tree: AC Tree Execution (v3.0.0+)
 
@@ -412,69 +421,128 @@ Emit a single event: `dependency_plan_built` with `{feature, total_levels, is_pa
 
 ### Step 3: Tree loop (until `tree_progress.all_done` is true)
 
+This is an **iterative** loop in the main skill; each iteration produces one batch of Agent invocations. Maintain two locals across iterations:
+
+- `tree_json` — the current tree state. Every call that mutates it (update_leaf_status) returns a new `tree` field; read that field and use it as input to the next MCP call.
+- `completed_ids` — list of leaf IDs whose status has been finalized this run. Seeded from Step 2.
+- `consecutive_fail_batches` — integer, starts at 0. Used for the Circuit Breaker in 3f.
+
+**Iterate until `mcp__samvil_mcp__tree_progress(...).all_done == true`.** Each iteration:
+
+#### 3a. Fetch the next batch
+
+Call:
 ```
-while True:
-    batch = mcp__samvil_mcp__next_buildable_leaves(
-        ac_tree_json=<current tree_json>,
-        completed_ids_json=json.dumps(completed_ids),
-        max_parallel=MAX_PARALLEL,
-    )
-    if batch.count == 0:
-        break
-
-    # 3a. Spawn workers — one Agent per leaf in the batch, in ONE message
-    #     (same chunk-dispatch pattern as Phase B Legacy).
-    for leaf in batch.leaves:
-        Agent(
-          description: "SAMVIL Build: AC <leaf.id>",
-          subagent_type: "general-purpose",
-          prompt:
-            <compact persona from agents/frontend-dev.md>
-            Context (≤2000 tokens): project path, Stack, architecture
-            Feature: <feature.name>
-            AC (leaf): <leaf.id> — <leaf.description>
-            Parent AC context: <leaf.parent_id description, 1 line>
-            Rules: create components under components/<feature-name>/;
-                   run `npx tsc --noEmit` + `npx eslint . --quiet`;
-                   report files_created, files_modified, typecheck_ok.
-        )
-
-    # 3b. Wait for the chunk
-
-    # 3c. Update tree + checkpoint from results
-    for leaf, result in zip(batch.leaves, worker_results):
-        status = "pass" if result.typecheck_ok and result.files_created else "fail"
-        tree_json = mcp__samvil_mcp__update_leaf_status(
-            ac_tree_json=tree_json,
-            leaf_id=leaf.id,
-            status=status,
-            evidence_json=json.dumps(result.files_created + result.files_modified),
-        )
-        completed_ids.append(leaf.id)
-        mcp__samvil_mcp__save_event(
-            event_type="ac_leaf_complete",
-            data='{"feature":"<name>","leaf_id":"<id>","status":"<status>"}'
-        )
-
-    # 3d. HUD
-    hud = mcp__samvil_mcp__render_ac_tree_hud(ac_tree_json=tree_json)
-    print(hud.ascii)
-
-    # 3e. Checkpoint
-    mcp__samvil_mcp__save_checkpoint(
-        seed_id=<session_id>,
-        phase="build",
-        state_json=json.dumps({
-            "feature": feature.name,
-            "completed_ids": completed_ids,
-        }),
-    )
-
-    # 3f. Circuit breaker — two consecutive fail batches → stop this feature
-    if last_two_batches_all_failed:
-        emit event build_feature_fail
-        break
+nb_json = mcp__samvil_mcp__next_buildable_leaves(
+    ac_tree_json=<current tree_json>,
+    completed_ids_json=json.dumps(completed_ids),
+    max_parallel=MAX_PARALLEL,
+)
+batch = json.loads(nb_json)
 ```
+
+If `batch["count"] == 0`: break the loop. (Nothing more is buildable — either done, or every remaining leaf has a blocked ancestor.)
+
+#### 3b. Acquire rate-budget slots
+
+For each leaf in `batch["leaves"]`, call `mcp__samvil_mcp__rate_budget_acquire(budget_path="<cwd>/.samvil/rate-budget.jsonl", worker_id=f"build-{leaf['id']}", max_concurrent=MAX_PARALLEL)`. If any returns `acquired == false`, release the ones already acquired and wait ~1 s before retrying (budget is stale). After 30 s of no slot, log `rate_budget_starved` event and continue anyway (best-effort).
+
+#### 3c. Spawn Agents — one per leaf, all in ONE message (parallel chunk)
+
+For each `leaf` in `batch["leaves"]`, use the Agent tool with:
+
+- `description: "SAMVIL Build: AC <leaf['id']>"`
+- `subagent_type: "general-purpose"`
+- `model: config.model_routing.build_worker or config.model_routing.default or "sonnet"`
+- `prompt:` (≤ 2000 tokens, concrete sections)
+  1. **Persona**: inline-paste `agents/frontend-dev.md` (the "leaf-aware" v3.0.0+ version).
+  2. **Context** (≤ 400 tokens):
+     - `Project: ~/dev/<seed.name>/`
+     - `Stack: <1-line tech_stack summary>`
+     - `Architecture: <5–10 line blueprint directory tree>`
+     - `Feature: <feature.name> — <feature.description>`
+     - `Peers: <other feature names, comma-separated>`
+  3. **Your AC leaf**:
+     - `Leaf ID: <leaf['id']>`
+     - `Leaf description: <leaf['description']>`
+     - `Parent AC: <leaf['parent_id'] resolved to its description, or "(root)">`
+     - `Sibling leaf IDs: <other buildable leaf IDs in this batch>`
+  4. **Contract**:
+     - Only create/modify files under `components/<feature-name>/` (or the equivalent folder per blueprint). No shared-file edits.
+     - Run `cd ~/dev/<seed.name> && npx tsc --noEmit 2>&1 | head -20 && npx eslint . --quiet 2>&1 | head -20`. Do **not** run `npm run build` (integration build is the main session's job in Step 4).
+     - Reply with exactly this block (the skill parses it):
+       ```
+       Leaf: <leaf-id>
+       files_created: [<paths>]
+       files_modified: [<paths>]
+       typecheck_ok: <true|false>
+       lint_ok: <true|false>
+       notes: <≤ 2 sentences>
+       ```
+
+Issue all Agent calls in a **single assistant message** so they run in parallel.
+
+#### 3d. Parse results and update the tree
+
+Wait for the chunk to complete. For each `leaf` / Agent result pair:
+
+```
+status = "pass" if (typecheck_ok and files_created not empty) else "fail"
+update_json = mcp__samvil_mcp__update_leaf_status(
+    ac_tree_json=<current tree_json>,
+    leaf_id=leaf["id"],
+    status=status,
+    evidence_json=json.dumps(files_created + files_modified),
+)
+u = json.loads(update_json)
+assert u["found"] is True, f"leaf {leaf['id']} vanished from tree"
+tree_json = json.dumps(u["tree"])          # ← the only way to propagate tree state
+completed_ids.append(leaf["id"])
+
+mcp__samvil_mcp__rate_budget_release(
+    budget_path="<cwd>/.samvil/rate-budget.jsonl",
+    worker_id=f"build-{leaf['id']}",
+)
+
+mcp__samvil_mcp__save_event(
+    session_id="<session_id>",
+    event_type="ac_leaf_complete",
+    stage="build",
+    data=json.dumps({"feature": feature["name"], "leaf_id": leaf["id"], "status": status}),
+)
+```
+
+#### 3e. HUD + checkpoint (after every batch)
+
+```
+hud_json = mcp__samvil_mcp__render_ac_tree_hud(ac_tree_json=tree_json)
+print(json.loads(hud_json)["ascii"])      # user-visible progress
+
+mcp__samvil_mcp__save_checkpoint(
+    seed_id="<session_id>",
+    phase="build",
+    state_json=json.dumps({
+        "feature": feature["name"],
+        "completed_ids": completed_ids,
+        "tree_json": tree_json,
+        "consecutive_fail_batches": consecutive_fail_batches,
+    }),
+)
+```
+
+The tree itself is stored **inside** the checkpoint so a resumed session replays from the same mid-feature state.
+
+#### 3f. Circuit Breaker (persistent)
+
+```
+all_failed_this_batch = all(result.status == "fail" for result in this batch)
+consecutive_fail_batches = (consecutive_fail_batches + 1) if all_failed_this_batch else 0
+```
+
+If `consecutive_fail_batches >= 2`:
+- Emit `build_feature_fail` event with `{"feature": feature["name"], "reason": "two consecutive failed batches"}`.
+- Break out of the loop for this feature (remaining leaves stay `pending` — QA will report them).
+- Do **not** propagate the failure beyond this feature; the next feature still runs.
 
 ### Step 4: Integration build per feature
 
@@ -507,44 +575,21 @@ After all features in the seed:
 - `MAX_PARALLEL` is still determined by the same Dynamic Parallelism logic (see legacy Phase B below).
 - `next_buildable_leaves` already honors blocked parents, terminal statuses, and the completed set; no separate independence-check is needed across leaves of the same feature — they share a folder so conflicts are handled by the worker contract (one leaf per Agent, no shared-file edits outside `components/<feature>/`).
 
-### Shared API rate budget (v3.0.0 T3)
+### Rate budget lifecycle (summary)
 
-Before spawning a worker, cooperatively acquire a slot from the session's shared budget so multiple skills (build, QA, council) don't exceed the API concurrency cap.
-
-```
-# Before spawning each worker in a chunk
-for leaf in batch.leaves:
-    ack = mcp__samvil_mcp__rate_budget_acquire(
-        budget_path="<cwd>/.samvil/rate-budget.jsonl",
-        worker_id=f"build-{leaf.id}",
-        max_concurrent=MAX_PARALLEL,
-    )
-    if not ack.acquired:
-        # Budget exhausted → wait for a release from an in-flight agent
-        # (main session is single-threaded; this is a slot check, not a lock)
-        sleep 1; retry up to 30s; then log warning and continue anyway
-```
-
-After each worker returns (pass or fail), release immediately:
-
-```
-mcp__samvil_mcp__rate_budget_release(
-    budget_path="<cwd>/.samvil/rate-budget.jsonl",
-    worker_id=f"build-{leaf.id}",
-)
-```
-
-At the end of the feature tree loop, emit one summary event with the stats:
-
-```
-st = mcp__samvil_mcp__rate_budget_stats(budget_path="<cwd>/.samvil/rate-budget.jsonl")
-mcp__samvil_mcp__save_event(event_type="rate_budget_summary", data=st)
-```
-
-When starting a fresh session, reset the budget file first:
-```
-mcp__samvil_mcp__rate_budget_reset(budget_path="<cwd>/.samvil/rate-budget.jsonl")
-```
+- Step 3b acquires a slot before each Agent spawn.
+- Step 3d releases after each Agent returns.
+- At the **start of a fresh session** (no checkpoint for this seed), reset:
+  ```
+  mcp__samvil_mcp__rate_budget_reset(budget_path="<cwd>/.samvil/rate-budget.jsonl")
+  ```
+- At the **end of each feature**, emit a summary event:
+  ```
+  stats = json.loads(mcp__samvil_mcp__rate_budget_stats(
+      budget_path="<cwd>/.samvil/rate-budget.jsonl"
+  ))
+  mcp__samvil_mcp__save_event(event_type="rate_budget_summary", data=json.dumps({"feature": feature["name"], **stats}))
+  ```
 
 ### Backward compatibility
 

@@ -37,9 +37,27 @@ async def get_store() -> EventStore:
     return _store
 
 
+_HEALTH_OK_COUNTS: dict[str, int] = {}
+# Sample 1-in-N successful calls per tool. `fail` is always logged.
+_HEALTH_OK_SAMPLE_RATE = 10
+
+
 def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
-    """Log MCP health event to .samvil/mcp-health.jsonl for retro reporting."""
+    """Log MCP health event to .samvil/mcp-health.jsonl for retro reporting.
+
+    - `fail` events are always recorded (with the error message).
+    - `ok` events are sampled (1/10 by default) + total call count is
+      persisted on every sampled entry so retro can compute real volume.
+    """
     from datetime import datetime, timezone
+
+    total_calls: int | None = None
+    if status == "ok":
+        _HEALTH_OK_COUNTS[tool] = _HEALTH_OK_COUNTS.get(tool, 0) + 1
+        total_calls = _HEALTH_OK_COUNTS[tool]
+        if total_calls % _HEALTH_OK_SAMPLE_RATE != 0:
+            return  # sampled out
+
     health_path = Path.home() / ".samvil" / "mcp-health.jsonl"
     health_path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
@@ -48,6 +66,9 @@ def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
         "error": error,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+    if total_calls is not None:
+        entry["ok_total_so_far"] = total_calls
+        entry["sample_rate"] = _HEALTH_OK_SAMPLE_RATE
     with open(health_path, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -1008,11 +1029,13 @@ async def next_buildable_leaves(
         node = ACNode.from_dict(json.loads(ac_tree_json))
         completed = set(json.loads(completed_ids_json))
         batch = _nbl(node, completed, max_parallel=max_parallel)
-        return json.dumps({
+        result = {
             "leaves": [l.to_dict() for l in batch],
             "count": len(batch),
             "max_parallel": max_parallel,
-        })
+        }
+        _log_mcp_health("ok", "next_buildable_leaves")
+        return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "next_buildable_leaves", str(e))
         return json.dumps({"error": str(e), "leaves": [], "count": 0})
@@ -1032,6 +1055,7 @@ async def tree_progress(ac_tree_json: str) -> str:
         node = ACNode.from_dict(json.loads(ac_tree_json))
         stats = _tp(node)
         stats["all_done"] = _all_done(node)
+        _log_mcp_health("ok", "tree_progress")
         return json.dumps(stats)
     except Exception as e:
         _log_mcp_health("fail", "tree_progress", str(e))
@@ -1053,13 +1077,20 @@ async def update_leaf_status(
         status: new status (pending/in_progress/pass/fail/blocked/skipped)
         evidence_json: JSON array of evidence strings to append
 
-    Returns: updated ACNode dict + {found: bool}
+    Returns:
+        {"found": bool, "tree": <ACNode dict>, "leaf_id": str, "status": str}
+        - tree is a clean ACNode that callers can round-trip back into
+          parse_ac_tree / next_buildable_leaves without pruning extra keys.
     """
     try:
         from .ac_tree import ACNode, walk
         valid = {"pending", "in_progress", "pass", "fail", "blocked", "skipped"}
         if status not in valid:
-            return json.dumps({"error": f"invalid status: {status}", "found": False})
+            return json.dumps({
+                "found": False,
+                "tree": None,
+                "error": f"invalid status: {status}",
+            })
         node = ACNode.from_dict(json.loads(ac_tree_json))
         evidence = json.loads(evidence_json)
         found = False
@@ -1070,12 +1101,17 @@ async def update_leaf_status(
                     n.evidence.extend(evidence)
                 found = True
                 break
-        result = node.to_dict()
-        result["found"] = found
+        result = {
+            "found": found,
+            "tree": node.to_dict(),
+            "leaf_id": leaf_id,
+            "status": status,
+        }
+        _log_mcp_health("ok", "update_leaf_status")
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "update_leaf_status", str(e))
-        return json.dumps({"error": str(e), "found": False})
+        return json.dumps({"found": False, "tree": None, "error": str(e)})
 
 
 # ── v3.0.0 T1.4: Seed migration tools ─────────────────────────
@@ -1105,12 +1141,14 @@ async def migrate_seed(
             return json.dumps({
                 "error": f"Unsupported migration path: {from_version} → {to_version}",
             })
-        return json.dumps({
+        result = {
             "migrated": migrated,
             "from": from_version,
             "to": to_version,
             "migrated_version": migrated.get("schema_version", "3.0"),
-        })
+        }
+        _log_mcp_health("ok", "migrate_seed")
+        return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "migrate_seed", str(e))
         return json.dumps({"error": str(e)})
@@ -1137,13 +1175,15 @@ async def migrate_seed_file(seed_path: str) -> str:
         already_v3 = str(pre.get("schema_version", "")).startswith("3.")
         migrated = migrate_with_backup(str(p))
         backup = p.with_suffix(".v2.backup.json")
-        return json.dumps({
+        result = {
             "status": "ok",
             "path": str(p),
             "backup_path": str(backup) if backup.exists() else "",
             "schema_version": migrated.get("schema_version", "3.0"),
             "already_v3": already_v3,
-        })
+        }
+        _log_mcp_health("ok", "migrate_seed_file")
+        return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "migrate_seed_file", str(e))
         return json.dumps({"error": str(e)})
@@ -1156,6 +1196,7 @@ async def migrate_seed_file(seed_path: str) -> str:
 async def analyze_ac_dependencies(
     acs_json: str,
     llm_deps_json: str = "[]",
+    llm_mode: str = "augment",
 ) -> str:
     """Build a dependency DAG from ACs and return the execution plan.
 
@@ -1166,6 +1207,9 @@ async def analyze_ac_dependencies(
         llm_deps_json: JSON list of LLM-inferred dependency entries of the
             form {"ac_id": str, "depends_on": [str], "reason": str}.
             Defaults to no LLM input.
+        llm_mode: "augment" (default — keep structured deps, add LLM deps)
+                  or "replace" (for ACs in llm_deps, discard structured and
+                  use LLM only).
 
     Returns: execution plan dict with nodes / execution_levels /
              is_parallelizable / total_levels / total_acs
@@ -1180,9 +1224,10 @@ async def analyze_ac_dependencies(
         acs = json.loads(acs_json)
         llm_deps = json.loads(llm_deps_json) if llm_deps_json else []
         structured = analyze_structured(acs)
-        merged = merge_llm(structured, llm_deps)
+        merged = merge_llm(structured, llm_deps, mode=llm_mode)
         levels = compute_execution_levels(merged)
         plan = build_plan(merged, levels)
+        _log_mcp_health("ok", "analyze_ac_dependencies")
         return json.dumps(plan)
     except Exception as e:
         _log_mcp_health("fail", "analyze_ac_dependencies", str(e))
@@ -1206,6 +1251,7 @@ async def rate_budget_acquire(
     try:
         from .rate_budget import acquire as _acquire
         result = _acquire(budget_path, worker_id, max_concurrent)
+        _log_mcp_health("ok", "rate_budget_acquire")
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "rate_budget_acquire", str(e))
@@ -1217,7 +1263,9 @@ async def rate_budget_release(budget_path: str, worker_id: str) -> str:
     """Append a `release` event for worker_id. Idempotent."""
     try:
         from .rate_budget import release as _release
-        return json.dumps(_release(budget_path, worker_id))
+        result = _release(budget_path, worker_id)
+        _log_mcp_health("ok", "rate_budget_release")
+        return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "rate_budget_release", str(e))
         return json.dumps({"error": str(e), "released": False})
@@ -1228,7 +1276,9 @@ async def rate_budget_stats(budget_path: str) -> str:
     """Return budget stats {active, peak, total_acquired, total_released}."""
     try:
         from .rate_budget import stats as _stats
-        return json.dumps(_stats(budget_path))
+        result = _stats(budget_path)
+        _log_mcp_health("ok", "rate_budget_stats")
+        return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "rate_budget_stats", str(e))
         return json.dumps({"error": str(e)})
@@ -1239,7 +1289,9 @@ async def rate_budget_reset(budget_path: str) -> str:
     """Truncate the budget log. Returns pre-reset stats."""
     try:
         from .rate_budget import reset as _reset
-        return json.dumps(_reset(budget_path))
+        result = _reset(budget_path)
+        _log_mcp_health("ok", "rate_budget_reset")
+        return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "rate_budget_reset", str(e))
         return json.dumps({"error": str(e)})
@@ -1255,6 +1307,7 @@ async def validate_pm_seed(pm_seed_json: str) -> str:
         from .pm_seed import validate_pm_seed as _validate
         pm_seed = json.loads(pm_seed_json)
         errors = _validate(pm_seed)
+        _log_mcp_health("ok", "validate_pm_seed")
         return json.dumps({"valid": not errors, "errors": errors})
     except Exception as e:
         _log_mcp_health("fail", "validate_pm_seed", str(e))
@@ -1262,15 +1315,27 @@ async def validate_pm_seed(pm_seed_json: str) -> str:
 
 
 @mcp.tool()
-async def pm_seed_to_eng_seed(pm_seed_json: str) -> str:
+async def pm_seed_to_eng_seed(
+    pm_seed_json: str,
+    defaults_json: str = "{}",
+) -> str:
     """Convert a PM seed to an engineering seed (features[]).
+
+    Args:
+        pm_seed_json: PM seed
+        defaults_json: engineering-field overrides
+            (tech_stack, solution_type, core_experience, constraints,
+             out_of_scope, version, description). Anything missing is filled
+            with conservative placeholders so validate_seed accepts the result.
 
     Output includes schema_version: "3.0" and preserves vision / users / metrics.
     """
     try:
         from .pm_seed import pm_seed_to_eng_seed as _convert
         pm_seed = json.loads(pm_seed_json)
-        eng_seed = _convert(pm_seed)
+        defaults = json.loads(defaults_json) if defaults_json else {}
+        eng_seed = _convert(pm_seed, defaults=defaults)
+        _log_mcp_health("ok", "pm_seed_to_eng_seed")
         return json.dumps(eng_seed)
     except Exception as e:
         _log_mcp_health("fail", "pm_seed_to_eng_seed", str(e))

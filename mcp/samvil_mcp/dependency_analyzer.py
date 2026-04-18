@@ -102,17 +102,27 @@ def analyze_structured(acs: list[dict]) -> list[ACDepNode]:
 def merge_llm(
     structured: list[ACDepNode],
     llm_deps: list[dict],
+    mode: str = "augment",
 ) -> list[ACDepNode]:
     """Merge LLM-inferred dependencies into the structured node set.
 
     llm_deps schema (per entry):
       {"ac_id": "<id>", "depends_on": ["<id>", ...], "reason": "..."}
 
-    Behavior:
-      - Structured deps are preserved.
-      - LLM deps are added (deduplicated).
-      - Self-references and unknown IDs are discarded.
+    Args:
+        structured: nodes from `analyze_structured`.
+        llm_deps: LLM output.
+        mode:
+          - "augment" (default) — keep structured deps, add LLM-inferred ones.
+          - "replace" — for any AC mentioned in llm_deps, discard its
+            structured deps and use the LLM list only. ACs not mentioned
+            keep their structured deps.
+
+    Self-references and unknown IDs are always discarded regardless of mode.
     """
+    if mode not in ("augment", "replace"):
+        raise ValueError(f"merge_llm mode must be 'augment' or 'replace', got {mode!r}")
+
     by_id = {n.id: n for n in structured}
     known_ids = set(by_id)
 
@@ -121,6 +131,8 @@ def merge_llm(
         if not ac_id or ac_id not in by_id:
             continue
         target = by_id[ac_id]
+        if mode == "replace":
+            target.depends_on = []
         for dep in entry.get("depends_on", []) or []:
             if not dep or dep == ac_id or dep not in known_ids:
                 continue

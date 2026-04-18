@@ -91,9 +91,9 @@ def test_migrate_with_backup_idempotent_on_v3(tmp_path: Path):
     seed_path.write_text(json.dumps(original))
     result = migrate_with_backup(str(seed_path))
     assert result["schema_version"] == "3.0"
-    # No backup should be created for a fresh v3 file
+    # v3 seed → no backup created, file unchanged
     backup = seed_path.with_suffix(".v2.backup.json")
-    # backup may exist from the shutil.copy2 pre-check — but file is unchanged
+    assert not backup.exists(), "v3 seed should not produce a backup"
     assert json.loads(seed_path.read_text()) == original
 
 
