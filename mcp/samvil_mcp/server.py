@@ -579,6 +579,55 @@ async def semantic_check(code: str, context_hint: str = "") -> str:
         return json.dumps({"risk_level": "LOW", "error": str(e)})
 
 
+@mcp.tool()
+async def semantic_check_llm(code: str, ac_description: str, tier: str = "standard") -> str:
+    """Enhanced semantic check with LLM support for thorough+ tiers.
+
+    Returns heuristic result + llm_prompt (for skill to call LLM) + should_use_llm flag.
+    The actual LLM call is done by the skill, not MCP.
+
+    Args:
+        code: Source code to analyze
+        ac_description: AC description for context
+        tier: Agent tier (minimal/standard/thorough/full)
+
+    Returns: heuristic result + {llm_prompt, should_use_llm}
+    """
+    try:
+        from .semantic_checker import (
+            analyze_code_snippet,
+            build_llm_prompt,
+            should_use_llm,
+        )
+        result = analyze_code_snippet(code, ac_description)
+        use_llm = should_use_llm(tier, result["risk_level"])
+        result["should_use_llm"] = use_llm
+        if use_llm:
+            result["llm_prompt"] = build_llm_prompt(code, ac_description)
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "semantic_check_llm", str(e))
+        return json.dumps({"risk_level": "LOW", "error": str(e), "should_use_llm": False})
+
+
+@mcp.tool()
+async def merge_llm_result(heuristic_json: str, llm_response_json: str) -> str:
+    """Merge LLM verdict into heuristic result after skill calls LLM.
+
+    Args:
+        heuristic_json: Original heuristic result from semantic_check_llm
+        llm_response_json: LLM response {is_real_implementation, confidence, reasoning}
+    """
+    try:
+        from .semantic_checker import merge_llm_verdict
+        heuristic = json.loads(heuristic_json)
+        llm_resp = json.loads(llm_response_json)
+        return json.dumps(merge_llm_verdict(heuristic, llm_resp))
+    except Exception as e:
+        _log_mcp_health("fail", "merge_llm_result", str(e))
+        return heuristic_json
+
+
 # ── Skip Externally Satisfied ACs tools (v2.6.0, #08) ────────
 
 
