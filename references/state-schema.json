@@ -14,7 +14,7 @@
     },
     "current_stage": {
       "type": "string",
-      "enum": ["interview", "seed", "scaffold", "build", "qa", "retro", "evolve", "complete"],
+      "enum": ["interview", "seed", "council", "design", "scaffold", "build", "qa", "deploy", "retro", "evolve", "complete"],
       "description": "Current pipeline stage"
     },
     "session_id": {

@@ -196,6 +196,49 @@ def test_next_buildable_leaves_skips_when_only_one_branch_blocked():
     assert [l.id for l in batch] == ["AC-1.2.1"]
 
 
+def test_from_dict_rejects_depth_exceeding_max():
+    """MAX_DEPTH=3 — depth 4 must raise ValueError."""
+    import pytest
+    too_deep = {
+        "id": "AC-1", "description": "d0",
+        "children": [{
+            "id": "AC-1.1", "description": "d1",
+            "children": [{
+                "id": "AC-1.1.1", "description": "d2",
+                "children": [{
+                    "id": "AC-1.1.1.1", "description": "d3",
+                    "children": [{
+                        "id": "AC-1.1.1.1.1", "description": "d4",
+                        "children": [],
+                    }],
+                }],
+            }],
+        }],
+    }
+    with pytest.raises(ValueError, match="MAX_DEPTH"):
+        load_ac_from_schema(too_deep)
+
+
+def test_from_dict_accepts_max_depth():
+    """Exactly MAX_DEPTH (depth 3 leaf) is allowed."""
+    at_max = {
+        "id": "AC-1", "description": "d0",
+        "children": [{
+            "id": "AC-1.1", "description": "d1",
+            "children": [{
+                "id": "AC-1.1.1", "description": "d2",
+                "children": [{
+                    "id": "AC-1.1.1.1", "description": "d3 (leaf)",
+                    "children": [],
+                }],
+            }],
+        }],
+    }
+    node = load_ac_from_schema(at_max)
+    deepest = list(leaves(node))[0]
+    assert deepest.depth == 3
+
+
 def test_next_buildable_leaves_deep_tree():
     tree = load_ac_from_schema({
         "id": "AC-1",

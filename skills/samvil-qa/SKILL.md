@@ -1363,6 +1363,8 @@ If QA Pass 3 all dimensions ≥ 4/5: skip evolve offer, go directly to deploy:
 - Pass rates: Mechanical <N/N>, Functional <N/N>, Quality <N/N>
 - Issues fixed: <요약>
 - Remaining: <없음 또는 목록>
+- (v3) Tree leaves: <total> total / <passed> passed / <failed> failed across <feature count> feature(s)
+- (v3) Top failing leaves: <leaf-id list, max 5 — empty if all passed>
 ```
 
   Invoke the Skill tool with skill: `samvil-deploy`

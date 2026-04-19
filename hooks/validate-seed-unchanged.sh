@@ -1,21 +1,21 @@
 #!/bin/bash
-# SAMVIL Hook: Validate seed hasn't been modified during build/QA phases
+# SAMVIL Hook: Validate seed hasn't been modified during build/QA/deploy phases
 # Triggers: PreToolCall on Write/Edit tools
-# Purpose: Prevent accidental seed modification during build
-# v2: Recognizes solution_type field (web-app, automation, game, mobile-app, dashboard)
+# Purpose: Prevent accidental seed modification once the build pipeline has started
+# v3: also protects "deploy" stage (samvil-deploy must not mutate seed)
 
 # Get the file being written/edited from the tool input
 FILE_PATH="$1"
 
 # Only check if it's a seed file being modified
 if [[ "$FILE_PATH" == *"project.seed.json"* ]]; then
-  # Check if we're in build or QA phase
+  # Check if we're in a stage where the seed is immutable
   STATE_FILE=$(dirname "$FILE_PATH")/project.state.json
   if [ -f "$STATE_FILE" ]; then
     STAGE=$(python3 -c "import json; print(json.load(open('$STATE_FILE'))['current_stage'])" 2>/dev/null)
-    if [[ "$STAGE" == "build" || "$STAGE" == "qa" ]]; then
+    if [[ "$STAGE" == "build" || "$STAGE" == "qa" || "$STAGE" == "deploy" ]]; then
       echo "[SAMVIL] ⚠️ WARNING: Attempting to modify seed during $STAGE phase."
-      echo "Seed is immutable during build/QA. If you need changes, run samvil:evolve after QA."
+      echo "Seed is immutable during build/QA/deploy. If you need changes, run samvil:evolve after QA."
       exit 1
     fi
   fi

@@ -15,6 +15,7 @@ class Stage(str, Enum):
     SCAFFOLD = "scaffold"
     BUILD = "build"
     QA = "qa"
+    DEPLOY = "deploy"  # v3.0.0: samvil-deploy emits stage="deploy"
     RETRO = "retro"
     EVOLVE = "evolve"
     COMPLETE = "complete"

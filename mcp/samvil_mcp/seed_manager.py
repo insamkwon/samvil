@@ -152,8 +152,14 @@ def validate_state(state: dict) -> dict:
         errors.append("Missing required field: seed_version")
     if "current_stage" not in state:
         errors.append("Missing required field: current_stage")
-    elif state["current_stage"] not in ("interview", "seed", "scaffold", "build", "qa", "retro", "evolve", "complete"):
-        errors.append(f"Invalid current_stage: {state['current_stage']}")
+    else:
+        # Aligned with samvil_mcp.models.Stage (kept in sync deliberately)
+        valid_stages = (
+            "interview", "seed", "council", "design", "scaffold",
+            "build", "qa", "deploy", "retro", "evolve", "complete",
+        )
+        if state["current_stage"] not in valid_stages:
+            errors.append(f"Invalid current_stage: {state['current_stage']}")
 
     return {"valid": len(errors) == 0, "errors": errors}
 

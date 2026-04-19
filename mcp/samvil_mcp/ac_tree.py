@@ -53,6 +53,12 @@ class ACNode:
 
     @classmethod
     def from_dict(cls, data: dict, parent_id: str | None = None, depth: int = 0) -> "ACNode":
+        if depth > MAX_DEPTH:
+            raise ValueError(
+                f"AC tree depth {depth} exceeds MAX_DEPTH={MAX_DEPTH} "
+                f"(node id={data.get('id', '?')!r}). Flatten or split into "
+                f"a separate feature."
+            )
         node = cls(
             id=data.get("id", ""),
             description=data.get("description", ""),
