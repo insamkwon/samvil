@@ -12,7 +12,11 @@
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
 
-**v2.2 "Manifesto v3"** — 1인 개발자를 위한 범용 하네스. 견고성(Robustness) 우선, 완성 후 자가 진화(Converge-then-Evolve).
+**v3.0.0 "AC Tree Era"** — 1인 개발자를 위한 범용 하네스. 견고성(Robustness) 우선, 완성 후 자가 진화(Converge-then-Evolve).
+
+> **⚠️ Breaking change vs v2.x**: AC가 트리 구조로 바뀌었습니다. 기존 v2 프로젝트는 `/samvil:update --migrate` 한 번 실행하면 자동 변환됩니다 (`project.v2.backup.json`로 백업). 자세한 내용: [migration-v2-to-v3.md](references/migration-v2-to-v3.md).
+>
+> v3.0.0의 주요 추가: AC Tree leaf-level Build/QA, 의존성 기반 병렬 plan (T2), 공유 API rate budget (T3), PM Interview mode (T4).
 
 ## 🧬 정체성 (Identity)
 

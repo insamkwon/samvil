@@ -36,16 +36,26 @@
 - [ ] No `any` type in core business logic (lib/, components/)
 - [ ] All imports resolve (no "Module not found")
 
-## Pass 2: Functional (check each AC)
+## Pass 2: Functional (check each AC leaf)
 
-For each `acceptance_criteria` in seed.json:
+**v3.0.0**: `seed.features[i].acceptance_criteria` is an AC tree. Iterate **leaves** (nodes with `children: []`); branch nodes get their verdict from `aggregate_status` automatically. v2 seeds still work — every flat AC is a leaf.
+
+For each leaf AC:
 
 - [ ] Code exists that implements this criterion
 - [ ] The implementation is reachable (not dead code, properly imported)
 - [ ] Edge case: empty state handled (first-use experience)
 - [ ] Edge case: if data persistence claimed, verify localStorage/DB code
+- [ ] (v3) Use the parent AC's description as context — leaf descriptions are often partial sentences ("validates form" under "Add habit")
 
-Verdict per AC: **PASS** / **PARTIAL** / **UNIMPLEMENTED** / **FAIL**
+Verdict per leaf AC: **PASS** / **PARTIAL** / **UNIMPLEMENTED** / **FAIL**
+
+Branch verdict aggregation (handled by `mcp__samvil_mcp__render_ac_tree_hud`):
+- All children PASS → branch PASS
+- Any child FAIL → branch FAIL
+- Any child in_progress → branch in_progress
+- Any child blocked → branch blocked
+- Otherwise → pending
 
 | Verdict | 점수 | 의미 |
 |---------|------|------|

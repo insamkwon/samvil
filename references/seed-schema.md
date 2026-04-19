@@ -1,11 +1,14 @@
 # Seed Schema Reference
 
-## project.seed.json (v2)
+## project.seed.json (v3.0.0)
 
-```json
+> **Breaking change vs v2**: `acceptance_criteria` lives **inside each feature** as an AC tree. The root-level `acceptance_criteria` array is no longer required; v3 validation reads `features[i].acceptance_criteria` and counts tree leaves. Old v2 seeds are auto-migrated by `mcp__samvil_mcp__migrate_seed_file` (creates `project.v2.backup.json`). See `references/migration-v2-to-v3.md`.
+
+```jsonc
 {
   "name": "string — kebab-case, valid npm package name",
   "description": "string — one-line project description",
+  "schema_version": "3.0",          // required for v3 validation path
   "solution_type": "web-app | automation | game | mobile-app | dashboard",
   "mode": "web (DEPRECATED — auto-migrated to solution_type)",
   "implementation": {
@@ -35,13 +38,22 @@
       "name": "string — kebab-case",
       "priority": 1,
       "independent": true,
-      "depends_on": null
+      "depends_on": null,
+      "acceptance_criteria": [
+        // v3 AC tree node — leaf if children == [], otherwise branch
+        {
+          "id": "AC-<feature>-1",
+          "description": "string — testable statement",
+          "children": [],          // up to MAX_DEPTH=3
+          "status": "pending | in_progress | pass | fail | blocked | skipped",
+          "evidence": ["file:line", ...]
+        }
+      ]
     }
   ],
-  "acceptance_criteria": ["string array — testable statements"],
   "constraints": ["string array"],
   "out_of_scope": ["string array"],
-  "version": 1
+  "version": 1                      // user-facing seed version (increments on evolve)
 }
 ```
 

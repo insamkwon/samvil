@@ -26,6 +26,12 @@ QA Result → Wonder ("what was lacking?") → Reflect ("how to improve?") → S
 3. **Version increments by 1**: v1 → v2 → v3
 4. **User approves every change**: no auto-modification
 5. **Rebuild only what changed**: don't re-scaffold from scratch
+6. **Preserve schema_version**: if the seed is v3 (`schema_version` starts with `"3."`), keep it across generations. Never collapse `features[].acceptance_criteria` back to flat strings.
+7. **AC tree mutation rules** (v3.0.0+):
+   - Add AC → append a leaf `{id, description, children: [], status: "pending", evidence: []}`
+   - Split AC → convert a leaf into a branch by populating `children[]` (depth ≤ 3); the branch's terminal status resets to `pending`
+   - Remove AC → drop the node and any descendants
+   - Reword AC → keep `id` stable, edit `description` only
 
 ## Wonder Agent Focus
 
