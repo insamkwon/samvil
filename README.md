@@ -16,7 +16,13 @@
 
 > **⚠️ Breaking change vs v2.x**: AC가 트리 구조로 바뀌었습니다. 기존 v2 프로젝트는 `/samvil:update --migrate` 한 번 실행하면 자동 변환됩니다 (`project.v2.backup.json`로 백업). 자세한 내용: [migration-v2-to-v3.md](references/migration-v2-to-v3.md).
 >
-> v3.0.0의 주요 추가: AC Tree leaf-level Build/QA, 의존성 기반 병렬 plan (T2), 공유 API rate budget (T3), PM Interview mode (T4).
+> **v3.0.0 주요 추가**:
+> - **AC Tree** — feature 안의 acceptance criteria가 leaf 단위 트리 구조 (depth ≤ 3). Build/QA가 leaf 단위 dispatch + branch 자동 집계
+> - **LLM Dependency Planning** — tier ≥ thorough에서 AC 의존성 DAG로 병렬 stage 계산
+> - **Shared API Rate Budget** — fcntl 기반 cooperative slot으로 Worker 동시성 안전
+> - **PM Interview Mode** — vision → users → metrics → epics → tasks → AC tree 자동 변환
+>
+> **검증**: 9-pass internal audit + 5-scenario E2E smoke + 370 unit tests.
 
 ## 🧬 정체성 (Identity)
 
