@@ -1144,6 +1144,8 @@ Update `project.state.json` with `implementation_rate`: `"implementation_rate": 
 - Failed: <기능 목록 또는 "없음">
 - Retries: <N>
 - Build errors: <해결된 에러 요약 또는 "없음">
+- (v3) Tree progress: <total_leaves> total / <passed> passed / <failed> failed across <feature count> feature(s)
+- (v3) Rate budget: peak=<N>, total_acquired=<N>, stale_recovery=<N or 0>
 ```
 
 Invoke the Skill tool with skill: `samvil-qa`

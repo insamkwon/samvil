@@ -367,24 +367,30 @@ Invoke the Skill tool with skill: `samvil-council`
 
 ## Output Format
 
-Write `~/dev/<project>/project.seed.json` — valid JSON conforming to `references/seed-schema.md`.
+Write `~/dev/<project>/project.seed.json` — valid JSON conforming to `references/seed-schema.md` (v3.0.0).
 
 ### web-app (기본)
 
 Required fields and constraints:
 - `name`: valid npm package name, kebab-case (e.g., "task-manager")
 - `description`: 1-sentence string
+- `schema_version`: always `"3.0"` (required for v3 validation path)
 - `solution_type`: `"web-app"`
-- `mode`: always `"web"` (deprecated)
+- `mode`: always `"web"` (deprecated, ignored in v3)
 - `tech_stack`: `{ framework, ui, state, router }` — use simplest valid choice
 - `core_experience`: `{ description, primary_screen (PascalCase), key_interactions[] }`
-- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on? }` — at least 1 with priority 1
-- `acceptance_criteria[]`: each has `{ description, vague_words[], rewrite_hint? }` — at least 3 items, all testable
+- `features[]`: each has `{ name, description, priority (1 or 2), independent, depends_on?, acceptance_criteria[] }` — at least 1 with priority 1
+- `features[].acceptance_criteria[]` (v3.0.0+): each entry is a tree node `{ id, description, children: [], status: "pending", evidence: [], vague_words?, rewrite_hint? }`. `id` format: `AC-<feature>-<idx>`. Use leaves (children: []) by default; only split into branches (depth ≤ 3) when an AC has 2+ independent verifiable sub-conditions. **At least 3 leaves total across features**, all testable.
 - `constraints[]`: at least 1 item (default: "No backend server — client-only with localStorage")
 - `out_of_scope[]`: at least 2 items
 - `version`: integer, starts at 1
 
 No extra fields beyond the schema. No comments in JSON.
+
+> **v2 → v3 difference**: in v2 the seed had a single root-level
+> `acceptance_criteria[]` of strings. In v3 the canonical AC location is
+> `features[i].acceptance_criteria[]` and each entry is a tree node.
+> Root `acceptance_criteria` is no longer required and should be omitted.
 
 ### automation
 

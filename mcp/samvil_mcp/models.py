@@ -36,6 +36,31 @@ class EventType(str, Enum):
     SEED_VERSION = "seed_version"
     USER_EDIT = "user_edit"
     ERROR = "error"
+    # v2.6.0+ — pre-v3 events that were also silently failing
+    AC_SATISFIED_EXTERNALLY = "ac_satisfied_externally"
+    BUILD_FEATURE_START = "build_feature_start"
+    BUILD_FEATURE_SUCCESS = "build_feature_success"
+    BUILD_FEATURE_FAIL = "build_feature_fail"
+    BUILD_STAGE_COMPLETE = "build_stage_complete"
+    FIX_APPLIED = "fix_applied"
+    STAGE_CHANGE = "stage_change"
+    STALL_DETECTED = "stall_detected"
+    STALL_ABANDONED = "stall_abandoned"
+    EVOLVE_GEN = "evolve_gen"
+    RETRO_COMPLETE = "retro_complete"
+    # v3.0.0+ — AC tree, dependency planning, rate budget, PM mode
+    AC_LEAF_COMPLETE = "ac_leaf_complete"
+    AC_VERDICT = "ac_verdict"
+    FEATURE_TREE_START = "feature_tree_start"
+    FEATURE_TREE_COMPLETE = "feature_tree_complete"
+    SEED_MIGRATED = "seed_migrated"
+    DEPENDENCY_PLAN_BUILT = "dependency_plan_built"
+    RATE_BUDGET_SUMMARY = "rate_budget_summary"
+    RATE_BUDGET_STARVED = "rate_budget_starved"
+    RATE_BUDGET_STALE_RECOVERY = "rate_budget_stale_recovery"
+    PM_SEED_COMPLETE = "pm_seed_complete"
+    PM_SEED_CONVERTED = "pm_seed_converted"
+    TIER_MISSING = "tier_missing"
 
 
 @dataclass

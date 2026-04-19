@@ -9,11 +9,12 @@
 /samvil:update --migrate
 ```
 
-- Creates `project.v2.backup.json` next to your seed (idempotent).
 - Converts `features[].acceptance_criteria` to v3 tree nodes.
 - Sets `schema_version: "3.0"`.
-
-Re-running is a no-op on v3 seeds.
+- Writes `project.v2.backup.json` next to your seed **only when an actual
+  migration happens**. Re-running on a seed that's already v3 is a true
+  no-op (no backup, no rewrite).
+- Existing backup files are never overwritten — safe to re-run.
 
 ## What actually changes
 
