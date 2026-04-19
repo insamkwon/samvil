@@ -387,13 +387,14 @@
   "name": "나만의 앱",
   "description": "한 줄 설명",
   "core_experience": "처음 30초에 사용자가 하는 것",
+  "schema_version": "3.0",
   "features": [
     {
       "name": "기능1",
       "description": "설명",
       "acceptance_criteria": [
-        "AC1: 구체적인 검증 가능한 기준",
-        "AC2: 구체적인 검증 가능한 기준"
+        {"id": "AC-기능1-1", "description": "구체적인 검증 가능한 기준", "children": [], "status": "pending", "evidence": []},
+        {"id": "AC-기능1-2", "description": "구체적인 검증 가능한 기준", "children": [], "status": "pending", "evidence": []}
       ]
     }
   ],

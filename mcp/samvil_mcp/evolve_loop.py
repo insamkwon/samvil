@@ -66,6 +66,15 @@ def validate_evolved_seed(original: dict, evolved: dict) -> dict:
     if evolved.get("mode") != original.get("mode"):
         issues.append("mode changed — must be preserved")
 
+    # v3.0.0+: schema_version must be preserved (downgrading to v2 silently
+    # would route the next build through the wrong validation path).
+    orig_sv = original.get("schema_version")
+    new_sv = evolved.get("schema_version")
+    if orig_sv and orig_sv != new_sv:
+        issues.append(
+            f"schema_version changed ({orig_sv!r} → {new_sv!r}) — must be preserved"
+        )
+
     # Core experience must exist
     if not evolved.get("core_experience"):
         issues.append("core_experience removed — must be preserved")
