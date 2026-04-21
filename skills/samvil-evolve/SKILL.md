@@ -124,9 +124,33 @@ Follow your Output Format. Under 400 words.",
 )
 ```
 
+## Step 2.5: AC Split Suggestion (v3.1.0, v3-011)
+
+Before Reflect, scan current seed's AC tree leaves for compound/multi-verb descriptions that would benefit from decomposition. This feeds reflect-proposer better signal than a general "propose changes" prompt.
+
+**Step 2.5.1** — iterate each feature's AC tree leaves (recursively via `ac_tree.walk_leaves`):
+
+```
+for each leaf in seed.features[*].acceptance_criteria (recursively):
+    verdict = mcp__samvil_mcp__suggest_ac_split(description=leaf.description)
+    if verdict["should_split"]:
+        split_candidates.append({
+            "leaf_id": leaf.id,
+            "original": leaf.description,
+            "reasons": verdict["reasons"],
+            "heuristic_children": verdict["suggested_children"],
+        })
+```
+
+**Step 2.5.2** — include `split_candidates` in reflect-proposer prompt (Step 3). The LLM polishes the heuristic children into proper tree nodes following `agents/reflect-proposer.md` AC Tree Mutation Rules (split leaf → branch, status stays in_progress until all children pass, etc.).
+
+**Step 2.5.3** — if `split_candidates` is empty, skip directly to Step 3 without mentioning splits.
+
+**MCP fail (INV-5)**: if `suggest_ac_split` fails, proceed to Step 3 without splits — don't block Reflect.
+
 ## Step 3: Reflect — "How to improve?"
 
-Spawn `reflect-proposer` agent (sequentially, receives wonder output):
+Spawn `reflect-proposer` agent (sequentially, receives wonder output + split candidates):
 
 ```
 Agent(
@@ -138,6 +162,7 @@ Agent(
 ## Context
 Current seed (v{N}): <seed JSON>
 Wonder Analysis: <wonder output>
+AC Split Candidates (v3-011, Step 2.5): <JSON array from suggest_ac_split; empty if none>
 {convergence info}
 
 ## Task

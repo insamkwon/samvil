@@ -924,6 +924,37 @@ async def increment_stall_recovery_count(state_path: str) -> str:
         return json.dumps({"ok": False, "error": str(e)})
 
 
+# ── v3.1.0 Sprint 1 — tier phase wiring (v3-022 Polish #5) ───
+
+
+@mcp.tool()
+async def get_tier_phases(tier: str = "standard") -> str:
+    """Return the required interview phases for a tier (v3-022).
+
+    Consumers: samvil-interview SKILL reads this to decide which Phase 2.x
+    blocks are mandatory for a given tier. Previously this lived as a dict
+    constant in interview_engine.py and was only reachable from Python tests —
+    the SKILL had no way to consult it, so the tier→phases mapping was
+    duplicated in prose form. This tool closes the loop.
+
+    Args:
+        tier: minimal / standard / thorough / full / deep
+    """
+    try:
+        from .interview_engine import TIER_REQUIRED_PHASES, TIER_TARGETS, tier_phases
+        phases = sorted(tier_phases(tier))
+        target = TIER_TARGETS.get(tier, TIER_TARGETS["standard"])
+        return json.dumps({
+            "tier": tier,
+            "phases": phases,
+            "ambiguity_target": target,
+            "all_tiers": sorted(TIER_REQUIRED_PHASES.keys()),
+        })
+    except Exception as e:
+        _log_mcp_health("fail", "get_tier_phases", str(e))
+        return json.dumps({"tier": tier, "phases": [], "error": str(e)})
+
+
 # ── v3.1.0 Sprint 6 — AC split heuristic (v3-011) ─────────────
 
 

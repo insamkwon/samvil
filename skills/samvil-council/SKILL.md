@@ -39,9 +39,9 @@ Then invoke `samvil-design` and return.
 
 ## Step 2: Round 1 — Research (if tier ≥ thorough)
 
-### 2a. Pre-spawn heartbeat + progress announcement (v3.1.0, v3-016)
+### 2a. Pre-spawn announcement (v3.1.0, v3-016)
 
-Before spawning Round 1 agents, print the batch plan and start the heartbeat:
+Before spawning Round 1 agents, print the batch plan:
 
 ```
 [SAMVIL] Spawning N agents for Council Round 1 (Research)
@@ -49,25 +49,13 @@ Before spawning Round 1 agents, print the batch plan and start the heartbeat:
   Batches: <N/MAX_PARALLEL> of size <MAX_PARALLEL>
 ```
 
-**MCP heartbeat** (best-effort):
+Start the heartbeat:
 
 ```
 mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")
 ```
 
-After each agent returns, emit a single-line progress log AND heartbeat:
-
-```
-[SAMVIL]   Agent <k>/<N> returned: <agent-name> → <one-line summary>
-```
-
-```
-mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")
-```
-
-Between batches, check for stall (5-minute threshold) via `is_state_stalled`; if stalled, increment counter and emit `build_reawake_message`. Same pattern as samvil-design Step 3d. Escalate at `MAX_REAWAKES=3`.
-
-### 2b. Spawn batches
+### 2b. Spawn batches (v3.1.0, v3-016)
 
 Spawn research agents **in controlled parallel batches**:
 
@@ -115,6 +103,35 @@ Keep your response under 500 words — focus on key findings only.",
 ```
 
 **Read each agent's .md file** before spawning to include in the prompt.
+
+### 2c. Per-agent progress line + heartbeat (v3.1.0, v3-016)
+
+After each batch returns, emit one progress line per agent AND heartbeat the state:
+
+```
+[SAMVIL]   Agent <k>/<N> returned: <agent-name> → <one-line summary>
+```
+
+```
+mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")
+```
+
+### 2d. Stall check between batches (v3.1.0, v3-016)
+
+Between batches, probe for stall:
+
+```
+verdict = mcp__samvil_mcp__is_state_stalled(
+    state_path="project.state.json",
+    threshold_seconds=300,
+)
+if verdict["stalled"]:
+    count = mcp__samvil_mcp__increment_stall_recovery_count(state_path="project.state.json")
+    message = mcp__samvil_mcp__build_reawake_message(stage="council", detail=verdict, count=count)
+    # Print the reawake message AND continue — don't block the next batch.
+```
+
+If `count >= MAX_REAWAKES` (3), stop spawning further batches and surface the escalation message with a skip/abort/retry AskUserQuestion.
 
 After all Round 1 agents return, collect their outputs as `round1_context`.
 

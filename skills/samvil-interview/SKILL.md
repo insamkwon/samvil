@@ -7,23 +7,46 @@ description: "Socratic interview with app presets, unknown-unknown probing, and 
 
 **모든 대화는 한국어로.** 코드와 기술 용어만 영어 허용.
 
-## Boot Sequence (INV-1)
+## Boot Sequence (INV-1) — 명시적 Step 패턴 (v3.1.0, v3-017)
 
-0. **TaskUpdate**: "Interview" task를 `in_progress`로 설정
-1. Read `project.state.json` → confirm `current_stage` is `"interview"`, get `session_id`
-2. Read `project.config.json` → `selected_tier`
-3. Read `references/app-presets.md` → preset 매칭 준비
-4. **커스텀 프리셋 스캔**: `~/.samvil/presets/` 디렉토리 스캔
-   - 디렉토리가 없으면 생성: `mkdir -p ~/.samvil/presets`
-   - `*.json` 파일 목록 수집
-   - 각 파일의 `name`과 `keywords` 필드 파싱
-   - 감지된 커스텀 프리셋이 있으면 목록 저장
-5. The app idea is in the conversation context (from orchestrator)
-6. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
-7. **MCP (best-effort):** Save interview start event:
-   ```
-   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_start", stage="interview", data='{"tier":"<selected_tier>","custom_presets":<N>}')
-   ```
+> 이 섹션은 모든 LLM (Claude / GLM / GPT) 에서 동일하게 실행되어야 한다. 각 step은 **"무엇을 하고 → 무엇을 확인한다"** 형식으로 명시. implicit reasoning에 의존하지 않는다.
+
+**Step 0 — TaskUpdate**
+- Do: "Interview" task를 `in_progress`로 설정
+- → Result: task tracker에서 current task가 in_progress
+
+**Step 1 — Read project.state.json**
+- Do: `project.state.json`을 Read tool로 읽기
+- → Result: `current_stage == "interview"` 확인, `session_id` 변수에 저장
+- → If fail: state.json 없으면 orchestrator 재시작 필요 — 사용자에게 보고 + STOP
+
+**Step 2 — Read project.config.json**
+- Do: `project.config.json` Read
+- → Result: `selected_tier` 변수에 저장 (minimal/standard/thorough/full/deep 중 하나)
+- → If fail: tier unknown → default `standard` 사용
+
+**Step 3 — Read references/app-presets.md**
+- Do: `references/app-presets.md`를 Read (built-in preset pool)
+- → Result: preset 매칭용 context 확보
+
+**Step 4 — 커스텀 프리셋 스캔**
+- Do: `~/.samvil/presets/` 디렉토리 체크
+  - 없으면: `mkdir -p ~/.samvil/presets` 실행 → 빈 상태로 진행
+  - 있으면: `*.json` 파일 목록 수집, 각 파일의 `name` + `keywords` 파싱
+- → Result: `custom_presets` 변수에 배열 저장 (비어있을 수 있음)
+
+**Step 5 — Pipeline context**
+- Do: 오케스트레이터가 전달한 app idea를 대화 컨텍스트에서 추출
+- → Result: `app_idea` 변수에 문장 저장
+
+**Step 6 — Boot sequence common protocol**
+- Do: `references/boot-sequence.md` Read → metrics 시작, checkpoint rules 적용
+- → Result: `.samvil/metrics.json` 초기화됨
+
+**Step 7 — MCP interview_start event (best-effort)**
+- Do: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_start", stage="interview", data='{"tier":"<selected_tier>","custom_presets":<N>}')`
+- → Result: events.jsonl에 start 이벤트 기록
+- → If MCP fail: graceful degradation (INV-5) — continue without event
 
 ## Step 0: Mode Detection
 
@@ -222,6 +245,29 @@ MCP 호출 실패하면:
 - Phase 3 Convergence Check 종료 시 사용자가 "아직 부족한 느낌"이라 답하면 AskUserQuestion으로 Deep Mode 제안 (한 번만)
 
 **Framework reference**: `references/interview-frameworks.md` 읽어서 각 Phase 수행 방법 확인. `references/interview-question-bank.md`에서 solution_type별 pool 참조.
+
+**Tier → Phase 매핑 (MCP tool, v3.1.0 Polish #5)**
+
+Tier별 필수 phase를 하드코딩하지 말고 MCP에서 읽어온다:
+
+```
+phases_info = mcp__samvil_mcp__get_tier_phases(tier=<selected_tier>)
+# Returns: {"tier": "...", "phases": [...], "ambiguity_target": 0.xx, "all_tiers": [...]}
+```
+
+예:
+- `tier=standard` → phases=["core", "lifecycle", "scope"], target=0.05
+- `tier=thorough` → phases=["core", "inversion", "lifecycle", "nonfunc", "scope", "unknown"], target=0.02
+- `tier=deep` → 모든 phase 활성 + `domain_deep`, target=0.005
+
+SKILL이 각 Phase 진입 전에 phases 리스트 멤버십을 체크해서 skip 여부 결정:
+- `"nonfunc"` ∈ phases → Phase 2.6 실행
+- `"inversion"` ∈ phases → Phase 2.7 실행
+- `"stakeholder"` ∈ phases → Phase 2.8 실행
+- `"lifecycle"` ∈ phases → Phase 2.9 실행
+- `"domain_deep"` ∈ phases → Domain pack 25~30Q 강제
+
+MCP 실패 시 fallback: tier 이름 기반 prose lookup (이 SKILL의 기존 표).
 
 ## Step 3: 인터뷰 질문
 

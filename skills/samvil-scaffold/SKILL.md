@@ -610,6 +610,54 @@ main().then(process.exit).catch((e) => {
 }
 ```
 
+**`.env.example`** (v3.1.0, v3-025 — externalize model IDs):
+
+Start with baseline keys:
+
+```
+# API Keys
+API_KEY=your-api-key-here
+API_BASE_URL=https://api.example.com
+
+# Output
+OUTPUT_DIR=./output
+```
+
+**For each provider in `seed.external_api_config.providers`**, append a pair of env vars so the model ID is never hardcoded:
+
+```
+# External provider: <provider.name>
+<provider.env_var>=<provider.default_model>
+<provider.env_var>_FALLBACK=<provider.fallback_model or blank>
+```
+
+Example (OpenAI):
+```
+# External provider: openai
+OPENAI_MODEL=gpt-4o
+OPENAI_MODEL_FALLBACK=gpt-4o-mini
+```
+
+**In source** — `src/config.ts`:
+
+```typescript
+export interface ProviderConfig {
+  model: string;
+  fallback: string;
+}
+
+export function loadProviderConfig(): Record<string, ProviderConfig> {
+  return {
+    openai: {
+      model: process.env.OPENAI_MODEL ?? "gpt-4o",
+      fallback: process.env.OPENAI_MODEL_FALLBACK ?? "",
+    },
+  };
+}
+```
+
+Same rule as Python: **never hardcode the model ID** — resolve via `process.env`. This closed the `game-asset-gen` regression class (Gemini 404 at runtime).
+
 #### Phaser Game
 
 ```bash
