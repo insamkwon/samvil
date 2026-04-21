@@ -12,35 +12,42 @@ if [ ! -d "$MCP_DIR" ]; then
   exit 0
 fi
 
-# Skip if already installed (venv exists and samvil_mcp is importable)
+# Determine installation state. We DON'T exit early when already installed —
+# tool coverage check below must run on every SessionStart (that's the whole
+# point of v3-012, to catch drift between expected and exposed tool sets).
+NEEDS_INSTALL=1
 if [ -f "$MCP_DIR/.venv/bin/python" ]; then
-  "$MCP_DIR/.venv/bin/python" -c "import samvil_mcp" 2>/dev/null && exit 0
+  if "$MCP_DIR/.venv/bin/python" -c "import samvil_mcp" 2>/dev/null; then
+    NEEDS_INSTALL=0
+  fi
 fi
 
-# Install uv if not available
-if ! command -v uv &>/dev/null; then
-  echo "[SAMVIL] uv 설치 중..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null
-  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+if [ "$NEEDS_INSTALL" = "1" ]; then
+  # Install uv if not available
   if ! command -v uv &>/dev/null; then
-    echo "[SAMVIL] ⚠️ uv 자동 설치 실패. MCP 없이 기본 모드로 진행합니다."
+    echo "[SAMVIL] uv 설치 중..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+    if ! command -v uv &>/dev/null; then
+      echo "[SAMVIL] ⚠️ uv 자동 설치 실패. MCP 없이 기본 모드로 진행합니다."
+      exit 0
+    fi
+    echo "[SAMVIL] ✓ uv 설치 완료"
+  fi
+
+  # Install MCP
+  echo "[SAMVIL] MCP 서버 자동 설치 중..."
+  cd "$MCP_DIR"
+  uv venv .venv 2>/dev/null
+  source .venv/bin/activate 2>/dev/null
+  uv pip install -e . 2>/dev/null
+
+  if [ $? -eq 0 ]; then
+    echo "[SAMVIL] ✓ MCP 서버 설치 완료"
+  else
+    echo "[SAMVIL] ⚠️ MCP 설치 실패. 기본 모드로 진행합니다."
     exit 0
   fi
-  echo "[SAMVIL] ✓ uv 설치 완료"
-fi
-
-# Install MCP
-echo "[SAMVIL] MCP 서버 자동 설치 중..."
-cd "$MCP_DIR"
-uv venv .venv 2>/dev/null
-source .venv/bin/activate 2>/dev/null
-uv pip install -e . 2>/dev/null
-
-if [ $? -eq 0 ]; then
-  echo "[SAMVIL] ✓ MCP 서버 설치 완료"
-else
-  echo "[SAMVIL] ⚠️ MCP 설치 실패. 기본 모드로 진행합니다."
-  exit 0
 fi
 
 # Register in settings.json if not already there
