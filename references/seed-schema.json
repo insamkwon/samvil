@@ -368,6 +368,160 @@
           "description": "Why this product over existing alternatives (Excel/Notion/paper)"
         }
       }
+    },
+    "game_config": {
+      "type": "object",
+      "description": "Mobile/web game technical config (v3.1.0, v3-014). Populated by game-interviewer for solution_type=game. Scaffold reads these to generate correct Phaser config instead of defaulting to 800x600.",
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 240,
+          "maximum": 7680,
+          "description": "Base canvas width in CSS pixels"
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 240,
+          "maximum": 4320,
+          "description": "Base canvas height in CSS pixels"
+        },
+        "orientation": {
+          "type": "string",
+          "enum": ["portrait", "landscape", "both"],
+          "description": "Screen orientation policy"
+        },
+        "input": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["keyboard", "mouse", "touch", "multitouch", "gamepad"] },
+          "description": "Supported input modalities"
+        },
+        "supported_devices": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["ios", "android", "tablet", "desktop"] },
+          "description": "Target devices"
+        },
+        "offline_play": {
+          "type": "string",
+          "enum": ["required", "optional", "never"],
+          "description": "Offline play requirement"
+        },
+        "asset_budget_mb": {
+          "type": ["number", "null"],
+          "description": "Initial asset download budget in MB. null = unlimited"
+        }
+      }
+    },
+    "game_architecture": {
+      "type": "object",
+      "description": "Game lifecycle + persistence architecture (v3.1.0, v3-013). Populated by game-interviewer for solution_type=game.",
+      "additionalProperties": false,
+      "properties": {
+        "solo_multi": {
+          "type": "string",
+          "enum": ["solo", "local-2p", "online-multi"],
+          "description": "Player count architecture"
+        },
+        "login_strategy": {
+          "type": "string",
+          "enum": ["anonymous", "guest", "email", "oauth", "none"],
+          "description": "Authentication approach"
+        },
+        "data_storage": {
+          "type": "string",
+          "enum": ["localStorage", "cloud-sync", "server-required"],
+          "description": "Progress persistence location"
+        },
+        "save_policy": {
+          "type": "string",
+          "enum": ["auto-save", "manual", "checkpoint"],
+          "description": "When saves happen"
+        },
+        "leaderboard": {
+          "type": "string",
+          "enum": ["global", "friends", "none"],
+          "description": "Ranking system"
+        },
+        "iap_policy": {
+          "type": "string",
+          "enum": ["none", "one-time", "consumables", "subscription"],
+          "description": "Monetization"
+        },
+        "matchmaking_policy": {
+          "type": "string",
+          "enum": ["invite", "random", "skill-based", "not-applicable"],
+          "description": "Multiplayer matchmaking (only if solo_multi=online-multi)"
+        }
+      }
+    },
+    "art_design": {
+      "type": "object",
+      "description": "Game art direction + audio (v3.1.0, v3-015). Populated by game-interviewer + referenced by game-art-architect in samvil-design.",
+      "additionalProperties": false,
+      "properties": {
+        "character_art": {
+          "type": "string",
+          "enum": ["pixel-8bit", "pixel-16bit", "cartoon", "symbolic", "3d-render"],
+          "description": "Character visual style"
+        },
+        "ui_style_tone": {
+          "type": "string",
+          "enum": ["minimal-clean", "fantasy", "sci-fi", "cute-pastel", "retro"],
+          "description": "UI aesthetic"
+        },
+        "animation_level": {
+          "type": "string",
+          "enum": ["static", "tween-only", "sprite-sheet", "particle-included"],
+          "description": "Animation complexity"
+        },
+        "sound_policy": {
+          "type": "string",
+          "enum": ["full-sound", "sfx-only", "muted-default"],
+          "description": "BGM/SFX policy"
+        },
+        "hud_layout": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "HUD elements (score/health/timer/minimap/inventory)"
+        },
+        "character_count": {
+          "type": "string",
+          "enum": ["1", "2-5", "6+", "customizable"],
+          "description": "Number of unique characters"
+        }
+      }
+    },
+    "external_api_config": {
+      "type": "object",
+      "description": "External API configuration for automation projects (v3.1.0, v3-025). Lists model IDs and provider configs that must be externalized to .env.example so deprecated models can be swapped without rebuild.",
+      "additionalProperties": false,
+      "properties": {
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "env_var", "default_model"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Provider name (e.g., 'gemini', 'openai', 'anthropic')"
+              },
+              "env_var": {
+                "type": "string",
+                "description": "Env variable name (e.g., 'GEMINI_MODEL')"
+              },
+              "default_model": {
+                "type": "string",
+                "description": "Default model ID. Must be stored in .env.example, never hardcoded in source."
+              },
+              "fallback_model": {
+                "type": ["string", "null"],
+                "description": "Optional fallback when default is deprecated"
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

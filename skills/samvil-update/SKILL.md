@@ -15,13 +15,29 @@ SAMVIL 플러그인을 GitHub 최신 버전으로 업데이트.
 
 ## Process
 
-### Step 1: 현재 버전 확인
+### Step 1: 현재 버전 확인 (v3.1.0 fallback 강화, v3-006)
 
 ```bash
 CACHE_DIR=$(ls -td ~/.claude/plugins/cache/samvil/samvil/*/ 2>/dev/null | head -1)
-CURRENT=$(python3 -c "import json; print(json.load(open('${CACHE_DIR}.claude-plugin/plugin.json'))['version'])" 2>/dev/null || echo "unknown")
+
+# 1a. plugin.json 존재 확인
+PLUGIN_JSON="${CACHE_DIR}.claude-plugin/plugin.json"
+if [ -z "$CACHE_DIR" ]; then
+  CURRENT="unknown (cache dir not found)"
+elif [ ! -f "$PLUGIN_JSON" ]; then
+  # fallback 1: 폴더명에서 버전 추정
+  CURRENT="unknown (plugin.json missing — folder: $(basename "$CACHE_DIR"))"
+else
+  # 1b. JSON 파싱 시도. 실패 시 폴더명으로 fallback.
+  CURRENT=$(python3 -c "import json; print(json.load(open('${PLUGIN_JSON}'))['version'])" 2>/dev/null)
+  if [ -z "$CURRENT" ]; then
+    CURRENT="unknown (plugin.json corrupt — folder: $(basename "$CACHE_DIR"))"
+  fi
+fi
 echo "현재 버전: $CURRENT"
 ```
+
+**v3-006 개선**: plugin.json이 없거나 깨졌을 때 과거처럼 "unknown" 단독으로 표시하는 대신, **이유 + 폴더명 fallback**을 함께 표시. `"v1.0.0 → v3.0.0"` 같은 stale 값이 우연히 찍히는 상황을 방지한다.
 
 ### Step 2: 최신 버전 확인
 
@@ -70,12 +86,35 @@ if [ -d "$MCP_VENV" ]; then
 fi
 ```
 
-### Step 5: 구버전 캐시 정리
+### Step 5: 캐시 폴더 rename (v3.1.0, v3-005) + 구버전 정리
 
-업데이트 성공 시, 최신 버전 디렉토리만 남기고 나머지 구버전 삭제:
+업데이트 성공 시, 현재 폴더명을 최신 버전으로 rename → 구버전 삭제 순서.
+
+#### 5a. 폴더 rename (v3-005 신규)
+
+`rsync`는 파일 내용만 덮어쓰고 폴더 이름은 유지한다. 그래서 v2.7.0 사용자가 v3.0.0으로 업데이트하면 `plugin.json:version`은 `3.0.0`이지만 폴더명은 `2.7.0/`으로 남아 "내 플러그인이 몇 버전?" 혼선이 생긴다. 이를 해결:
 
 ```bash
 CACHE_ROOT=~/.claude/plugins/cache/samvil/samvil
+CURRENT_FOLDER=$(basename "$CACHE_DIR")
+
+# $LATEST가 명확하고 현재 폴더와 다르면 rename
+if [ -n "$LATEST" ] && [ "$CURRENT_FOLDER" != "$LATEST" ]; then
+  NEW_PATH="${CACHE_ROOT}/${LATEST}"
+  if [ -d "$NEW_PATH" ] && [ "$NEW_PATH" != "$CACHE_DIR" ]; then
+    # 대상 이미 존재 (거의 없지만 안전 가드)
+    echo "[SAMVIL] ⚠️ 대상 폴더 이미 존재: $NEW_PATH — rename 건너뜀"
+  else
+    mv "$CACHE_DIR" "$NEW_PATH"
+    CACHE_DIR="$NEW_PATH/"
+    echo "[SAMVIL] 폴더 rename: ${CURRENT_FOLDER} → ${LATEST}"
+  fi
+fi
+```
+
+#### 5b. 구버전 디렉토리 정리
+
+```bash
 LATEST_DIR="${CACHE_ROOT}/${LATEST}"
 
 # 안전 검증: 최신 버전 디렉토리가 존재하는지 + $LATEST가 비어있지 않은지 확인
@@ -101,7 +140,7 @@ else
 fi
 ```
 
-**주의**: `$LATEST`가 비어있으면 `$CACHE_ROOT/*/`에서 전체 삭제 위험이 있으므로, `-z "$LATEST"` 체크가 반드시 먼저 실행되어야 함. `rm -rf`는 이중 가드(empty check + explicit match)로 보호.
+**주의**: `$LATEST`가 비어있으면 `$CACHE_ROOT/*/`에서 전체 삭제 위험이 있으므로, `-z "$LATEST"` 체크가 반드시 먼저 실행되어야 함. `rm -rf`는 이중 가드(empty check + explicit match)로 보호. rename도 `-n "$LATEST"` 가드 필수.
 
 ### Step 6: 완료
 

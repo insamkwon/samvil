@@ -266,6 +266,8 @@ Split design council agents into chunks of `MAX_PARALLEL`. Spawn each chunk in O
 | thorough | ui-designer, ux-researcher, responsive-checker, accessibility-expert |
 | full | + copywriter |
 
+**Game-specific addendum (v3.1.0, v3-015)**: When `seed.solution_type == "game"` and tier ≥ `standard`, add `game-art-architect` to the agent list. This agent translates `seed.art_design` answers into Phaser-ready specifications (sprite strategy, palette, HUD layout, animation plan, audio spec) and appends them to `blueprint.json.art_architecture`. samvil-build reads this section to drive Phaser config + asset scaffolding. Without this agent the build has to guess at art direction, causing expensive post-build redesign.
+
 ```
 Agent(
   description: "SAMVIL Gate B: <agent-name>",

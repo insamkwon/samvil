@@ -220,6 +220,56 @@ chore: 설정, 버전, 구조 변경
 4. **배포 준비** — next.config.mjs에 output:'standalone'. QA 완료 후 Vercel/Railway/수동 배포 옵션 제시.
 5. **Council 간접 토론** — Round 1 결과에서 논쟁점(consensus/debate/blind_spots) 추출 → Round 2 prompt에 주입.
 
+## v3.1.0 변경 내역 (v3.0.0 → v3.1.0) — Interview Renaissance + Stability + Universal Builder
+
+27 dogfood backlog items (v3-001~027) 중 25건 구현. dogfood 실행이 필요한 5건(v3-001~004, v3-007)은 v3.1.1로 연기.
+
+### Sprint 0 — Backlog Schema (1건)
+- `v3-021` samvil-retro가 suggestions_v2 dict schema로 저장 + `scripts/view-retro.py` viewer + `test_retro_schema.py` 5 tests
+
+### Sprint 1 — Interview Renaissance (2건, 가장 큰 leverage)
+- `v3-022` Deep Mode tier + Phase 2.6 Non-functional + 2.7 Inversion + 2.8 Stakeholder/JTBD
+- `v3-023` Phase 2.9 Customer Lifecycle Journey 8 stages (standard+ 의무)
+- 신규 references: `interview-frameworks.md`, `interview-question-bank.md` (110개 Q)
+- seed-schema: customer_lifecycle, non_functional, inversion, stakeholders
+
+### Sprint 2 — Stability CRITICAL (3건)
+- `v3-016` Design stall 복구 — heartbeat_state + is_state_stalled + reawake + 4 MCP tools
+- `v3-017` 모델 호환성 — Claude/GLM/GPT 모두 작동. `references/model-specific-prompts.md`
+- `v3-019` auto_chain 기본 활성화 + state-schema.auto_chain field
+
+### Sprint 3 — Game + Automation (4건)
+- `v3-013/014/015` game-interviewer 확장 (lifecycle + mobile spec + art)
+- `agents/game-art-architect.md` 신규, samvil-design에서 spawn
+- seed-schema: game_config, game_architecture, art_design
+- `v3-025` automation scaffold external API model ID 외부화 (.env.example)
+
+### Sprint 5 — Polish (7건)
+- `v3-005/006` samvil-update cache rename + plugin.json fallback
+- `v3-008` reflect-proposer AC Tree Mutation Rules inline
+- `v3-009` state-schema stage enum sync test (council/design)
+- `v3-018` cost-aware mode (`references/cost-aware-mode.md`)
+- `v3-020` Sonnet 6x 측정값 README + samvil-doctor
+- `v3-024` Council 한글화 (`references/council-korean-style.md` + 6 agents)
+
+### Sprint 6 — Long Tail (3건)
+- `v3-010` SAMPLE_RATE atomic counter (threading.Lock)
+- `v3-011` suggest_ac_split MCP tool + `ac_split.py` heuristic
+- `v3-012` SessionStart hook tool coverage check
+
+### Sprint 4 — Dogfood preparation (2/7건 코드 작업)
+- `v3-026` samvil-build Phase A.6 Scaffold Sanity Check
+- `v3-027` samvil-qa Pass 1b automation API connectivity check
+- 5건 (v3-001~004, v3-007)은 실 dogfood 필요 → v3.1.1
+
+### Tests
+- 375 → 406 (+31)
+
+### Migration
+- Non-breaking. v3.0.0 seed 그대로 로드. 신규 optional fields는 새 인터뷰 통과 시 populate.
+
+---
+
 ## v3.0.0 변경 내역 (v2.7.0 → v3.0.0) — 🌳 AC Tree Era (BREAKING)
 
 ### ⚠️ Breaking changes

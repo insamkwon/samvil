@@ -476,7 +476,10 @@ def test_dry_run_no_api_calls():
     assert "api.slack.com" not in result.stderr
 ```
 
-**`.env.example`**:
+**`.env.example`** (v3.1.0, v3-025 — externalize model IDs):
+
+Start with the baseline keys:
+
 ```
 # API Keys
 API_KEY=your-api-key-here
@@ -485,6 +488,38 @@ API_BASE_URL=https://api.example.com
 # Output
 OUTPUT_DIR=./output
 ```
+
+**For each provider in `seed.external_api_config.providers` (v3-025)**, append a pair of env vars so the model ID never gets hardcoded in source:
+
+```
+# External provider: <provider.name>
+<provider.env_var>=<provider.default_model>
+# Optional fallback if the default is deprecated:
+<provider.env_var>_FALLBACK=<provider.fallback_model or leave blank>
+```
+
+Example (Gemini):
+```
+# External provider: gemini
+GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL_FALLBACK=gemini-1.5-flash
+```
+
+**In source code** — `src/config.py` (or `src/config.ts` for node):
+
+```python
+import os
+
+def load_provider_config() -> dict:
+    return {
+        "gemini": {
+            "model": os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+            "fallback": os.getenv("GEMINI_MODEL_FALLBACK", ""),
+        },
+    }
+```
+
+**Never hardcode the model ID in a call site.** This is the specific regression caught by `game-asset-gen` dogfood: a `gemini-2.0-flash-exp-image-generation` literal survived build + static QA, then failed with 404 only at real API call time. With this pattern the user can swap `.env` to the live model without a rebuild.
 
 #### Node Script (automation)
 
@@ -1115,12 +1150,14 @@ export function formatDisplay(text: string): string {
 }
 ```
 
-**`.env.example`**:
+**`.env.example`** (v3.1.0, v3-025 — externalize model IDs for automation):
 ```
 # API Keys (if applicable)
 API_KEY=your-api-key-here
 API_BASE_URL=https://api.example.com
 ```
+
+If `seed.external_api_config.providers` is present (automation with LLM/external AI), append one block per provider (see Python Script section for the full pattern). Never hardcode model IDs in source — put them here and read via `process.env` / `os.getenv`.
 
 **`.gitignore`에 `.samvil/` 추가** (없으면).
 

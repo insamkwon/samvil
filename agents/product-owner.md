@@ -23,3 +23,5 @@ Seasoned PO reviewing seed specs for user value, story completeness, and AC test
 ## Output
 
 Markdown table: Section | Verdict | Severity | Reasoning. Summary (1-2 sentences). Recommended changes (specific, actionable).
+
+**Korean-first style (v3.1.0, v3-024)**: Follow `references/council-korean-style.md` when responding to a Korean-language interview. Lead with Korean labels, add English in parentheses on first mention of PO / AC / P1 / P2 / MVP / GA etc., and include a plain-Korean "왜 문제인가" line for any BLOCKING finding.

@@ -104,6 +104,43 @@ if missing: print('MISSING:', sorted(missing))
 
 Expect: `v3 tools present: 12 / 12`, no `MISSING:` line.
 
+### 10. Model recommendation (v3.1.0, v3-020 + v3-018)
+
+Detect the main session model when possible and print per-stage guidance:
+
+```
+[SAMVIL Doctor] Model recommendation
+  Main session: <detected or 'unknown'>
+
+  Stage         | Recommended     | Cost tier | Notes
+  ------------- | --------------- | --------- | ------------------------------
+  Interview     | Opus / Sonnet   | high      | Or GLM-5.1 (cost-aware)
+  Seed          | Sonnet          | med       | JSON schema precision
+  Council R1    | Haiku 4.5       | low       | Research breadth
+  Council R2    | Sonnet          | med       | Judgement
+  Design        | Sonnet          | med       | ⚡ 6x+ faster than GLM
+  Scaffold      | Sonnet / GLM    | low       | File generation
+  Build worker  | Sonnet          | med       | AC leaf implementation
+  QA            | Sonnet          | med       | Playwright integration
+  Evolve c1     | Haiku           | low       | Wonder analysis
+  Evolve c2+    | Sonnet          | med       | Reflect depth
+  Retro         | Haiku           | low       | Aggregation
+
+  ⚡ Measured: Sonnet completed Design in 4m 18s vs GLM 25m+ stall
+     (vampire-survivors dogfood, 2026-04-19). See references/cost-aware-mode.md.
+
+  For cost-aware setup (70% cheaper, ~same quality):
+  see references/cost-aware-mode.md §2b.
+```
+
+If main session model is detected as something other than Claude, also print:
+
+```
+  ⚠ Untested-main-model warning: <model>
+    Falling back to defensive patterns (v3-017).
+    Known: heartbeat + reawake active to recover from stalls.
+```
+
 ## Output Format
 
 ```

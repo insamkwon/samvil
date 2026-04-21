@@ -327,6 +327,96 @@ npm install <packages> --save > .samvil/deps-install.log 2>&1
 
 **CC skill:** No dependency installation needed.
 
+## Phase A.6: Scaffold Sanity Check (v3.1.0, v3-026)
+
+Catch Scaffold regressions **before** running the tree build. This is the regression-defense layer for the class of bugs seen in the `game-asset-gen` dogfood: empty files, unsubstituted template variables, and import paths pointing to files that don't exist. These slip past static typecheck and surface only at runtime.
+
+Run these checks in order. If any FAIL, treat it as a blocking build error (report to user + pause); WARN items are logged but don't block.
+
+### A.6.1 Key config files must be non-empty
+
+```bash
+for f in package.json tsconfig.json .env.example; do
+  if [ -f "$f" ] && [ ! -s "$f" ]; then
+    echo "[SAMVIL] ❌ Scaffold sanity FAIL: $f exists but is empty" >> .samvil/sanity.log
+    exit 1
+  fi
+done
+```
+
+Python projects:
+```bash
+for f in requirements.txt setup.py pyproject.toml; do
+  if [ -f "$f" ] && [ ! -s "$f" ]; then
+    echo "[SAMVIL] ❌ Scaffold sanity FAIL: $f exists but is empty" >> .samvil/sanity.log
+    exit 1
+  fi
+done
+```
+
+### A.6.2 No unsubstituted template variables
+
+```bash
+# Check for {{ PLACEHOLDER }} or <PLACEHOLDER> patterns in source
+UNSUB=$(grep -rEn '\{\{[A-Z_]+\}\}|\<[A-Z_]{3,}\>' src/ app/ 2>/dev/null | grep -v node_modules || true)
+if [ -n "$UNSUB" ]; then
+  echo "[SAMVIL] ❌ Scaffold sanity FAIL: unsubstituted template variables" >> .samvil/sanity.log
+  echo "$UNSUB" >> .samvil/sanity.log
+  exit 1
+fi
+```
+
+### A.6.3 Import paths point to files that exist
+
+For TypeScript / JavaScript:
+
+```bash
+# Extract relative imports and verify each resolves
+python3 - <<'PYEOF' 2>> .samvil/sanity.log
+import re, sys, os
+from pathlib import Path
+
+bad = []
+for root, _, files in os.walk("src") if Path("src").exists() else []:
+    for fname in files:
+        if not fname.endswith((".ts", ".tsx", ".js", ".jsx")):
+            continue
+        p = Path(root) / fname
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        for m in re.finditer(r"from ['\"](\.[^'\"]+)['\"]", text):
+            rel = m.group(1)
+            target = (p.parent / rel).resolve()
+            # TS files may omit extension
+            candidates = [target, target.with_suffix(".ts"), target.with_suffix(".tsx"),
+                          target.with_suffix(".js"), target / "index.ts", target / "index.tsx"]
+            if not any(c.exists() for c in candidates):
+                bad.append(f"{p}: import '{rel}' → not found")
+
+if bad:
+    print("[SAMVIL] ❌ Scaffold sanity FAIL: broken imports")
+    for b in bad[:10]:
+        print("  " + b)
+    sys.exit(1)
+PYEOF
+```
+
+### A.6.4 Log + continue
+
+On success, append to `.samvil/sanity.log`:
+```
+[SAMVIL] ✓ Scaffold sanity check passed (Phase A.6)
+```
+
+On FAIL the build stops and surfaces the failure. User sees:
+
+```
+[SAMVIL] ❌ Scaffold sanity check failed — see .samvil/sanity.log
+         Fix the scaffold output before continuing.
+         Common causes: empty files after scaffold, unsubstituted {{VARS}}, missing imports.
+```
+
+This closed the gap identified in `game-asset-gen dogfood` where 23/23 ACs were reported PASS by QA Pass 1 static smoke, then failed at runtime with API 404 + empty config files that weren't caught because Phase A.5 only checked dependency install success, not file content.
+
 ## Phase A ↔ Phase B boundary (v3.0.0)
 
 **Phase A (Core Experience) stays feature-less**: it builds exactly one primary screen / entry point from `seed.core_experience`. AC tree granularity is **not** applied here — `core_experience` is defined as a single artifact across all `solution_type`s, so leaf-level decomposition is noise. The tree path starts at Phase B.

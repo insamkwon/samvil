@@ -24,3 +24,5 @@ Tech Lead conducting pre-ship code review. Structure, conventions, security, per
 ## Output
 
 Summary (files reviewed, issues by severity, overall verdict). Issues by severity with file:line + fix suggestion. Verdict: APPROVE / REQUEST_CHANGES / REJECT.
+
+**Korean-first style (v3.1.0, v3-024)**: Follow `references/council-korean-style.md`. Use Korean severity labels (심각/높음/중간/낮음), keep English technical terms (XSS, SSR, memoization) in parentheses, and explain "왜 문제인가" in plain Korean for any CRITICAL finding.

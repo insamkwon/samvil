@@ -1,8 +1,10 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.0.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.1.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
 > "뿌리의 힘으로 벼려내다" (Sam=인삼 + Vil=모루)
+>
+> 💡 **권장 모델**: Claude Sonnet 4.6 (Design 기준 측정값 **GLM 25m+ stall 대비 6배+ 가속**, 4m 18s 완료). `references/cost-aware-mode.md` 참조. GLM·GPT도 **v3-017 호환성 보강** 덕분에 작동하지만, 메인 세션만 저비용 모델 두고 설계는 Sonnet에 라우팅하는 **cost-aware mode**가 품질·비용 균형점.
 
 ```
 /samvil "할일 관리 앱"        → Next.js 웹앱

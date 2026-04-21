@@ -23,3 +23,5 @@ UX Researcher evaluating designs through cognitive science and usability heurist
 ## Output
 
 Heuristic table (score + issue per heuristic), Cognitive Load assessment (low/medium/high), Flow Efficiency (click count), Top 3 usability issues, Verdict: APPROVE / CHALLENGE / REJECT.
+
+**Korean-first style (v3.1.0, v3-024)**: Follow `references/council-korean-style.md`. Translate heuristic labels (Nielsen 10) to Korean on first mention, keep the original English in parentheses, and explain "왜 문제인가" for any heuristic scoring below 3/5.

@@ -4,6 +4,74 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.1.0] — 2026-04-21 — Interview Renaissance + Stability + Universal Builder
+
+Post-v3.0.0 dogfood (vampire-survivors + game-asset-gen) surfaced 27 backlog
+items. v3.1.0 lands 25 of them (2 remaining are dogfood-dependent, deferred to
+v3.1.1). Net effect: seed production-ready depth + GLM/GPT compatibility +
+auto stall recovery + Korean-first council output.
+
+### Sprint 0 — Backlog Schema (v3-021)
+- `samvil-retro` now writes `suggestions_v2` dict schema (id / priority / component / name / problem / fix / expected_impact / sprint / source). Auto-increments IDs across entries so new retros never duplicate. `scripts/view-retro.py` CLI viewer.
+
+### Sprint 1 — Interview Renaissance (v3-022, v3-023)
+- **Deep Mode tier** — `ambiguity ≤ 0.005` + Domain pack 25~30Q. Triggers: `--deeper` flag, "더 깊게" during interview, "아직 부족한 느낌" at Phase 3.
+- **Phase 2.6 Non-functional** (thorough+): perf / accessibility / security / data retention / offline / i18n / error UX.
+- **Phase 2.7 Inversion** (thorough+): failure path premortem / anti-requirements / abuse vectors.
+- **Phase 2.8 Stakeholder/JTBD** (full+): primary/secondary users + JTBD template + payer + motivation-vs-alternatives.
+- **Phase 2.9 Customer Lifecycle** (standard+): 8 stages Discovery → Churn. Pulls AARRR/HEART/JTBD frameworks behind the scenes without exposing the acronyms to the user.
+- References: `interview-frameworks.md` + `interview-question-bank.md` (110 questions across common + 5 domain packs).
+- Seed schema: `customer_lifecycle`, `non_functional`, `inversion`, `stakeholders` objects.
+
+### Sprint 2 — Stability CRITICAL (v3-016, v3-017, v3-019)
+- **Stall detection for design/council/evolve** — `state.json`-driven heartbeat complements the events.jsonl-based `detect_stall` (v2.6.0). 4 new MCP tools: `heartbeat_state`, `is_state_stalled`, `build_reawake_message`, `increment_stall_recovery_count`.
+- `samvil-design` Step 3a-3d + `samvil-council` Step 2a integrate pre-spawn announcement + per-agent progress + between-batch stall check. Regression case from mobile-game dogfood (25-minute hang) now auto-recovers within 5 minutes.
+- **Model compatibility** (`references/model-specific-prompts.md`): Claude/GLM/GPT per-stage guidance. Measured 6×+ Sonnet-vs-GLM gap surfaced in docs, **not** enforced as rejection.
+- **Auto-chain policy** (`state-schema.auto_chain`): pipeline stages chain without user approval by default. Interview/Seed still require confirmation. Legacy `'go' to proceed` prompts removed.
+
+### Sprint 3 — Game Domain + Automation Scaffold (v3-013, v3-014, v3-015, v3-025)
+- `game-interviewer` agent expanded with 3 new question blocks: lifecycle architecture (solo/multi, login, save, ranking, IAP), mobile spec (resolution, orientation, input, supported devices), art direction.
+- `agents/game-art-architect.md` new — translates `seed.art_design` into Phaser-ready specs (sprite strategy, palette, HUD layout, animation plan, audio spec). Spawned by `samvil-design` when `solution_type == "game"`.
+- Seed schema: `game_config`, `game_architecture`, `art_design` objects (no more 800×600 default).
+- `samvil-scaffold` automation: external API model IDs externalized to `.env.example` per `seed.external_api_config.providers`. `game-asset-gen` regression (Gemini hardcoded → 404) now impossible.
+
+### Sprint 5 — Polish (v3-005, v3-006, v3-008, v3-009, v3-018, v3-020, v3-024)
+- `samvil-update` Step 1 fallback (plugin.json missing/corrupt → explicit "unknown" + folder name), Step 5a folder rename so `cache/samvil/samvil/3.0.0/` → `3.1.0/` after rsync.
+- `agents/reflect-proposer.md`: AC Tree Mutation Rules section — node shape, allowed mutations (add/split/merge/remove/update), status transitions, evidence requirements.
+- `test_stage_enum_sync.py` pins Stage enum vs state-schema so council/design can't silently drop out of the enum.
+- `references/cost-aware-mode.md` — GLM-main + Claude-sub pattern as first-class supported workflow.
+- README + `samvil-doctor` Step 10: per-stage recommended model table with the 6x+ measurement cited.
+- `references/council-korean-style.md` — 6 council agents route their output through the Korean-first style guide (labels in Korean, English jargon parenthesized, "왜 문제인가" line for BLOCKING findings).
+
+### Sprint 6 — Long Tail (v3-010, v3-011, v3-012)
+- Atomic counter for `_HEALTH_OK_SAMPLE_RATE` (threading.Lock), so concurrent MCP calls don't lose increments or mis-sample.
+- `suggest_ac_split` MCP tool + `ac_split.py` heuristic for evolve cycle — detects compound connectors / multi-verb / many-commas and proposes a split.
+- `hooks/setup-mcp.sh` SessionStart tool coverage check — diffs expected tools against what the server exposes.
+
+### Sprint 4 — Dogfood preparation (v3-026, v3-027)
+- `samvil-build` Phase A.6 Scaffold Sanity Check: empty config files / unsubstituted `{{VARS}}` / broken imports detected before Phase B-Tree.
+- `samvil-qa` Pass 1b API Connectivity Check for automation — probes each provider in `seed.external_api_config.providers`, warns on 401/403/429, fails on 404 (deprecated model).
+- Remaining dogfood items (v3-001~004, v3-007) defer to v3.1.1 once dogfood sessions produce measurement data.
+
+### Tests
+
+- 375 → 406 (+31): retro schema 5 · deep-mode interview 9 · state-based stall 11 · stage enum sync 3 · atomic counter 2 · AC split 6.
+
+### Migration
+
+- No breaking seed schema changes. v3.0.0 seeds load unchanged. New optional fields populate when interview goes through the new phases.
+- Retro entries from before v3.0.1 keep legacy `suggestions` string array; new entries always use `suggestions_v2`.
+
+### Known follow-ups (v3.1.1)
+
+- v3-001: real Next.js dogfood end-to-end (web-app type)
+- v3-002: 50+ AC Phase B-Tree measurement
+- v3-003: Worker contract real-call capture
+- v3-004: `_log_mcp_health` sampling tune with production data
+- v3-007: PM-interview live user run
+
+---
+
 ## [3.0.0] — 2026-04-19 — 🌳 AC Tree Era (BREAKING)
 
 Sprint 3 converts SAMVIL's acceptance-criteria handling from flat lists to a

@@ -72,4 +72,40 @@ except Exception as e:
   fi
 fi
 
+# v3.1.0 (v3-012) — Tool coverage check at SessionStart
+# Compares expected MCP tool set against what the server currently exposes.
+# Warn (not fail) if tools are missing so users catch broken installs before
+# a skill fails mid-pipeline. Completely silent on match.
+if [ -f "$MCP_DIR/.venv/bin/python" ]; then
+  "$MCP_DIR/.venv/bin/python" - <<'PYEOF' 2>/dev/null
+import sys
+try:
+    import asyncio
+    from samvil_mcp.server import mcp
+    tools = {t.name for t in asyncio.run(mcp.list_tools())}
+except Exception as e:
+    print(f"[SAMVIL] ⚠️ tool coverage check 실패 (import): {e}", file=sys.stderr)
+    sys.exit(0)
+
+expected = {
+    # v3.0.0 tools
+    "next_buildable_leaves", "tree_progress", "update_leaf_status",
+    "migrate_seed", "migrate_seed_file",
+    "analyze_ac_dependencies",
+    "rate_budget_acquire", "rate_budget_release", "rate_budget_stats", "rate_budget_reset",
+    "validate_pm_seed", "pm_seed_to_eng_seed",
+    # v3.1.0 additions (Sprint 2 + Sprint 6)
+    "heartbeat_state", "is_state_stalled",
+    "build_reawake_message", "increment_stall_recovery_count",
+    "suggest_ac_split",
+}
+missing = expected - tools
+if missing:
+    print(f"[SAMVIL] ⚠️ MCP tool coverage: 누락 {len(missing)}/{len(expected)}")
+    for name in sorted(missing):
+        print(f"  - {name}")
+    print("  → /samvil:update 또는 uv pip install -e . 를 실행해 MCP를 최신으로 동기화하세요.")
+PYEOF
+fi
+
 exit 0

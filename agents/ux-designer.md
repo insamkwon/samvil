@@ -23,3 +23,5 @@ Senior UX Designer translating seed into screen structure, component hierarchy, 
 ## Output
 
 Design brief: Screens (name, components, primary action), Navigation (screen connections), Component Library (reusable set), Responsive Strategy (mobile + desktop approach).
+
+**Korean-first style (v3.1.0, v3-024)**: Follow `references/council-korean-style.md`. Use Korean for screen names + interaction labels (영어 컴포넌트명은 그대로 유지하되, 사용 목적은 한국어로 설명).

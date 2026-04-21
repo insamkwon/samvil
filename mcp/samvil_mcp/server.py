@@ -37,7 +37,19 @@ async def get_store() -> EventStore:
     return _store
 
 
+import threading
+
+# v3.1.0, v3-010 — atomic counter for multi-threaded/multi-instance MCP.
+# Historically `_HEALTH_OK_COUNTS[tool] += 1` was a read-modify-write pattern,
+# which is racy under Python's GIL-free contention window and outright broken
+# if the MCP server is run in threads or multiple instances simultaneously.
+# Using threading.Lock serializes the counter bump. Multi-process safety is
+# still out of scope — for that see the BG discussion in
+# references/cost-aware-mode.md; each MCP instance keeps its own counter
+# (accepted trade-off: a few duplicate samples across instances vs a shared
+# file-lock on every call).
 _HEALTH_OK_COUNTS: dict[str, int] = {}
+_HEALTH_OK_COUNTS_LOCK = threading.Lock()
 # Sample 1-in-N successful calls per tool. `fail` is always logged.
 _HEALTH_OK_SAMPLE_RATE = 10
 
@@ -48,13 +60,17 @@ def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
     - `fail` events are always recorded (with the error message).
     - `ok` events are sampled (1/10 by default) + total call count is
       persisted on every sampled entry so retro can compute real volume.
+
+    v3.1.0 (v3-010): the per-tool counter bump is now guarded by a Lock so
+    concurrent tool calls don't lose increments or mis-sample.
     """
     from datetime import datetime, timezone
 
     total_calls: int | None = None
     if status == "ok":
-        _HEALTH_OK_COUNTS[tool] = _HEALTH_OK_COUNTS.get(tool, 0) + 1
-        total_calls = _HEALTH_OK_COUNTS[tool]
+        with _HEALTH_OK_COUNTS_LOCK:
+            _HEALTH_OK_COUNTS[tool] = _HEALTH_OK_COUNTS.get(tool, 0) + 1
+            total_calls = _HEALTH_OK_COUNTS[tool]
         if total_calls % _HEALTH_OK_SAMPLE_RATE != 0:
             return  # sampled out
 
@@ -906,6 +922,27 @@ async def increment_stall_recovery_count(state_path: str) -> str:
     except Exception as e:
         _log_mcp_health("fail", "increment_stall_recovery_count", str(e))
         return json.dumps({"ok": False, "error": str(e)})
+
+
+# ── v3.1.0 Sprint 6 — AC split heuristic (v3-011) ─────────────
+
+
+@mcp.tool()
+async def suggest_ac_split(description: str) -> str:
+    """Check whether an AC leaf should be decomposed into children (v3-011).
+
+    Returns a verdict dict with reasons and a heuristic child split. The
+    evolve skill consumes this verdict and asks an LLM for a polished split
+    when `should_split` is true.
+    """
+    try:
+        from .ac_split import should_split
+        result = should_split(description)
+        _log_mcp_health("ok", "suggest_ac_split")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "suggest_ac_split", str(e))
+        return json.dumps({"should_split": False, "error": str(e)})
 
 
 # ── Phase 4: Evolve Gates tools (v2.5.0) ──────────────────────

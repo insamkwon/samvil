@@ -186,6 +186,87 @@ Check:
 
 **If Pass 1 fails:** Verdict = REVISE with specific errors. Skip Pass 2 and 3.
 
+### Pass 1b (automation-specific): API Connectivity Check (v3.1.0, v3-027)
+
+For `solution_type == "automation"` projects whose seed declares external APIs (`seed.external_api_config.providers` non-empty), run a lightweight connectivity probe **before** claiming all ACs pass. This closed the `game-asset-gen` dogfood gap where 23/23 ACs were marked PASS by static analysis but the real API call returned 404 at runtime.
+
+```bash
+# 1. Check .env exists with at least one provider key
+if [ ! -f .env ]; then
+  echo "[SAMVIL] ⚠️ Pass 1b skipped: .env not found (dry-run mode — not a failure)"
+  API_CHECK_STATUS="skipped-no-env"
+else
+  # 2. For each provider, ping the API
+  python3 - <<'PYEOF' 2>&1 | tee -a .samvil/api-connectivity.log
+import os, json, sys
+from pathlib import Path
+
+seed = json.loads(Path("project.seed.json").read_text())
+providers = (seed.get("external_api_config") or {}).get("providers") or []
+if not providers:
+    print("[SAMVIL] Pass 1b: no providers declared — skip")
+    sys.exit(0)
+
+# Load .env into os.environ (minimal parser)
+for line in Path(".env").read_text().splitlines():
+    line = line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    k, v = line.split("=", 1)
+    os.environ[k.strip()] = v.strip().strip('"').strip("'")
+
+import urllib.request, urllib.error
+
+failed = []
+warned = []
+for p in providers:
+    name = p["name"]
+    env_var = p["env_var"]
+    model = os.getenv(env_var, p.get("default_model", ""))
+    if not model or model.startswith("your-"):
+        warned.append(f"{name}: env key {env_var} not set — dry-run ok")
+        continue
+    probe_url = p.get("probe_url")
+    if not probe_url:
+        print(f"[SAMVIL] {name}: no probe_url declared — skipping connectivity check")
+        continue
+    try:
+        req = urllib.request.Request(probe_url, method="HEAD")
+        # provider may require a header — seed can supply
+        for h, hv in (p.get("probe_headers") or {}).items():
+            req.add_header(h, hv.replace("$MODEL", model))
+        urllib.request.urlopen(req, timeout=10)
+        print(f"[SAMVIL] {name} ({model}): 200/OK")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            warned.append(f"{name} ({model}): {e.code} — auth required (OK in dry-run)")
+        elif e.code == 404:
+            failed.append(f"{name} ({model}): 404 — model likely deprecated")
+        elif e.code == 429:
+            warned.append(f"{name} ({model}): 429 — rate-limited (OK)")
+        else:
+            failed.append(f"{name} ({model}): HTTP {e.code}")
+    except Exception as e:
+        failed.append(f"{name}: {e}")
+
+for w in warned:
+    print(f"[SAMVIL] ⚠️ {w}")
+for f in failed:
+    print(f"[SAMVIL] ❌ {f}")
+
+sys.exit(1 if failed else 0)
+PYEOF
+  API_CHECK_STATUS=$?
+fi
+```
+
+Verdict rules:
+- `0` exit (or skipped with no-env) → Pass 1b OK
+- `404` → block QA completion, mark AC related to that provider as `fail` with evidence from api-connectivity.log
+- `401 / 403 / 429` → warn only (likely config/quota issue, not a deprecation). User sees warning in final report.
+
+Seeds should include `probe_url` per provider (e.g., `https://generativelanguage.googleapis.com/v1/models/$MODEL` for Gemini) to enable this check. Scaffold adds it when present; `game-asset-gen` future dogfood should add the url so next time the 404 is caught here.
+
 ### game
 
 ```bash
