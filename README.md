@@ -14,17 +14,26 @@
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
 
+**v3.1.0 "Interview Renaissance + Universal Builder"** — v3.0.0 AC Tree에 인터뷰 깊이·Stability·모델 호환성을 더해 dogfood 25건을 흡수한 버전.
+
+> **v3.1.0 주요 추가** (2026-04-21):
+> - **Deep Mode 인터뷰** (`tier=deep`, ambiguity ≤ 0.005) + Phase 2.6 Non-functional / 2.7 Inversion / 2.8 Stakeholder / 2.9 Customer Lifecycle Journey (8 stages)
+> - **Design stall 자동 복구** — state.json heartbeat + 5분 reawake. 모바일 게임 dogfood 25분 hang 회귀 방지
+> - **모델 호환성 공식 지원** — Claude/GLM/GPT 모두 작동. cost-aware mode (GLM main + Claude sub) 공식 가이드
+> - **Auto-chain 기본 활성** — interview/seed 외에 'go' 승인 prompt 제거
+> - **게임 도메인 강화** — lifecycle architecture + mobile spec + art direction (game-art-architect agent)
+> - **Automation 외부 API 모델 ID 외부화** — `.env.example`로. deprecated 모델 404 회귀 방지
+> - **Council 한글화** — 영어 원문 + 한글 병기, 약어 풀어쓰기, BLOCKING finding 근거 1줄
+>
+> **검증**: 412 unit tests + SessionStart hook 실제 동작 확인 + 2개 dogfood 누적. 5건 dogfood-dependent는 v3.1.1.
+
+---
+
 **v3.0.0 "AC Tree Era"** — 1인 개발자를 위한 범용 하네스. 견고성(Robustness) 우선, 완성 후 자가 진화(Converge-then-Evolve).
 
 > **⚠️ Breaking change vs v2.x**: AC가 트리 구조로 바뀌었습니다. 기존 v2 프로젝트는 `/samvil:update --migrate` 한 번 실행하면 자동 변환됩니다 (`project.v2.backup.json`로 백업). 자세한 내용: [migration-v2-to-v3.md](references/migration-v2-to-v3.md).
 >
-> **v3.0.0 주요 추가**:
-> - **AC Tree** — feature 안의 acceptance criteria가 leaf 단위 트리 구조 (depth ≤ 3). Build/QA가 leaf 단위 dispatch + branch 자동 집계
-> - **LLM Dependency Planning** — tier ≥ thorough에서 AC 의존성 DAG로 병렬 stage 계산
-> - **Shared API Rate Budget** — fcntl 기반 cooperative slot으로 Worker 동시성 안전
-> - **PM Interview Mode** — vision → users → metrics → epics → tasks → AC tree 자동 변환
->
-> **검증**: 9-pass internal audit + 5-scenario E2E smoke + 370 unit tests.
+> v3.0.0 base: AC Tree · LLM Dependency Planning · Shared Rate Budget · PM Interview Mode. 9-pass internal audit + 370 unit tests.
 
 ## 🧬 정체성 (Identity)
 
