@@ -823,6 +823,91 @@ async def check_stall(
         return json.dumps({"is_stalled": False, "error": str(e)})
 
 
+# ── v3.1.0 Sprint 2 — state.json heartbeat + stall detection (v3-016) ────
+
+
+@mcp.tool()
+async def heartbeat_state(state_path: str, now_iso: str | None = None) -> str:
+    """Update ``last_progress_at`` on project.state.json (v3-016).
+
+    Call from design/council/evolve skills between long-running substeps so
+    `is_state_stalled` and the main session know the run is alive.
+
+    Args:
+        state_path: Path to project.state.json
+        now_iso: Override "now" with a specific ISO timestamp (for tests).
+    """
+    try:
+        from .stall_detector import heartbeat_state as _heartbeat
+        state = _heartbeat(state_path, now_iso)
+        return json.dumps({
+            "ok": True,
+            "last_progress_at": state.get("last_progress_at"),
+            "stall_recovery_count": state.get("stall_recovery_count", 0),
+        })
+    except Exception as e:
+        _log_mcp_health("fail", "heartbeat_state", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def is_state_stalled(
+    state_path: str,
+    now_iso: str | None = None,
+    threshold_seconds: int = 300,
+) -> str:
+    """Return stall verdict based on project.state.json last_progress_at (v3-016).
+
+    Complements ``check_stall`` which reads events.jsonl — this one is for
+    skills that don't emit domain events during long loops (design, council,
+    evolve).
+    """
+    try:
+        from .stall_detector import is_state_stalled as _is_stalled
+        verdict = _is_stalled(state_path, now_iso, threshold_seconds)
+        return json.dumps(verdict)
+    except Exception as e:
+        _log_mcp_health("fail", "is_state_stalled", str(e))
+        return json.dumps({
+            "stalled": False,
+            "reason": f"error: {e}",
+            "elapsed_seconds": None,
+            "last_progress_at": None,
+            "threshold_seconds": threshold_seconds,
+        })
+
+
+@mcp.tool()
+async def build_reawake_message(stage: str, detail_json: str, count: int) -> str:
+    """Construct the recovery message the main session should inject (v3-016).
+
+    Args:
+        stage: Current stage name (design/council/evolve/...)
+        detail_json: JSON-serialised output of is_state_stalled
+        count: Current reawake count (0-based)
+    """
+    try:
+        from .stall_detector import build_reawake_message as _build
+        detail = json.loads(detail_json)
+        message = _build(stage, detail, count)
+        return json.dumps({"ok": True, "message": message})
+    except Exception as e:
+        _log_mcp_health("fail", "build_reawake_message", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def increment_stall_recovery_count(state_path: str) -> str:
+    """Bump ``stall_recovery_count`` on project.state.json (v3-016)."""
+    try:
+        from .stall_detector import increment_stall_recovery_count as _bump
+        count = _bump(state_path)
+        return json.dumps({"ok": True, "count": count})
+    except Exception as e:
+        _log_mcp_health("fail", "increment_stall_recovery_count", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
 # ── Phase 4: Evolve Gates tools (v2.5.0) ──────────────────────
 
 

@@ -204,16 +204,24 @@ MCP 호출 실패하면:
 실행 시 `project.seed.json`에서 프리셋 포맷(JSON)으로 변환하여 `~/.samvil/presets/<name>.json`에 저장.
 저장 시 `keywords` 필드에 앱 아이디어의 핵심 명사를 자동 추출하여 포함.
 
-## Step 2: Tier 기반 인터뷰 깊이
+## Step 2: Tier 기반 인터뷰 깊이 (v3.1.0 확장, v3-022)
 
-`selected_tier`에 따라 질문 수와 모호도 목표 결정:
+`selected_tier`에 따라 질문 수, 모호도 목표, 필수 Phase 세트를 결정.
 
-| Tier | 질문 수 | 모호도 목표 | Phase 2.5 |
+| Tier | 질문 수 | 모호도 목표 | 필수 Phase |
 |------|--------|-----------|-----------|
-| minimal | 3-4개 | ≤ 0.10 | 자동 감지 시 (Pre-mortem만) |
-| standard | 5-6개 | ≤ 0.05 | 자동 감지 시 (Pre-mortem만) |
-| thorough | 6-8개 | ≤ 0.02 | 항상 |
-| full | 8개 + | ≤ 0.01 | 항상 + Research |
+| minimal | 3-4개 | ≤ 0.10 | Core(1) + Scope(2) |
+| standard | 5-6개 | ≤ 0.05 | Core + Scope + **Lifecycle(2.9, 8Q)** |
+| thorough | 6-8개 | ≤ 0.02 | + Unknown(2.5) + **Non-func(2.6, 3Q)** + **Inversion(2.7)** |
+| full | 8개 + | ≤ 0.01 | + **Stakeholder/JTBD(2.8)** + PATH 4 Research |
+| **deep** | **10개 +** | **≤ 0.005** | full + **Domain pack 25~30Q 심화** + premortem 반복 |
+
+**Deep Mode 활성화 경로** (v3-022 fix f):
+- `/samvil:interview --deeper` 플래그가 있으면 tier를 `deep`로 승격
+- 인터뷰 중 사용자가 "더 깊게", "더 디테일", "production 수준"이라 입력 시 tier 즉시 승격 후 AskUserQuestion으로 확인
+- Phase 3 Convergence Check 종료 시 사용자가 "아직 부족한 느낌"이라 답하면 AskUserQuestion으로 Deep Mode 제안 (한 번만)
+
+**Framework reference**: `references/interview-frameworks.md` 읽어서 각 Phase 수행 방법 확인. `references/interview-question-bank.md`에서 solution_type별 pool 참조.
 
 ## Step 3: 인터뷰 질문
 
@@ -485,11 +493,92 @@ preset의 **"흔한 함정"**과 **"Pre-mortem"**을 활용:
    - preset의 Pre-mortem 사유를 보기로 + Other
    - multiSelect: true
 
-8. **Inversion**: "이 앱에서 사용자가 가장 짜증날 수 있는 순간은?"
+8. **Inversion (짜증 포인트)**: "이 앱에서 사용자가 가장 짜증날 수 있는 순간은?"
    - preset의 흔한 함정을 보기로 + Other
    - multiSelect: true
 
 → 답변을 AC 또는 constraints에 자동 반영
+
+### Phase 2.6: Non-functional (thorough+ 의무, v3.1.0 신설, v3-022)
+
+기능이 아닌 **품질 속성**을 인터뷰. `references/interview-frameworks.md` § 2 참조.
+
+thorough tier: **3개 필수** (맥락상 중요한 것만)
+full/deep tier: **7개 전체**
+
+질문 pool (`references/interview-question-bank.md` Common § 1~7):
+- Performance target (LCP / first paint)
+- Accessibility target (WCAG AA / keyboard-only)
+- Security sensitivity (pii / payment / enterprise / none)
+- Data retention (탈퇴 시 보관 기간)
+- Offline support (none / cached / full-offline)
+- i18n languages
+- Error UX style
+
+결과는 `seed.non_functional` 객체로 저장 (seed-schema.json 참조).
+
+### Phase 2.7: Inversion Phase (thorough+ 의무, v3.1.0 강화, v3-022)
+
+`references/interview-frameworks.md` § 3 참조. Phase 2.5의 Pre-mortem/Inversion과는 중복 아닌 **강화**:
+
+9. **Failure Path Premortem**: "이 앱이 6개월 후 폐기된다면, 가능성 높은 이유 3가지는?"
+   - multiSelect: true, 4~5 보기 + Other
+   - 예시 보기: onboarding 이탈 / 경쟁 차별화 실패 / API cost 초과 / 유지보수 부담 / 보안 사고
+
+10. **Explicit Exclusions**: "이 앱이 **절대로** 다루지 않을 것은?"
+    - multiSelect: true, seed.exclusions + seed.inversion.anti_requirements에 기록
+
+11. **Anti-requirements**: "사용자가 **못** 하게 막아야 할 것은?"
+    - 예시: 중복 가입 / 결제 우회 / admin 권한 스스로 부여
+    - 답변을 seed.inversion.anti_requirements에 저장
+
+deep tier면 추가:
+12. **Abuse vectors**: "악의적 사용자가 어떻게 남용할 수 있을까요?"
+    - 예시: spam/bot/결제 우회/스크래핑
+
+### Phase 2.8: Stakeholder / JTBD (full+ 의무, v3.1.0 신설, v3-022)
+
+`references/interview-frameworks.md` § 4 참조. full tier 이상에서만 수행.
+
+13. **Primary user JTBD**:
+    - 템플릿: "When <상황>, I want to <동기>, so I can <결과>."
+    - AskUserQuestion으로 각 필드 분리 수집 후 합성
+    - seed.stakeholders.primary_user_jtbd에 저장
+
+14. **Secondary users**: "가끔 협업/관리하는 다른 역할이 있나요? (admin/reviewer/observer/없음)"
+
+15. **Decision maker + Payer**: "누가 사용을 결정하나요?" + "결제 시 누가 내나요?"
+
+16. **Motivation vs Alternatives**: "엑셀/노션/종이 대신 이 앱을 써야 하는 결정적 이유는?"
+
+### Phase 2.9: Customer Lifecycle Journey (standard+ 의무, v3.1.0 신설, v3-023)
+
+`references/interview-frameworks.md` § 5 참조. **8단계 각 1-2Q = 10-15Q 추가**.
+
+**사용자에게는 framework 이름(AARRR/HEART/JTBD)을 노출하지 않는다.** 자연스러운 한국어 질문으로 바꿔 묻는다.
+
+standard tier: 축약 (각 1Q, 핵심 8개)
+thorough/full/deep: 상세 (각 1-2Q, 하위 정책 포함)
+
+| Stage | 질문 패턴 | Seed 필드 |
+|---|---|---|
+| Discovery | 사용자가 이 앱을 어떻게 알게 되나요? (검색/추천/광고/오프라인) | `customer_lifecycle.discovery` |
+| First Open | 처음 5초에 뭘 보나요? empty state는? | `.first_open` |
+| Onboarding | 가입 강제? tutorial? sample data? | `.onboarding` |
+| Activation | '아 이거 좋네'라고 느끼는 정확한 순간은? | `.activation` |
+| Retention | 다시 오는 이유? push/email 정책? | `.retention` |
+| Completion | 다 쓰고 나면? (게임 클리어/할일 완수/content 소진) | `.completion` |
+| Re-engagement | 한 달 떠난 사용자 win-back 전략? | `.re_engagement` |
+| Churn | 이탈 감지 + 데이터 보관 정책? | `.churn` + `.data_retention` |
+
+**Unknown Unknowns 처리** (v3-023 fix e):
+- 사용자가 "모르겠다", "아직 생각 안 해봤다" 답변 시 해당 필드에 `"TBD — research needed"` 저장
+- PATH 4 Research에 자동 위임 (deep tier면 즉시, 다른 tier는 Phase 3 종료 후 일괄)
+- Research 결과를 AskUserQuestion 3개 보기로 변환해 재확인
+
+**Council/Design 연결** (v3-023 fix d):
+- samvil-council의 ux-designer/ux-researcher agent prompt에 `customer_lifecycle` 자동 주입
+- samvil-design의 blueprint.json에 `onboarding_flow`, `empty_state_design`, `re_engagement_strategy` 섹션 생성
 
 ### Phase 3: Convergence Check
 
@@ -500,9 +589,10 @@ preset의 **"흔한 함정"**과 **"Pre-mortem"**을 활용:
 | Tier | 종료 임계값 | 재질문 없이 종료 가능 |
 |------|-----------|---------------------|
 | minimal | ≤ 0.10 | O (preset 매칭 시) |
-| standard | ≤ 0.05 | preset 매칭 + Phase 1 충실 시 |
-| thorough | ≤ 0.02 | X (Phase 2.5 필수) |
-| full | ≤ 0.01 | X (Phase 2.5 + Research 필수) |
+| standard | ≤ 0.05 | preset 매칭 + Phase 1 + Phase 2.9 Lifecycle 충실 시 |
+| thorough | ≤ 0.02 | X (Phase 2.5 + 2.6 + 2.7 + 2.9 필수) |
+| full | ≤ 0.01 | X (+ Phase 2.8 + Research 필수) |
+| **deep** | **≤ 0.005** | **X (full + Domain pack 25~30Q + premortem 심화 필수)** |
 
 **종료 루프:**
 1. Phase 3 gates 평가
@@ -1030,15 +1120,21 @@ Each section must be non-empty. Constraints must have >= 1 item. Success criteri
 
 1. **모든 질문은 AskUserQuestion 도구 사용** — 객관식 보기 + Other
 2. **대화는 한국어로.** 기술 용어와 코드만 영어.
-3. **한 번에 하나씩.** 2개 이상 질문 금지.
+3. **한 번에 하나씩.** 2개 이상 질문 금지. Framework 이름(AARRR/JTBD/HEART) 사용자에게 노출 금지.
 4. **preset 있으면 활용.** 질문을 줄이고 보기 품질 높임.
-5. **Phase 2.5는 thorough/full 기본 + 자동 감지.** preset 매칭 실패 + 짧은 답변 비율 > 50%면 minimal/standard도 활성화.
-6. **Zero-Question은 요약 검토 1회 필수.** 완전 무확인 빌드는 안 됨.
-7. **tier별 모호도 목표 준수.** minimal=0.10, standard=0.05, thorough=0.02, full=0.01.
-8. **Tech stack 기본값:** preset 추천 스택 우선. 없으면 Next.js 14 + Tailwind + shadcn/ui.
-9. **Breadth rule:** 같은 기능 질문 2회 연속이면 다른 주제로 전환.
-10. **커스텀 프리셋 우선.** `~/.samvil/presets/`의 프리셋이 빌트인보다 먼저 매칭. 같은 키워드면 커스텀이 우선.
-11. **프리셋 자동 제안.** 매칭 실패 후 인터뷰로 구체화한 앱은 프리셋 저장을 제안.
+5. **Phase 2.5 (Unknown Unknowns)**: thorough/full/deep 기본 + 자동 감지. preset 매칭 실패 + 짧은 답변 비율 > 50%면 minimal/standard도 활성화.
+6. **Phase 2.6 (Non-functional)**: thorough+ 의무 — thorough는 3Q, full/deep는 7Q 전체. (v3.1.0)
+7. **Phase 2.7 (Inversion)**: thorough+ 의무 — failure paths / anti-requirements / abuse vectors. (v3.1.0)
+8. **Phase 2.8 (Stakeholder/JTBD)**: full+ 의무 — primary/secondary users + JTBD + payer. (v3.1.0)
+9. **Phase 2.9 (Customer Lifecycle Journey)**: standard+ 의무 — 8 stages. (v3.1.0, v3-023)
+10. **Zero-Question은 요약 검토 1회 필수.** 완전 무확인 빌드는 안 됨.
+11. **tier별 모호도 목표 준수.** minimal=0.10 / standard=0.05 / thorough=0.02 / full=0.01 / **deep=0.005**.
+12. **Deep Mode 승격 경로** (v3.1.0): `--deeper` 플래그 / "더 깊게" / Phase 3 "아직 부족" 답변.
+13. **Tech stack 기본값:** preset 추천 스택 우선. 없으면 Next.js 14 + Tailwind + shadcn/ui.
+14. **Breadth rule:** 같은 기능 질문 2회 연속이면 다른 주제로 전환.
+15. **커스텀 프리셋 우선.** `~/.samvil/presets/`의 프리셋이 빌트인보다 먼저 매칭. 같은 키워드면 커스텀이 우선.
+16. **프리셋 자동 제안.** 매칭 실패 후 인터뷰로 구체화한 앱은 프리셋 저장을 제안.
+17. **Framework reference**: 각 Phase 실행 시 `references/interview-frameworks.md` + `interview-question-bank.md` 읽기. 단 전체를 매번 로드하지 않고 solution_type + active phase 섹션만.
 
 **TaskUpdate**: "Interview" task를 `completed`로 설정
 ## Chain (Runtime-specific)

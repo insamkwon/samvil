@@ -14,6 +14,27 @@ You are the SAMVIL orchestrator. Take the user's one-line app idea and guide it 
                               ↑ Council skip if minimal    ↑ Gate B if thorough+    ↑ parallel if standard+  ↑ QA PASS시  ↑ optional
 ```
 
+## Chain Policy (v3.1.0, v3-019)
+
+**Auto-chain is the default.** Once interview and seed are confirmed by the user, all subsequent stages (council → design → scaffold → build → qa → deploy → retro) run without re-asking "go". The main session invokes each next skill directly via the Skill tool.
+
+- User approval is **only** required at:
+  - Interview end (summary verification)
+  - Seed end (final JSON review)
+  - Critical decisions (Council CHALLENGE/REJECT, Evolve MAJOR changes, Deploy before push)
+- `project.state.json.auto_chain` flag (v3.1.0): defaults to `true`. Set `false` to force step-through for debugging. See `references/state-schema.json`.
+- Legacy 'go' prompts (e.g., "Type 'go' to continue to Scaffold") from pre-v3.0.0 have been removed. If any surface, treat as a bug and file a v3.1.x backlog item.
+
+## Model Compatibility (v3.1.0, v3-017)
+
+SAMVIL works best with Claude (Opus/Sonnet/Haiku) but **does not reject other models**. See `references/model-specific-prompts.md` for:
+
+- Per-stage recommended models with measured performance
+- Known limitations of GLM / GPT-4 / Gemini / others
+- `cost-aware mode` pattern (GLM main + Claude sub): see `references/cost-aware-mode.md` (v3-018)
+
+For long-running stages (design, council, evolve) the orchestrator and skills emit **heartbeats every ≤30s** via `mcp__samvil_mcp__heartbeat_state` and check `is_state_stalled` between batches, so any model-induced hang auto-surfaces a reawake message within 5 minutes instead of appearing as a silent 25-minute stall (v3-016).
+
 ## How to Run
 
 ### Step 0: Health Check

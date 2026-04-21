@@ -39,6 +39,36 @@ Then invoke `samvil-design` and return.
 
 ## Step 2: Round 1 — Research (if tier ≥ thorough)
 
+### 2a. Pre-spawn heartbeat + progress announcement (v3.1.0, v3-016)
+
+Before spawning Round 1 agents, print the batch plan and start the heartbeat:
+
+```
+[SAMVIL] Spawning N agents for Council Round 1 (Research)
+  Tier: <thorough|full>  MAX_PARALLEL=<N>  Total agents: <N>
+  Batches: <N/MAX_PARALLEL> of size <MAX_PARALLEL>
+```
+
+**MCP heartbeat** (best-effort):
+
+```
+mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")
+```
+
+After each agent returns, emit a single-line progress log AND heartbeat:
+
+```
+[SAMVIL]   Agent <k>/<N> returned: <agent-name> → <one-line summary>
+```
+
+```
+mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")
+```
+
+Between batches, check for stall (5-minute threshold) via `is_state_stalled`; if stalled, increment counter and emit `build_reawake_message`. Same pattern as samvil-design Step 3d. Escalate at `MAX_REAWAKES=3`.
+
+### 2b. Spawn batches
+
 Spawn research agents **in controlled parallel batches**:
 
 ```

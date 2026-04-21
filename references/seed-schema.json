@@ -236,6 +236,138 @@
       "minimum": 1,
       "default": 1,
       "description": "Schema version, increments on evolve"
+    },
+    "customer_lifecycle": {
+      "type": "object",
+      "description": "Customer Lifecycle Journey (v3.1.0, v3-023). 8 stages of user experience over time. All fields optional — 사용자가 모를 수 있음. 'TBD — research needed' 표기는 PATH 4 Research에 위임하는 신호다. standard tier 이상에서 인터뷰가 수집.",
+      "additionalProperties": false,
+      "properties": {
+        "discovery": {
+          "type": "string",
+          "description": "How users learn the product exists (search/referral/ads/offline)"
+        },
+        "first_open": {
+          "type": "string",
+          "description": "What the user sees in the first 5 seconds + empty state"
+        },
+        "onboarding": {
+          "type": "string",
+          "description": "Signup strategy, tutorial, sample data"
+        },
+        "activation": {
+          "type": "string",
+          "description": "The Aha moment — one sentence describing when the user feels value"
+        },
+        "retention": {
+          "type": "string",
+          "description": "Reasons to come back daily/weekly, push/email policy"
+        },
+        "completion": {
+          "type": "string",
+          "description": "What happens when the user finishes (level clear, tasks done, content consumed)"
+        },
+        "re_engagement": {
+          "type": "string",
+          "description": "Win-back strategy for users who left for a month+"
+        },
+        "churn": {
+          "type": "string",
+          "description": "Churn signal detection and exit survey strategy"
+        },
+        "data_retention": {
+          "type": "string",
+          "description": "Data retention policy after churn (immediate delete / 30-day grace / export)"
+        }
+      }
+    },
+    "non_functional": {
+      "type": "object",
+      "description": "Non-functional requirements (v3.1.0, v3-022). Performance, accessibility, security, etc. Collected by Interview Phase 2.6 in thorough+ tier.",
+      "additionalProperties": false,
+      "properties": {
+        "performance_target": {
+          "type": "string",
+          "description": "e.g., 'LCP < 2.5s', 'first paint < 1s'"
+        },
+        "accessibility_target": {
+          "type": "string",
+          "description": "e.g., 'WCAG AA', 'keyboard-only operable', 'none'"
+        },
+        "security_sensitivity": {
+          "type": "string",
+          "enum": ["none", "pii", "payment", "enterprise-secret", "mixed"],
+          "description": "Most sensitive data category handled"
+        },
+        "data_retention_days": {
+          "type": ["integer", "null"],
+          "description": "Days before user data auto-deletes after churn. null = indefinite."
+        },
+        "offline_support": {
+          "type": "string",
+          "enum": ["none", "cached-read", "full-offline"],
+          "description": "Offline behavior expectation"
+        },
+        "i18n_languages": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Supported languages (BCP 47 tags). Empty = Korean-only."
+        },
+        "error_ux": {
+          "type": "string",
+          "enum": ["toast", "banner", "full-page", "inline", "mixed"],
+          "description": "Dominant error presentation style"
+        }
+      }
+    },
+    "inversion": {
+      "type": "object",
+      "description": "Inversion phase outputs (v3.1.0, v3-022). Failure modes, anti-requirements. Collected by Interview Phase 2.7.",
+      "additionalProperties": false,
+      "properties": {
+        "failure_paths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Top reasons this product could be abandoned within 6 months"
+        },
+        "anti_requirements": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Things users MUST be prevented from doing (e.g., duplicate signup, privilege escalation)"
+        },
+        "abuse_vectors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Known abuse/attack patterns to defend against"
+        }
+      }
+    },
+    "stakeholders": {
+      "type": "object",
+      "description": "Stakeholder & JTBD outputs (v3.1.0, v3-022). full tier only. Collected by Interview Phase 2.8.",
+      "additionalProperties": false,
+      "properties": {
+        "primary_user_jtbd": {
+          "type": "string",
+          "description": "When <situation>, I want to <motivation>, so I can <outcome>."
+        },
+        "secondary_users": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Non-primary roles (admin/reviewer/observer)"
+        },
+        "decision_maker": {
+          "type": "string",
+          "description": "Who decides to adopt — user/manager/IT/self"
+        },
+        "payer": {
+          "type": "string",
+          "description": "Who pays — user/company/free"
+        },
+        "motivation_vs_alternatives": {
+          "type": "string",
+          "description": "Why this product over existing alternatives (Excel/Notion/paper)"
+        }
+      }
     }
   }
 }

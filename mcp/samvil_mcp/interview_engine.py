@@ -43,7 +43,25 @@ TIER_TARGETS = {
     "standard": 0.05,
     "thorough": 0.02,
     "full": 0.01,
+    # v3.1.0 (Sprint 1, v3-022): Deep Mode for production-grade seeds
+    "deep": 0.005,
 }
+
+
+# Required interview phases per tier (v3.1.0, Sprint 1)
+# Used by SKILL to decide which Phase 2.x blocks are mandatory.
+TIER_REQUIRED_PHASES = {
+    "minimal": {"core", "scope"},
+    "standard": {"core", "scope", "lifecycle"},
+    "thorough": {"core", "scope", "lifecycle", "unknown", "nonfunc", "inversion"},
+    "full": {"core", "scope", "lifecycle", "unknown", "nonfunc", "inversion", "stakeholder", "research"},
+    "deep": {"core", "scope", "lifecycle", "unknown", "nonfunc", "inversion", "stakeholder", "research", "domain_deep"},
+}
+
+
+def tier_phases(tier: str) -> set[str]:
+    """Return the required phases for a tier. Falls back to standard."""
+    return TIER_REQUIRED_PHASES.get(tier, TIER_REQUIRED_PHASES["standard"])
 
 
 def score_ambiguity(interview_state: dict, tier: str = "standard") -> dict:

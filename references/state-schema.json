@@ -101,6 +101,23 @@
       },
       "default": [],
       "description": "Accumulated failed ACs across cycles. Fed to Evolve Wonder as learning signal (P6 Fail-Fast Learn Later). (v2.3.0+ scaffold, v2.6.0 full wiring)"
+    },
+    "auto_chain": {
+      "type": "boolean",
+      "default": true,
+      "description": "(v3.1.0, v3-019) Chain Skills automatically between stages (design→scaffold→build→qa) without user approval. Interview/Seed still require user confirmation. Set false to force legacy behavior for manual step-through."
+    },
+    "last_progress_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "default": null,
+      "description": "(v3.1.0, v3-016) ISO-8601 timestamp of the last observable progress event (skill heartbeat, agent response, AC leaf transition). stall_detector reads this to decide whether to wake main session. Updated at ≤ 30-second cadence during long-running stages."
+    },
+    "stall_recovery_count": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "(v3.1.0, v3-016) Number of times stall_detector has issued a reawake message in the current run. Caps at 3 before escalating to user."
     }
   }
 }

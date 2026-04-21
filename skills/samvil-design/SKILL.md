@@ -233,6 +233,26 @@ Include this as a comment section in the blueprint or present to user.
 
 Read `config.selected_tier`. If `thorough` or `full`:
 
+### 3a. Pre-spawn heartbeat + progress announcement (v3.1.0, v3-016)
+
+Before spawning agents, print the batch plan and start the heartbeat:
+
+```
+[SAMVIL] Spawning N agents for Gate B (Design Review)
+  Tier: <thorough|full>  MAX_PARALLEL=<2|3>  Total agents: <N>
+  Batches: <N/MAX_PARALLEL> of size <MAX_PARALLEL>
+```
+
+**MCP heartbeat** (best-effort): update `last_progress_at` so `stall_detector` knows the session is alive:
+
+```
+mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")
+```
+
+If MCP is unavailable, skip silently — the health log will record it.
+
+### 3b. Spawn batches
+
 Spawn design council agents **in controlled parallel batches**:
 
 ```
@@ -265,6 +285,37 @@ Keep response under 400 words.",
   subagent_type: "general-purpose"
 )
 ```
+
+### 3c. Per-agent progress line (v3.1.0, v3-016)
+
+After each agent returns (batch by batch), emit a single-line progress log **AND** heartbeat:
+
+```
+[SAMVIL]   Agent <k>/<N> returned: <agent-name> → <one-line summary>
+```
+
+```
+mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")
+```
+
+This is the specific regression from the mobile-game dogfood: the 25-minute hang happened because neither a progress line nor a heartbeat was emitted while Sonnet agents ran — the main session had no way to notice it was still alive.
+
+### 3d. Stall check between batches (v3.1.0, v3-016)
+
+Between batches, check whether the session has stalled:
+
+```
+verdict = mcp__samvil_mcp__is_state_stalled(
+    state_path="project.state.json",
+    threshold_seconds=300,
+)
+if verdict["stalled"]:
+    count = mcp__samvil_mcp__increment_stall_recovery_count(state_path="project.state.json")
+    message = mcp__samvil_mcp__build_reawake_message(stage="design", detail=verdict, count=count)
+    # Print the reawake message AND continue the next batch — don't block.
+```
+
+If the reawake count reaches `MAX_REAWAKES` (3), stop spawning and surface the escalation message to the user with a skip/abort/retry AskUserQuestion.
 
 ### Gate B Synthesis
 

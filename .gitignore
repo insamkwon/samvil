@@ -10,3 +10,4 @@ mcp/.pytest_cache/
 mcp/tests/__pycache__/
 .worktrees/
 .samvil/
+harness-feedback.log.bak-*
