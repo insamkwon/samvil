@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Shared helpers for SAMVIL contract-layer hooks (L1).
 #
 # Why a helper: both PreToolUse and PostToolUse hooks need to:

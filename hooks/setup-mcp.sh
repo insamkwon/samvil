@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SAMVIL Hook: Auto-setup MCP server on SessionStart
 # Triggers: SessionStart
 # Purpose: Automatically install and register MCP server if not already set up

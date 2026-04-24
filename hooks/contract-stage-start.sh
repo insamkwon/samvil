@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SAMVIL v3.2 L1 — PreToolUse hook for Skill invocations.
 #
 # Fires when Claude is about to call the Skill tool. If the target skill

@@ -4,6 +4,37 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.2.1] — 2026-04-25 — Portability + Pre-Commit Enforcement
+
+Hardening patch. No user-visible feature change; internal safeguards
+against the regression class that almost shipped in v3.2.0.
+
+### Fixed
+- Removed hard-coded `/Users/<name>/` absolute paths from `.mcp.json`
+  (2 spots), `hooks/_contract-helpers.sh` (5 spots),
+  `hooks/contract-stage-end.sh` (1 spot), and
+  `skills/samvil-doctor/SKILL.md` (6 spots). All replaced with
+  `${CLAUDE_PLUGIN_ROOT}` / dynamic resolution.
+- `.mcp.json` switched to `uvx --from ${CLAUDE_PLUGIN_ROOT}/mcp samvil-mcp`
+  (same pattern as Ouroboros), removing the first-install venv race.
+- Shell shebangs unified to `#!/usr/bin/env bash` so hook scripts run
+  on Alpine / Docker images where `/bin/bash` is absent.
+
+### Added — absolute pre-commit gate
+- `scripts/pre-commit-check.sh`: 6-check enforcement (hard-coded paths,
+  version sync, glossary, pytest, skill wiring, MCP import) that blocks
+  commits on failure.
+- `.githooks/pre-commit`: delegate hook activated via
+  `bash scripts/install-git-hooks.sh` (one-time per clone).
+- `CLAUDE.md` absolute rule: `--no-verify` reserved for true emergencies
+  with a mandatory fix commit in the same session.
+- `.gitignore` excludes `.claude/settings.local.json` (machine-local
+  permission prompts that would leak worktree paths).
+
+### Verified
+- `git ls-files | xargs grep -l '/Users/<name>'` → 0 hits.
+- pytest 626 / glossary green / skill wiring PASS / MCP import clean.
+
 ## [3.2.0] — 2026-04-24 — Contract Layer
 
 13개 흡수 항목(①~⑬) 전부 반영. v3.2는 "자동으로 앱을 빌드하는 도구"에서

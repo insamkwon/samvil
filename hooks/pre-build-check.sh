@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SAMVIL Pre-build Check
 # Runs TypeScript type check and ESLint before full build
 # Returns: 0 = pass, 1 = type errors, 2 = lint errors, 3 = both

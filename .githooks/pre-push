@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SAMVIL pre-push hook: block push if version wasn't bumped
 
 CURRENT=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])" 2>/dev/null)

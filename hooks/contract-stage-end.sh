@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SAMVIL v3.2 L1 — PostToolUse hook for Skill invocations.
 #
 # Fires right after Claude's Skill tool returns. Wraps up the stage:

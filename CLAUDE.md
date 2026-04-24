@@ -22,6 +22,64 @@ GitHub: https://github.com/insamkwon/samvil
 Manifesto: see `~/docs/ouroboros-absorb/MANIFESTO-v3.md`
 v3.2 decisions: see `~/docs/ouroboros-absorb/HANDOFF-v3.2-DECISIONS.md`
 
+## 🛑 ABSOLUTE RULE — Pre-Commit Enforcement
+
+**Every commit on this repo must pass `bash scripts/pre-commit-check.sh`.**
+No exceptions. This rule exists because v3.2.0 shipped with hard-coded
+author-machine absolute paths that broke every other install until a
+portability fix landed. That regression is forbidden from reoccurring.
+
+The check enforces:
+
+1. **No hard-coded home paths** (`/Users/<name>/`, `/home/<name>/`) in any
+   tracked `.sh / .py / .md / .json / .yaml / .yml / .toml` file.
+2. **No author-specific emails or handles** in code.
+3. **No obvious secret patterns** (provider token prefixes followed by
+   20+ alphanumerics, or assignments of a raw value to known auth env
+   vars — the exact patterns live in `scripts/pre-commit-check.sh`).
+4. **Version sync** — `plugin.json` / `mcp/samvil_mcp/__init__.py` /
+   `README.md` all agree.
+5. **Glossary CI green** — banned v3.1 terms in new artifacts block.
+6. **Full pytest suite passes** (`mcp/.venv/bin/python -m pytest`).
+7. **Skill wiring smoke passes** (`scripts/check-skill-wiring.py`).
+8. **MCP server imports clean** — broken `server.py` syntax caught here,
+   not at someone else's plugin install.
+
+### How it is enforced
+
+- `.githooks/pre-commit` calls `scripts/pre-commit-check.sh`. Enable
+  once per clone: `bash scripts/install-git-hooks.sh`.
+- AI operators (Claude, etc.) working in this repo **must** run
+  `bash scripts/pre-commit-check.sh` before every `git commit`, even
+  when the `core.hooksPath` hook is not installed (some environments
+  bypass hooks). Treat a red check as a BLOCKER — fix first, commit
+  never.
+
+### What to do when a check fails
+
+- **Hard-coded path** → replace with `${CLAUDE_PLUGIN_ROOT}`,
+  `$(dirname "$0")` relative, or an env-var lookup. See
+  `hooks/_contract-helpers.sh` for the canonical pattern.
+- **Version mismatch** → run the steps in *"버전업 체크리스트"* (below).
+- **Glossary violation** → either pick the canonical v3.2 term (see
+  `references/glossary.md`) or annotate the intentional use with
+  `# glossary-allow` + a one-line reason.
+- **pytest failure** → fix the test before committing. Don't skip.
+- **Skill wiring broken** → a contract-layer tool reference was removed
+  from a skill; restore it or update the wiring map in
+  `scripts/check-skill-wiring.py`.
+- **MCP import fail** → syntax error in `server.py` (most common) or a
+  new module's import that wasn't added to the test suite.
+
+### Bypass policy
+
+`--no-verify` is reserved for *true emergencies* where the repo is
+actively broken and the failing check is orthogonal (e.g., CI infra is
+down, not code health). Every bypass must be followed by a fixing
+commit within the same session. Do not use `--no-verify` to
+"commit now, fix later" — that is how v3.2.0 shipped its portability
+bug in the first place.
+
 ## 📚 Vocabulary (v3.2)
 
 Single source of truth: `references/glossary.md`. Enforced in CI via

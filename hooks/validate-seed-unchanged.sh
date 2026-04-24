@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SAMVIL Hook: Validate seed hasn't been modified during build/QA/deploy phases
 # Triggers: PreToolCall on Write/Edit tools
 # Purpose: Prevent accidental seed modification once the build pipeline has started

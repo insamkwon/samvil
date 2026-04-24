@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SAMVIL Hook: Block destructive commands in project directories
 # Triggers: PreToolCall on Bash tool
 # Purpose: Prevent accidental rm -rf, git reset --hard, etc.

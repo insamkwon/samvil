@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SAMVIL Hook: Log build results for retro analysis
 # Triggers: PostToolCall on Bash tool (when npm run build is detected)
 # Purpose: Accumulate build metrics with timing, error categorization, and log path

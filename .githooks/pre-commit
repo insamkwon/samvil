@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# SAMVIL pre-commit — delegates to scripts/pre-commit-check.sh.
+#
+# Enabled by running (one time after clone):
+#   git config core.hooksPath .githooks
+#
+# This file is tracked so the check travels with the repo. Bypass only
+# in emergencies with `git commit --no-verify`, and fix the issue in
+# the next commit.
+
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+exec bash "$HERE/scripts/pre-commit-check.sh"
