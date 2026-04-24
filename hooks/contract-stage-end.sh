@@ -57,7 +57,7 @@ from pathlib import Path
 project_root, stage, exit_code = sys.argv[1:4]
 project = Path(project_root)
 
-sys.path.insert(0, "/Users/kwondongho/dev/samvil/mcp")
+sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
 
 try:
     from samvil_mcp.claim_ledger import ClaimLedger

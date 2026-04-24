@@ -13,9 +13,39 @@
 #     so the pipeline never halts because of a hook hiccup.
 #   * `source` this file from other hook scripts.
 
-# Absolute path to SAMVIL's Python venv. Cached here so each hook doesn't
-# have to re-resolve.
-SAMVIL_PY="/Users/kwondongho/dev/samvil/mcp/.venv/bin/python"
+# Resolve the plugin root (directory containing the hooks/ folder).
+# We prefer $CLAUDE_PLUGIN_ROOT when Claude Code provides it; otherwise
+# we derive from the location of this very file. This keeps the helpers
+# portable across the plugin's user-specific cache location without any
+# hard-coded machine paths.
+_samvil_helpers_file="${BASH_SOURCE[0]}"
+_samvil_resolve_plugin_root() {
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -d "$CLAUDE_PLUGIN_ROOT" ]; then
+    echo "$CLAUDE_PLUGIN_ROOT"
+    return 0
+  fi
+  # Fallback: this script lives at <plugin_root>/hooks/_contract-helpers.sh
+  local here
+  here="$(cd "$(dirname "$_samvil_helpers_file")" && pwd)"
+  # Go one level up: hooks/ → plugin root
+  echo "$(dirname "$here")"
+}
+SAMVIL_PLUGIN_ROOT="$(_samvil_resolve_plugin_root)"
+
+# Python venv lives at <plugin_root>/mcp/.venv/bin/python after the
+# SessionStart hook has run. If the venv hasn't been created yet, the
+# Python calls fall through to the system `python3` (best-effort mode —
+# the hook is allowed to no-op silently until the venv is in place).
+if [ -x "$SAMVIL_PLUGIN_ROOT/mcp/.venv/bin/python" ]; then
+  SAMVIL_PY="$SAMVIL_PLUGIN_ROOT/mcp/.venv/bin/python"
+else
+  SAMVIL_PY="$(command -v python3 || echo python3)"
+fi
+
+# Export the MCP package dir so the inline Python heredocs below can
+# resolve imports without hard-coding paths.
+export SAMVIL_MCP_DIR="$SAMVIL_PLUGIN_ROOT/mcp"
+export SAMVIL_PLUGIN_ROOT
 
 # The stage skills we tag as pipeline stages. Anything else is ignored.
 # Keep in sync with references/contract-layer-protocol.md's task_role table.
@@ -122,7 +152,7 @@ samvil_contract_ensure_project_init() {
 
   # Seed model_profiles.yaml from packaged defaults if absent.
   if [ ! -f "$root/.samvil/model_profiles.yaml" ]; then
-    local defaults="/Users/kwondongho/dev/samvil/references/model_profiles.defaults.yaml"
+    local defaults="$SAMVIL_PLUGIN_ROOT/references/model_profiles.defaults.yaml"
     [ -f "$defaults" ] && cp "$defaults" "$root/.samvil/model_profiles.yaml"
   fi
 }
@@ -145,7 +175,7 @@ samvil_contract_append_claim() {
 import json, sys, os
 root, ctype, subject, statement, authority, claimed_by, evidence_json = sys.argv[1:8]
 try:
-    sys.path.insert(0, "/Users/kwondongho/dev/samvil/mcp")
+    sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
     from samvil_mcp.claim_ledger import ClaimLedger, CLAIM_TYPES
     if ctype not in CLAIM_TYPES:
         sys.exit(0)
@@ -180,7 +210,7 @@ samvil_contract_verify_claim() {
 import sys, os
 root, subject, verified_by = sys.argv[1:4]
 try:
-    sys.path.insert(0, "/Users/kwondongho/dev/samvil/mcp")
+    sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
     from samvil_mcp.claim_ledger import ClaimLedger
     ledger = ClaimLedger(os.path.join(root, ".samvil", "claims.jsonl"))
     pending = [
