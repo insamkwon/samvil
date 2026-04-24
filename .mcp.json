@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "samvil-mcp": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/mcp/.venv/bin/python",
-      "args": ["-m", "samvil_mcp.server"],
-      "cwd": "${CLAUDE_PLUGIN_ROOT}/mcp"
+      "command": "uvx",
+      "args": ["--from", "${CLAUDE_PLUGIN_ROOT}/mcp", "samvil-mcp"]
     }
   }
 }
