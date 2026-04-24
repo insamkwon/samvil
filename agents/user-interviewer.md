@@ -1,6 +1,7 @@
 ---
 name: user-interviewer
 description: "Simulate a real user encountering the product for the first time. Test the seed from user's perspective."
+model_role: out_of_band
 phase: A
 tier: full
 mode: council

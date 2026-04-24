@@ -1,6 +1,7 @@
 ---
 name: qa-functional
 description: "QA Pass 2: Verify each acceptance criterion against actual code. PASS/PARTIAL/UNIMPLEMENTED/FAIL per AC."
+model_role: judge
 phase: D
 tier: minimal
 mode: evaluator

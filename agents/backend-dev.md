@@ -1,6 +1,7 @@
 ---
 name: backend-dev
 description: "Build API routes, data models, server logic, and database integration."
+model_role: generator
 phase: C
 tier: standard
 mode: worker

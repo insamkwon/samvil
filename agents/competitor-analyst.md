@@ -1,6 +1,7 @@
 ---
 name: competitor-analyst
 description: "Web search for competing services. Identify what exists, what works, what we can do differently."
+model_role: researcher
 phase: A
 tier: full
 mode: council

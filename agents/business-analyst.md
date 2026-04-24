@@ -1,6 +1,7 @@
 ---
 name: business-analyst
 description: "Analyze target market sizing, revenue model viability, and competitive landscape."
+model_role: researcher
 phase: A
 tier: thorough
 mode: council

@@ -1,6 +1,7 @@
 ---
 name: deployer
 description: "Deploy specialist. Vercel/Railway/Coolify deployment, env validation, URL generation."
+model_role: generator
 phase: E
 tier: standard
 mode: compact

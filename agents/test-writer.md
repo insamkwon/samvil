@@ -1,6 +1,7 @@
 ---
 name: test-writer
 description: "Write unit and integration tests for core features. Focus on user-facing behavior, not implementation."
+model_role: generator
 phase: C
 tier: full
 mode: worker

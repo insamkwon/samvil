@@ -1,6 +1,7 @@
 ---
 name: socratic-interviewer
 description: "Socratic questioning until requirements are crystal clear. Ambiguity → 0. v3.1.0: Deep Mode + Lifecycle + Inversion + Stakeholder."
+model_role: out_of_band
 phase: A
 tier: minimal
 mode: adopted

@@ -1,6 +1,7 @@
 ---
 name: product-owner
 description: "Validate story completeness, AC verifiability, and user value alignment in seed specs."
+model_role: judge
 phase: A
 tier: standard
 mode: council

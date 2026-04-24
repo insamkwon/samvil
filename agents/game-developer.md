@@ -1,6 +1,7 @@
 ---
 name: game-developer
 description: "Implement Phaser 3 games: scene lifecycle, physics, sprite management, input handling, and game state."
+model_role: generator
 phase: C
 tier: standard
 mode: worker

@@ -1,6 +1,7 @@
 ---
 name: mobile-interviewer
 description: "Socratic interviewer specialized for mobile app projects. Asks about platform, native features, navigation, and offline needs."
+model_role: out_of_band
 phase: A
 tier: standard
 mode: worker

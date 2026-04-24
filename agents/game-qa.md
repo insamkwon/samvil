@@ -1,6 +1,7 @@
 ---
 name: game-qa
 description: "QA for game projects: Playwright canvas verification, Phaser state inspection, FPS checks, and gameplay testing."
+model_role: judge
 phase: D
 tier: standard
 mode: worker

@@ -1,6 +1,7 @@
 ---
 name: frontend-dev
 description: "Build React components, pages, client-side state, and user interactions."
+model_role: generator
 phase: C
 tier: standard
 mode: worker

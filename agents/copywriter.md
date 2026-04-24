@@ -1,6 +1,7 @@
 ---
 name: copywriter
 description: "Craft UI text, error messages, empty states, tooltips, and CTAs that guide users naturally."
+model_role: reviewer
 phase: B
 tier: full
 mode: council

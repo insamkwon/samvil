@@ -1,6 +1,7 @@
 ---
 name: growth-advisor
 description: "Advise on next steps: v2 features, monetization timing, user acquisition, growth strategies."
+model_role: reviewer
 phase: E
 tier: full
 mode: council

@@ -1,6 +1,7 @@
 ---
 name: ui-designer
 description: "Review visual hierarchy, consistency, design system adherence, and aesthetic quality."
+model_role: reviewer
 phase: B
 tier: thorough
 mode: council

@@ -1,6 +1,7 @@
 ---
 name: qa-quality
 description: "QA Pass 3: Review responsive design, accessibility basics, code structure, and overall polish."
+model_role: judge
 phase: D
 tier: minimal
 mode: evaluator

@@ -1,6 +1,7 @@
 ---
 name: mobile-architect
 description: "Design mobile app blueprints with Expo Router architecture, native module integration, and offline-first patterns."
+model_role: generator
 phase: B
 tier: standard
 mode: worker

@@ -1,6 +1,7 @@
 ---
 name: mobile-qa
 description: "QA for mobile apps: Expo web preview testing, touch target verification, accessibility checks, and cross-platform validation."
+model_role: judge
 phase: D
 tier: standard
 mode: worker

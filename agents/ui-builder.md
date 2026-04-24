@@ -1,6 +1,7 @@
 ---
 name: ui-builder
 description: "Build design system components: buttons, cards, inputs, modals. Responsive, animated, polished."
+model_role: generator
 phase: C
 tier: thorough
 mode: worker

@@ -1,6 +1,7 @@
 ---
 name: simplifier
 description: "Cut scope to true MVP. Challenge anything that isn't essential for first usable version."
+model_role: reviewer
 phase: A
 tier: standard
 mode: council

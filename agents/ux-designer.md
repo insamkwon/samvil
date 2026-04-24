@@ -1,6 +1,7 @@
 ---
 name: ux-designer
 description: "Design screen structure, component hierarchy, and user flows. Primary design agent for all tiers."
+model_role: generator
 phase: B
 tier: minimal
 mode: adopted

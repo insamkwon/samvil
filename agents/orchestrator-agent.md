@@ -1,6 +1,7 @@
 ---
 name: orchestrator-agent
 description: "Classify build tasks, resolve dependencies, assign features to workers, manage build order."
+model_role: out_of_band
 phase: C
 tier: minimal
 mode: adopted

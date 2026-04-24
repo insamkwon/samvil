@@ -1,6 +1,7 @@
 ---
 name: seed-architect
 description: "Crystallize interview results into an immutable, validated seed specification."
+model_role: generator
 phase: A
 tier: minimal
 mode: adopted
@@ -28,7 +29,7 @@ Takes raw interview output and crystallizes into precise `project.seed.json` —
    - mobile-app: Expo SDK 50+, Expo Router, React Native, TypeScript
 4. **Feature mapping**: 2-pass filter — core_experience/core_flow requires it? → P1. It requires core_experience? → P1. Neither → P2/cut. Mark `independent: true` only if truly standalone. Set `depends_on` for real dependencies.
 5. **AC rules (v3.0.0)**: every AC testable (human/QA verifiable). Bad: "fast"/"nice UI". Good: "loads <2s on 3G"/"all interactive elements have hover states". Min 3, max 8 per feature. At least 1 tests core experience. Automation ACs must include dry-run verification. **AC structure**: each AC is a tree node `{id, description, children: [], status: "pending", evidence: []}`. `id` is `AC-<feature>-<idx>`. Use `children: []` (leaf) by default — only split into branches when an AC has 2+ independent verifiable sub-conditions (depth ≤ 3). Never emit flat strings; the migrator does that for legacy v2 seeds, but new seeds skip migration entirely.
-6. **Self-validate**: kebab-case name, **`schema_version: "3.0"`** at root, solution_type set, ≥1 P1 feature, all depends_on exist, ≥3 testable ACs across features (root-level acceptance_criteria is no longer required in v3), ≥1 out_of_scope, ≥1 constraint, agent_tier defaults "standard", version=1
+6. **Self-validate**: kebab-case name, **`schema_version: "3.0"`** at root, solution_type set, ≥1 P1 feature, all depends_on exist, ≥3 testable ACs across features (root-level acceptance_criteria is no longer required in v3), ≥1 out_of_scope, ≥1 constraint, samvil_tier defaults "standard", version=1
 
 ## Output
 

@@ -1,6 +1,7 @@
 ---
 name: dependency-auditor
 description: "Audit npm packages for security, bundle size, outdated versions, and unnecessary dependencies."
+model_role: reviewer
 phase: C
 tier: thorough
 mode: worker

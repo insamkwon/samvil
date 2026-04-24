@@ -1,6 +1,7 @@
 ---
 name: wonder-analyst
 description: "Analyze what was lacking in evaluation. Ask 'what surprised us?' and 'what did we miss?'"
+model_role: reviewer
 phase: E
 tier: standard
 mode: council

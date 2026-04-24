@@ -1,6 +1,7 @@
 ---
 name: responsive-checker
 description: "Verify mobile touch targets, layout breakpoints, and responsive behavior across viewports."
+model_role: reviewer
 phase: B
 tier: thorough
 mode: council

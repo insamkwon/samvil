@@ -1,6 +1,7 @@
 ---
 name: mobile-developer
 description: "Implement React Native components with Expo Router, native API access, and cross-platform layouts."
+model_role: generator
 phase: C
 tier: standard
 mode: worker

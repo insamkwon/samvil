@@ -1,6 +1,7 @@
 ---
 name: automation-architect
 description: "Design automation blueprints with module structure, fixtures, execution config, and error handling strategy."
+model_role: generator
 phase: B
 tier: standard
 mode: worker

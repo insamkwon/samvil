@@ -1,6 +1,7 @@
 ---
 name: ceo-advisor
 description: "Evaluate business value, market differentiation, and strategic positioning of the product."
+model_role: reviewer
 phase: A
 tier: thorough
 mode: council

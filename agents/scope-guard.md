@@ -1,6 +1,7 @@
 ---
 name: scope-guard
 description: "Prevent scope creep throughout the pipeline. Flag hidden dependencies and feature inflation."
+model_role: reviewer
 phase: A
 tier: standard
 mode: council

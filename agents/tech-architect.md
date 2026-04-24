@@ -1,6 +1,7 @@
 ---
 name: tech-architect
 description: "Define folder structure, data model, API routes, and state management architecture."
+model_role: generator
 phase: C
 tier: minimal
 mode: adopted

@@ -1,6 +1,7 @@
 ---
 name: retro-analyst
 description: "Analyze the SAMVIL run itself. Suggest harness improvements based on run metrics and patterns."
+model_role: reviewer
 phase: F
 tier: minimal
 mode: adopted

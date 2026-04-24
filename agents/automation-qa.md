@@ -1,6 +1,7 @@
 ---
 name: automation-qa
 description: "QA for automation projects: dry-run verification, expected output comparison, error handling checks, and fixture validation."
+model_role: judge
 phase: D
 tier: standard
 mode: worker

@@ -1,6 +1,7 @@
 ---
 name: reflect-proposer
 description: "Propose concrete seed improvements based on wonder analysis. Create the next seed version. v3.1.0: inline AC Tree mutation rules."
+model_role: reviewer
 phase: E
 tier: standard
 mode: council

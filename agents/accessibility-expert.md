@@ -1,6 +1,7 @@
 ---
 name: accessibility-expert
 description: "Verify WCAG 2.1 AA compliance: keyboard navigation, screen reader, color contrast, ARIA."
+model_role: reviewer
 phase: B
 tier: thorough
 mode: council

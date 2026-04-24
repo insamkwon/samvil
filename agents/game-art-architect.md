@@ -1,6 +1,7 @@
 ---
 name: game-art-architect
 description: "Game art direction + UI tone + audio + HUD layout architect. Spawned by samvil-design for solution_type=game when tier ≥ standard."
+model_role: generator
 phase: B
 tier: standard
 mode: council

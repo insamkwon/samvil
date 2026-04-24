@@ -1,6 +1,7 @@
 ---
 name: dog-fooder
 description: "Simulate real user scenarios end-to-end. Test the product as if you're the target user."
+model_role: reviewer
 phase: D
 tier: standard
 mode: evaluator

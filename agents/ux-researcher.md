@@ -1,6 +1,7 @@
 ---
 name: ux-researcher
 description: "Evaluate user flow naturalness, cognitive load, learnability, and interaction efficiency."
+model_role: reviewer
 phase: B
 tier: thorough
 mode: council

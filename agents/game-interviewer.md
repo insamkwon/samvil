@@ -1,6 +1,7 @@
 ---
 name: game-interviewer
 description: "Socratic interviewer specialized for game projects. v3.1.0: game lifecycle architecture + mobile spec + art/UX."
+model_role: out_of_band
 phase: A
 tier: standard
 mode: worker

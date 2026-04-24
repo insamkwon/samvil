@@ -1,6 +1,7 @@
 ---
 name: qa-mechanical
 description: "QA Pass 1: Build verification, TypeScript errors, lint checks, import validation."
+model_role: judge
 phase: D
 tier: minimal
 mode: evaluator

@@ -1,6 +1,7 @@
 ---
 name: automation-interviewer
 description: "Socratic interviewer specialized for automation projects. Asks about triggers, I/O, execution environment, and API integrations."
+model_role: out_of_band
 phase: A
 tier: standard
 mode: worker

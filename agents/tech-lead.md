@@ -1,6 +1,7 @@
 ---
 name: tech-lead
 description: "Review code structure, conventions, security, performance, and engineering best practices."
+model_role: reviewer
 phase: D
 tier: standard
 mode: evaluator

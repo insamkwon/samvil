@@ -1,6 +1,7 @@
 ---
 name: automation-engineer
 description: "Implement Python/Node automation scripts with dry-run pattern, API clients, logging, and error handling."
+model_role: generator
 phase: C
 tier: standard
 mode: worker

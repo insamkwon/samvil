@@ -1,6 +1,7 @@
 ---
 name: performance-auditor
 description: "Audit page load performance, bundle size, render efficiency, and Core Web Vitals readiness."
+model_role: reviewer
 phase: D
 tier: thorough
 mode: evaluator

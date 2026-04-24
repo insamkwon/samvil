@@ -1,6 +1,7 @@
 ---
 name: infra-dev
 description: "Set up auth, database connections, environment config, and deployment infrastructure."
+model_role: generator
 phase: C
 tier: standard
 mode: worker

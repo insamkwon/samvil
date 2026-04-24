@@ -1,6 +1,7 @@
 ---
 name: scaffolder
 description: "Generate project skeleton from template. Zero business logic, verified build."
+model_role: generator
 phase: C
 tier: minimal
 mode: adopted

@@ -1,6 +1,7 @@
 ---
 name: game-architect
 description: "Design game blueprints with Phaser scene/entity architecture, game config, asset management, and state machines."
+model_role: generator
 phase: B
 tier: standard
 mode: worker

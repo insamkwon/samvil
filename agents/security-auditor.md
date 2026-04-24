@@ -1,6 +1,7 @@
 ---
 name: security-auditor
 description: "Scan for XSS, CSRF, auth bypass, env exposure, and injection vulnerabilities."
+model_role: reviewer
 phase: D
 tier: thorough
 mode: evaluator

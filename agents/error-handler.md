@@ -1,6 +1,7 @@
 ---
 name: error-handler
 description: "Add error boundaries, loading states, fallback UI, and graceful degradation to all features."
+model_role: repairer
 phase: C
 tier: full
 mode: worker
