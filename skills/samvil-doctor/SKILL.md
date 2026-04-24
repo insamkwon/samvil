@@ -20,9 +20,20 @@ Expect: Node v18+, npm v9+.
 
 ### 2. Python + venv
 
+First resolve the plugin root dynamically so this diagnostic works on
+any install (local `directory:` source or `~/.claude/plugins/cache/...`):
+
 ```bash
+# Try $CLAUDE_PLUGIN_ROOT first (set when hooks run); otherwise search cache.
+SAMVIL_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+if [ -z "$SAMVIL_ROOT" ]; then
+  SAMVIL_ROOT=$(ls -td ~/.claude/plugins/cache/samvil/samvil/*/ 2>/dev/null | head -1)
+  SAMVIL_ROOT="${SAMVIL_ROOT%/}"
+fi
+echo "Plugin root: $SAMVIL_ROOT"
+
 python3 --version
-ls /Users/kwondongho/dev/samvil/mcp/.venv/bin/python3
+ls "$SAMVIL_ROOT/mcp/.venv/bin/python3" 2>/dev/null || echo "venv not installed — run /samvil:update or let SessionStart hook initialize"
 ```
 
 Expect: Python 3.11+, venv exists.
@@ -30,8 +41,7 @@ Expect: Python 3.11+, venv exists.
 ### 3. SAMVIL version sync
 
 ```bash
-cd /Users/kwondongho/dev/samvil
-bash hooks/validate-version-sync.sh
+bash "$SAMVIL_ROOT/hooks/validate-version-sync.sh"
 ```
 
 Expect: All versions synchronized.
@@ -39,7 +49,7 @@ Expect: All versions synchronized.
 ### 4. MCP tests
 
 ```bash
-cd /Users/kwondongho/dev/samvil/mcp
+cd "$SAMVIL_ROOT/mcp"
 source .venv/bin/activate
 python -m pytest tests/ --tb=no -q
 ```
@@ -70,7 +80,9 @@ Expect: Cache dir exists, .py files present.
 
 ```bash
 du -sh ~/.samvil 2>/dev/null || echo "~/.samvil not found"
-du -sh /Users/kwondongho/dev/samvil/.samvil 2>/dev/null || echo "project .samvil not found"
+du -sh "$SAMVIL_ROOT/.samvil" 2>/dev/null || echo "plugin .samvil not found"
+# User's current working project (where /samvil was invoked) — optional:
+du -sh "$PWD/.samvil" 2>/dev/null || true
 ```
 
 ### 8. Recent MCP health log
@@ -85,7 +97,7 @@ Verify every v3 tool is registered on the server (not just the 9 core
 tools that older doctor versions checked):
 
 ```bash
-cd /Users/kwondongho/dev/samvil/mcp && source .venv/bin/activate && python3 -c "
+cd "$SAMVIL_ROOT/mcp" && source .venv/bin/activate && python3 -c "
 from samvil_mcp.server import mcp
 import asyncio
 tools = {t.name for t in asyncio.run(mcp.list_tools())}
