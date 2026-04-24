@@ -1,0 +1,96 @@
+# SAMVIL v3.2 — stage gate configuration
+#
+# Per HANDOFF-v3.2-DECISIONS.md §3.⑥. Every gate is Hard by default, with
+# tier-specific thresholds. Soft only via `--allow-warn`. Three checks may
+# escalate (rather than hard-block) in standard+ tiers:
+#   - ac_testability
+#   - lifecycle_coverage
+#   - decision_boundary_clarity
+#
+# Numbers below are (initial estimate) per §7 Sprint 1. They're registered
+# as experimental_policy via scripts/seed-experiments.py so dogfood runs
+# can calibrate them. Promote only with retro evidence.
+#
+# This file is optional. When absent, mcp/samvil_mcp/gates.DEFAULT_CONFIG
+# is used — values below are the same as the defaults, duplicated here so
+# users can see them at a glance.
+
+gates:
+  interview_to_seed:
+    policy: hard
+    thresholds:
+      minimal:  { seed_readiness: 0.80 }
+      standard: { seed_readiness: 0.88 }
+      thorough: { seed_readiness: 0.93 }
+      full:     { seed_readiness: 0.96 }
+      deep:     { seed_readiness: 0.985 }
+
+  seed_to_council:
+    policy: hard
+    thresholds:
+      minimal:  { schema_valid: true, schema_version_min: "3.2" }
+      standard: { schema_valid: true, schema_version_min: "3.2" }
+      thorough: { schema_valid: true, schema_version_min: "3.2" }
+      full:     { schema_valid: true, schema_version_min: "3.2" }
+      deep:     { schema_valid: true, schema_version_min: "3.2" }
+
+  council_to_design:
+    policy: hard
+    thresholds:
+      minimal:  { skip: true }
+      standard: { consensus_required: true }
+      thorough: { consensus_required: true }
+      full:     { consensus_required: true }
+      deep:     { consensus_required: true }
+
+  design_to_scaffold:
+    policy: hard
+    thresholds:
+      minimal:  { blueprint_valid: true, stack_matrix_match: true }
+      standard: { blueprint_valid: true, stack_matrix_match: true }
+      thorough: { blueprint_valid: true, stack_matrix_match: true }
+      full:     { blueprint_valid: true, stack_matrix_match: true }
+      deep:     { blueprint_valid: true, stack_matrix_match: true }
+
+  scaffold_to_build:
+    policy: hard
+    thresholds:
+      minimal:  { sanity_build_ok: true, env_vars_present: true }
+      standard: { sanity_build_ok: true, env_vars_present: true }
+      thorough: { sanity_build_ok: true, env_vars_present: true }
+      full:     { sanity_build_ok: true, env_vars_present: true }
+      deep:     { sanity_build_ok: true, env_vars_present: true }
+
+  build_to_qa:
+    policy: hard
+    thresholds:
+      minimal:  { implementation_rate: 0.70 }
+      standard: { implementation_rate: 0.85 }
+      thorough: { implementation_rate: 0.95 }
+      full:     { implementation_rate: 0.98 }
+      deep:     { implementation_rate: 0.98 }
+
+  qa_to_deploy:
+    policy: hard
+    thresholds:
+      minimal:  { three_pass_pass: true, zero_stubs: true }
+      standard: { three_pass_pass: true, zero_stubs: true }
+      thorough: { three_pass_pass: true, zero_stubs: true }
+      full:     { three_pass_pass: true, zero_stubs: true }
+      deep:     { three_pass_pass: true, zero_stubs: true }
+
+  any_to_retro:
+    policy: hard  # cannot skip — feeds ⑧ policy evolution
+    thresholds:
+      minimal:  { always_run: true }
+      standard: { always_run: true }
+      thorough: { always_run: true }
+      full:     { always_run: true }
+      deep:     { always_run: true }
+
+escalation:
+  policy: same_check_twice_forces_user
+  checks:
+    - ac_testability
+    - lifecycle_coverage
+    - decision_boundary_clarity

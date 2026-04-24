@@ -22,7 +22,7 @@
 | scaffold | Next.js/Vite/Astro 스캐폴드 빌드 통과 |
 | build | 모든 features의 leaf AC 구현 + lint/typecheck |
 | qa | 3-pass 모두 PASS + evidence 존재 (P1) |
-| evolve | similarity ≥ 0.95 + regression 0 + 5 gates 통과 (P5) |
+| evolve | similarity ≥ 0.95 + regression 0 + 5 evolve_checks 통과 (P5) |
 | deploy | 사용자 명시적 승인 (P10 — Irreversible action) |
 | retro | feedback.log 기록 완료 |
 

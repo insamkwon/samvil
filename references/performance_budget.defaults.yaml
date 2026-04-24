@@ -1,0 +1,37 @@
+# SAMVIL v3.2 — default performance budget.
+# Copy to .samvil/performance_budget.yaml to override.
+#
+# Numbers are (initial estimate) and registered as experimental_policy;
+# retro promotes when dogfood accumulates observations.
+#
+# Enforcement:
+#   * warn_multiplier = 0.80  → log a warning when consumption hits 80%.
+#   * hard_stop_multiplier = 1.50 → stop the run at 150%.
+#   * consensus_exempt = true → consensus-triggered cost doesn't count.
+
+per_run:
+  wall_time_minutes:
+    minimal:  15
+    standard: 40
+    thorough: 90
+    full:     180
+    deep:     300
+
+  llm_calls:
+    minimal:  50
+    standard: 150
+    thorough: 400
+    full:     800
+    deep:     1500
+
+  estimated_cost_usd:
+    minimal:  0.5
+    standard: 2
+    thorough: 8
+    full:     20
+    deep:     40
+
+enforcement:
+  warn_multiplier: 0.80
+  hard_stop_multiplier: 1.50
+  consensus_exempt: true

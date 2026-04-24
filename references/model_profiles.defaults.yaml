@@ -1,0 +1,64 @@
+# SAMVIL v3.2 — default model profiles for ④ routing.
+#
+# Copy this file to .samvil/model_profiles.yaml in a project to override.
+# When absent, mcp/samvil_mcp/routing.DEFAULT_PROFILES is used — the two
+# stay in sync by hand; see the module docstring.
+#
+# Schema:
+#   profiles:
+#     - provider:      string
+#       model_id:      string (provider-specific)
+#       cost_tier:     frugal | balanced | frontier
+#       nickname:      short human label (used in reason strings)
+#       max_tokens_out: soft ceiling
+#       notes:         free text
+#
+#   role_overrides:           # optional; merged with DEFAULT_ROLE_TO_TIER
+#     build-worker: balanced
+#     qa-functional: frontier
+#
+# Router rules (see mcp/samvil_mcp/routing.py):
+#   1. Caller picks task_role. Role maps to cost_tier via role_overrides
+#      or DEFAULT_ROLE_TO_TIER.
+#   2. On retry, escalation_depth lifts the tier up (capped at frontier).
+#   3. On budget pressure ≥ downgrade_threshold (default 0.80), tier is
+#      pushed down one step (capped at frugal). Escalation wins ties.
+#   4. Within a tier, the first matching profile is used (deterministic).
+
+profiles:
+  - provider: anthropic
+    model_id: claude-haiku-4-5
+    cost_tier: frugal
+    nickname: haiku-4.5
+    max_tokens_out: 8192
+    notes: Fast/cheap; routine tasks, dependency audits, UI lint.
+
+  - provider: anthropic
+    model_id: claude-sonnet-4-6
+    cost_tier: balanced
+    nickname: sonnet-4.6
+    max_tokens_out: 8192
+    notes: Default balanced; most build + QA work.
+
+  - provider: anthropic
+    model_id: claude-opus-4-7
+    cost_tier: frontier
+    nickname: opus-4.7
+    max_tokens_out: 32000
+    notes: Complex planning, tricky debugging, Judge role for tough ACs.
+
+  - provider: openai
+    model_id: gpt-5-codex
+    cost_tier: frontier
+    nickname: codex
+    max_tokens_out: 16000
+    notes: Alternative frontier for Judge role — "build on Opus, QA on Codex".
+
+  - provider: openai
+    model_id: gpt-4o-mini
+    cost_tier: frugal
+    nickname: gpt-4o-mini
+    max_tokens_out: 16000
+    notes: Frugal alternative for lookup-heavy researcher roles.
+
+role_overrides: {}
