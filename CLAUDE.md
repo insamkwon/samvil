@@ -80,6 +80,131 @@ commit within the same session. Do not use `--no-verify` to
 "commit now, fix later" — that is how v3.2.0 shipped its portability
 bug in the first place.
 
+## 🛑 ABSOLUTE RULE — Development Discipline (not just commits)
+
+Pre-commit check is the **minimum quality bar** for any change to this
+repo, not just for commit time. Every Claude operator (and human) doing
+development on SAMVIL must follow the rules below at edit time and
+especially before claiming any task "done".
+
+### 0. Before claiming "done" — non-negotiable
+
+**Always run `bash scripts/pre-commit-check.sh` before reporting a task
+complete.** If it exits non-zero, you are not done. Fix first. Never
+report success to the user when the check is red. This applies even
+for tasks that don't end in a commit (e.g., a refactor, a doc update,
+a dependency bump that leaves the tree dirty).
+
+### 1. Edit-time forbidden patterns
+
+While editing any file in this repo:
+
+| Forbidden | Why | Use instead |
+|-----------|-----|-------------|
+| Hard-coded `/Users/<name>/` or `/home/<name>/` | Breaks every other install | `${CLAUDE_PLUGIN_ROOT}` (shell) · `Path(__file__).resolve().parents[N]` (Python) · `$(dirname "${BASH_SOURCE[0]}")` (bash source-dir) |
+| Raw secret values | Leak | `.env.example` placeholders only |
+| Author-specific handles in code | Personal leak | Generic text or env vars |
+| `#!/bin/bash` shebang | Alpine / Docker incompat | `#!/usr/bin/env bash` |
+| v3.1 glossary terms (see §Vocabulary) | Terminology drift | `references/glossary.md` canonical names |
+
+### 2. Task-type checklists
+
+Follow the checklist that matches what you're doing. Running the
+pre-commit script at the end is always the final step.
+
+#### Adding a new MCP tool (to `mcp/samvil_mcp/server.py`)
+
+- [ ] New tool implemented in the appropriate `samvil_mcp/*.py` module
+- [ ] `@mcp.tool()` wrapper added in `server.py` with health logging
+- [ ] Unit test added in `mcp/tests/test_<module>.py`
+- [ ] `scripts/check-skill-wiring.py` updated if the tool is referenced from a skill body
+- [ ] `cd mcp && .venv/bin/python -m pytest tests/` passes
+- [ ] `bash scripts/pre-commit-check.sh` exits 0
+
+#### Adding / editing a pipeline stage skill
+
+- [ ] `Boot Sequence` entry has `save_event(<stage>_start, <stage>)` for auto-claim
+- [ ] Chain continuation explicit at the end (e.g., *"반드시 samvil-retro invoke"*)
+- [ ] If new event_type introduced: update `_EVENT_TYPE_TO_STAGE`,
+  `_STAGE_ENTRY_EVENTS` / `_STAGE_EXIT_EVENTS` / `_STAGE_FAIL_EVENTS` in `server.py`
+- [ ] `scripts/check-skill-wiring.py` green
+- [ ] `references/contract-layer-protocol.md` updated if wrapper shape changed
+- [ ] `bash scripts/pre-commit-check.sh` exits 0
+
+#### Adding a new agent persona
+
+- [ ] `agents/<name>.md` created with proper frontmatter
+- [ ] Registered in `mcp/samvil_mcp/model_role.DEFAULT_ROLES` (or `OUT_OF_BAND`)
+- [ ] `python3 scripts/apply-role-tags.py` run to inject `model_role:` frontmatter
+- [ ] `python3 scripts/render-role-inventory.py` run to refresh `ROLE-INVENTORY.md`
+- [ ] `mcp/tests/test_model_role.py` still green after change
+- [ ] `bash scripts/pre-commit-check.sh` exits 0
+
+#### Adding a new `save_event` event_type in a skill body
+
+- [ ] Update `_STAGE_ENTRY_EVENTS` / `_STAGE_EXIT_EVENTS` / `_STAGE_FAIL_EVENTS` in `server.py`
+- [ ] Update `_EVENT_TYPE_TO_STAGE` mapping
+- [ ] Run stdio test: `python3 scripts/test-mcp-stdio-roundtrip.py`
+- [ ] `bash scripts/pre-commit-check.sh` exits 0
+
+#### Changing seed / state / retro / claim schema
+
+- [ ] JSON schema updated in `references/*-schema.json`
+- [ ] Schema version bumped if breaking
+- [ ] Migration logic added in `mcp/samvil_mcp/migrate_v3_2.py` (or a new
+  migration module if jumping major)
+- [ ] At least one test exercising the migration in `mcp/tests/test_migrate*.py`
+- [ ] `bash scripts/pre-commit-check.sh` exits 0
+
+#### Touching hook scripts (`hooks/*.sh`, `.githooks/*`)
+
+- [ ] Shebang is `#!/usr/bin/env bash`
+- [ ] Path resolution dynamic (`${CLAUDE_PLUGIN_ROOT}` or script-relative)
+- [ ] Best-effort error handling (hooks must never halt the pipeline;
+  log failures to `.samvil/mcp-health.jsonl` and exit 0)
+- [ ] Manual fire test from a tmp dir (see existing hook smoke patterns)
+- [ ] `bash scripts/pre-commit-check.sh` exits 0
+
+### 3. Version bump discipline (pushes)
+
+`pre-push` hook blocks push to `origin/main` if `plugin.json.version`
+matches remote. Decide the bump level per the *Versioning* table in
+this file (PATCH / MINOR / MAJOR). Bump three places: `plugin.json`,
+`mcp/samvil_mcp/__init__.py`, `README.md` first line. Add a CHANGELOG
+entry. `hooks/validate-version-sync.sh` verifies the three match.
+
+### 4. When you cannot follow the discipline
+
+If an exception is genuinely needed (e.g., external CI is down, or a
+single-file emergency hotfix that deliberately bypasses one of the
+checks), document it:
+
+1. Use `--no-verify` *explicitly* (never silently).
+2. Within the same session, create a second commit that either fixes
+   the root cause or explains why the check is incorrect (e.g., update
+   the check itself).
+3. Record the exception as a retro `observation[severity: high]` with
+   `category: pre-commit-bypass`. Retro may mature this into a policy
+   change.
+
+### 5. AI operator-specific guidance
+
+If you are Claude (or another LLM) working in this repo:
+
+- **Check scripts are cheap.** `scripts/pre-commit-check.sh` runs in ~3
+  seconds with 626 tests. Running it after meaningful edits costs
+  essentially nothing versus the cost of shipping a regression.
+- **When the user says "done"-related things** (e.g., "커밋해줘",
+  "push해", "완료해"), run the check first. Report the check result
+  alongside the completion status.
+- **Never silently skip.** If a check fails and you know the fix,
+  apply the fix and re-run. If you can't fix, stop and report the
+  specific failure to the user.
+- **Before "I'm confident" type answers**, re-run the checks. The
+  Final Validation in personal CLAUDE.md (`자신있어?`) in this repo
+  means "pre-commit-check + full 11-dimension verification from
+  the v3.2.1 release session".
+
 ## 📚 Vocabulary (v3.2)
 
 Single source of truth: `references/glossary.md`. Enforced in CI via

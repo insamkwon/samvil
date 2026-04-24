@@ -4,6 +4,27 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.2.2] — 2026-04-25 — Development Discipline (CLAUDE.md)
+
+Docs-only patch. No code change. Extends the "pre-commit check" rule
+beyond commit time into the entire development workflow, so AI operators
+(Claude, etc.) and human contributors apply the same quality bar at
+edit time.
+
+### Added
+- `CLAUDE.md` §"🛑 ABSOLUTE RULE — Development Discipline (not just
+  commits)" covering:
+  - "Before claiming done" mandatory pre-commit-check.sh execution
+  - Edit-time forbidden patterns table
+  - Task-type checklists: new MCP tool / new skill / new agent / new
+    event_type / schema change / hook script edit
+  - Version bump discipline (references pre-push hook)
+  - Exception workflow (--no-verify + fix commit + retro observation)
+  - AI operator-specific guidance
+
+No user-visible change. End-users running `/samvil` experience the
+same pipeline as v3.2.1.
+
 ## [3.2.1] — 2026-04-25 — Portability + Pre-Commit Enforcement
 
 Hardening patch. No user-visible feature change; internal safeguards
