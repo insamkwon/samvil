@@ -150,6 +150,26 @@ fi
   새 세션을 열면 업데이트된 SAMVIL이 로드됩니다.
 ```
 
+### Step 6.5: v3.2 → v3.2.x upgrade note (end-user)
+
+이 skill은 **end-user가 SAMVIL을 사용해 앱을 만드는 경우**를 위한 플러그인
+업데이트 경로다. end-user는 repo를 clone하거나 git hooks를 설치할 필요가
+**없다**. 필요한 것은 전부 다음과 같이 자동 처리된다:
+
+- `.mcp.json`의 `${CLAUDE_PLUGIN_ROOT}` expansion으로 MCP 서버 자동 spawn.
+- SessionStart hook이 `.samvil/claims.jsonl` 등 baseline 자동 생성.
+- `save_event` 호출이 자동으로 claim ledger에 기록.
+- Retro chain이 명령형으로 보장되어 Deploy 스킵 후에도 회고 실행.
+
+기존 프로젝트에 v3.2 claim ledger를 소급 적용하려면 Step 7의
+`--migrate v3.2` 경로를 사용한다. 새 프로젝트는 아무 액션 없이 바로
+v3.2.x 기능을 사용 가능.
+
+**SAMVIL 플러그인 자체를 수정**하려는 경우 (contributor)는 repo를 clone하고
+`bash scripts/install-git-hooks.sh`를 1회 실행해야 pre-commit/pre-push
+훅이 활성화된다. 자세한 내용은 README의 "SAMVIL 자체를 개선하려면
+(Contributors)" 섹션 참조.
+
 ### Step 7: 프로젝트 Seed Migration 체크 (v3.0.0+)
 
 업데이트 후, 현재 CWD에 `project.seed.json`이 있고 schema가 v3 미만이면 migration을 제안한다.

@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.2.2`
+# SAMVIL — AI 바이브코딩 하네스 `v3.2.3`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -32,6 +32,25 @@
 > - **Retro chain 명령형 수정** — Deploy 스킵 후 Retro 자동 invoke 강제. 이전 dogfood에서 체인 끊김 regression 차단.
 >
 > **검증**: 626 unit tests (v3.1 406 → +220) · 104 MCP tools · Sprint별 exit-gate 스크립트 전부 PASS · glossary CI green · MCP stdio roundtrip empirical 증명 · full chain simulation 9/9 stages verified.
+
+### v3.2.x patch 내역
+
+- **v3.2.3** (2026-04-25): README 보강. v3.2.x patch 내역 섹션 + "SAMVIL
+  자체를 개선하려면 (Contributors)" 섹션 추가 (git clone → hooks 설치 →
+  venv → pre-commit-check 검증 절차 명시). `samvil-update` 스킬에 end-user
+  vs contributor 구분 안내 추가. docs-only.
+- **v3.2.2** (2026-04-25): CLAUDE.md에 "Development Discipline" 절대
+  규칙 섹션 추가. Task-type별 checklist + "완료 선언 전 pre-commit-check.sh
+  실행" 의무화 + `--no-verify` 예외 정책. AI operator가 repo에서 작업할
+  때 편집 중에도 같은 품질 바를 유지하게 만드는 docs-only patch.
+- **v3.2.1** (2026-04-25): Portability + pre-commit 강제. v3.2.0에서
+  실수로 섞인 `/Users/<name>/` 절대경로 제거 (`.mcp.json` + hook
+  scripts + samvil-doctor). `.mcp.json`을 `uvx --from
+  ${CLAUDE_PLUGIN_ROOT}/mcp samvil-mcp` 패턴으로 전환 (Ouroboros 검증됨,
+  venv race 해소). `scripts/pre-commit-check.sh` + `.githooks/pre-commit`
+  + `scripts/install-git-hooks.sh`로 6개 검사 (하드코딩 / 버전 sync
+  / glossary / pytest / skill wiring / MCP import) 강제. 쉘 shebang을
+  `#!/usr/bin/env bash`로 통일하여 Alpine/Docker 호환.
 
 **v3.1.0 "Interview Renaissance + Universal Builder"** — v3.0.0 AC Tree에 인터뷰 깊이·Stability·모델 호환성을 더해 dogfood 25건을 흡수한 버전.
 
@@ -78,6 +97,46 @@
 cd ~/dev/<app-name>
 npm run dev    # → localhost:3000
 ```
+
+---
+
+## SAMVIL 자체를 개선하려면 (Contributors)
+
+이 섹션은 SAMVIL **플러그인 자체를 수정**하려는 개발자용입니다. SAMVIL을
+사용해서 앱을 만드는 일반 사용자는 위 "빠른 시작"만 읽어도 됩니다.
+
+```bash
+# 1. Fork / clone
+git clone https://github.com/insamkwon/samvil.git
+cd samvil
+
+# 2. git hooks 활성화 (1회, 필수)
+bash scripts/install-git-hooks.sh
+# → core.hooksPath 가 .githooks/ 로 설정됨. 이후 모든 commit/push 직전
+#   scripts/pre-commit-check.sh 가 자동 실행되어 품질 검사 6개를
+#   통과해야만 저장됨.
+
+# 3. MCP 서버 파이썬 venv 셋업
+cd mcp
+uv venv .venv
+uv pip install -e .
+cd ..
+
+# 4. 로컬 검증 실행
+bash scripts/pre-commit-check.sh   # → 모두 PASS 떠야 정상
+```
+
+**절대 규칙** (`CLAUDE.md` §"🛑 Development Discipline" 참조):
+
+- 편집 중 하드코딩된 홈 경로(`/Users/<name>/`) · 시크릿 · 개인 handle
+  금지. `${CLAUDE_PLUGIN_ROOT}` / `Path(__file__)` / env var로 동적 해결.
+- 새 MCP tool / skill / agent / event_type / schema 변경 시 CLAUDE.md
+  의 "Task-type checklists" 체크리스트를 따를 것.
+- 어떤 작업이든 **"완료"라 말하기 전에** `bash scripts/pre-commit-check.sh`
+  실행 → exit 0 확인. 실패하면 먼저 고치고 다시 돌림.
+- `git commit --no-verify`는 진짜 긴급 상황에만 쓰고, 같은 세션 안에
+  fix commit + retro observation(`category: pre-commit-bypass`)을
+  기록할 것.
 
 ---
 

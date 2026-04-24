@@ -4,6 +4,29 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.2.3] — 2026-04-25 — README onboarding (contributors + end-users)
+
+Docs-only patch. No code or skill behavior change.
+
+### Added
+- `README.md` gains a "SAMVIL 자체를 개선하려면 (Contributors)" section
+  covering the 4-step local dev setup: clone → `bash scripts/install-git-
+  hooks.sh` (mandatory, 1× per clone) → `mcp/` venv → pre-commit-check
+  verification. End-users who only run `/samvil "..."` still read only
+  the "빠른 시작" section.
+- `README.md` v3.2.x patch changelog block (v3.2.1 / v3.2.2 / v3.2.3)
+  so history is visible from the top-level README, not only CHANGELOG.md.
+- `skills/samvil-update/SKILL.md` Step 6.5 distinguishes end-user
+  upgrade path (no clone, no hooks — everything automatic via
+  SessionStart + .mcp.json + save_event auto-claim) from contributor
+  path (clone + install-git-hooks).
+
+### Unchanged
+- All code and pipeline behavior identical to v3.2.2.
+- `/samvil:update` on existing installs still works as before (cache
+  rename + venv re-install + tool coverage check). End-users see no
+  additional prompts.
+
 ## [3.2.2] — 2026-04-25 — Development Discipline (CLAUDE.md)
 
 Docs-only patch. No code change. Extends the "pre-commit check" rule
