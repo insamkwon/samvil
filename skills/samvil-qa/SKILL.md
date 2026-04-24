@@ -15,6 +15,7 @@ You are adopting the role of **QA Judge**. Verify the built app against the seed
 3. Read `project.config.json` → `qa_max_iterations`, `selected_tier`
 4. Read `references/qa-checklist.md` from this plugin directory
 5. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+6. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="qa_started", stage="qa", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:qa"` 자동 기록.
 
 ### Seed 없는 경우 (Brownfield QA)
 
@@ -136,6 +137,45 @@ QA 완료 후 `.samvil/qa-results.json` 갱신:
 2. 재사용한 feature는 타임스탬프 유지
 3. `_meta.last_full_qa` 업데이트 (전체 QA 시에만)
 4. `_meta.total_iterations` 증가
+
+## Pre-QA Contract Layer (v3.2.0, ④+⑤)
+
+> Spec: `references/contract-layer-protocol.md`. Runs once at QA entry,
+> before Pass 1.
+
+```
+# 1. Task routing for Judge role. QA uses the frontier tier by default;
+#    on retry (attempts>0) escalation is a no-op (already frontier).
+mcp__samvil_mcp__route_task(
+  task_role="qa-functional",
+  project_root=".",
+  attempts=0
+)
+→ Record chosen_cost_tier + model_id in state.json.current_model_qa.
+
+# 2. Role separation pre-check: the Judge identity we'll use must not
+#    collide with the Generator who produced the build. build-worker is
+#    Generator; qa-functional / qa-mechanical / qa-quality are Judges.
+mcp__samvil_mcp__validate_role_separation(
+  claimed_by="agent:build-worker",
+  verified_by="agent:qa-functional"
+)
+→ Must return valid=true. If not, halt and escalate to user.
+
+# 3. Stage-start claim.
+mcp__samvil_mcp__claim_post(
+  project_root=".",
+  claim_type="evidence_posted",
+  subject="stage:qa",
+  statement="qa stage entered at tier=<samvil_tier>",
+  authority_file="state.json",
+  claimed_by="agent:qa-functional",
+  evidence_json='["project.state.json"]'
+)
+→ state.json.stage_claims.qa = claim_id for post_stage verify.
+```
+
+MCP down → log + proceed with v3.1 QA flow.
 
 ## Pass 1: Mechanical Verification
 
@@ -1312,6 +1352,64 @@ SATISFIED_EXTERNALLY handling (v2.6.0+):
   - Notes: "Pre-existing (<evidence>)"
   - Counted as passed in aggregation
 ```
+
+## Post-QA Contract Layer (v3.2.0, ①+⑥+⑨)
+
+> Spec: `references/contract-layer-protocol.md`. Runs before the Event
+> Log and On PASS/FAIL branches below.
+
+```
+# 1. Verify every ac_verdict claim build-worker posted in build's
+#    Phase Z. Judge identity must differ from Generator (enforced by
+#    the ledger via G≠J).
+for each pending ac_verdict claim with subject in <our seed's leaf ids>:
+  if Pass 2 verdict == PASS:
+    mcp__samvil_mcp__claim_verify(
+      project_root=".",
+      claim_id="<claim_id>",
+      verified_by="agent:qa-functional",
+      evidence_json='[<file:line or test path from Pass 2 evidence>]'
+    )
+  elif Pass 2 verdict in (FAIL, UNIMPLEMENTED):
+    mcp__samvil_mcp__claim_reject(
+      project_root=".",
+      claim_id="<claim_id>",
+      verified_by="agent:qa-functional",
+      reason="<Pass 2 reason>"
+    )
+  # PARTIAL leaves the claim pending — retro decides.
+
+# 2. Verify the stage_start claim posted in pre_stage.
+mcp__samvil_mcp__claim_verify(
+  project_root=".",
+  claim_id="<from state.json.stage_claims.qa>",
+  verified_by="agent:product-owner"
+)
+
+# 3. Dispute detector: if Generator said PASS but Judge said FAIL on any
+#    AC, we have a mismatch → consensus.
+mcp__samvil_mcp__consensus_trigger(
+  input_json='{"subject": "<ac_id>", "generator_verdict": "pass", "judge_verdict": "<fail|partial>"}'
+)
+→ should_invoke=true: build reviewer + judge prompts, run the 2-round
+  resolver, record consensus_verdict claim, use its verdict as the
+  final answer for that AC.
+
+# 4. Gate check: qa → deploy.
+mcp__samvil_mcp__gate_check(
+  gate_name="qa_to_deploy",
+  samvil_tier="<from state.json>",
+  metrics_json='{"three_pass_pass": <bool>, "zero_stubs": <bool>}',
+  project_root="."
+)
+→ verdict=block: Verdict above becomes REVISE (or FAIL if Ralph Loop exhausted).
+  Emit required_action.type.
+→ verdict=pass: record gate_verdict claim → proceed to PASS branch.
+```
+
+MCP errors → `.samvil/mcp-health.jsonl`; fall back to v3.1 verdict
+matrix. Never synthesize a claim verify without running the actual
+pass logic.
 
 ## Event Log (MCP 필수)
 

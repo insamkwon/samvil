@@ -18,6 +18,7 @@ QA 통과 후 samvil-retro 전에 자동 호출 (또는 `/samvil-deploy` 수동 
 3. Read `.env.example` → 필수 환경변수 파악
 4. 배포 플랫폼 감지 (seed 설정 또는 프로젝트 설정 파일)
 5. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+6. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="deploy_started", stage="deploy", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:deploy"` 자동 기록.
 
 ## Step 1: Pre-Deploy Check
 
@@ -359,7 +360,16 @@ Output:
 
 ## Chain Continuation
 
-배포 완료(또는 사용자가 스킵) 후 → `samvil-retro` 호출
+배포 완료(또는 사용자가 스킵) 후 → **반드시** `samvil-retro` 호출.
+
+**필수 동작** (v3.2 L1.5 — 스킵 경로 체인 끊김 regression 방지):
+
+1. 배포 완료 또는 사용자가 "나중에" 선택 → `.samvil/handoff.md`에 Deploy 섹션 append
+2. `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="deploy_complete", stage="deploy", data='{"status":"<deployed|skipped>"}')` 호출
+3. **즉시** `Invoke the Skill tool with skill: samvil-retro` — 사용자 승인 대기하지 말고 자동 진행. Retro는 회고일 뿐이고 파일 변경이 없어서 P10 Irreversibility 대상 아님.
+4. Retro가 끝나면 완료 메시지 + samvil-status 출력.
+
+이 체인을 빠뜨리면 파이프라인이 Deploy에서 멈추고 Retro가 실행되지 않아 harness-feedback.log가 갱신되지 않음. v3.2 dogfood (weekly-exercise-tracker run)에서 이 regression이 확인됐고 수정됨.
 
 ## Anti-Patterns
 

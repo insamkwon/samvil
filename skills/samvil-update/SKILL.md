@@ -205,6 +205,43 @@ mcp__samvil_mcp__migrate_seed_file(seed_path="$CWD_SEED")
 2. 이미 `3.*` 스키마라면 `[SAMVIL] ✓ 이미 v3 스키마입니다` 출력 후 종료.
 3. 그 외는 Step 7의 Yes 분기를 강제 실행 (backup + migrate).
 
+### `/samvil:update --migrate v3.2` — v3.1 → v3.2 (Sprint 6, ⑫)
+
+`--migrate v3.2`는 v3.1 프로젝트를 v3.2로 전환한다. 주요 변경:
+legacy v3.1 tier 필드 → `samvil_tier` rename, 12개 AI-inferred AC
+필드 backfill, `.samvil/claims.jsonl` 초기화, `model_profiles.yaml`
+시드, `.samvil/rollback/v3_2_0/manifest.json` snapshot 생성. 상세는
+`references/migration-v3.1-to-v3.2.md` 참조.
+
+```
+/samvil:update --migrate v3.2 [--dry-run]
+```
+
+동작:
+
+1. CWD에 `project.seed.json`이 없으면 에러.
+2. dry-run 먼저:
+   ```
+   mcp__samvil_mcp__migrate_plan(project_root=".")
+   ```
+   → `plan.seed_changes` + `files_created` + `backups` 출력. 사용자 승인 대기.
+3. 승인 후:
+   ```
+   mcp__samvil_mcp__migrate_apply(project_root=".", dry_run=false)
+   ```
+   → 실패 시 `project.v3-1.backup.json`에서 수동 복구 안내.
+4. 완료 출력:
+   ```
+   [SAMVIL] ✓ v3.1 → v3.2 Migration 완료
+     Schema:    3.1 → 3.2
+     Backup:    project.v3-1.backup.json
+     Rollback:  .samvil/rollback/v3_2_0/manifest.json
+     Council:   .samvil/council/*.md → retro observations (read-only)
+   ```
+
+**롤백**: `.samvil/rollback/v3_2_0/` 스냅샷을 보고 수동 복원. 아직
+automated rollback CLI는 제공되지 않는다 (v3.3에서 제공 예정).
+
 ### 실패 시
 
 ```

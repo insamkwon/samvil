@@ -929,6 +929,60 @@ interview-summary.md에 `디자인 프리셋: <preset>` 포함 → seed가 읽�
 mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_complete", stage="seed", data='{"questions_asked":<N>,"preset_matched":"<preset>"}')
 ```
 
+### 3.5. Contract Layer — post_stage (v3.2.0, ②+⑥)
+
+> Spec: `references/contract-layer-protocol.md`.
+
+Compute `seed_readiness` from the interview dimensions (intent_clarity /
+constraint_clarity / ac_testability / lifecycle_coverage /
+decision_boundary). Score each on [0,1] from the answers you recorded;
+if a dimension wasn't probed, pass its current best estimate and flag
+it in the summary.
+
+```
+# 1. Multi-dimensional readiness
+mcp__samvil_mcp__compute_seed_readiness(
+  dimensions_json='{"intent_clarity":<float>,"constraint_clarity":<float>,"ac_testability":<float>,"lifecycle_coverage":<float>,"decision_boundary":<float>}',
+  samvil_tier="<from project.config.json>"
+)
+→ Parse total + below_floor. Attach the total to state.json.seed_readiness.
+
+# 2. Gate check for interview → seed
+mcp__samvil_mcp__gate_check(
+  gate_name="interview_to_seed",
+  samvil_tier="<tier>",
+  metrics_json='{"seed_readiness": <total>}',
+  project_root="."
+)
+→ On verdict=block: DO NOT chain to samvil-seed yet. Emit the
+  required_action.type (split_ac / run_research / stronger_model / ask_user)
+  and loop back to the relevant Phase. Reprompt until either the gate
+  passes or the user accepts a residual gap.
+→ On verdict=escalate: bump interview_level one step (normal → deep → max)
+  and re-run the Phase that owns the failed check. Cap at two escalations
+  via mcp__samvil_mcp__gate_should_force_user.
+→ On verdict=pass: record a gate_verdict claim and proceed to chain.
+
+# 3. Record the gate verdict as a claim (anti reward-hacking)
+mcp__samvil_mcp__claim_post(
+  project_root=".",
+  claim_type="gate_verdict",
+  subject="interview_to_seed",
+  statement="verdict=<v>, seed_readiness=<total>",
+  authority_file="state.json",
+  claimed_by="agent:socratic-interviewer",
+  evidence_json='["interview-summary.md"]',
+  meta_json='<the full verdict dict>'
+)
+→ Judge role verifies in samvil-seed's pre_stage (seed-architect is
+  Generator, so the Judge here is agent:user or agent:product-owner
+  invoked out-of-band during approval).
+```
+
+MCP failures: log to `.samvil/mcp-health.jsonl` and proceed (INV-5).
+Never fake a pass verdict — if `gate_check` couldn't run, chain as
+normal but record an `evidence_posted` claim noting the skipped check.
+
 ### 4. 진행 표시
 ```
 [SAMVIL] Stage 1/5: 인터뷰 ✓

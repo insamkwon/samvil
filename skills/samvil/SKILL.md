@@ -366,7 +366,7 @@ Write this to `~/dev/<project-name>/.samvil/metrics.json`.
 **MCP (best-effort):** Create a SAMVIL session for event tracking:
 
 ```
-mcp__samvil_mcp__create_session(project_name="<project-name>", agent_tier="<selected_tier>")
+mcp__samvil_mcp__create_session(project_name="<project-name>", samvil_tier="<selected_tier>")
 ```
 
 Parse the returned `session_id` and update `project.state.json` → set `session_id` to the returned value.
@@ -543,6 +543,23 @@ Write this to `~/dev/<project-name>/project.config.json`.
 
 ### Step 6: Start the Chain
 
+**Contract Layer pre-flight (v3.2, ⑦)** — 파이프라인 진입 전 1회 실행:
+
+```
+mcp__samvil_mcp__check_jurisdiction(
+  action_description="SAMVIL pipeline start: <app-idea> at tier=<samvil_tier>",
+  command="",
+  filenames_json='["project.seed.json","project.state.json","project.config.json"]',
+  diff_text=""
+)
+```
+
+- `jurisdiction=ai`: 조용히 계속.
+- `jurisdiction=external`: 외부 조회(라이선스/패키지 등)가 필요한
+  경우 해당 조회 후 `claim_post(type="evidence_posted")`로 기록하고 계속.
+- `jurisdiction=user`: 사용자에게 **확인 질문** 후 `ㄱ` / `고` / `yes` 승인을 받고 계속.
+  irreversible 플래그가 붙으면 특히 명확히 경고.
+
 **파이프라인 진행 상황 등록** — TaskCreate 도구로 전체 단계를 생성한다. 사용자가 하단에서 진행 상황을 한눈에 볼 수 있도록:
 
 ```
@@ -611,6 +628,29 @@ If the request is ambiguous, default to engineering mode.
 The chain continues from whichever interview skill ran — each skill invokes the next (INV-4).
 
 **Metrics Tracking (INV-5):** See `references/metrics-tracking.md` for stage metrics recording rules.
+
+### Contract Layer Protocol (v3.2.0, ①/⑤/⑥/⑦/⑨/⑩)
+
+> Spec: `references/contract-layer-protocol.md`. **Every stage skill**
+> follows the same pre_stage / post_stage wrapper so the contract layer
+> (claim ledger, role enforcement, gates, jurisdiction, stagnation,
+> consensus) fires at stage transitions without scattering MCP calls
+> through skill bodies.
+
+Responsibilities split:
+
+- **Orchestrator (this skill)** — owns the chain entry / exit. Runs
+  `check_jurisdiction` once on the initial action, posts the pipeline
+  start event, and at the very end calls `narrate_build_prompt` for
+  the Compressor-role summary (Sprint 4). That's it.
+- **Each stage skill** — owns its own pre_stage (task routing +
+  stage_start claim) and post_stage (claim verify + gate check).
+  Stage-specific metrics are gathered by the stage that produced
+  them.
+
+Read `references/contract-layer-protocol.md` once and apply the
+protocol consistently. When a new stage is added, the protocol doc is
+the single update site.
 
 ### Plugin System (INV-8) — Planned
 

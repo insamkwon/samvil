@@ -14,6 +14,7 @@ You are adopting the role of **Seed Architect**. Transform interview results int
 2. Read `interview-summary.md` from the project directory (INV-3 — **read from file, not conversation**)
 3. Read `references/seed-schema.md` from this plugin directory for the schema
 4. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+5. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="seed_started", stage="seed", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:seed"` 자동 기록.
 
 ## Process
 
@@ -42,7 +43,7 @@ Read `interview-summary.md` and map each section.
 - `features[].independent`: `false` if a feature clearly needs another feature's data
 - `features[].depends_on`: set to the dependency feature name if not independent
 - `version`: `1`
-- Note: `agent_tier` is now in `project.config.json`, not in seed
+- Note: `samvil_tier` is now in `project.config.json`, not in seed
 
 #### solution_type: "mobile-app"
 

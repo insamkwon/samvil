@@ -17,6 +17,7 @@ Generate the technical blueprint that translates the seed spec into concrete arc
 5. Read `decisions.log` → binding decisions from Gate A (if exists)
 6. Read `references/seed-schema.md` → blueprint schema reference
 7. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+8. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="design_started", stage="design", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:design"` 자동 기록.
 
 ## Step 1: Generate Blueprint
 

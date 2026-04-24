@@ -31,6 +31,7 @@ Improve the seed based on QA feedback. Spawn wonder + reflect agents, generate a
 4. Read `.samvil/qa-report.md` → QA results
 5. Read `decisions.log` → binding decisions (if exists)
 6. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+7. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="evolve_gen", stage="evolve", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:evolve"` 자동 기록.
 
 ## Step 0: Mode Selection
 

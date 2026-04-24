@@ -7,6 +7,32 @@ description: "Multi-agent council debate. Spawns agents via CC Agent tool, synth
 
 Spawn multiple agents to debate seed quality. Each agent brings a different perspective. Verdicts are synthesized and binding decisions recorded.
 
+## v3.2 Status — opt-in only (⑨)
+
+Per HANDOFF-v3.2-DECISIONS.md §3.⑨, Council Gate A is **opt-in** in
+v3.2 and **removed** in v3.3. Consensus runs automatically when dispute
+triggers fire (see `references/council-retirement-migration.md`).
+
+**Entry gate:** check for the `--council` flag in
+`project.config.json.flags` (or the invocation context). If absent:
+
+```
+# 1. Emit the deprecation notice once per run.
+mcp__samvil_mcp__council_deprecation_warning()
+→ Print the returned warning string with a leading `[SAMVIL]` tag.
+
+# 2. Skip the entire Council pipeline.
+Record in state.json.completed_stages: "council" with status="skipped".
+Invoke the Skill tool with skill: `samvil-design` and return.
+```
+
+If `--council` flag IS present, proceed with the legacy v3.1 Council
+body below. The flag itself is scheduled for removal in v3.3.
+
+When disputes need consensus during later stages (Build/QA/Evolve), the
+relevant skill invokes `consensus_trigger` → `consensus_reviewer_prompt`
+→ `consensus_judge_prompt` directly; they do not chain to this skill.
+
 ## Boot Sequence (INV-1)
 
 0. **TaskUpdate**: "Council" task를 `in_progress`로 설정
@@ -17,6 +43,7 @@ Spawn multiple agents to debate seed quality. Each agent brings a different pers
 5. Read `references/council-protocol.md` → synthesis rules and format
 6. Read `references/tier-definitions.md` → which agents to activate
 7. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+8. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="council_started", stage="council", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:council"` 자동 기록.
 
 ## Step 1: Determine Active Agents
 
@@ -29,7 +56,7 @@ thorough → Round 1: business-analyst | Round 2: + ceo-advisor
 full     → Round 1: all 3 | Round 2: all 4
 ```
 
-If `agent_tier` is `"minimal"`, print:
+If `samvil_tier` is `"minimal"`, print:
 
 ```
 [SAMVIL] Council: skipped (minimal tier)

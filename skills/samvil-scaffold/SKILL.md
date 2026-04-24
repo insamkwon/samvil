@@ -18,6 +18,7 @@ You are adopting the role of **Scaffolder**. Create a project directory with a v
    - Use `component_structure` to create feature directories
 5. **Read `references/dependency-matrix.json`** → get pinned versions for the target stack
 6. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+7. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="scaffold_started", stage="scaffold", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:scaffold"` 자동 기록.
 
 ## Process
 

@@ -16,6 +16,7 @@ You are adopting the role of **Retro Analyst**. Analyze this SAMVIL run and prod
 4. Read `interview-summary.md` → count questions (count lines starting with a question pattern)
 5. **Read `.samvil/metrics.json`** → 관측성 대시보드 메트릭 (stage durations, pass rates, etc.)
 6. **Follow `references/boot-sequence.md`** for metrics end recording (Retro is the final stage).
+7. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="retro_started", stage="retro", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:retro"` 자동 기록.
 
 **Retro Boot에서 metrics 종료 처리** — metrics.json이 존재하면:
 ```json
@@ -448,6 +449,44 @@ Suggestions (v3.0.1+ suggestions_v2 schema):
 ```
 
 Exactly 3 suggestions with `{id, priority, component, name, problem, fix, expected_impact, source, sprint}` schema. All data from files — zero conversation-dependent metrics.
+
+## Pipeline-End Narrate (v3.2.0, §6.1)
+
+At the very end, after retro is written, invoke the Compressor-role
+narrator for a one-page briefing the user can read in 30 seconds. This
+is the only point in the pipeline where `samvil narrate` runs
+automatically; everywhere else it's user-invoked.
+
+```
+# 1. Build the Compressor prompt from .samvil/ files.
+mcp__samvil_mcp__narrate_build_prompt(
+  project_root=".",
+  since=""  # default: last 7 days
+)
+→ Parse the returned prompt. Run it through the current Compressor
+  model (frugal cost_tier; route_task(task_role="compressor") picks
+  the model).
+
+# 2. Parse the LLM output.
+mcp__samvil_mcp__narrate_parse(
+  raw="<LLM response>"
+)
+→ Print the returned markdown under a "Pipeline summary" header.
+
+# 3. Record as policy_adoption claim (not a gate verdict).
+mcp__samvil_mcp__claim_post(
+  project_root=".",
+  claim_type="policy_adoption",
+  subject="pipeline_end:<seed.name>",
+  statement="run summary recorded",
+  authority_file=".samvil/retro/retro-<run_id>.yaml",
+  claimed_by="agent:retro-analyst",
+  evidence_json='[".samvil/retro/retro-<run_id>.yaml", ".samvil/events.jsonl"]'
+)
+```
+
+Narrate failures → log to `.samvil/mcp-health.jsonl` and skip. The
+retro itself is still persisted; narrate is best-effort polish.
 
 ## Anti-Patterns
 

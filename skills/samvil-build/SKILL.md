@@ -38,6 +38,37 @@ Use these normalized `error_category` values everywhere build events are emitted
 
 Normalize `error_signature` to a brief, repeatable summary (for example: `Module not found: @/lib/utils`).
 
+## Phase A — pre_stage Contract Layer (v3.2.0, ④+⑥+⑤)
+
+> Spec: `references/contract-layer-protocol.md`. Runs ONCE at the top of
+> the build stage, before Phase A body. Skip silently if the contract
+> layer tools aren't available (MCP down) — fall back to v3.1 flow.
+
+```
+# 1. Task routing: pick model for build-worker based on cost_tier
+mcp__samvil_mcp__route_task(
+  task_role="build-worker",
+  project_root=".",
+  attempts=0
+)
+→ Parse chosen_cost_tier + provider/model_id; write to state.json.current_model_build.
+→ Use this model_id when spawning build-worker agents. Escalation bumps on retry: attempts=1, 2.
+
+# 2. Stage-start claim (tracks "build started")
+mcp__samvil_mcp__claim_post(
+  project_root=".",
+  claim_type="evidence_posted",
+  subject="stage:build",
+  statement="build stage entered at tier=<samvil_tier>",
+  authority_file="state.json",
+  claimed_by="agent:build-worker",
+  evidence_json='["project.state.json"]'
+)
+→ Record returned claim_id in state.json.stage_claims.build for post_stage verify.
+```
+
+Errors → `.samvil/mcp-health.jsonl` + continue. INV-5.
+
 ## Phase A: Core Experience
 
 ### solution_type: "web-app"
@@ -1220,6 +1251,54 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_stage_c
 ```
 
 Update `project.state.json` with `implementation_rate`: `"implementation_rate": <N/M>` (e.g., 0.85 for 85%).
+
+## Phase Z — post_stage Contract Layer (v3.2.0, ①+⑥)
+
+> Spec: `references/contract-layer-protocol.md`. Runs ONCE after all
+> features build cleanly, before chain-invoke to samvil-qa.
+
+```
+# 1. AC verdict claims for every leaf that built (Generator side).
+#    For each leaf that succeeded, post one ac_verdict claim:
+for each leaf in tree where leaf.status == "pass":
+  mcp__samvil_mcp__claim_post(
+    project_root=".",
+    claim_type="ac_verdict",
+    subject="<leaf.id>",
+    statement="build-worker asserts leaf implemented",
+    authority_file="qa-results.json",
+    claimed_by="agent:build-worker",
+    evidence_json='[<file:line entries from leaf.evidence>]'
+  )
+→ These remain status=pending until QA's Judge verifies them.
+
+# 2. Verify the stage_start claim posted in pre_stage (by orchestrator/user).
+mcp__samvil_mcp__claim_verify(
+  project_root=".",
+  claim_id="<from state.json.stage_claims.build>",
+  verified_by="agent:user"  # out-of-band verifier for system-level stage
+)
+
+# 3. Gate check: build → QA
+#    Gather implementation_rate = passed_leaves / total_leaves across all features.
+mcp__samvil_mcp__gate_check(
+  gate_name="build_to_qa",
+  samvil_tier="<from state.json>",
+  metrics_json='{"implementation_rate": <float 0..1>}',
+  project_root="."
+)
+→ verdict=block: halt. Emit required_action, update handoff.md, exit.
+→ verdict=escalate: not applicable for this gate (no escalation check).
+→ verdict=pass: record gate_verdict claim + proceed to chain.
+
+# 4. Stagnation sniff — only on retry attempts.
+#    If this is the 2nd+ build pass, evaluate stagnation.
+mcp__samvil_mcp__stagnation_evaluate(
+  input_json='{"error_history": [...], "current_error": "<if any>"}'
+)
+→ severity=HIGH → halt build, invoke lateral_propose for the specific
+  failure signature. Do not chain to QA until HIGH clears.
+```
 
 ## Chain to QA (INV-4)
 
