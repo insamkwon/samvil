@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "samvil-mcp": {
+      "command": "/Users/kwondongho/dev/samvil/mcp/.venv/bin/python",
+      "args": ["-m", "samvil_mcp.server"],
+      "cwd": "/Users/kwondongho/dev/samvil/mcp"
+    }
+  }
+}

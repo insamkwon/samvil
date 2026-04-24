@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.1.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.2.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,25 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.2.0 "Contract Layer"** — v3.1.0 위에 Claim 레지스트리·Stage Gate 프레임워크·Role primitive·Model routing을 얹은 계약 기반 릴리스. 모든 stage 전환이 `.samvil/claims.jsonl`에 deterministic하게 기록되고 Generator ≠ Judge 규칙이 런타임에서 강제됩니다.
+
+> **v3.2.0 주요 추가** (2026-04-25):
+> - **Claim ledger (①)** — `.samvil/claims.jsonl`이 새 SSOT. 10개 type + Generator ≠ Judge 불변식 + file:line 증거 해상도.
+> - **Stage gate framework (⑥)** — 8개 게이트, `samvil_tier`별 기준치, 3개 escalation check(`ac_testability`/`lifecycle_coverage`/`decision_boundary_clarity`), `--allow-warn`만 soft.
+> - **Role primitive (⑤)** — 50개 에이전트에 `model_role:` frontmatter. generator/reviewer/judge/repairer/researcher/compressor 6역 + 런타임 G≠J 강제.
+> - **AC leaf schema (③)** — 2 user + 12 AI-inferred 필드. testability 검사, `parallel_safety` 자동 계산.
+> - **Model routing (④, Lite 흡수)** — `cost_tier` (frugal/balanced/frontier) + `.samvil/model_profiles.yaml`. "build on Opus, QA on Codex" 시나리오 exit-gate 통과.
+> - **Interview v3.2 (②)** — 6 technique + 5 level + AUTO. `interview_level` 축 신설.
+> - **Jurisdiction (⑦)** — AI/External/User 3등급 판정. git push, migration, auth 자동 escalation.
+> - **Retro policy evolution (⑧)** — 4-stage observations/hypotheses/experiments/adopted. 21개 (initial estimate)가 experimental_policy로 자동 등록.
+> - **Stagnation (⑩)** + **Consensus (⑨ 재정의)** — Council Gate A는 v3.2에서 opt-in, v3.3 제거. Consensus는 dispute resolver로 축소.
+> - **Narrated observability** — `samvil narrate` + `view-claims.py`/`view-gates.py`/`samvil-status.py`.
+> - **Performance budget (⑬)** + **Migration (⑫)** — `.samvil/performance_budget.yaml`, `samvil-update --migrate v3.2` with dry-run + rollback snapshot.
+> - **Hard-wired 결선** — Plugin hooks(SessionStart bootstrap + PreToolUse/PostToolUse 필터) + MCP `save_event` 자동 claim 로직 + 8개 skill에 `*_start` 이벤트 추가. LLM의 지시 해석에 의존하지 않는 deterministic contract-layer firing.
+> - **Retro chain 명령형 수정** — Deploy 스킵 후 Retro 자동 invoke 강제. 이전 dogfood에서 체인 끊김 regression 차단.
+>
+> **검증**: 626 unit tests (v3.1 406 → +220) · 104 MCP tools · Sprint별 exit-gate 스크립트 전부 PASS · glossary CI green · MCP stdio roundtrip empirical 증명 · full chain simulation 9/9 stages verified.
 
 **v3.1.0 "Interview Renaissance + Universal Builder"** — v3.0.0 AC Tree에 인터뷰 깊이·Stability·모델 호환성을 더해 dogfood 25건을 흡수한 버전.
 

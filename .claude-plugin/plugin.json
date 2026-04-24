@@ -1,11 +1,12 @@
 {
   "name": "samvil",
   "description": "AI vibe-coding harness for solo developers: one-line input, self-correcting convergence to robust apps.",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "author": {
     "name": "insam"
   },
   "license": "UNLICENSED",
+  "mcpServers": "./.mcp.json",
   "hooks": {
     "SessionStart": [
       {
@@ -35,6 +36,14 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/validate-seed-unchanged.sh \"$TOOL_INPUT\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/contract-stage-start.sh \"$TOOL_INPUT\""
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -44,6 +53,14 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/log-build-result.sh \"$TOOL_INPUT\" \"$TOOL_EXIT_CODE\""
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/contract-stage-end.sh \"$TOOL_INPUT\" \"$TOOL_EXIT_CODE\""
           }
         ]
       }

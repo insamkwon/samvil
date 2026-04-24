@@ -14,12 +14,32 @@ SAMVIL is a CC Plugin that generates full applications (web/automation/game/mobi
 Completion levels:
   L1: Build passes      (npm run build success)
   L2: QA passes         (3-pass verification + evidence)
-  L3: Evolve converges  (first cycle + 5 gates passed)
+  L3: Evolve converges  (first cycle + 5 evolve_checks passed)
   Optional: Deploy
 ```
 
 GitHub: https://github.com/insamkwon/samvil
 Manifesto: see `~/docs/ouroboros-absorb/MANIFESTO-v3.md`
+v3.2 decisions: see `~/docs/ouroboros-absorb/HANDOFF-v3.2-DECISIONS.md`
+
+## 📚 Vocabulary (v3.2)
+
+Single source of truth: `references/glossary.md`. Enforced in CI via
+`scripts/check-glossary.sh`. Key v3.2 renames:
+
+- Whole-pipeline rigor → **`samvil_tier`** (`minimal` / `standard` /
+  `thorough` / `full` / `deep`). The legacy v3.1 parameter name is tracked
+  in `references/glossary.md` and accepted as a deprecated alias on MCP
+  tools during v3.2; removed in v3.3.
+- Model cost band → **`cost_tier`** (`frugal` / `balanced` / `frontier`).
+  Introduced in Sprint 2.
+- Interview intensity → **`interview_level`** (`quick` / `normal` /
+  `deep` / `max` / `auto`). Default stays `normal` until Sprint 4 ships
+  AUTO.
+- Evolve convergence checks → **`evolve_checks`** (reserve the word
+  `gate` for the 8 stage gates in §3.⑥).
+- Contract ledger entry → **`claim`** with typed whitelist; see
+  `mcp/samvil_mcp/claim_ledger.py`.
 
 ## 🧬 Identity (v3)
 
@@ -97,7 +117,7 @@ samvil-update    ← [v3.0.0] GitHub 업데이트 + --migrate 지원
 | Interview | `ambiguity_score ≤ tier 임계값` (minimal 0.10 / standard 0.05 / thorough 0.02 / full 0.01) |
 | Build | `npm run build` 성공 + typecheck 통과 |
 | QA | 3-pass 모두 PASS + evidence 존재 |
-| Evolve 수렴 | similarity ≥ 0.95 + regression 0 + 5 gates 통과 |
+| Evolve 수렴 | similarity ≥ 0.95 + regression 0 + 5 evolve_checks 통과 |
 | Circuit Breaker | 동일 실패 2회 연속 |
 | Stall Detection | 5분간 이벤트 없음 |
 | Rhythm Guard | AI 자동답변 3회 연속 → 다음은 강제 사용자 개입 |
@@ -113,7 +133,7 @@ samvil-update    ← [v3.0.0] GitHub 업데이트 + --migrate 지원
 
 1. **Stub/Mock/하드코딩으로 AC 통과** → Reward Hacking이 자동 FAIL
 2. **Evidence 없는 PASS 선언** → P1 위반, 자동 FAIL
-3. **Blind convergence** → 5 gates 중 하나라도 실패 시 수렴 거부 (P5)
+3. **Blind convergence** → 5 evolve_checks 중 하나라도 실패 시 수렴 거부 (P5)
 4. **사용자 대신 결정** → P2 위반. Rhythm Guard로 방어.
 5. **요청 범위 외 코드 수정** → Zero-Refactor Rule (동호님 개인 CLAUDE.md 상속)
 6. **Irreversible action without confirmation** → Deploy/push는 사용자 승인 필수 (P10)
@@ -219,6 +239,53 @@ chore: 설정, 버전, 구조 변경
 3. **실제 연동 기본화** — 인터뷰에 DB/Auth/API 질문 추가. Supabase 클라이언트 자동 설정. 스텁/하드코딩 금지. .env.example 자동 생성.
 4. **배포 준비** — next.config.mjs에 output:'standalone'. QA 완료 후 Vercel/Railway/수동 배포 옵션 제시.
 5. **Council 간접 토론** — Round 1 결과에서 논쟁점(consensus/debate/blind_spots) 추출 → Round 2 prompt에 주입.
+
+## v3.2.0 변경 내역 (v3.1.0 → v3.2.0) — Contract Layer
+
+v3.2 흡수 13개 항목 모두 구현. 626 unit tests · 104 MCP tools · Sprint별 exit-gate PASS.
+
+### Sprint 1 — Foundation primitives (① ⑥ ⑪)
+- `mcp/samvil_mcp/claim_ledger.py` (18 tests) — `.samvil/claims.jsonl` SSOT. 10개 type 화이트리스트 + Generator ≠ Judge + file:line 해상도.
+- `mcp/samvil_mcp/gates.py` (27 tests) + `references/gate_config.yaml` — 8 gates, `samvil_tier`별 기준치, 3개 escalation check.
+- `references/glossary.md` + `scripts/check-glossary.sh` (CI) — `agent_tier → samvil_tier` rename. 5 gates → 5 evolve_checks.
+- Observability v1: `scripts/view-claims.py`, `view-gates.py`, `samvil-status.py` (sprint + gates + budget pane).
+- `references/gate-vs-degradation.md` — ⑥ vs P8 경계 결정표.
+- `scripts/seed-experiments.py` + `.samvil/experiments.jsonl` (21 experiments 등록).
+- `references/calibration-dogfood.md` runbook + `scripts/check-exit-gate-sprint1.py`.
+
+### Sprint 2 — Model routing (④, Lite 흡수)
+- `mcp/samvil_mcp/routing.py` (30 tests) — `cost_tier` (frugal/balanced/frontier), `ModelProfile`, `route_task`, escalation/downgrade.
+- `references/model_profiles.defaults.yaml` — Opus/Sonnet/Haiku/Codex/gpt-4o-mini 기본 프로필.
+- Exit-gate 시나리오 "build on Opus, QA on Codex" + 4/4 PASS.
+- `references/model-routing-guide.md` + `model-profiles-schema.md` + `troubleshooting-codex.md`.
+
+### Sprint 3 — Role (⑤) + AC schema (③)
+- `mcp/samvil_mcp/model_role.py` (18 tests) + 50개 `agents/*.md`에 `model_role:` frontmatter.
+- `agents/ROLE-INVENTORY.md` 자동 생성 (`scripts/render-role-inventory.py`).
+- `mcp/samvil_mcp/ac_leaf_schema.py` (22 tests) — 2 user + 12 AI-inferred 필드, testability sniff, `compute_parallel_safety`.
+
+### Sprint 4 — Interview full (②) + narrate
+- `mcp/samvil_mcp/interview_v3_2.py` (29 tests) — 6 technique, `interview_level` (quick/normal/deep/max/auto), PAL adaptive selection.
+- `mcp/samvil_mcp/narrate.py` (10 tests) + `scripts/samvil-narrate.py` — Compressor role 기반 1-page narrative.
+- `references/interview-levels.md`.
+
+### Sprint 5a — Jurisdiction (⑦) + Retro (⑧)
+- `mcp/samvil_mcp/jurisdiction.py` (16 tests) — AI/External/User 3단계, 강성 우선, irreversibility 감지.
+- `mcp/samvil_mcp/retro_v3_2.py` (10 tests) — 4-stage schema + `promote/reject/supersession`.
+- `references/jurisdiction-boundary-cases.md`.
+
+### Sprint 5b — Stagnation (⑩) + Consensus (⑨)
+- `mcp/samvil_mcp/stagnation_v3_2.py` + `consensus_v3_2.py` (17 tests) — 4 signal detection + dispute resolver.
+- `references/council-retirement-migration.md` — v3.2 opt-in → v3.3 removal 전환 계획.
+
+### Sprint 6 — Release (⑫ ⑬)
+- `mcp/samvil_mcp/migrate_v3_2.py` (6 tests) — backup + idempotent + dry-run + rollback snapshot.
+- `mcp/samvil_mcp/performance_budget.py` (8 tests) — per-tier 한도, 80% warn, 150% hard-stop, consensus 면제.
+- `references/performance_budget.defaults.yaml` + `migration-v3.1-to-v3.2.md`.
+
+### Non-negotiables preserved
+- INV-1~5 전부 유지. Claim ledger는 INV-1에 **첫 번째 SSOT 파일**로 추가됨 (view files는 재생성됨).
+- `zero-refactor rule` — 포팅 대상 외 코드 변경 없음.
 
 ## v3.1.0 변경 내역 (v3.0.0 → v3.1.0) — Interview Renaissance + Stability + Universal Builder
 

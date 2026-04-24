@@ -11,3 +11,7 @@ mcp/tests/__pycache__/
 .worktrees/
 .samvil/
 harness-feedback.log.bak-*
+scripts/__pycache__/
+# v3.2: bootstrap artifacts from testing hooks against the repo itself
+project.state.json
+mcp/project.state.json

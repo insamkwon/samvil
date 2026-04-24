@@ -4,6 +4,82 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.2.0] — 2026-04-24 — Contract Layer
+
+13개 흡수 항목(①~⑬) 전부 반영. v3.2는 "자동으로 앱을 빌드하는 도구"에서
+**"요구사항·실행·검증·학습을 계약으로 관리하는 하네스"**로 전환한다.
+
+### Added — 3 primitives
+
+- **① Claim ledger** (`mcp/samvil_mcp/claim_ledger.py`) — `.samvil/claims.jsonl`이 append-only SSOT. 10개 type 화이트리스트 + Generator ≠ Judge 불변식 + file:line 증거 해상도.
+- **⑤ Role primitive** (`mcp/samvil_mcp/model_role.py`) — 50개 agents에 `model_role:` frontmatter. generator/reviewer/judge/repairer/researcher/compressor 6 역할. 런타임 G≠J enforcement.
+- **⑥ Gate framework** (`mcp/samvil_mcp/gates.py` + `references/gate_config.yaml`) — 8개 stage gate, `samvil_tier`별 기준치, 3개 escalation check (`ac_testability` / `lifecycle_coverage` / `decision_boundary_clarity`).
+
+### Added — 7 policies
+
+- **② Interview v3.2** (`interview_v3_2.py`) — 6 technique (seed_readiness / meta self-probe / confidence marking / scenario simulation / adversarial / PAL adaptive) + 5 `interview_level` (quick/normal/deep/max/auto).
+- **③ AC leaf schema** (`ac_leaf_schema.py`) — 2 user-owned + 12 AI-inferred 필드, testability sniff, `compute_parallel_safety`.
+- **④ Model routing** (`routing.py`, Lite absorb) — `cost_tier` (frugal/balanced/frontier), `.samvil/model_profiles.yaml`, escalation + downgrade. "build on Opus, QA on Codex" 시나리오 exit-gate 통과.
+- **⑦ Jurisdiction** (`jurisdiction.py`) — AI/External/User 3단계, strictest-wins. git push / migration / auth 자동 escalation.
+- **⑧ Retro policy evolution** (`retro_v3_2.py`) — 4-stage observations/hypotheses/policy_experiments/adopted. 21개 `(initial estimate)` 자동 experimental_policy 등록.
+- **⑨ Consensus** — dispute resolver로 축소. Council Gate A는 v3.2에서 opt-in (`--council`), v3.3에서 제거 예정 (`references/council-retirement-migration.md`).
+- **⑩ Stagnation** (`stagnation_v3_2.py`) — 4 signal detector, 2 신호 이상 시 severity=HIGH + lateral diagnosis prompt.
+
+### Added — 3 infrastructure
+
+- **⑪ Glossary + rename sweep** (`references/glossary.md` + `scripts/check-glossary.sh`) — `agent_tier → samvil_tier`, "5 gates" → `evolve_checks`. CI enforcement.
+- **⑫ Migration v3.1 → v3.2** (`migrate_v3_2.py`) — backup-first, idempotent, `--dry-run`, mid-sprint rollback snapshot.
+- **⑬ Performance budget** (`performance_budget.py` + `performance_budget.defaults.yaml`) — per-tier ceiling, 80% warn, 150% hard-stop, consensus 면제.
+
+### Added — observability + docs
+
+- `samvil status` (v1 MVP) — `scripts/samvil-status.py` (sprint + gates + budget pane, zero LLM calls)
+- `samvil narrate` — Compressor-role 1-page briefing. `scripts/samvil-narrate.py` + 파이프라인 종료 시 자동.
+- `scripts/view-claims.py`, `scripts/view-gates.py`, `scripts/view-retro.py` (single-topic viewer).
+- 12 신규 reference 문서: glossary, gate-vs-degradation, model-routing-guide, model-profiles-schema, troubleshooting-codex, interview-levels, jurisdiction-boundary-cases, council-retirement-migration, migration-v3.1-to-v3.2, calibration-dogfood, contract-layer-protocol, performance_budget.defaults.yaml.
+
+### Added — skill wiring (β plan)
+
+- `samvil-interview` — post_stage `compute_seed_readiness` + `gate_check(interview_to_seed)` + claim post.
+- `samvil-build` — pre_stage `route_task(build-worker)` + stage_start claim. Post_stage per-leaf `claim_post(ac_verdict)` + `gate_check(build_to_qa)` + stagnation sniff.
+- `samvil-qa` — pre_stage `route_task(qa-functional)` + `validate_role_separation`. Post_stage per-leaf `claim_verify` / `claim_reject` + `consensus_trigger` + `gate_check(qa_to_deploy)`.
+- `samvil-council` — `--council` opt-in + deprecation warning.
+- `samvil-update` — `/samvil:update --migrate v3.2` flag (dry-run + apply).
+- `samvil-retro` — 파이프라인 종료 시 `narrate_build_prompt` + `narrate_parse`.
+- `samvil` (orchestrator) — Contract Layer protocol 참조 + `check_jurisdiction` pre-flight.
+- `scripts/check-skill-wiring.py` — grep 기반 smoke test.
+
+### Changed
+
+- 50개 `agents/*.md`에 `model_role:` frontmatter 자동 주입 (`scripts/apply-role-tags.py` + `scripts/render-role-inventory.py`).
+- `Session.samvil_tier` — v3.1 legacy tier field rename. DB column도 같이 rename. Migration 포함.  <!-- glossary-allow: changelog history -->
+  (기존 이름은 `references/glossary.md` 참조)
+- `convergence_gate.py` — docstring에서 "5 gates" → "5 evolve_checks" 리네임 (기능 동일).
+- `CLAUDE.md` 상단에 Vocabulary (v3.2) 섹션 추가.
+
+### Fixed
+
+- v3.1 스킬들의 legacy tier 파라미터 사용을 `samvil_tier`로 통일 (기존 이름은 deprecated alias로 여전히 수용; 상세는 `references/glossary.md`).
+
+### Deprecated
+
+- `--council` 플래그 (v3.3에서 제거).
+- legacy MCP 파라미터 (v3.3에서 제거; 이름은 `references/glossary.md` 참조).
+
+### Tests
+
+- 406 → **626** unit tests (+220).
+- MCP tool count: 63 → **104** (+41).
+- 7개 Sprint exit-gate 스크립트 (`scripts/check-exit-gate-sprint*.py`) 전부 PASS.
+
+### Known gaps (deferred to v3.2.1 / v3.3)
+
+- 자동 rollback CLI (`samvil-update --rollback v3.2`) — 스냅샷은 있지만 복원 루틴 미구현. 수동 복원 가능.
+- 실제 dogfood 1회가 아직 미실행 — synthetic bootstrap observation만 있음. 사용자 실행 후 real observation 주입.
+- seed / design / scaffold / deploy / evolve 5개 스킬의 contract layer 결선은 β 설계상 의도 제외. 필요 시 각 15~20줄 추가로 완성 가능.
+
+---
+
 ## [3.1.0] — 2026-04-21 — Interview Renaissance + Stability + Universal Builder
 
 Post-v3.0.0 dogfood (vampire-survivors + game-asset-gen) surfaced 27 backlog
