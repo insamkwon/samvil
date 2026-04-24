@@ -115,4 +115,34 @@ if missing:
 PYEOF
 fi
 
+# ── v3.2 L1 — Contract Layer baseline init + bootstrap claim ────────
+# Ensures the project's .samvil/ skeleton exists AND seeds a first
+# claim so `.samvil/claims.jsonl` is never empty after /samvil runs.
+# This removes the "file doesn't exist" failure mode we hit in the
+# Sprint 6 dogfood even when the Pre/PostToolUse hooks don't fire.
+# shellcheck source=_contract-helpers.sh
+source "$PLUGIN_ROOT/hooks/_contract-helpers.sh" 2>/dev/null
+if command -v samvil_contract_find_project_root >/dev/null 2>&1; then
+  _samvil_project_root="$(samvil_contract_find_project_root)"
+  if [ -n "$_samvil_project_root" ]; then
+    samvil_contract_ensure_project_init "$_samvil_project_root"
+    # Seed a `pipeline_start` marker only once per session so repeated
+    # SessionStart firings don't spam. Idempotency key: ISO date + pid.
+    _marker="$_samvil_project_root/.samvil/.session-bootstrap"
+    _today="$(date -u +%Y-%m-%d)"
+    if [ ! -f "$_marker" ] || ! grep -q "$_today" "$_marker" 2>/dev/null; then
+      samvil_contract_append_claim \
+        "$_samvil_project_root" \
+        "policy_adoption" \
+        "pipeline_session_start" \
+        "SAMVIL session started on $_today via SessionStart hook" \
+        "project.state.json" \
+        "agent:orchestrator-agent" \
+        '["project.state.json"]' >/dev/null 2>&1
+      echo "$_today $$" > "$_marker"
+      echo "[samvil-contract] session bootstrap claim seeded at $_samvil_project_root/.samvil/claims.jsonl" >&2
+    fi
+  fi
+fi
+
 exit 0
