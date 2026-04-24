@@ -8,6 +8,7 @@ license = { text = "UNLICENSED" }
 dependencies = [
     "mcp[cli]>=1.0.0",
     "aiosqlite>=0.20",
+    "PyYAML>=6.0",
 ]
 
 [project.scripts]
