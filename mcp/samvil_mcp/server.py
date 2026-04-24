@@ -18,8 +18,92 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from .ac_leaf_schema import (
+    ACLeaf,
+    Stage as ACStage,
+    compute_parallel_safety as _compute_parallel_safety,
+    validate_leaf as _validate_leaf_core,
+)
+from .claim_ledger import ClaimLedger, ClaimLedgerError
+from .migrate_v3_2 import (
+    apply_migration as _apply_migration,
+    plan_migration as _plan_migration,
+)
+from .performance_budget import (
+    Consumption,
+    evaluate_status as _budget_evaluate_status,
+    load_budget as _load_budget,
+)
+from .consensus_v3_2 import (
+    DEPRECATION_WARNING as COUNCIL_DEPRECATION_WARNING,
+    DisputeInput,
+    build_judge_prompt as _consensus_judge_prompt,
+    build_reviewer_prompt as _consensus_reviewer_prompt,
+    detect_dispute as _detect_dispute,
+)
+from .stagnation_v3_2 import (
+    StagnationInput,
+    build_lateral_prompt as _lateral_prompt,
+    evaluate as _stagnation_evaluate,
+)
+from .jurisdiction import (
+    Jurisdiction,
+    check_jurisdiction as _check_jurisdiction_core,
+    loop_should_stop as _loop_should_stop,
+)
+from .retro_v3_2 import (
+    ExperimentRun as _ExperimentRun,
+    Observation as _Observation,
+    PolicyExperiment as _PolicyExperiment,
+    RetroReport as _RetroReport,
+    load_retro as _load_retro,
+    promote as _retro_promote,
+    reject as _retro_reject,
+    save_retro as _save_retro,
+)
+from .interview_v3_2 import (
+    InterviewLevel,
+    build_adversarial_prompt as _build_adv_prompt,
+    build_meta_probe_prompt as _build_meta_prompt,
+    compute_seed_readiness as _compute_seed_readiness_core,
+    confidence_follow_up as _confidence_follow_up,
+    pal_select_level as _pal_select_level,
+    parse_meta_probe_result as _parse_meta_result,
+    resolve_level as _resolve_level,
+    scenario_simulate as _scenario_simulate,
+    techniques_for_level as _techniques_for_level,
+)
+from .narrate import (
+    build_context as _build_narrate_context,
+    build_narrate_prompt as _build_narrate_prompt,
+    parse_narrative as _parse_narrative,
+)
 from .event_store import EventStore
+from .gates import (
+    DEFAULT_CONFIG as GATE_DEFAULT_CONFIG,
+    GateName,
+    gate_check as _gate_check_core,
+    load_config as _load_gate_config,
+    should_force_user_decision as _should_force_user_decision,
+)
+from .model_role import (
+    ModelRole,
+    agents_by_role as _agents_by_role,
+    inventory as _role_inventory,
+    validate_role_separation as _validate_role_separation_core,
+)
 from .models import Event, EventType, Session, SeedVersion, Stage
+from .routing import (
+    CostTier,
+    DEFAULT_PROFILES,
+    RoutingError,
+    downgrade_from_budget as _downgrade_from_budget,
+    escalation_from_attempts as _escalation_from_attempts,
+    load_profiles as _load_profiles,
+    load_role_overrides as _load_role_overrides,
+    route_task as _route_task_core,
+    validate_profiles as _validate_profiles_core,
+)
 
 mcp = FastMCP("samvil-mcp")
 
@@ -117,17 +201,35 @@ async def health_check() -> str:
 
 
 @mcp.tool()
-async def create_session(project_name: str, agent_tier: str = "standard") -> str:
-    """Create a new SAMVIL session for a project. Returns session ID."""
+async def create_session(
+    project_name: str,
+    samvil_tier: str = "standard",
+    agent_tier: str | None = None,  # glossary-allow: deprecated alias, removed in v3.3
+) -> str:
+    """Create a new SAMVIL session for a project. Returns session ID.
+
+    v3.2: the legacy parameter was renamed to ``samvil_tier`` in the
+    glossary sweep. The old parameter name is still accepted for one
+    minor-version window to avoid breaking in-flight skills, and
+    dispatches to the same field. Emits a health warning when the legacy
+    name is used.
+    """
     try:
         from .security import sanitize_filename, detect_dangerous
+        if agent_tier is not None:  # glossary-allow: deprecated-param shim
+            _log_mcp_health(
+                "fail",
+                "create_session",
+                "deprecated parameter agent_tier; use samvil_tier",  # glossary-allow: warning text
+            )
+            samvil_tier = agent_tier  # glossary-allow: deprecated-param shim
         detected = detect_dangerous(project_name)
         if detected:
             return json.dumps({"session_id": None, "error": f"Blocked patterns: {detected}"})
         project_name = sanitize_filename(project_name, max_len=100)
         store = await get_store()
-        session = await store.create_session(project_name, agent_tier)
-        return json.dumps({"session_id": session.id, "project_name": project_name, "tier": agent_tier})
+        session = await store.create_session(project_name, samvil_tier)
+        return json.dumps({"session_id": session.id, "project_name": project_name, "tier": samvil_tier})
     except Exception as e:
         _log_mcp_health("fail", "create_session", str(e))
         return json.dumps({"session_id": None, "error": str(e)})
@@ -145,7 +247,7 @@ async def get_session(session_id: str) -> str:
         "project_name": session.project_name,
         "current_stage": session.current_stage,
         "seed_version": session.seed_version,
-        "agent_tier": session.agent_tier,
+        "samvil_tier": session.samvil_tier,
         "created_at": session.created_at,
         "updated_at": session.updated_at,
     })
@@ -182,6 +284,270 @@ async def resume_session(project_name: str) -> str:
 # ── Event tools ───────────────────────────────────────────────
 
 
+# ── v3.2 L1.5 — save_event auto-posts contract-layer claims ─────────
+#
+# Our Sprint 6 dogfood showed that Claude's Skill invocation does not
+# reliably trigger PreToolUse/PostToolUse hooks under the current plugin
+# runtime, which left .samvil/claims.jsonl empty. Instead of relying on
+# the hook layer alone, we piggyback on `save_event` — a tool the
+# existing v3.1 skills already call at every stage transition — and
+# synthesize claim ledger rows there. This gives the contract layer a
+# **deterministic backup path**: even if the shell hook never fires, the
+# ledger still fills as long as skills call `save_event`, which they do.
+#
+# Lenient EventType — v3.1 skills sometimes invent types ("interview_
+# start", "seed_generated"). We accept any string now; unknown types are
+# stored under the enum value "stage_change" so the existing schema
+# stays valid, with the raw name preserved in data.event_type_raw.
+
+
+# Mapping built from `scripts/audit-save-event-callers.sh` — every
+# event_type string grepped out of skills/*/SKILL.md is categorized below.
+# Keep this in sync when adding a new save_event call.
+_STAGE_ENTRY_EVENTS = {
+    # generic
+    "stage_start",
+    # per-stage entry markers actually emitted by v3.1 skills
+    "interview_start",
+    "seed_started",
+    "council_started",
+    "design_started",
+    "scaffold_started",
+    "build_feature_start",
+    "feature_tree_start",
+    "feature_start",
+    "qa_started",
+    "deploy_started",
+    "retro_started",
+}
+_STAGE_EXIT_EVENTS = {
+    # generic
+    "stage_end",
+    "stage_change",
+    # interview
+    "interview_complete",
+    # seed / pm seed
+    "seed_generated",
+    "pm_seed_complete",
+    "pm_seed_converted",
+    # analyze (brownfield mode)
+    "analyze_complete",
+    # council
+    "council_complete",
+    "council_verdict",
+    # design
+    "design_complete",
+    "blueprint_generated",
+    "blueprint_feasibility_checked",
+    # scaffold
+    "scaffold_complete",
+    # build
+    "build_pass",
+    "build_stage_complete",
+    "build_feature_success",
+    "feature_tree_complete",
+    # qa
+    "qa_pass",
+    "qa_revise",
+    "qa_fail",
+    "qa_verdict",
+    "qa_partial",
+    "qa_blocked",
+    "qa_unimplemented",
+    "ac_satisfied_externally",
+    # evolve
+    "evolve_converge",
+    "evolve_gen",
+    # deploy
+    "deploy_complete",
+    # retro
+    "retro_complete",
+}
+_STAGE_FAIL_EVENTS = {
+    "build_fail",
+    "build_feature_fail",
+    "feature_failed",
+    "stall_detected",
+    "stall_abandoned",
+    "rate_budget_starved",
+}
+
+
+def _resolve_project_path(project_name: str | None) -> "Path | None":
+    """Best-effort lookup of a SAMVIL project dir given the session's
+    project_name. Convention: `~/dev/<name>`."""
+    if not project_name:
+        return None
+    guess = Path.home() / "dev" / project_name
+    return guess if guess.exists() else None
+
+
+# Map event_type → canonical stage name. The v3.1 skill convention is
+# that `save_event(event_type, stage, ...)` uses `stage` as the NEXT
+# stage (what the pipeline is transitioning into). For claim subjects we
+# need the stage that this event is ABOUT — derived from event_type.
+#
+# Without this, `save_event("interview_complete", stage="seed", ...)`
+# gets mapped to subject=`stage:seed` and never matches the pending
+# `stage:interview` entry claim, so verify never fires. The Sprint 6
+# dogfood surfaced this.
+_EVENT_TYPE_TO_STAGE: dict[str, str] = {
+    "interview_start": "interview",
+    "interview_complete": "interview",
+    "seed_started": "seed",
+    "seed_generated": "seed",
+    "pm_seed_complete": "seed",
+    "pm_seed_converted": "seed",
+    "analyze_complete": "interview",  # brownfield analyze lives in interview
+    "council_started": "council",
+    "council_complete": "council",
+    "council_verdict": "council",
+    "design_started": "design",
+    "design_complete": "design",
+    "blueprint_generated": "design",
+    "blueprint_feasibility_checked": "design",
+    "blueprint_concern": "design",
+    "scaffold_started": "scaffold",
+    "scaffold_complete": "scaffold",
+    "feature_tree_start": "build",
+    "feature_tree_complete": "build",
+    "build_feature_start": "build",
+    "build_feature_success": "build",
+    "build_feature_fail": "build",
+    "build_pass": "build",
+    "build_fail": "build",
+    "build_stage_complete": "build",
+    "fix_applied": "build",
+    "feature_start": "build",
+    "feature_failed": "build",
+    "qa_started": "qa",
+    "qa_pass": "qa",
+    "qa_revise": "qa",
+    "qa_fail": "qa",
+    "qa_verdict": "qa",
+    "qa_partial": "qa",
+    "qa_blocked": "qa",
+    "qa_unimplemented": "qa",
+    "ac_satisfied_externally": "qa",
+    "deploy_started": "deploy",
+    "deploy_complete": "deploy",
+    "retro_started": "retro",
+    "retro_complete": "retro",
+    "evolve_converge": "evolve",
+    "evolve_gen": "evolve",
+}
+
+
+def _canonical_stage_for_event(event_type_raw: str, fallback_stage: str) -> str:
+    """Return the pipeline stage this event is about. Falls back to the
+    `stage` arg the skill passed when no explicit mapping exists."""
+    et = (event_type_raw or "").strip().lower()
+    if et in _EVENT_TYPE_TO_STAGE:
+        return _EVENT_TYPE_TO_STAGE[et]
+    # Prefix match — handles new event types whose name starts with the
+    # stage name (e.g. "interview_foo" → "interview").
+    for prefix in (
+        "interview",
+        "seed",
+        "council",
+        "design",
+        "scaffold",
+        "build",
+        "qa",
+        "deploy",
+        "retro",
+        "evolve",
+    ):
+        if et.startswith(prefix + "_") or et == prefix:
+            return prefix
+    return (fallback_stage or "unknown").lower()
+
+
+async def _auto_post_claim_for_event(
+    session_id: str,
+    event_type_raw: str,
+    stage: str,
+    data: dict,
+) -> None:
+    """Best-effort append to the project's .samvil/claims.jsonl based on
+    the event type. Never raises — on failure we log to health and move
+    on. This runs alongside the v3.1 event write so nothing regresses."""
+    try:
+        store = await get_store()
+        session = await store.get_session(session_id)
+        if session is None:
+            return
+        project_path = _resolve_project_path(session.project_name)
+        if project_path is None:
+            return
+        ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
+
+        # Derive the canonical stage name from event_type, not from the
+        # `stage` arg (which is the NEXT stage per v3.1 skill convention).
+        canonical_stage = _canonical_stage_for_event(event_type_raw, stage)
+        subject = f"stage:{canonical_stage}"
+        et = event_type_raw.lower()
+
+        if et in _STAGE_ENTRY_EVENTS:
+            ledger.post(
+                type="evidence_posted",
+                subject=subject,
+                statement=f"{event_type_raw} @ {stage}",
+                authority_file="project.state.json",
+                claimed_by=f"agent:orchestrator-agent",
+                evidence=["project.state.json"],
+                meta={"via": "save_event", "event_type": event_type_raw},
+            )
+        elif et in _STAGE_EXIT_EVENTS:
+            # Verify the most recent stage_start claim (if any) and post
+            # a gate_verdict claim if we have enough signal.
+            pending = [
+                c
+                for c in ledger.query_by_subject(subject)
+                if c.status == "pending" and c.type == "evidence_posted"
+            ]
+            if pending:
+                target = sorted(pending, key=lambda c: c.ts)[-1]
+                try:
+                    ledger.verify(
+                        target.claim_id,
+                        verified_by="agent:user",
+                        evidence=[f"event:{event_type_raw}"],
+                        skip_file_resolution=True,
+                    )
+                except ClaimLedgerError:
+                    pass
+            # Gate verdict synthesis (light: PASS if event is *_pass /
+            # *_complete, else leave untagged).
+            verdict = "pass" if et.endswith("_pass") or et.endswith("_complete") else "unknown"
+            ledger.post(
+                type="gate_verdict",
+                subject=f"gate:{canonical_stage}_exit",
+                statement=f"verdict={verdict} via {event_type_raw}",
+                authority_file="state.json",
+                claimed_by="agent:orchestrator-agent",
+                evidence=["project.state.json"],
+                meta={
+                    "verdict": verdict,
+                    "event_type": event_type_raw,
+                    "data": data,
+                },
+            )
+        elif et in _STAGE_FAIL_EVENTS:
+            ledger.post(
+                type="evidence_posted",
+                subject=subject,
+                statement=f"{event_type_raw} failure @ {stage}",
+                authority_file="project.state.json",
+                claimed_by="agent:orchestrator-agent",
+                evidence=["project.state.json"],
+                meta={"via": "save_event", "failure": True, "event_type": event_type_raw},
+            )
+        # Other event types: not stage transitions; skip.
+    except Exception as e:
+        _log_mcp_health("fail", "save_event.auto_claim", str(e))
+
+
 @mcp.tool()
 async def save_event(
     session_id: str,
@@ -190,18 +556,50 @@ async def save_event(
     data: str = "{}",
     token_count: int | None = None,
 ) -> str:
-    """Save a pipeline event. data is a JSON string. token_count is optional estimated token usage."""
+    """Save a pipeline event. data is a JSON string. token_count is
+    optional estimated token usage.
+
+    v3.2: the event_type is lenient — unknown types are stored as
+    ``stage_change`` with the original name preserved in
+    ``data.event_type_raw``. In addition, a contract-layer claim is
+    auto-posted to the project's .samvil/claims.jsonl when the event
+    matches a stage transition (deterministic backup when the plugin
+    hook path fails).
+    """
     try:
+        parsed_data = json.loads(data) if data else {}
+
+        # Lenient EventType: try the enum, fall back to STAGE_CHANGE.
+        try:
+            event_type_enum = EventType(event_type)
+        except ValueError:
+            event_type_enum = EventType.STAGE_CHANGE
+            parsed_data.setdefault("event_type_raw", event_type)
+
+        # Lenient Stage: fall back to STAGE_CHANGE's stage if unknown.
+        try:
+            stage_enum = Stage(stage)
+        except ValueError:
+            stage_enum = Stage.INTERVIEW  # default rather than crash
+            parsed_data.setdefault("stage_raw", stage)
+
         store = await get_store()
         event = await store.save_event(
             session_id=session_id,
-            event_type=EventType(event_type),
-            stage=Stage(stage),
-            data=json.loads(data),
+            event_type=event_type_enum,
+            stage=stage_enum,
+            data=parsed_data,
             token_count=token_count,
         )
         # Update session's current stage
-        await store.update_session_stage(session_id, Stage(stage))
+        await store.update_session_stage(session_id, stage_enum)
+
+        # v3.2 contract-layer auto-claim (best-effort, never blocks).
+        await _auto_post_claim_for_event(
+            session_id, event_type, stage, parsed_data
+        )
+
+        _log_mcp_health("ok", "save_event")
         return json.dumps({"event_id": event.id, "saved": True})
     except Exception as e:
         _log_mcp_health("fail", "save_event", str(e))
@@ -246,7 +644,7 @@ async def session_status(session_id: str) -> str:
             "project_name": session.project_name,
             "current_stage": session.current_stage,
             "seed_version": session.seed_version,
-            "agent_tier": session.agent_tier,
+            "samvil_tier": session.samvil_tier,
         },
         "event_summary": event_counts,
         "total_events": len(events),
@@ -1492,6 +1890,1028 @@ async def pm_seed_to_eng_seed(
         return json.dumps(eng_seed)
     except Exception as e:
         _log_mcp_health("fail", "pm_seed_to_eng_seed", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── v3.2.0 Sprint 1 — Claim Ledger (①) ────────────────────────
+#
+# The ledger lives at `<project_root>/.samvil/claims.jsonl`. Every tool here
+# takes an explicit `project_root` argument so one MCP instance can service
+# multiple concurrent project directories. Callers (skills) pass the absolute
+# or relative path. Graceful degradation: on failure we still log health and
+# return an error payload — the pipeline never hard-crashes on ledger issues.
+
+
+def _ledger_for(project_root: str) -> ClaimLedger:
+    return ClaimLedger(Path(project_root) / ".samvil" / "claims.jsonl")
+
+
+@mcp.tool()
+async def claim_post(
+    project_root: str,
+    claim_type: str,
+    subject: str,
+    statement: str,
+    authority_file: str,
+    claimed_by: str,
+    evidence_json: str = "[]",
+    meta_json: str = "{}",
+) -> str:
+    """Append a new `pending` claim to the project's claim ledger.
+
+    claim_type must be one of the typed whitelist (see claim_ledger.CLAIM_TYPES).
+    Returns JSON: {"claim_id": "...", "status": "pending"} on success,
+    {"error": "..."} on failure.
+    """
+    try:
+        evidence = json.loads(evidence_json or "[]")
+        meta = json.loads(meta_json or "{}")
+        ledger = _ledger_for(project_root)
+        claim = ledger.post(
+            type=claim_type,
+            subject=subject,
+            statement=statement,
+            authority_file=authority_file,
+            claimed_by=claimed_by,
+            evidence=evidence,
+            meta=meta,
+        )
+        _log_mcp_health("ok", "claim_post")
+        return json.dumps({"claim_id": claim.claim_id, "status": claim.status})
+    except Exception as e:
+        _log_mcp_health("fail", "claim_post", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def claim_verify(
+    project_root: str,
+    claim_id: str,
+    verified_by: str,
+    evidence_json: str = "[]",
+    skip_file_resolution: bool = False,
+) -> str:
+    """Flip a pending claim to `verified`. Enforces Generator ≠ Judge and
+    resolves file:line evidence against `project_root`.
+
+    Returns JSON: {"claim_id": "...", "status": "verified", "evidence": [...]}
+    on success, {"error": "..."} on failure.
+    """
+    try:
+        evidence = json.loads(evidence_json or "[]")
+        ledger = _ledger_for(project_root)
+        claim = ledger.verify(
+            claim_id,
+            verified_by=verified_by,
+            evidence=evidence,
+            project_root=project_root,
+            skip_file_resolution=skip_file_resolution,
+        )
+        _log_mcp_health("ok", "claim_verify")
+        return json.dumps(
+            {
+                "claim_id": claim.claim_id,
+                "status": claim.status,
+                "evidence": claim.evidence,
+                "verified_by": claim.verified_by,
+            }
+        )
+    except ClaimLedgerError as e:
+        _log_mcp_health("fail", "claim_verify", str(e))
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        _log_mcp_health("fail", "claim_verify", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def claim_reject(
+    project_root: str,
+    claim_id: str,
+    verified_by: str,
+    reason: str = "",
+) -> str:
+    """Flip a pending claim to `rejected`. Reason stored under meta.reject_reason."""
+    try:
+        ledger = _ledger_for(project_root)
+        claim = ledger.reject(claim_id, verified_by=verified_by, reason=reason)
+        _log_mcp_health("ok", "claim_reject")
+        return json.dumps(
+            {"claim_id": claim.claim_id, "status": claim.status, "reason": reason}
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "claim_reject", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def claim_query_by_subject(project_root: str, subject: str) -> str:
+    """Return all claims (latest state) for a given subject."""
+    try:
+        ledger = _ledger_for(project_root)
+        rows = ledger.query_by_subject(subject)
+        _log_mcp_health("ok", "claim_query_by_subject")
+        from dataclasses import asdict
+
+        return json.dumps([asdict(c) for c in rows])
+    except Exception as e:
+        _log_mcp_health("fail", "claim_query_by_subject", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def claim_materialize_view(
+    project_root: str,
+    authority_file: str,
+) -> str:
+    """Return the verified claims that back an authority file (e.g. seed.json).
+
+    Read-only. Skills handle the file-writing step since each authority file
+    has its own shape.
+    """
+    try:
+        ledger = _ledger_for(project_root)
+        rows = ledger.materialize_view(authority_file)
+        _log_mcp_health("ok", "claim_materialize_view")
+        from dataclasses import asdict
+
+        return json.dumps([asdict(c) for c in rows])
+    except Exception as e:
+        _log_mcp_health("fail", "claim_materialize_view", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def claim_ledger_stats(project_root: str) -> str:
+    """Return counts by status and type. Used by view-claims.py and samvil status."""
+    try:
+        ledger = _ledger_for(project_root)
+        s = ledger.stats()
+        _log_mcp_health("ok", "claim_ledger_stats")
+        return json.dumps(s)
+    except Exception as e:
+        _log_mcp_health("fail", "claim_ledger_stats", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── v3.2.0 Sprint 1 — Gate framework (⑥) ──────────────────────
+#
+# `gate_check` is the single entry point. Callers gather runtime metrics
+# (seed_readiness from interview_engine, implementation_rate from build,
+# etc.) and invoke this tool. On non-pass, callers branch on `verdict` and
+# `required_action.type`. The Judge role then writes a `gate_verdict` claim
+# via `claim_post` so the result is auditable and G ≠ J is enforced.
+
+
+def _config_path_for(project_root: str) -> str | None:
+    """Resolve gate_config.yaml from the project first, then the repo root."""
+    candidates = [
+        Path(project_root) / ".samvil" / "gate_config.yaml",
+        Path(project_root) / "gate_config.yaml",
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    # Fall back to packaged default (references/gate_config.yaml at repo root).
+    repo_default = Path(__file__).resolve().parents[2] / "references" / "gate_config.yaml"
+    return str(repo_default) if repo_default.exists() else None
+
+
+@mcp.tool()
+async def gate_check(
+    gate_name: str,
+    samvil_tier: str,
+    metrics_json: str,
+    project_root: str = ".",
+    subject: str = "",
+    allow_warn: bool = False,
+) -> str:
+    """Evaluate a stage gate. Returns the verdict as JSON.
+
+    Verdict schema:
+      {
+        "gate": "build_to_qa",
+        "verdict": "pass" | "block" | "escalate" | "skip",
+        "samvil_tier": "standard",
+        "threshold": { "implementation_rate": 0.85 },
+        "failed_checks": [...],
+        "reason": "human-readable",
+        "required_action": { "type": "split_ac" | ..., "payload": {...} }
+      }
+    """
+    try:
+        from dataclasses import asdict
+
+        metrics = json.loads(metrics_json or "{}")
+        cfg_path = _config_path_for(project_root)
+        cfg = _load_gate_config(cfg_path) if cfg_path else _load_gate_config(None)
+        verdict = _gate_check_core(
+            gate_name,
+            samvil_tier=samvil_tier,
+            metrics=metrics,
+            subject=subject,
+            config=cfg,
+            allow_warn=allow_warn,
+        )
+        _log_mcp_health("ok", "gate_check")
+        return json.dumps(asdict(verdict))
+    except Exception as e:
+        _log_mcp_health("fail", "gate_check", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def gate_list() -> str:
+    """Return the list of configured gates with their per-tier thresholds.
+
+    Used by view-gates.py and samvil status to render the gate pane.
+    """
+    try:
+        cfg = _load_gate_config(None)
+        _log_mcp_health("ok", "gate_list")
+        return json.dumps(
+            {
+                "gates": list(cfg["gates"].keys()),
+                "config": cfg,
+            }
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "gate_list", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def gate_should_force_user(
+    gate_name: str,
+    subject: str,
+    failed_check: str,
+    history_json: str,
+) -> str:
+    """Escalation loop safety. Returns {"force_user": bool}.
+
+    Same check escalating twice for the same subject forces a user decision
+    (no infinite loop). Caller passes the prior verdicts for that subject.
+    """
+    try:
+        history = json.loads(history_json or "[]")
+        force = _should_force_user_decision(
+            gate=gate_name,
+            subject=subject,
+            failed_check=failed_check,
+            history=history,
+        )
+        _log_mcp_health("ok", "gate_should_force_user")
+        return json.dumps({"force_user": force})
+    except Exception as e:
+        _log_mcp_health("fail", "gate_should_force_user", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── v3.2.0 Sprint 2 — Model routing (④) ───────────────────────
+#
+# The routing module lives at `samvil_mcp.routing`. These MCP tools are
+# thin wrappers that let skills ask for a routing decision and validate
+# their profile file. Callers record the returned decision as a
+# `policy_adoption` claim — Sprint 3 wires that into the build/QA skills.
+
+
+def _profiles_path_for(project_root: str) -> str | None:
+    """Resolve .samvil/model_profiles.yaml from the project; fall back to
+    the packaged defaults reference yaml at repo root."""
+    p = Path(project_root) / ".samvil" / "model_profiles.yaml"
+    if p.exists():
+        return str(p)
+    repo_default = (
+        Path(__file__).resolve().parents[2]
+        / "references"
+        / "model_profiles.defaults.yaml"
+    )
+    return str(repo_default) if repo_default.exists() else None
+
+
+@mcp.tool()
+async def route_task(
+    task_role: str,
+    project_root: str = ".",
+    requested_cost_tier: str = "",
+    attempts: int = 0,
+    consumed_json: str = "{}",
+    ceiling_json: str = "{}",
+    downgrade_threshold: float = 0.80,
+) -> str:
+    """Pick a model for the given task_role and return the decision.
+
+    * `requested_cost_tier`: optional override ("frugal" | "balanced" |
+      "frontier"). Empty string uses the role default.
+    * `attempts`: number of prior failures for this subject (controls
+      escalation depth).
+    * `consumed_json` / `ceiling_json`: performance budget snapshot used
+      to compute downgrade pressure.
+    """
+    try:
+        profiles_path = _profiles_path_for(project_root)
+        profiles = _load_profiles(profiles_path)
+        overrides = _load_role_overrides(profiles_path)
+
+        requested: CostTier | None = None
+        if requested_cost_tier:
+            try:
+                requested = CostTier(requested_cost_tier)
+            except ValueError:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"unknown cost_tier {requested_cost_tier!r}; "
+                            "expected frugal|balanced|frontier"
+                        )
+                    }
+                )
+
+        consumed = json.loads(consumed_json or "{}")
+        ceiling = json.loads(ceiling_json or "{}")
+        budget_pressure = _downgrade_from_budget(consumed, ceiling)
+        escalation_depth = _escalation_from_attempts(attempts)
+
+        decision = _route_task_core(
+            task_role=task_role,
+            profiles=profiles,
+            role_overrides=overrides,
+            requested_cost_tier=requested,
+            escalation_depth=escalation_depth,
+            budget_pressure=budget_pressure,
+            downgrade_threshold=downgrade_threshold,
+        )
+        _log_mcp_health("ok", "route_task")
+        return json.dumps(decision.to_dict())
+    except RoutingError as e:
+        _log_mcp_health("fail", "route_task", str(e))
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        _log_mcp_health("fail", "route_task", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def list_profiles(project_root: str = ".") -> str:
+    """Return the model profiles currently loaded for the project."""
+    try:
+        profiles_path = _profiles_path_for(project_root)
+        profiles = _load_profiles(profiles_path)
+        _log_mcp_health("ok", "list_profiles")
+        return json.dumps(
+            {
+                "profiles_path": profiles_path,
+                "profiles": [
+                    {
+                        "provider": p.provider,
+                        "model_id": p.model_id,
+                        "cost_tier": p.cost_tier.value,
+                        "nickname": p.nickname,
+                        "max_tokens_out": p.max_tokens_out,
+                        "notes": p.notes,
+                    }
+                    for p in profiles
+                ],
+            }
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "list_profiles", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def validate_profiles(project_root: str = ".") -> str:
+    """Validate the project's model_profiles.yaml. Returns
+    {"issues": [...]}. Empty list means valid.
+    """
+    try:
+        profiles_path = _profiles_path_for(project_root)
+        profiles = _load_profiles(profiles_path)
+        issues = _validate_profiles_core(profiles)
+        _log_mcp_health("ok", "validate_profiles")
+        return json.dumps({"issues": issues, "profiles_path": profiles_path})
+    except Exception as e:
+        _log_mcp_health("fail", "validate_profiles", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── v3.2.0 Sprint 3 — Role primitive (⑤) ──────────────────────
+
+
+@mcp.tool()
+async def validate_role_separation(claimed_by: str, verified_by: str) -> str:
+    """Enforce Generator ≠ Judge at the semantic layer.
+
+    The claim ledger already blocks `verified_by == claimed_by`. This
+    tool adds the role-level check: verified_by must resolve to a Judge
+    role (or an out-of-band verifier like user / orchestrator), and a
+    Judge cannot self-claim.
+    """
+    try:
+        r = _validate_role_separation_core(
+            claimed_by=claimed_by,
+            verified_by=verified_by,
+        )
+        _log_mcp_health("ok", "validate_role_separation")
+        return json.dumps(
+            {
+                "valid": r.valid,
+                "reason": r.reason,
+                "claimed_role": r.claimed_role.value if r.claimed_role else None,
+                "verified_role": r.verified_role.value if r.verified_role else None,
+            }
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "validate_role_separation", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def list_model_roles() -> str:
+    """Return the full role inventory. Used by ROLE-INVENTORY.md render
+    and by retro when auditing drift.
+    """
+    try:
+        _log_mcp_health("ok", "list_model_roles")
+        return json.dumps(
+            {
+                "inventory": _role_inventory(),
+                "rollup": _agents_by_role(),
+            }
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "list_model_roles", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── v3.2.0 Sprint 3 — AC leaf schema (③) ──────────────────────
+
+
+@mcp.tool()
+async def validate_ac_leaf(leaf_json: str, stage: str) -> str:
+    """Validate one AC leaf against its required fields for the given
+    pipeline stage (interview / seed / design / build / qa).
+
+    Returns `{"issues": [...]}`. Empty list means valid.
+    """
+    try:
+        d = json.loads(leaf_json)
+        leaf = ACLeaf.from_dict(d)
+        stage_enum = ACStage(stage)
+        issues = _validate_leaf_core(leaf, stage=stage_enum)
+        _log_mcp_health("ok", "validate_ac_leaf")
+        return json.dumps(
+            {
+                "issues": [
+                    {"field": i.field, "code": i.code, "message": i.message}
+                    for i in issues
+                ]
+            }
+        )
+    except ValueError as e:
+        _log_mcp_health("fail", "validate_ac_leaf", str(e))
+        return json.dumps({"error": f"bad input: {e}"})
+    except Exception as e:
+        _log_mcp_health("fail", "validate_ac_leaf", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def compute_parallel_safety(leaves_json: str) -> str:
+    """Compute parallel_safety for a batch of leaves. Input is a JSON
+    list of leaf dicts (must have `id`, `likely_files`, `shared_resources`).
+
+    Returns `{"safety": {"AC-1.1": true, ...}}`.
+    """
+    try:
+        rows = json.loads(leaves_json)
+        leaves = [ACLeaf.from_dict(r) for r in rows]
+        safety = _compute_parallel_safety(leaves)
+        _log_mcp_health("ok", "compute_parallel_safety")
+        return json.dumps({"safety": safety})
+    except Exception as e:
+        _log_mcp_health("fail", "compute_parallel_safety", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── v3.2.0 Sprint 4 — Interview (②) + narrate ─────────────────
+
+
+@mcp.tool()
+async def compute_seed_readiness(
+    dimensions_json: str,
+    samvil_tier: str = "standard",
+) -> str:
+    """Compute the multi-dimensional seed_readiness score (T1).
+
+    `dimensions_json` is a JSON object with keys `intent_clarity`,
+    `constraint_clarity`, `ac_testability`, `lifecycle_coverage`,
+    `decision_boundary` (values in [0, 1]).
+    """
+    try:
+        dims = json.loads(dimensions_json)
+        score = _compute_seed_readiness_core(dims, samvil_tier=samvil_tier)
+        _log_mcp_health("ok", "compute_seed_readiness")
+        return json.dumps(score.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "compute_seed_readiness", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def resolve_interview_level(
+    requested: str,
+    project_prompt: str = "",
+    solution_type: str = "",
+    samvil_tier: str = "standard",
+    provider_router_ready: bool = False,
+) -> str:
+    """Turn `auto` into a concrete level via PAL (T6) and downgrade
+    `max` if ④ routing isn't ready.
+    """
+    try:
+        lvl = _resolve_level(
+            requested,
+            project_prompt=project_prompt or None,
+            solution_type=solution_type or None,
+            samvil_tier=samvil_tier,
+            provider_router_ready=provider_router_ready,
+        )
+        techs = [t.value for t in _techniques_for_level(lvl)]
+        _log_mcp_health("ok", "resolve_interview_level")
+        return json.dumps({"level": lvl.value, "techniques": techs})
+    except ValueError as e:
+        _log_mcp_health("fail", "resolve_interview_level", str(e))
+        return json.dumps({"error": str(e)})
+    except Exception as e:
+        _log_mcp_health("fail", "resolve_interview_level", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def meta_probe_prompt(phase: str, answers_summary: str) -> str:
+    """Build the T2 Meta Self-Probe prompt. Caller runs the LLM and pipes
+    the raw response into `meta_probe_parse`.
+    """
+    try:
+        prompt = _build_meta_prompt(phase=phase, answers_summary=answers_summary)
+        _log_mcp_health("ok", "meta_probe_prompt")
+        return json.dumps({"prompt": prompt})
+    except Exception as e:
+        _log_mcp_health("fail", "meta_probe_prompt", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def meta_probe_parse(raw: str) -> str:
+    """Parse the T2 LLM response. Returns
+    `{"blind_spots": [...], "followups": [...]}`."""
+    try:
+        out = _parse_meta_result(raw)
+        _log_mcp_health("ok", "meta_probe_parse")
+        return json.dumps(out)
+    except Exception as e:
+        _log_mcp_health("fail", "meta_probe_parse", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def confidence_followup(
+    answer: str, confidence: int, low_threshold: int = 2
+) -> str:
+    """Return a tacit-extraction follow-up when confidence ≤ threshold,
+    or `{"followup": null}` when high enough.
+    """
+    try:
+        q = _confidence_follow_up(
+            answer=answer, confidence=confidence, low_threshold=low_threshold
+        )
+        _log_mcp_health("ok", "confidence_followup")
+        return json.dumps({"followup": q})
+    except Exception as e:
+        _log_mcp_health("fail", "confidence_followup", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def scenario_simulation(features_json: str) -> str:
+    """Run the T4 scenario simulation. Returns a list of steps with any
+    contradictions found."""
+    try:
+        features = json.loads(features_json)
+        steps = _scenario_simulate(features=features)
+        _log_mcp_health("ok", "scenario_simulation")
+        from dataclasses import asdict
+
+        return json.dumps({"steps": [asdict(s) for s in steps]})
+    except Exception as e:
+        _log_mcp_health("fail", "scenario_simulation", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def adversarial_prompt(summary: str, samvil_tier: str = "standard") -> str:
+    """Build the T5 adversarial interviewer prompt."""
+    try:
+        prompt = _build_adv_prompt(summary=summary, samvil_tier=samvil_tier)
+        _log_mcp_health("ok", "adversarial_prompt")
+        return json.dumps({"prompt": prompt})
+    except Exception as e:
+        _log_mcp_health("fail", "adversarial_prompt", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def narrate_build_prompt(project_root: str = ".", since: str = "") -> str:
+    """Assemble the narrate context and build the Compressor prompt.
+
+    Returns `{"prompt": "...", "context_summary": "..."}`. Caller runs
+    the LLM and pipes the response through `narrate_parse`.
+    """
+    try:
+        ctx = _build_narrate_context(project_root, since=since or None)
+        prompt = _build_narrate_prompt(ctx)
+        _log_mcp_health("ok", "narrate_build_prompt")
+        return json.dumps(
+            {"prompt": prompt, "context_summary": ctx.to_summary()}
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "narrate_build_prompt", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def narrate_parse(raw: str) -> str:
+    """Parse a narrate response. Returns `{"narrative": {...},
+    "markdown": "..."}`."""
+    try:
+        n = _parse_narrative(raw)
+        _log_mcp_health("ok", "narrate_parse")
+        return json.dumps(
+            {
+                "narrative": {
+                    "what_happened": n.what_happened,
+                    "where_stuck": n.where_stuck,
+                    "next_actions": n.next_actions,
+                },
+                "markdown": n.to_markdown(),
+            }
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "narrate_parse", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── v3.2.0 Sprint 5a — Jurisdiction (⑦) + Retro (⑧) ──────────
+
+
+@mcp.tool()
+async def check_jurisdiction(
+    action_description: str = "",
+    command: str = "",
+    filenames_json: str = "[]",
+    diff_text: str = "",
+) -> str:
+    """Return jurisdiction (ai / external / user) for a candidate action.
+
+    Strictest-wins resolution. Callers branch on the verdict — AI
+    autonomous, External lookup required, or User explicit confirmation.
+    """
+    try:
+        filenames = json.loads(filenames_json or "[]")
+        v = _check_jurisdiction_core(
+            action_description=action_description,
+            command=command,
+            filenames=filenames,
+            diff_text=diff_text,
+        )
+        _log_mcp_health("ok", "check_jurisdiction")
+        return json.dumps(v.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "check_jurisdiction", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def loop_should_stop(
+    last_failure_signature: str,
+    failure_history_json: str,
+    ac_mutation_needed: bool = False,
+    seed_contradiction: bool = False,
+    irreversible_next: bool = False,
+    model_confidence_below: bool = False,
+) -> str:
+    """Auto-stop checker. Returns `{"stop": bool, "reason": "..."}`."""
+    try:
+        history = json.loads(failure_history_json or "[]")
+        stop, reason = _loop_should_stop(
+            last_failure_signature=last_failure_signature,
+            failure_history=history,
+            ac_mutation_needed=ac_mutation_needed,
+            seed_contradiction=seed_contradiction,
+            irreversible_next=irreversible_next,
+            model_confidence_below=model_confidence_below,
+        )
+        _log_mcp_health("ok", "loop_should_stop")
+        return json.dumps({"stop": stop, "reason": reason})
+    except Exception as e:
+        _log_mcp_health("fail", "loop_should_stop", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def retro_load(path: str) -> str:
+    """Load a retro report. Returns the serialized dict form."""
+    try:
+        r = _load_retro(path)
+        _log_mcp_health("ok", "retro_load")
+        return json.dumps(r.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "retro_load", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def retro_save(path: str, report_json: str) -> str:
+    """Persist a retro report to disk (YAML preferred, JSON fallback)."""
+    try:
+        data = json.loads(report_json)
+        r = _retro_from_dict(data)
+        _save_retro(r, path)
+        _log_mcp_health("ok", "retro_save")
+        return json.dumps({"ok": True, "path": str(path)})
+    except Exception as e:
+        _log_mcp_health("fail", "retro_save", str(e))
+        return json.dumps({"error": str(e)})
+
+
+def _retro_from_dict(d: dict) -> _RetroReport:
+    # Thin wrapper so callers can pass plain dicts.
+    from .retro_v3_2 import _from_dict  # local import to avoid leaking name
+
+    return _from_dict(d)
+
+
+@mcp.tool()
+async def experiment_record_run(
+    path: str,
+    experiment_id: str,
+    verdict: str,
+    value_seen: str = "",
+    note: str = "",
+    source: str = "dogfood",
+) -> str:
+    """Append an ExperimentRun to the named experiment in the retro file.
+
+    `value_seen` is a string — callers JSON-encode scalars if needed.
+    Re-saves the file atomically after the append.
+    """
+    try:
+        report = _load_retro(path)
+        target = next(
+            (e for e in report.policy_experiments if e.id == experiment_id),
+            None,
+        )
+        if target is None:
+            return json.dumps(
+                {"error": f"experiment {experiment_id!r} not in {path}"}
+            )
+        import datetime as _dt
+
+        target.record_run(
+            _ExperimentRun(
+                ts=_dt.datetime.now(_dt.timezone.utc).isoformat(),
+                value_seen=value_seen,
+                verdict=verdict,
+                note=note,
+                source=source,
+            )
+        )
+        _save_retro(report, path)
+        _log_mcp_health("ok", "experiment_record_run")
+        return json.dumps(
+            {
+                "ok": True,
+                "run_count": len(target.results),
+                "should_promote": target.should_promote(),
+            }
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "experiment_record_run", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def experiment_promote(
+    path: str, experiment_id: str, supersedes_json: str = "[]"
+) -> str:
+    """Attempt to promote an experiment to adopted_policies. Returns the
+    new AdoptedPolicy dict or `{"error": ...}` if preconditions fail."""
+    try:
+        supersedes = json.loads(supersedes_json or "[]")
+        report = _load_retro(path)
+        adopted = _retro_promote(report, experiment_id, supersedes=supersedes)
+        if adopted is None:
+            return json.dumps(
+                {"error": "promotion blocked (not found, already terminal, or not enough runs)"}
+            )
+        _save_retro(report, path)
+        from dataclasses import asdict
+
+        _log_mcp_health("ok", "experiment_promote")
+        return json.dumps(asdict(adopted))
+    except Exception as e:
+        _log_mcp_health("fail", "experiment_promote", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def experiment_reject(
+    path: str, experiment_id: str, reason: str
+) -> str:
+    """Move an experiment to rejected_policies."""
+    try:
+        report = _load_retro(path)
+        r = _retro_reject(report, experiment_id, reason=reason)
+        if r is None:
+            return json.dumps(
+                {"error": "rejection blocked (not found or already terminal)"}
+            )
+        _save_retro(report, path)
+        from dataclasses import asdict
+
+        _log_mcp_health("ok", "experiment_reject")
+        return json.dumps(asdict(r))
+    except Exception as e:
+        _log_mcp_health("fail", "experiment_reject", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── v3.2.0 Sprint 5b — Stagnation (⑩) + Consensus (⑨) ─────────
+
+
+@mcp.tool()
+async def stagnation_evaluate(input_json: str) -> str:
+    """Run the stagnation detector on a per-cycle snapshot.
+
+    Input shape matches `StagnationInput` — see
+    `mcp/samvil_mcp/stagnation_v3_2.py` for fields.
+    """
+    try:
+        data = json.loads(input_json or "{}")
+        inp = StagnationInput(**data)
+        v = _stagnation_evaluate(inp)
+        _log_mcp_health("ok", "stagnation_evaluate")
+        return json.dumps(v.to_dict())
+    except TypeError as e:
+        # Unknown fields in input_json → user error, not a 500.
+        _log_mcp_health("fail", "stagnation_evaluate", str(e))
+        return json.dumps({"error": f"bad input shape: {e}"})
+    except Exception as e:
+        _log_mcp_health("fail", "stagnation_evaluate", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def lateral_propose(subject: str, verdict_json: str) -> str:
+    """Build the lateral-diagnosis prompt for a stagnation=HIGH subject.
+
+    `verdict_json` is the `StagnationVerdict.to_dict()` output.
+    """
+    try:
+        from .stagnation_v3_2 import StagnationVerdict
+
+        data = json.loads(verdict_json)
+        v = StagnationVerdict(**data)
+        prompt = _lateral_prompt(subject=subject, verdict=v)
+        _log_mcp_health("ok", "lateral_propose")
+        return json.dumps({"prompt": prompt})
+    except Exception as e:
+        _log_mcp_health("fail", "lateral_propose", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def consensus_trigger(input_json: str) -> str:
+    """Detect whether a dispute should invoke consensus.
+
+    Input shape matches `DisputeInput`. Output:
+      {"triggers": [...], "should_invoke": bool, "reason": "..."}
+    """
+    try:
+        data = json.loads(input_json or "{}")
+        inp = DisputeInput(**data)
+        d = _detect_dispute(inp)
+        _log_mcp_health("ok", "consensus_trigger")
+        return json.dumps(d.to_dict())
+    except TypeError as e:
+        _log_mcp_health("fail", "consensus_trigger", str(e))
+        return json.dumps({"error": f"bad input shape: {e}"})
+    except Exception as e:
+        _log_mcp_health("fail", "consensus_trigger", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def consensus_reviewer_prompt(
+    subject: str, triggers_json: str, context: str = ""
+) -> str:
+    """Build the Reviewer prompt for a dispute."""
+    try:
+        triggers = json.loads(triggers_json or "[]")
+        p = _consensus_reviewer_prompt(
+            subject=subject, triggers=triggers, context=context
+        )
+        _log_mcp_health("ok", "consensus_reviewer_prompt")
+        return json.dumps({"prompt": p})
+    except Exception as e:
+        _log_mcp_health("fail", "consensus_reviewer_prompt", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def consensus_judge_prompt(
+    subject: str, triggers_json: str, reviewer_position: str
+) -> str:
+    """Build the Judge prompt using the Reviewer's position."""
+    try:
+        triggers = json.loads(triggers_json or "[]")
+        p = _consensus_judge_prompt(
+            subject=subject,
+            triggers=triggers,
+            reviewer_position=reviewer_position,
+        )
+        _log_mcp_health("ok", "consensus_judge_prompt")
+        return json.dumps({"prompt": p})
+    except Exception as e:
+        _log_mcp_health("fail", "consensus_judge_prompt", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def council_deprecation_warning() -> str:
+    """Return the one-line deprecation notice for v3.1 `--council` users."""
+    _log_mcp_health("ok", "council_deprecation_warning")
+    return json.dumps({"warning": COUNCIL_DEPRECATION_WARNING})
+
+
+# ── v3.2.0 Sprint 6 — Migration (⑫) + Budget (⑬) ──────────────
+
+
+@mcp.tool()
+async def migrate_plan(project_root: str = ".") -> str:
+    """Return the v3.1 → v3.2 migration plan without writing."""
+    try:
+        plan = _plan_migration(project_root)
+        _log_mcp_health("ok", "migrate_plan")
+        return json.dumps(plan.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "migrate_plan", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def migrate_apply(project_root: str = ".", dry_run: bool = False) -> str:
+    """Run the migration. `dry_run=true` only prints the plan."""
+    try:
+        plan = _apply_migration(project_root, dry_run=dry_run)
+        _log_mcp_health("ok", "migrate_apply")
+        return json.dumps(plan.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "migrate_apply", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def budget_status(
+    samvil_tier: str,
+    consumed_json: str,
+    project_root: str = ".",
+    exempt_consensus: bool = True,
+    consensus_cost_json: str = "",
+) -> str:
+    """Return BudgetStatus as JSON.
+
+    `consumed_json`: {"wall_time_minutes": 5, "llm_calls": 20, "estimated_cost_usd": 0.3}
+    """
+    try:
+        budget_path = Path(project_root) / ".samvil" / "performance_budget.yaml"
+        budget = _load_budget(budget_path if budget_path.exists() else None)
+        consumed = Consumption(**json.loads(consumed_json or "{}"))
+        consensus_cost = None
+        if consensus_cost_json:
+            consensus_cost = Consumption(**json.loads(consensus_cost_json))
+        status = _budget_evaluate_status(
+            budget=budget,
+            samvil_tier=samvil_tier,
+            consumed=consumed,
+            exempt_consensus=exempt_consensus,
+            consensus_cost=consensus_cost,
+        )
+        _log_mcp_health("ok", "budget_status")
+        return json.dumps(status.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "budget_status", str(e))
         return json.dumps({"error": str(e)})
 
 

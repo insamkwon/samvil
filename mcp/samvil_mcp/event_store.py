@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     project_name TEXT NOT NULL,
     seed_version INTEGER DEFAULT 1,
     current_stage TEXT DEFAULT 'interview',
-    agent_tier TEXT DEFAULT 'standard',
+    samvil_tier TEXT DEFAULT 'standard',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -49,9 +49,20 @@ CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_name);
 CREATE INDEX IF NOT EXISTS idx_seed_versions_session ON seed_versions(session_id, version);
 """
 
-# Migration: add token_count column to existing events tables
+# In-place migrations for already-initialized DBs. Each statement is wrapped
+# in try/except OperationalError at runtime, so idempotency is "try and
+# ignore the already-applied error" rather than a version table. Keep the
+# list short and strictly additive.
+#
+# - token_count column: added in v0.8.0.
+# - samvil_tier rename: v3.2 glossary sweep. Old column name was the v3.1
+#   field that actually held samvil_tier values (minimal/standard/...).
+#   The rename aligns the DB with the settled vocabulary. The literal old
+#   name must appear in the ALTER TABLE statement below, so both comment
+#   and SQL are glossary-allow anchors.
 _MIGRATIONS = [
     "ALTER TABLE events ADD COLUMN token_count INTEGER DEFAULT NULL",
+    "ALTER TABLE sessions RENAME COLUMN agent_tier TO samvil_tier",  # glossary-allow: rename source
 ]
 
 
@@ -81,19 +92,19 @@ class EventStore:
 
     # ── Sessions ──────────────────────────────────────────
 
-    async def create_session(self, project_name: str, agent_tier: str = "standard") -> Session:
+    async def create_session(self, project_name: str, samvil_tier: str = "standard") -> Session:
         session = Session(
             id=_uuid(),
             project_name=project_name,
-            agent_tier=agent_tier,
+            samvil_tier=samvil_tier,
             created_at=_now(),
             updated_at=_now(),
         )
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("BEGIN")
             await db.execute(
-                "INSERT INTO sessions (id, project_name, seed_version, current_stage, agent_tier, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (session.id, session.project_name, session.seed_version, session.current_stage, session.agent_tier, session.created_at, session.updated_at),
+                "INSERT INTO sessions (id, project_name, seed_version, current_stage, samvil_tier, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (session.id, session.project_name, session.seed_version, session.current_stage, session.samvil_tier, session.created_at, session.updated_at),
             )
             await db.commit()
         return session
@@ -110,7 +121,7 @@ class EventStore:
                 project_name=row["project_name"],
                 seed_version=row["seed_version"],
                 current_stage=Stage(row["current_stage"]),
-                agent_tier=row["agent_tier"],
+                samvil_tier=row["samvil_tier"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -130,7 +141,7 @@ class EventStore:
                 project_name=row["project_name"],
                 seed_version=row["seed_version"],
                 current_stage=Stage(row["current_stage"]),
-                agent_tier=row["agent_tier"],
+                samvil_tier=row["samvil_tier"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -148,7 +159,7 @@ class EventStore:
                     project_name=r["project_name"],
                     seed_version=r["seed_version"],
                     current_stage=Stage(r["current_stage"]),
-                    agent_tier=r["agent_tier"],
+                    samvil_tier=r["samvil_tier"],
                     created_at=r["created_at"],
                     updated_at=r["updated_at"],
                 )

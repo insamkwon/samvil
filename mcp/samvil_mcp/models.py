@@ -81,7 +81,7 @@ class Session:
     project_name: str
     seed_version: int = 1
     current_stage: Stage = Stage.INTERVIEW
-    agent_tier: str = "standard"
+    samvil_tier: str = "standard"
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 

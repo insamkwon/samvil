@@ -27,7 +27,7 @@ async def test_create_and_get_session(store: EventStore):
     session = await store.create_session("test-app", "standard")
     assert session.id
     assert session.project_name == "test-app"
-    assert session.agent_tier == "standard"
+    assert session.samvil_tier == "standard"
     assert session.current_stage == Stage.INTERVIEW
 
     fetched = await store.get_session(session.id)

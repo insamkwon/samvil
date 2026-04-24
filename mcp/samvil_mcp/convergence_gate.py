@@ -1,11 +1,16 @@
-"""Convergence Gate — 5 independent gates (v2.5.0, Ouroboros #03).
+"""Convergence Gate — 5 independent `evolve_checks` (v2.5.0, Ouroboros #03).
 
-Prevents "blind convergence" in Evolve by requiring ALL 5 gates to pass:
-  1. Eval Gate — overall score ≥ 0.7 AND final_approved
-  2. Per-AC Gate — all ACs passing (mode='all') or majority (mode='majority')
-  3. Regression Gate — no AC regressed from prior cycles
-  4. Evolution Gate — at least one actual mutation occurred (evolved_count > 0)
-  5. Validation Gate — validation not skipped/errored
+Per v3.2 glossary: these are **evolve_checks**, not "gates". The word
+``gate`` is reserved for the 8 stage gates in §3.⑥. The class is still
+called `ConvergenceGate` for source-compat with v3.1 callers; the module
+docstring, event log labels, and docs use the new name.
+
+Prevents "blind convergence" in Evolve by requiring ALL 5 evolve_checks to pass:
+  1. Eval check — overall score ≥ 0.7 AND final_approved
+  2. Per-AC check — all ACs passing (mode='all') or majority (mode='majority')
+  3. Regression check — no AC regressed from prior cycles
+  4. Evolution check — at least one actual mutation occurred (evolved_count > 0)
+  5. Validation check — validation not skipped/errored
 
 Implements Manifesto v3 P5 Regression Intolerance + proof-of-progress philosophy.
 """
@@ -156,7 +161,7 @@ def check_all_gates(
     history: list[dict],
     config: GateConfig | None = None,
 ) -> ConvergenceVerdict:
-    """Run all 5 gates. Return ConvergenceVerdict."""
+    """Run all 5 evolve_checks. Return ConvergenceVerdict."""
     config = config or GateConfig()
 
     gates = [
