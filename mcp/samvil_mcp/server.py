@@ -113,6 +113,10 @@ from .gates import (
     load_config as _load_gate_config,
     should_force_user_decision as _should_force_user_decision,
 )
+from .host import (
+    chain_strategy as _host_chain_strategy,
+    resolve_host_capability as _resolve_host_capability,
+)
 from .model_role import (
     ModelRole,
     agents_by_role as _agents_by_role,
@@ -817,6 +821,38 @@ async def complete_stage(session_id: str, stage: str, verdict: str) -> str:
     except Exception as e:
         _log_mcp_health("fail", "complete_stage", str(e))
         return json.dumps({"status": "error", "error": str(e)})
+
+
+# ── Host Capability (v3.3) ───────────────────────────────────
+
+
+@mcp.tool()
+async def resolve_host_capability(host_name: str = "") -> str:
+    """Return host capability data for Claude Code, Codex CLI, OpenCode, or generic."""
+    try:
+        cap = _resolve_host_capability(host_name)
+        _log_mcp_health("ok", "resolve_host_capability")
+        return json.dumps(cap.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "resolve_host_capability", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def host_chain_strategy(host_name: str = "") -> str:
+    """Return the recommended next-skill chaining mechanism for a host."""
+    try:
+        cap = _resolve_host_capability(host_name)
+        strategy = _host_chain_strategy(cap)
+        _log_mcp_health("ok", "host_chain_strategy")
+        return json.dumps({
+            "host": cap.name,
+            "chain_via": strategy,
+            "file_marker": ".samvil/next-skill.json",
+        })
+    except Exception as e:
+        _log_mcp_health("fail", "host_chain_strategy", str(e))
+        return json.dumps({"error": str(e)})
 
 
 # ── Seed version tools ────────────────────────────────────────
