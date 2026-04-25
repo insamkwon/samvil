@@ -434,7 +434,7 @@ Ask user: **"Council recommends these changes. Apply them? (yes / no / I'll edit
 ### If HOLD
 Present all findings. Wait for user direction.
 
-## Step 6: Write decisions.log
+## Step 6: Write decisions.log + Decision ADRs
 
 For each CHALLENGE or REJECT verdict, append to `~/dev/<project>/decisions.log`:
 
@@ -456,6 +456,31 @@ For each CHALLENGE or REJECT verdict, append to `~/dev/<project>/decisions.log`:
 ```
 
 If decisions.log already exists, read it first and append (don't overwrite).
+
+Then promote each appended decision row to a PM-readable ADR:
+
+```
+mcp__samvil_mcp__promote_council_decision(
+  project_root="<absolute project root>",
+  decision_json='<single decisions.log row as JSON>'
+)
+```
+
+Expected output:
+
+```json
+{
+  "status": "ok",
+  "adr": {
+    "id": "adr_council_d001",
+    "status": "accepted"
+  },
+  "path": "<project>/.samvil/decisions/adr_council_d001.md"
+}
+```
+
+If MCP is unavailable, keep `decisions.log` as the fallback source of truth and
+continue. Do not block Council completion only because ADR promotion failed.
 
 ## Step 6b: MCP Event (필수)
 
@@ -491,7 +516,8 @@ Invoke the Skill tool with skill: `samvil-design`
    { "id": "d001", "gate": "A", "round": 2, "agent": "<name>", "decision": "<text>", "reason": "<text>", "severity": "MINOR|BLOCKING", "binding": true, "applied": true, "timestamp": "<ISO 8601>" }
    ```
    Append only — never overwrite or delete existing entries.
-5. **Round 1 debate points**: Stored as `round1_debate_points` JSON (consensus/debate/blind_spots) for Round 2 injection and Consensus Score calculation.
+5. **Decision ADRs**: Best-effort call `promote_council_decision` for each appended decision row so `.samvil/decisions/*.md` stays readable by PMs.
+6. **Round 1 debate points**: Stored as `round1_debate_points` JSON (consensus/debate/blind_spots) for Round 2 injection and Consensus Score calculation.
 
 ## Anti-Patterns
 
@@ -511,6 +537,7 @@ Invoke the Skill tool with skill: `samvil-design`
 6. **User checkpoint before applying changes** — never auto-modify seed without approval
 7. **Consensus Score ≥ 60% required** — below threshold, always present to user for decision
 8. **Preserve all dissenting opinions** — record in Devil's Advocate section and decisions.log even when overruled
+9. **Decision ADR promotion is best-effort** — failed MCP promotion must be logged/mentioned, but must not erase decisions.log or block handoff
 
 **TaskUpdate**: "Council" task를 `completed`로 설정
 ## Chain (Runtime-specific)
