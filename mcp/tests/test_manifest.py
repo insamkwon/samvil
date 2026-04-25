@@ -279,3 +279,69 @@ def test_discover_modules_populates_public_api(tmp_path):
 
     modules = discover_modules(tmp_path)
     assert modules[0].public_api == ["signIn"]
+
+
+def test_extract_public_api_handles_interface_enum_type(tmp_path):
+    """interface, enum, type, async function are surfaced."""
+    mod = tmp_path / "src" / "x"
+    mod.mkdir(parents=True)
+    (mod / "index.ts").write_text(
+        "export interface Foo { bar: string }\n"
+        "export enum Color { Red, Blue }\n"
+        "export type ID = string;\n"
+        "export async function fetchUser() { return null; }\n"
+    )
+    from samvil_mcp.manifest import extract_public_api
+    api = extract_public_api(mod)
+    assert set(api) == {"Foo", "Color", "ID", "fetchUser"}
+
+
+def test_extract_public_api_handles_export_type_reexport(tmp_path):
+    """`export type { Foo } from '...'` is parsed like a regular re-export."""
+    mod = tmp_path / "src" / "x"
+    mod.mkdir(parents=True)
+    (mod / "index.ts").write_text("export type { User, Session } from './types';\n")
+    from samvil_mcp.manifest import extract_public_api
+    api = extract_public_api(mod)
+    assert set(api) == {"User", "Session"}
+
+
+def test_extract_public_api_strips_comments(tmp_path):
+    """Names inside line/block comments must not leak into the API list."""
+    mod = tmp_path / "src" / "x"
+    mod.mkdir(parents=True)
+    (mod / "index.ts").write_text(
+        "// export const TODO_REMOVE = 1;\n"
+        "/* export const fake = 2; */\n"
+        "export const real = 3;\n"
+    )
+    from samvil_mcp.manifest import extract_public_api
+    api = extract_public_api(mod)
+    assert "real" in api
+    assert "TODO_REMOVE" not in api
+    assert "fake" not in api
+
+
+def test_extract_public_api_handles_alias_and_dedup(tmp_path):
+    """`a as b` extracts b; duplicates collapse with order preserved."""
+    mod = tmp_path / "src" / "x"
+    mod.mkdir(parents=True)
+    (mod / "index.ts").write_text(
+        "export { default as MyComp } from './comp';\n"
+        "export { foo } from './a';\n"
+        "export { foo } from './b';\n"
+    )
+    from samvil_mcp.manifest import extract_public_api
+    api = extract_public_api(mod)
+    # MyComp first (alias), then foo once (dedup), no second foo
+    assert api == ["MyComp", "foo"]
+
+
+def test_extract_public_api_index_tsx_fallback(tmp_path):
+    """When index.ts is absent, index.tsx is parsed instead."""
+    mod = tmp_path / "src" / "Page"
+    mod.mkdir(parents=True)
+    (mod / "index.tsx").write_text("export default function Page() { return null; }\n")
+    from samvil_mcp.manifest import extract_public_api
+    api = extract_public_api(mod)
+    assert "default" in api

@@ -177,22 +177,28 @@ def discover_modules(project_root: Path | str) -> list[ModuleEntry]:
 
 
 _RE_NAMED_REEXPORT = re.compile(
-    r"export\s*\{([^}]+)\}\s*from\s*['\"][^'\"]+['\"]\s*;?"
+    r"export\s+(?:type\s+)?\{([^}]+)\}\s*from\s*['\"][^'\"]+['\"]\s*;?"
 )
 _RE_DIRECT_NAMED_EXPORT = re.compile(
-    r"export\s+(?:const|function|class|let|var)\s+(\w+)"
+    r"export\s+(?:async\s+)?(?:const|function|class|let|var|interface|enum|type)\s+(\w+)"
 )
 _RE_DEFAULT_EXPORT = re.compile(r"export\s+default\b")
 
 
 def extract_public_api(module_dir: Path) -> list[str]:
-    """Parse module's index.ts to extract exported names.
+    """Parse module's index.ts (or index.tsx fallback) to extract exported names.
 
     Best-effort regex. Catches:
       - export { a, b as c } from './x';
-      - export const X = ...
-      - export function foo() {}
+      - export type { Foo } from './types';
+      - export const|function|class|let|var|interface|enum|type X
+      - export async function fn() {}
       - export default <anything>  → 'default'
+
+    Note: ``export * from './x'`` is intentionally not parsed in Phase 1
+    (whole-namespace re-exports require an AST resolver — Phase 2 work).
+    Comments are stripped as a best-effort pre-pass; pathological cases
+    (comments inside strings, nested block comments) may still leak.
     """
     index = module_dir / "index.ts"
     if not index.exists():
@@ -201,6 +207,13 @@ def extract_public_api(module_dir: Path) -> list[str]:
         return []
 
     text = index.read_text(encoding="utf-8")
+
+    # Strip line and block comments to avoid phantom names from commented-out code.
+    # Best-effort: not a JS lexer, so /* nested */ or comments inside strings may slip.
+    # Phase 2 AST parser will replace this entirely.
+    text = re.sub(r"//[^\n]*", "", text)
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+
     names: list[str] = []
 
     for match in _RE_NAMED_REEXPORT.finditer(text):
