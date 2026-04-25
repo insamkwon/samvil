@@ -96,6 +96,15 @@ from .narrate import (
     build_narrate_prompt as _build_narrate_prompt,
     parse_narrative as _parse_narrative,
 )
+from .orchestrator import (
+    OrchestratorError,
+    StageEvent as _OrchestratorStageEvent,
+    complete_stage_plan as _complete_stage_plan,
+    get_next_stage as _orchestrator_get_next_stage,
+    get_orchestration_state as _orchestrator_get_state,
+    should_skip_stage as _orchestrator_should_skip_stage,
+    stage_can_proceed as _orchestrator_stage_can_proceed,
+)
 from .event_store import EventStore
 from .gates import (
     DEFAULT_CONFIG as GATE_DEFAULT_CONFIG,
@@ -668,6 +677,146 @@ async def session_status(session_id: str) -> str:
         "total_events": len(events),
         "total_tokens": total_tokens if total_tokens > 0 else None,
     })
+
+
+# ── Orchestrator (v3.3) ───────────────────────────────────────
+
+
+def _events_to_orchestrator(events: list[Event]) -> list[_OrchestratorStageEvent]:
+    # EventStore returns newest first; orchestrator status is chronological.
+    ordered = sorted(events, key=lambda event: event.timestamp)
+    return [
+        _OrchestratorStageEvent(
+            event_type=event.data.get("event_type_raw", event.event_type.value),
+            stage=event.stage.value,
+            data=event.data,
+            timestamp=event.timestamp,
+        )
+        for event in ordered
+    ]
+
+
+async def _session_and_events(session_id: str) -> tuple[Session | None, list[_OrchestratorStageEvent]]:
+    store = await get_store()
+    session = await store.get_session(session_id)
+    if session is None:
+        return None, []
+    events = await store.get_events(session_id, limit=1000)
+    return session, _events_to_orchestrator(events)
+
+
+@mcp.tool()
+async def get_next_stage(current: str, samvil_tier: str) -> str:
+    """Return the next non-skipped stage for a tier."""
+    try:
+        next_stage = _orchestrator_get_next_stage(current, samvil_tier)
+        _log_mcp_health("ok", "get_next_stage")
+        return json.dumps({"next_stage": next_stage})
+    except OrchestratorError as e:
+        _log_mcp_health("fail", "get_next_stage", str(e))
+        return json.dumps({"error": str(e), "next_stage": None})
+
+
+@mcp.tool()
+async def should_skip_stage(stage: str, samvil_tier: str) -> str:
+    """Return whether a stage should be skipped for a tier."""
+    try:
+        skip = _orchestrator_should_skip_stage(stage, samvil_tier)
+        _log_mcp_health("ok", "should_skip_stage")
+        return json.dumps({"skip": skip})
+    except OrchestratorError as e:
+        _log_mcp_health("fail", "should_skip_stage", str(e))
+        return json.dumps({"error": str(e), "skip": None})
+
+
+@mcp.tool()
+async def stage_can_proceed(session_id: str, target_stage: str) -> str:
+    """Return whether target_stage can proceed for a session."""
+    try:
+        session, events = await _session_and_events(session_id)
+        if session is None:
+            return json.dumps({
+                "can_proceed": False,
+                "blockers": [f"session {session_id} not found"],
+            })
+        result = _orchestrator_stage_can_proceed(session, events, target_stage)
+        _log_mcp_health("ok", "stage_can_proceed")
+        return json.dumps(result)
+    except OrchestratorError as e:
+        _log_mcp_health("fail", "stage_can_proceed", str(e))
+        return json.dumps({"can_proceed": False, "blockers": [str(e)]})
+
+
+@mcp.tool()
+async def get_orchestration_state(session_id: str) -> str:
+    """Return event-derived orchestration progress for a session."""
+    try:
+        session, events = await _session_and_events(session_id)
+        if session is None:
+            return json.dumps({"error": f"session {session_id} not found"})
+        state = _orchestrator_get_state(session, events)
+        _log_mcp_health("ok", "get_orchestration_state")
+        return json.dumps(state)
+    except OrchestratorError as e:
+        _log_mcp_health("fail", "get_orchestration_state", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def complete_stage(session_id: str, stage: str, verdict: str) -> str:
+    """Complete a stage by emitting an event and posting a gate claim."""
+    try:
+        store = await get_store()
+        session = await store.get_session(session_id)
+        if session is None:
+            return json.dumps({"status": "error", "error": f"session {session_id} not found"})
+
+        plan = _complete_stage_plan(session, stage, verdict)
+        event_data = dict(plan["event_data"])
+        try:
+            event_type_enum = EventType(plan["event_type"])
+        except ValueError:
+            event_type_enum = EventType.STAGE_CHANGE
+            event_data.setdefault("event_type_raw", plan["event_type"])
+        stage_enum = Stage(plan["event_stage"])
+
+        event = await store.save_event(
+            session_id=session_id,
+            event_type=event_type_enum,
+            stage=stage_enum,
+            data=event_data,
+        )
+        await store.update_session_stage(session_id, stage_enum)
+
+        claim_id = None
+        project_path = _resolve_project_path(session.project_name)
+        if project_path is not None:
+            claim_data = plan["claim"]
+            ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
+            claim = ledger.post(
+                type=claim_data["type"],
+                subject=claim_data["subject"],
+                statement=claim_data["statement"],
+                authority_file=claim_data["authority_file"],
+                claimed_by="agent:orchestrator-agent",
+                evidence=claim_data["evidence"],
+                meta=claim_data["meta"],
+            )
+            claim_id = claim.claim_id
+
+        _log_mcp_health("ok", "complete_stage")
+        return json.dumps({
+            "status": "ok",
+            "event_id": event.id,
+            "claim_id": claim_id,
+            "next_stage": plan["next_stage"],
+        })
+    except (OrchestratorError, ClaimLedgerError) as e:
+        _log_mcp_health("fail", "complete_stage", str(e))
+        return json.dumps({"status": "error", "error": str(e)})
+    except Exception as e:
+        _log_mcp_health("fail", "complete_stage", str(e))
+        return json.dumps({"status": "error", "error": str(e)})
 
 
 # ── Seed version tools ────────────────────────────────────────
