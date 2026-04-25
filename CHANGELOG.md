@@ -4,6 +4,44 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.8.0] — 2026-04-26 — Real Runtime Dogfood
+
+Phase 6 of the multi-host SAMVIL architecture. This release moves beyond
+file-only dogfood by proving generated apps can build, start a local HTTP
+runtime, and serve domain-specific user-visible content.
+
+### Added
+- `scripts/phase6-real-runtime-dogfood.py`, a network-free runtime harness
+  that creates SaaS dashboard and browser game projects in temp dirs.
+- `mcp/tests/test_phase6_real_runtime_dogfood.py`, a pytest wrapper that keeps
+  the runtime dogfood in the full regression suite.
+- Phase 6 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.8-phase6.md`.
+
+### Covered
+- `npm run build` for both generated runtime projects.
+- `npm start` for both generated runtime projects.
+- Localhost `/health` checks and served HTML response validation.
+- SaaS dashboard runtime markers: KPI, date filter, chart, table, empty state.
+- Browser game runtime markers: canvas, ArrowRight input, score, collision,
+  restart.
+- Domain Pack matching, Pattern Registry lookup, Codebase Manifest generation,
+  run report generation, status JSON rendering, and zero retro candidates.
+
+### Dogfood
+- `saas-dashboard-runtime`: pack=`saas-dashboard`, confidence=high,
+  patterns=2, modules=1, events=16, retro=0.
+- `browser-game-runtime`: pack=`browser-game`, confidence=high, patterns=1,
+  modules=1, events=16, retro=0.
+
+### Verified
+- Full test suite: 801 passed.
+- MCP server import smoke: 133 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.7.0] — 2026-04-26 — Dual Full-Chain Dogfood
 
 Phase 5 of the multi-host SAMVIL architecture. This release adds a
