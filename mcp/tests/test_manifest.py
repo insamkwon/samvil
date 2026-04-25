@@ -141,3 +141,60 @@ def test_write_manifest_is_atomic(tmp_path):
     assert rebuilt.project_name == "v2"
     # No leftover .tmp files
     assert not list((tmp_path / ".samvil").glob("*.tmp"))
+
+
+def test_discover_modules_finds_src_subdirs(tmp_path):
+    """discover_modules treats each direct child of src/ as a module."""
+    (tmp_path / "src" / "auth").mkdir(parents=True)
+    (tmp_path / "src" / "auth" / "index.ts").write_text("export const signIn = () => {};")
+    (tmp_path / "src" / "billing").mkdir(parents=True)
+    (tmp_path / "src" / "billing" / "stripe.ts").write_text("// stripe")
+
+    from samvil_mcp.manifest import discover_modules
+
+    modules = discover_modules(tmp_path)
+    names = {m.name for m in modules}
+    assert names == {"auth", "billing"}
+
+
+def test_discover_modules_skips_node_modules(tmp_path):
+    """discover_modules ignores node_modules / .next / .git."""
+    (tmp_path / "src" / "auth").mkdir(parents=True)
+    (tmp_path / "src" / "auth" / "index.ts").write_text("// auth")
+    (tmp_path / "node_modules" / "react").mkdir(parents=True)
+    (tmp_path / ".next" / "cache").mkdir(parents=True)
+    (tmp_path / ".git" / "objects").mkdir(parents=True)
+
+    from samvil_mcp.manifest import discover_modules
+
+    modules = discover_modules(tmp_path)
+    assert len(modules) == 1
+    assert modules[0].name == "auth"
+
+
+def test_discover_modules_collects_files(tmp_path):
+    """Each ModuleEntry.files lists the .ts/.tsx/.js files it owns."""
+    auth = tmp_path / "src" / "auth"
+    auth.mkdir(parents=True)
+    (auth / "index.ts").write_text("export {};")
+    (auth / "session.ts").write_text("export {};")
+    (auth / "session.test.ts").write_text("// test")
+    (auth / "README.md").write_text("# auth")  # should be skipped
+
+    from samvil_mcp.manifest import discover_modules
+
+    modules = discover_modules(tmp_path)
+    assert len(modules) == 1
+    files = modules[0].files
+    assert "src/auth/index.ts" in files
+    assert "src/auth/session.ts" in files
+    # Test files are kept (regression suite needs them); markdown not
+    assert "src/auth/session.test.ts" in files
+    assert "src/auth/README.md" not in files
+
+
+def test_discover_modules_returns_empty_when_no_src(tmp_path):
+    """No src/ directory → no modules (graceful, not error)."""
+    from samvil_mcp.manifest import discover_modules
+
+    assert discover_modules(tmp_path) == []

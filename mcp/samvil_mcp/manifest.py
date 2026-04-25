@@ -113,3 +113,51 @@ def read_manifest(project_root: Path | str) -> Manifest | None:
         return Manifest.from_dict(d)
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
+
+
+_IGNORE_DIRS = frozenset({
+    "node_modules", ".next", ".git", ".turbo", "dist",
+    "build", ".samvil", "__pycache__", ".venv", "venv",
+})
+
+_CODE_EXTS = frozenset({".ts", ".tsx", ".js", ".jsx", ".py"})
+
+
+def discover_modules(project_root: Path | str) -> list[ModuleEntry]:
+    """Walk src/ and treat each direct subdirectory as a module.
+
+    For projects without src/ this returns []. Caller decides whether to
+    fall back to root-level scan (out of scope for v3.3 — we assume src/).
+    """
+    root = Path(project_root)
+    src = root / "src"
+    if not src.is_dir():
+        return []
+
+    modules: list[ModuleEntry] = []
+    now = _now_iso()
+
+    for child in sorted(src.iterdir()):
+        if not child.is_dir() or child.name in _IGNORE_DIRS:
+            continue
+
+        files: list[str] = []
+        for f in sorted(child.rglob("*")):
+            if not f.is_file():
+                continue
+            if any(p in _IGNORE_DIRS for p in f.parts):
+                continue
+            if f.suffix not in _CODE_EXTS:
+                continue
+            files.append(str(f.relative_to(root)))
+
+        modules.append(
+            ModuleEntry(
+                name=child.name,
+                path=str(child.relative_to(root)),
+                files=files,
+                last_updated=now,
+            )
+        )
+
+    return modules
