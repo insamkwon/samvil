@@ -4,6 +4,54 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.10.0] — 2026-04-26 — Real App Inspection Gate
+
+Phase 8 of the multi-host SAMVIL architecture. This release promotes browser
+dogfood from "the generated app runs" to "the generated app passes a
+repeatable user-visible inspection gate."
+
+### Added
+- `mcp/samvil_mcp/inspection.py` for deterministic inspection report
+  generation, persistence, reading, and markdown rendering.
+- Inspection MCP tools: `build_inspection_report`, `read_inspection_report`,
+  and `render_inspection_report`.
+- `scripts/samvil-status.py` inspection summary in both human and JSON output.
+- `scripts/phase8-real-app-inspection.py`, a real browser inspection dogfood
+  that creates Vite React SaaS dashboard and Vite Phaser game projects.
+- `mcp/tests/test_phase8_real_app_inspection.py`, an opt-in pytest wrapper
+  enabled with `SAMVIL_RUN_BROWSER_DOGFOOD=1`.
+- Phase 8 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.10-phase8.md`.
+
+### Covered
+- Real `npm install`, `npm run build`, Vite dev server, and Playwright Chromium.
+- Desktop and mobile viewport inspection for both generated apps.
+- Screenshot artifact existence.
+- Console error checks.
+- Layout overflow checks.
+- Dashboard heading/KPI/filter/chart/table inspection.
+- Game canvas nonblank pixel, keyboard movement, score increase, and restart
+  reset inspection.
+- Domain Pack matching, Pattern Registry lookup, Codebase Manifest generation,
+  run report generation, status JSON rendering, and zero retro candidates.
+
+### Dogfood
+- `vite-saas-dashboard-inspection`: pack=`saas-dashboard`, confidence=high,
+  checks=12, failed=0, console_errors=0, screenshots=2, viewports=2, retro=0.
+- `vite-phaser-game-inspection`: pack=`browser-game`, confidence=high,
+  checks=14, failed=0, console_errors=0, screenshots=2, viewports=2, retro=0.
+
+### Verified
+- Direct real app inspection dogfood: PASS.
+- Opt-in pytest inspection dogfood:
+  `SAMVIL_RUN_BROWSER_DOGFOOD=1 ./.venv/bin/python -m pytest tests/test_phase8_real_app_inspection.py -q`: 1 passed.
+- Full test suite: 809 passed.
+- MCP server import smoke: 136 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.9.1] — 2026-04-26 — Telemetry Classifier Patch
 
 Patch release for v3.9 browser dogfood. This fixes a telemetry classifier false

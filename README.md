@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.9.1`
+# SAMVIL — AI 바이브코딩 하네스 `v3.10.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.10.0 "Real App Inspection Gate"** — v3.9의 browser runtime dogfood 위에 사용자 눈높이의 inspection report, desktop/mobile viewport evidence, console/overflow/interaction gate를 얹은 릴리스입니다.
+
+> **v3.10.0 주요 추가** (2026-04-26):
+> - **Inspection report contract** — `.samvil/inspection-evidence.json`을 `.samvil/inspection-report.json`으로 정규화하고 pass/fail summary와 markdown context를 생성.
+> - **Inspection MCP/status surface** — `build_inspection_report`, `read_inspection_report`, `render_inspection_report` MCP 도구와 `samvil-status.py` inspection summary 추가.
+> - **Real app inspection dogfood** — `scripts/phase8-real-app-inspection.py`가 Vite React SaaS dashboard와 Vite Phaser game을 실제 install/build/dev-server/Playwright로 검수.
+> - **User-visible quality checks** — desktop/mobile viewport, screenshot artifact, console error 0, layout overflow 0, dashboard filter interaction, game canvas/input/score/restart를 확인.
+> - **검증**: 809 unit tests · 136 MCP tools · real app inspection dogfood PASS · opt-in browser inspection pytest PASS · pre-commit-check PASS.
 
 **v3.9.1 "Telemetry Classifier Patch"** — v3.9 browser dogfood 중 발견한 `install_started` 오분류를 닫은 안정화 패치입니다.
 
