@@ -8,7 +8,7 @@ without reading the whole repository.
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "project_name": "todo-app",
   "project_root": "/Users/me/dev/todo-app",
   "generated_at": "2026-04-25T10:00:00Z",
@@ -25,17 +25,21 @@ without reading the whole repository.
 
 ## Module Entry
 
-Each direct child directory under `src/` becomes one module:
+Each direct child directory under `src/` becomes one module. Code files directly
+under `src/` become a synthetic `src` module:
 
 ```json
 {
   "name": "auth",
   "path": "src/auth",
   "public_api": ["signIn", "signOut"],
-  "depends_on": [],
-  "summary": "",
+  "depends_on": ["ui"],
+  "summary": "Owns 2 code files. Exports signIn, signOut. Depends on ui.",
+  "summary_generated_by": "manifest:heuristic-v1",
+  "summary_generated_at": "2026-04-25T10:00:00Z",
   "files": ["src/auth/index.ts", "src/auth/session.ts"],
   "convention_tags": [],
+  "confidence_tags": ["imports:regex", "summary:heuristic"],
   "last_updated": "2026-04-25T10:00:00Z"
 }
 ```
@@ -44,7 +48,7 @@ Each direct child directory under `src/` becomes one module:
 
 | Field | Source | Notes |
 |---|---|---|
-| `schema_version` | constant | fixed at `1.0` during v3.3 Phase 1 |
+| `schema_version` | constant | `1.1` includes Manifest v2 intelligence fields |
 | `project_name` | caller input | human-readable project name |
 | `project_root` | caller input | preserved as provided by the caller |
 | `generated_at` | manifest generation time | UTC, second precision |
@@ -54,10 +58,13 @@ Each direct child directory under `src/` becomes one module:
 | `name` | directory name under `src/` | unique within the project |
 | `path` | filesystem walk | relative to `project_root` |
 | `public_api` | best-effort regex over `index.ts` / `index.tsx` | manual override and AST parsing are Phase 2 work |
-| `depends_on` | planned import analysis | empty in Phase 1 |
-| `summary` | planned AI-generated summary | empty in Phase 1 |
+| `depends_on` | regex import analysis | internal module names only |
+| `summary` | deterministic heuristic summary | generated from files, public API, and dependencies |
+| `summary_generated_by` | summary generator id | currently `manifest:heuristic-v1` |
+| `summary_generated_at` | manifest generation time | matches `generated_at` |
 | `files` | recursive module walk | `.ts`, `.tsx`, `.js`, `.jsx`, `.py` only |
-| `convention_tags` | planned module-level pattern detection | empty in Phase 1 |
+| `convention_tags` | future module-level pattern detection | currently empty |
+| `confidence_tags` | source confidence labels | e.g. `imports:regex`, `summary:heuristic` |
 | `last_updated` | manifest generation time | UTC, second precision |
 
 ## Module Discovery
@@ -66,6 +73,7 @@ Phase 1 intentionally uses a narrow and deterministic rule:
 
 - if `src/` does not exist, `modules` is empty
 - each direct directory under `src/` is a module
+- direct code files under `src/` are grouped into a synthetic `src` module
 - nested directories are included as files inside their parent module
 - symlinked directories are not followed
 - dot-prefixed and generated directories are ignored
@@ -104,6 +112,27 @@ Inferred from well-known config-file presence:
 
 If multiple framework config files exist, the first matching rule wins.
 
+## Import Graph
+
+Schema `1.1` adds conservative internal dependency detection:
+
+- TypeScript/JavaScript: static `import`, `export ... from`, `require()`, and
+  dynamic `import()` string specifiers
+- Python: `import x` and `from x import y`
+- relative imports such as `../ui/button`
+- common aliases such as `@/auth/session`, `src/auth/session`, and bare
+  module-root imports like `auth/session`
+
+External packages are ignored. The extractor is regex-based and marks results
+with `imports:regex`; it is intended for context shaping, not build enforcement.
+
+## Module Summaries
+
+Each module gets a deterministic summary, `summary_generated_by`, and
+`summary_generated_at`. The summary is intentionally heuristic so it can run
+inside MCP without an LLM call. AI-generated or manual summaries can be added in
+later releases using distinct confidence tags.
+
 ## MCP Tools
 
 - `build_and_persist_manifest(project_root, project_name)` builds and writes
@@ -124,12 +153,10 @@ MCP wrappers reject empty or nonexistent `project_root` values. This prevents
 accidental writes to the MCP server's current working directory and avoids
 creating unexpected project trees.
 
-## Out Of Scope In Phase 1
+## Out Of Scope
 
 - root-level module discovery for projects without `src/`
 - namespace re-export resolution
 - AST-backed public API extraction
-- cross-module dependency graph
-- module summaries
-- module-level convention tags
+- module-level convention tags beyond confidence metadata
 - brownfield reverse-ADR generation

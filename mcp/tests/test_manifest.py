@@ -37,8 +37,8 @@ def test_module_entry_roundtrip():
 
 
 def test_manifest_schema_version_constant():
-    """Schema version is fixed at 1.0 for Phase 1."""
-    assert MANIFEST_SCHEMA_VERSION == "1.0"
+    """Schema version tracks Manifest v2 intelligence fields."""
+    assert MANIFEST_SCHEMA_VERSION == "1.1"
 
 
 def test_manifest_to_dict_includes_all_fields():
@@ -165,6 +165,82 @@ def test_render_for_context_includes_file_preview():
 
     assert "`src/App.tsx`" in text
     assert "`src/main.tsx`" in text
+
+
+def test_build_manifest_infers_ts_import_dependencies(tmp_path):
+    """Relative and @/ alias imports become internal module dependencies."""
+    (tmp_path / "tsconfig.json").write_text("{}")
+    (tmp_path / "src" / "auth").mkdir(parents=True)
+    (tmp_path / "src" / "auth" / "index.ts").write_text(
+        "import { Button } from '../ui/button';\nexport const signIn = () => Button;\n"
+    )
+    (tmp_path / "src" / "ui").mkdir(parents=True)
+    (tmp_path / "src" / "ui" / "button.tsx").write_text(
+        "export function Button() { return null; }\n"
+    )
+    (tmp_path / "src" / "features").mkdir(parents=True)
+    (tmp_path / "src" / "features" / "todos.tsx").write_text(
+        "import { signIn } from '@/auth';\nimport { Button } from '../ui/button';\n"
+    )
+
+    from samvil_mcp.manifest import build_manifest
+
+    manifest = build_manifest(tmp_path, project_name="todo-app")
+    by_name = {m.name: m for m in manifest.modules}
+
+    assert by_name["auth"].depends_on == ["ui"]
+    assert by_name["features"].depends_on == ["auth", "ui"]
+    assert by_name["ui"].depends_on == []
+    assert by_name["features"].summary_generated_by == "manifest:heuristic-v1"
+    assert by_name["features"].summary_generated_at == manifest.generated_at
+    assert "imports:regex" in by_name["features"].confidence_tags
+    assert "summary:heuristic" in by_name["features"].confidence_tags
+
+
+def test_build_manifest_infers_python_relative_dependencies(tmp_path):
+    """Python relative imports are resolved across src child modules."""
+    (tmp_path / "src" / "workers").mkdir(parents=True)
+    (tmp_path / "src" / "workers" / "job.py").write_text(
+        "from ..shared.config import load_config\n"
+    )
+    (tmp_path / "src" / "shared").mkdir(parents=True)
+    (tmp_path / "src" / "shared" / "config.py").write_text("def load_config(): pass\n")
+
+    from samvil_mcp.manifest import build_manifest
+
+    manifest = build_manifest(tmp_path, project_name="automation")
+    by_name = {m.name: m for m in manifest.modules}
+
+    assert by_name["workers"].depends_on == ["shared"]
+
+
+def test_nextjs_smoke_dependency_graph_across_three_modules(tmp_path):
+    """Next-style project smoke: app -> feature -> shared modules."""
+    (tmp_path / "next.config.ts").write_text("export default {};")
+    (tmp_path / "tsconfig.json").write_text("{}")
+    for module in ("app", "features", "auth", "ui"):
+        (tmp_path / "src" / module).mkdir(parents=True)
+    (tmp_path / "src" / "app" / "page.tsx").write_text(
+        "import { Todos } from '@/features/todos';\n"
+        "import { getSession } from '@/auth/session';\n"
+    )
+    (tmp_path / "src" / "features" / "todos.tsx").write_text(
+        "import { getSession } from '@/auth/session';\n"
+        "import { Button } from '../ui/button';\n"
+    )
+    (tmp_path / "src" / "auth" / "session.ts").write_text("export const getSession = () => null;\n")
+    (tmp_path / "src" / "ui" / "button.tsx").write_text("export const Button = () => null;\n")
+
+    from samvil_mcp.manifest import build_manifest
+
+    manifest = build_manifest(tmp_path, project_name="next-smoke")
+    by_name = {m.name: m for m in manifest.modules}
+
+    assert manifest.conventions["framework"] == "next"
+    assert by_name["app"].depends_on == ["auth", "features"]
+    assert by_name["features"].depends_on == ["auth", "ui"]
+    assert by_name["auth"].summary
+    assert "summary:heuristic" in by_name["auth"].confidence_tags
 
 
 def test_discover_modules_finds_src_subdirs(tmp_path):
@@ -495,7 +571,7 @@ def test_build_manifest_full_integration(tmp_path):
 
     m = build_manifest(tmp_path, project_name="todo-app")
 
-    assert m.schema_version == "1.0"
+    assert m.schema_version == "1.1"
     assert m.project_name == "todo-app"
     assert m.project_root == str(tmp_path)
     assert len(m.modules) == 1
@@ -517,7 +593,7 @@ def test_build_manifest_bare_project_returns_empty_modules_and_conventions(tmp_p
     assert m.modules == []
     assert m.conventions == {}
     assert m.public_apis == {}
-    assert m.schema_version == "1.0"
+    assert m.schema_version == "1.1"
     assert m.project_name == "bare"
     assert m.project_root == str(tmp_path)
     assert m.generated_at != ""

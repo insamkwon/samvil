@@ -22,11 +22,11 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-MANIFEST_SCHEMA_VERSION = "1.0"
+MANIFEST_SCHEMA_VERSION = "1.1"
 
 
 def _now_iso() -> str:
@@ -42,8 +42,11 @@ class ModuleEntry:
     public_api: list[str] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
     summary: str = ""
+    summary_generated_by: str = ""
+    summary_generated_at: str = ""
     files: list[str] = field(default_factory=list)
     convention_tags: list[str] = field(default_factory=list)
+    confidence_tags: list[str] = field(default_factory=list)
     last_updated: str = ""
 
 
@@ -203,6 +206,13 @@ _RE_DIRECT_NAMED_EXPORT = re.compile(
     r"export\s+(?:async\s+)?(?:const|function|class|let|var|interface|enum|type)\s+(\w+)"
 )
 _RE_DEFAULT_EXPORT = re.compile(r"export\s+default\b")
+_RE_JS_IMPORT = re.compile(
+    r"(?:import|export)\s+(?:[^'\";]*?\s+from\s*)?['\"]([^'\"]+)['\"]"
+)
+_RE_JS_REQUIRE = re.compile(r"require\(\s*['\"]([^'\"]+)['\"]\s*\)")
+_RE_JS_DYNAMIC_IMPORT = re.compile(r"import\(\s*['\"]([^'\"]+)['\"]\s*\)")
+_RE_PY_FROM_IMPORT = re.compile(r"^\s*from\s+([.\w]+)\s+import\s+", re.M)
+_RE_PY_IMPORT = re.compile(r"^\s*import\s+([\w.]+)", re.M)
 
 
 def extract_public_api(module_dir: Path) -> list[str]:
@@ -265,6 +275,103 @@ def extract_public_api(module_dir: Path) -> list[str]:
     return out
 
 
+def infer_module_dependencies(
+    project_root: Path | str,
+    module: ModuleEntry,
+    modules: list[ModuleEntry],
+) -> list[str]:
+    """Infer internal module dependencies from TS/JS/Python import strings.
+
+    This is intentionally regex-based and conservative. It resolves common
+    relative imports plus ``@/`` and ``src/`` aliases into ModuleEntry names.
+    External package imports are ignored.
+    """
+    root = Path(project_root)
+    deps: set[str] = set()
+    for rel_file in module.files:
+        path = root / rel_file
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for spec in _import_specs(text, path.suffix):
+            target = _resolve_import_target(root, path, spec)
+            if target is None:
+                continue
+            dep = _module_for_path(target, modules)
+            if dep and dep != module.name:
+                deps.add(dep)
+    return sorted(deps)
+
+
+def _import_specs(text: str, suffix: str) -> list[str]:
+    if suffix in {".ts", ".tsx", ".js", ".jsx"}:
+        specs = [m.group(1) for m in _RE_JS_IMPORT.finditer(text)]
+        specs.extend(m.group(1) for m in _RE_JS_REQUIRE.finditer(text))
+        specs.extend(m.group(1) for m in _RE_JS_DYNAMIC_IMPORT.finditer(text))
+        return specs
+    if suffix == ".py":
+        specs = [m.group(1) for m in _RE_PY_FROM_IMPORT.finditer(text)]
+        specs.extend(m.group(1) for m in _RE_PY_IMPORT.finditer(text))
+        return specs
+    return []
+
+
+def _resolve_import_target(root: Path, importer: Path, spec: str) -> Path | None:
+    if spec.startswith(("./", "../")):
+        return (importer.parent / spec).resolve()
+    if spec.startswith("."):
+        dot_count = len(spec) - len(spec.lstrip("."))
+        remainder = spec[dot_count:].replace(".", "/")
+        base = importer.parent
+        for _ in range(max(dot_count - 1, 0)):
+            base = base.parent
+        return base / remainder if remainder else base
+    if spec.startswith("@/"):
+        return root / "src" / spec[2:]
+    if spec.startswith("src/"):
+        return root / spec
+
+    first = spec.split(".", 1)[0].split("/", 1)[0]
+    if first:
+        candidate = root / "src" / first
+        if candidate.exists():
+            remainder = spec[len(first):].lstrip("./")
+            return candidate / remainder if remainder else candidate
+    return None
+
+
+def _module_for_path(target: Path, modules: list[ModuleEntry]) -> str | None:
+    target_text = str(target)
+    ordered = sorted(modules, key=lambda m: len(Path(m.path).parts), reverse=True)
+    for module in ordered:
+        module_path = str((Path(module.path)).as_posix())
+        # target may be absolute, so compare against both absolute suffix and
+        # relative path fragments. This avoids resolving the project root here.
+        if f"/{module_path}/" in target_text or target_text.endswith(f"/{module_path}"):
+            return module.name
+    return None
+
+
+def summarize_module(module: ModuleEntry, *, generated_at: str) -> ModuleEntry:
+    """Attach a deterministic heuristic summary and confidence metadata."""
+    pieces = [f"Owns {len(module.files)} code file{'s' if len(module.files) != 1 else ''}."]
+    if module.public_api:
+        pieces.append(f"Exports {', '.join(module.public_api[:5])}.")
+    if module.depends_on:
+        pieces.append(f"Depends on {', '.join(module.depends_on)}.")
+    else:
+        pieces.append("No internal module dependencies detected.")
+    tags = sorted(set(module.confidence_tags + ["imports:regex", "summary:heuristic"]))
+    return replace(
+        module,
+        summary=" ".join(pieces),
+        summary_generated_by="manifest:heuristic-v1",
+        summary_generated_at=generated_at,
+        confidence_tags=tags,
+    )
+
+
 _CONVENTION_RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
     # (names, key, value, kind) — kind ∈ {"file", "dir"}
     (("tsconfig.json",), "language", "typescript", "file"),
@@ -319,7 +426,20 @@ def build_manifest(project_root: Path | str, *, project_name: str) -> Manifest:
     the caller can ``Path(...).resolve()`` themselves if needed.
     """
     root = Path(project_root)
+    generated_at = _now_iso()
     modules = discover_modules(root)
+    modules_with_deps = [
+        replace(
+            module,
+            depends_on=infer_module_dependencies(root, module, modules),
+            confidence_tags=sorted(set(module.confidence_tags + ["imports:regex"])),
+        )
+        for module in modules
+    ]
+    modules = [
+        summarize_module(module, generated_at=generated_at)
+        for module in modules_with_deps
+    ]
     conventions = detect_conventions(root)
     public_apis = {m.name: list(m.public_api) for m in modules if m.public_api}
 
@@ -327,7 +447,7 @@ def build_manifest(project_root: Path | str, *, project_name: str) -> Manifest:
         schema_version=MANIFEST_SCHEMA_VERSION,
         project_name=project_name,
         project_root=str(root),
-        generated_at=_now_iso(),
+        generated_at=generated_at,
         modules=modules,
         conventions=conventions,
         public_apis=public_apis,
@@ -384,8 +504,14 @@ def render_for_context(
             lines.append(f"- Depends on: {', '.join(m.depends_on)}")
         if m.summary:
             lines.append(f"- Summary: {m.summary}")
+        if m.summary_generated_by:
+            lines.append(
+                f"- Summary source: {m.summary_generated_by} @ {m.summary_generated_at}"
+            )
         if m.convention_tags:
             lines.append(f"- Tags: {', '.join(m.convention_tags)}")
+        if m.confidence_tags:
+            lines.append(f"- Confidence: {', '.join(m.confidence_tags)}")
         if m.files:
             file_preview = ", ".join(f"`{path}`" for path in m.files[:8])
             if len(m.files) > 8:
