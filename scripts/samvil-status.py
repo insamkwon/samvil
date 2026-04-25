@@ -8,6 +8,7 @@ against local files only:
   .samvil/claims.jsonl        (ledger)
   .samvil/experiments.jsonl   (performance budget + initial-estimate tracking)
   .samvil/events.jsonl        (last activity)
+  .samvil/run-report.json     (v3.5 telemetry rollup, if present)
 
 Panes in MVP (other panes deferred to later sprints per §6.1):
   - Sprint + stage
@@ -54,6 +55,14 @@ def _load_jsonl(path: Path) -> list[dict]:
         except json.JSONDecodeError:
             continue
     return rows
+
+
+def _load_state(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "state.json") or _load_json(root / "project.state.json")
+
+
+def _load_run_report(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "run-report.json")
 
 
 def latest_gate_verdicts(claims: list[dict]) -> dict[str, dict]:
@@ -111,22 +120,31 @@ def budget_summary(state: dict) -> str:
 
 
 def render_human(root: Path) -> str:
-    state = _load_json(root / ".samvil" / "state.json")
+    state = _load_state(root)
+    report = _load_run_report(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
+    report_state = report.get("state", {}) or {}
+    report_claims = report.get("claims", {}) or {}
+    timeline = report.get("timeline", {}) or {}
+    health = report.get("mcp_health", {}) or {}
+    continuation = report.get("continuation", {}) or {}
 
     # v3.1 stored the field under the legacy name. Read both, preferring
     # the new one. After v3.3 the legacy branch is removed.
     samvil_tier = (
-        state.get("samvil_tier")
+        report_state.get("samvil_tier")
+        or state.get("samvil_tier")
         or state.get("agent_tier")  # glossary-allow: legacy state.json fallback
         or "standard"
     )
     sprint = state.get("sprint") or state.get("current_sprint") or "?"
-    stage = state.get("current_stage") or state.get("stage") or "?"
+    stage = report_state.get("current_stage") or state.get("current_stage") or state.get("stage") or "?"
 
     gate_verdicts = latest_gate_verdicts(claims)
     pending_claims = [c for c in claims if c.get("status") == "pending"]
+    pending_subjects = report_claims.get("pending_subjects")
+    pending_count = len(pending_subjects) if isinstance(pending_subjects, list) else len(pending_claims)
     obs_with, obs_total = experiment_coverage(experiments)
 
     lines: list[str] = []
@@ -135,9 +153,19 @@ def render_human(root: Path) -> str:
     lines.append(f"Sprint:  {sprint}")
     lines.append(f"Stage:   {stage}")
     lines.append(f"Tier:    {samvil_tier}")
+    if report:
+        lines.append(f"Report:  {report.get('generated_at') or '?'}")
     lines.append("")
     lines.append("Gate verdicts (latest):")
-    if not gate_verdicts:
+    report_gates = report_claims.get("latest_gate_verdicts") or []
+    if report_gates:
+        for gate in report_gates:
+            lines.append(
+                f"  {str(gate.get('subject','?')):<22} "
+                f"{str(gate.get('verdict','?')):<9} "
+                f"{str(gate.get('reason',''))[:60]}"
+            )
+    elif not gate_verdicts:
         lines.append("  (no gate_verdict claims recorded yet)")
     else:
         for g, v in sorted(gate_verdicts.items()):
@@ -147,7 +175,7 @@ def render_human(root: Path) -> str:
                 f"{meta.get('reason','')[:60]}"
             )
     lines.append("")
-    lines.append(f"Pending claims:    {len(pending_claims)}")
+    lines.append(f"Pending claims:    {pending_count}")
     if obs_total > 0:
         pct = obs_with / obs_total * 100.0
         lines.append(
@@ -160,33 +188,91 @@ def render_human(root: Path) -> str:
         )
     lines.append("")
     lines.append(f"Budget:            {budget_summary(state)}")
+    if report:
+        lines.append("")
+        lines.append("Run report:")
+        lines.append(
+            f"  Events:          {(report.get('events', {}) or {}).get('total', 0)} total"
+        )
+        lines.append(
+            "  Failures/retry:  "
+            f"{timeline.get('failure_count', 0)} failures, "
+            f"{timeline.get('retry_count', 0)} retries"
+        )
+        lines.append(
+            "  MCP health:      "
+            f"{health.get('failures', 0)} failures / "
+            f"{health.get('total', 0)} events"
+        )
+        if continuation.get("present"):
+            lines.append(
+                "  Continuation:    "
+                f"{continuation.get('from_stage')} -> {continuation.get('next_skill')}"
+            )
+        else:
+            lines.append("  Continuation:    (none)")
+        stages = timeline.get("stages") or []
+        if stages:
+            lines.append("  Stage timeline:")
+            for row in stages[:6]:
+                duration = row.get("duration_seconds")
+                duration_text = f"{duration:.1f}s" if isinstance(duration, (int, float)) else "?"
+                lines.append(
+                    f"    {str(row.get('stage','?')):<14} "
+                    f"{str(row.get('status','?')):<11} "
+                    f"{duration_text}"
+                )
     lines.append("")
-    lines.append(f"Next action:       {next_recommended_action(gate_verdicts)}")
+    lines.append(
+        "Next action:       "
+        f"{report.get('next_action') if report else next_recommended_action(gate_verdicts)}"
+    )
     return "\n".join(lines)
 
 
 def render_json(root: Path) -> str:
-    state = _load_json(root / ".samvil" / "state.json")
+    state = _load_state(root)
+    report = _load_run_report(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
-    samvil_tier = state.get("samvil_tier") or "standard"
+    report_state = report.get("state", {}) or {}
+    report_claims = report.get("claims", {}) or {}
+    timeline = report.get("timeline", {}) or {}
+    health = report.get("mcp_health", {}) or {}
+    continuation = report.get("continuation", {}) or {}
+    samvil_tier = report_state.get("samvil_tier") or state.get("samvil_tier") or "standard"
     gate_verdicts = latest_gate_verdicts(claims)
     pending = [c for c in claims if c.get("status") == "pending"]
+    pending_subjects = report_claims.get("pending_subjects")
+    pending_count = len(pending_subjects) if isinstance(pending_subjects, list) else len(pending)
     obs_with, obs_total = experiment_coverage(experiments)
     return json.dumps(
         {
             "root": str(root),
             "sprint": state.get("sprint"),
-            "stage": state.get("current_stage"),
+            "stage": report_state.get("current_stage") or state.get("current_stage"),
             "samvil_tier": samvil_tier,
-            "gate_verdicts_latest": gate_verdicts,
-            "pending_claims_count": len(pending),
+            "gate_verdicts_latest": report_claims.get("latest_gate_verdicts") or gate_verdicts,
+            "pending_claims_count": pending_count,
             "experiments": {
                 "total": obs_total,
                 "with_observations": obs_with,
                 "coverage_pct": (obs_with / obs_total * 100.0) if obs_total else 0.0,
             },
-            "next_recommended_action": next_recommended_action(gate_verdicts),
+            "run_report": {
+                "present": bool(report),
+                "generated_at": report.get("generated_at"),
+                "events_total": (report.get("events", {}) or {}).get("total", 0),
+                "failure_count": timeline.get("failure_count", 0),
+                "retry_count": timeline.get("retry_count", 0),
+                "mcp_failures": health.get("failures", 0),
+                "mcp_events_total": health.get("total", 0),
+                "continuation": continuation,
+                "stage_timeline": timeline.get("stages") or [],
+            },
+            "next_recommended_action": (
+                report.get("next_action") if report else next_recommended_action(gate_verdicts)
+            ),
         },
         ensure_ascii=False,
         indent=2,

@@ -80,6 +80,13 @@ project run. It is deterministic and file-only; no LLM call is required.
 - `derive_retro_observations(project_root, refresh=false, persist=false)`
 - `append_retro_observations(project_root, observations_json)`
 
+## Status Surface
+
+`scripts/samvil-status.py` reads `.samvil/run-report.json` when it exists and
+uses it as the preferred source for stage, tier, latest gate verdicts, pending
+claim count, MCP health, continuation, stage timeline, and next action. If no
+run report exists, the script keeps the legacy ledger-based fallback.
+
 ## Notes
 
 - Claims are collapsed to current state by `claim_id`.
