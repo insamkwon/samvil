@@ -9,9 +9,11 @@ tasks.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 ADR_STATUSES: tuple[str, ...] = ("proposed", "accepted", "superseded", "rejected")
@@ -28,6 +30,8 @@ _FRONTMATTER_KEYS: tuple[str, ...] = (
     "tags",
     "supersedes",
 )
+
+_ADR_ID_RE = re.compile(r"^adr_[A-Za-z0-9T_.-]+$")
 
 
 class DecisionLogError(ValueError):
@@ -47,6 +51,22 @@ def adr_id_for_title(title: str, *, ts: str | None = None) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
     slug = slug[:64].strip("-") or "decision"
     return f"adr_{compact_ts}_{slug}"
+
+
+def decision_dir(project_root: str | os.PathLike) -> Path:
+    """Return the project-local decision directory."""
+    return Path(project_root) / ".samvil" / "decisions"
+
+
+def adr_path(project_root: str | os.PathLike, adr_id: str) -> Path:
+    """Return the markdown path for an ADR id.
+
+    ADR ids are filenames, so reject path separators and traversal instead of
+    silently normalizing them.
+    """
+    if not _ADR_ID_RE.match(adr_id):
+        raise DecisionLogError(f"invalid ADR id: {adr_id!r}")
+    return decision_dir(project_root) / f"{adr_id}.md"
 
 
 @dataclass
@@ -170,6 +190,56 @@ def parse_adr_markdown(text: str) -> DecisionADR:
     data["supersession_reason"] = _section(body, "Supersession Reason")
 
     return DecisionADR.from_dict(data)
+
+
+def write_adr(adr: DecisionADR, project_root: str | os.PathLike) -> Path:
+    """Atomically write an ADR under `.samvil/decisions/`."""
+    target = adr_path(project_root, adr.adr_id)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(render_adr_markdown(adr), encoding="utf-8")
+    os.replace(tmp, target)
+    return target
+
+
+def read_adr(project_root: str | os.PathLike, adr_id: str) -> DecisionADR | None:
+    """Read a single ADR. Missing or malformed files return None."""
+    try:
+        path = adr_path(project_root, adr_id)
+    except DecisionLogError:
+        raise
+    if not path.exists():
+        return None
+    try:
+        return parse_adr_markdown(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, DecisionLogError):
+        return None
+
+
+def list_adrs(
+    project_root: str | os.PathLike,
+    *,
+    status: str | None = None,
+) -> list[DecisionADR]:
+    """List readable ADRs sorted by creation time, then id."""
+    if status is not None and status not in ADR_STATUSES:
+        raise DecisionLogError(f"status {status!r} not in whitelist {ADR_STATUSES}")
+
+    root = decision_dir(project_root)
+    if not root.exists():
+        return []
+
+    out: list[DecisionADR] = []
+    for path in sorted(root.glob("*.md")):
+        try:
+            adr = parse_adr_markdown(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, DecisionLogError):
+            continue
+        if status is not None and adr.status != status:
+            continue
+        out.append(adr)
+
+    return sorted(out, key=lambda adr: (adr.created_at, adr.adr_id))
 
 
 def _section(body: str, heading: str) -> str:

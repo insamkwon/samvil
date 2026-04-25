@@ -8,9 +8,14 @@ from samvil_mcp.decision_log import (
     ADR_STATUSES,
     DecisionADR,
     DecisionLogError,
+    adr_path,
     adr_id_for_title,
+    decision_dir,
+    list_adrs,
     parse_adr_markdown,
+    read_adr,
     render_adr_markdown,
+    write_adr,
 )
 
 
@@ -113,3 +118,86 @@ def test_parse_adr_markdown_roundtrip() -> None:
 def test_parse_adr_markdown_rejects_missing_frontmatter() -> None:
     with pytest.raises(DecisionLogError, match="frontmatter"):
         parse_adr_markdown("# Missing frontmatter")
+
+
+def test_write_adr_writes_under_samvil_decisions(tmp_path) -> None:
+    adr = DecisionADR(
+        adr_id="adr_2026-04-25T10-20-30_choose-api",
+        title="Choose API",
+        authors=["samvil-council"],
+        decision="Use dict output.",
+    )
+
+    path = write_adr(adr, tmp_path)
+
+    assert path == tmp_path / ".samvil" / "decisions" / f"{adr.adr_id}.md"
+    assert path.exists()
+    assert not path.with_suffix(".tmp").exists()
+    assert read_adr(tmp_path, adr.adr_id).decision == "Use dict output."
+
+
+def test_read_adr_returns_none_when_missing(tmp_path) -> None:
+    assert read_adr(tmp_path, "adr_missing") is None
+
+
+def test_read_adr_returns_none_when_corrupted(tmp_path) -> None:
+    path = adr_path(tmp_path, "adr_bad")
+    path.parent.mkdir(parents=True)
+    path.write_text("not an ADR", encoding="utf-8")
+
+    assert read_adr(tmp_path, "adr_bad") is None
+
+
+def test_list_adrs_sorted_by_created_at_then_id(tmp_path) -> None:
+    later = DecisionADR(
+        adr_id="adr_b",
+        title="B",
+        authors=["samvil-council"],
+        created_at="2026-04-25T10:20:31Z",
+    )
+    first = DecisionADR(
+        adr_id="adr_a",
+        title="A",
+        authors=["samvil-council"],
+        created_at="2026-04-25T10:20:30Z",
+    )
+    same_time = DecisionADR(
+        adr_id="adr_c",
+        title="C",
+        authors=["samvil-council"],
+        created_at="2026-04-25T10:20:30Z",
+    )
+    write_adr(later, tmp_path)
+    write_adr(same_time, tmp_path)
+    write_adr(first, tmp_path)
+
+    assert [adr.adr_id for adr in list_adrs(tmp_path)] == ["adr_a", "adr_c", "adr_b"]
+
+
+def test_list_adrs_filters_by_status(tmp_path) -> None:
+    write_adr(
+        DecisionADR(
+            adr_id="adr_accepted",
+            title="Accepted",
+            status="accepted",
+            authors=["samvil-council"],
+        ),
+        tmp_path,
+    )
+    write_adr(
+        DecisionADR(adr_id="adr_proposed", title="Proposed", authors=["user"]),
+        tmp_path,
+    )
+
+    assert [adr.adr_id for adr in list_adrs(tmp_path, status="accepted")] == [
+        "adr_accepted"
+    ]
+
+
+def test_decision_dir_is_project_local(tmp_path) -> None:
+    assert decision_dir(tmp_path) == tmp_path / ".samvil" / "decisions"
+
+
+def test_adr_path_rejects_path_traversal(tmp_path) -> None:
+    with pytest.raises(DecisionLogError, match="ADR id"):
+        adr_path(tmp_path, "../outside")
