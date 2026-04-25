@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -178,6 +179,48 @@ def get_domain_pack(pack_id: str) -> DomainPack | None:
     return None
 
 
+def match_domain_packs(seed: dict[str, Any]) -> list[dict[str, Any]]:
+    """Rank domain packs from deterministic seed fields and text signals."""
+    solution_type = str(seed.get("solution_type") or "").lower()
+    domain = str(seed.get("domain") or seed.get("app_domain") or "").lower()
+    text = _seed_text(seed)
+
+    matches: list[dict[str, Any]] = []
+    for pack in DOMAIN_PACKS:
+        score = 0
+        reasons: list[str] = []
+
+        if solution_type and solution_type in pack.solution_types:
+            score += 5
+            reasons.append(f"solution_type:{solution_type}")
+        if domain and domain == pack.domain:
+            score += 4
+            reasons.append(f"domain:{domain}")
+
+        signal_hits = [signal for signal in pack.signals if signal.lower() in text]
+        if signal_hits:
+            score += min(5, len(signal_hits))
+            reasons.append("signals:" + ",".join(signal_hits[:5]))
+
+        entity_hits = [entity for entity in pack.core_entities if entity.lower() in text]
+        if entity_hits:
+            score += min(3, len(entity_hits))
+            reasons.append("entities:" + ",".join(entity_hits[:3]))
+
+        if score <= 0:
+            continue
+        matches.append({
+            "pack_id": pack.pack_id,
+            "name": pack.name,
+            "domain": pack.domain,
+            "score": score,
+            "confidence": _confidence(score),
+            "reasons": reasons,
+        })
+
+    return sorted(matches, key=lambda row: (-int(row["score"]), str(row["pack_id"])))
+
+
 def render_domain_packs(packs: list[DomainPack], *, stage: str | None = None) -> str:
     lines = ["# Domain Packs", ""]
     for pack in packs:
@@ -217,3 +260,28 @@ def render_domain_packs(packs: list[DomainPack], *, stage: str | None = None) ->
             lines.append(f"- Sample data: {', '.join(pack.sample_data)}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _seed_text(seed: dict[str, Any]) -> str:
+    parts: list[str] = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, dict):
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(seed)
+    return " ".join(parts).lower()
+
+
+def _confidence(score: int) -> str:
+    if score >= 7:
+        return "high"
+    if score >= 3:
+        return "medium"
+    return "low"

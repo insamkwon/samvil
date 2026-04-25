@@ -77,6 +77,7 @@ from .pattern_registry import (
 from .domain_packs import (
     get_domain_pack as _get_domain_pack,
     list_domain_packs as _list_domain_packs,
+    match_domain_packs as _match_domain_packs,
     render_domain_packs as _render_domain_packs,
 )
 from .retro_v3_2 import (
@@ -3412,6 +3413,25 @@ def render_domain_context(
         }
     except Exception as e:
         _log_mcp_health("fail", "render_domain_context", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def match_domain_packs(seed_json: str) -> dict:
+    """Rank Domain Packs from deterministic seed fields and text signals."""
+    try:
+        seed = json.loads(seed_json)
+        if not isinstance(seed, dict):
+            return {"status": "error", "error": "seed_json must be an object"}
+        matches = _match_domain_packs(seed)
+        _log_mcp_health("ok", "match_domain_packs")
+        return {
+            "status": "ok",
+            "count": len(matches),
+            "matches": matches,
+        }
+    except Exception as e:
+        _log_mcp_health("fail", "match_domain_packs", str(e))
         return {"status": "error", "error": str(e)}
 
 

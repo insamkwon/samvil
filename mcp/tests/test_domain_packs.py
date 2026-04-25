@@ -3,6 +3,7 @@
 from samvil_mcp.domain_packs import (
     get_domain_pack,
     list_domain_packs,
+    match_domain_packs,
     render_domain_packs,
 )
 
@@ -35,3 +36,20 @@ def test_render_domain_packs_can_scope_to_stage():
     assert "QA focus" in text
     assert "Interview probes" not in text
     assert "Timezone boundaries" in text
+
+
+def test_match_domain_packs_ranks_by_solution_type_and_signals():
+    matches = match_domain_packs({
+        "solution_type": "dashboard",
+        "app_idea": "Admin metrics dashboard with reporting filters",
+        "features": ["KPI cards", "date range analytics"],
+    })
+
+    assert matches[0]["pack_id"] == "saas-dashboard"
+    assert matches[0]["confidence"] == "high"
+    assert any(reason.startswith("solution_type:") for reason in matches[0]["reasons"])
+    assert any(reason.startswith("signals:") for reason in matches[0]["reasons"])
+
+
+def test_match_domain_packs_returns_empty_for_unknown_seed():
+    assert match_domain_packs({"solution_type": "automation", "app_idea": "file renamer"}) == []

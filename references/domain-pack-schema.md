@@ -47,12 +47,20 @@ Domain Packs answer product-domain questions:
 - `list_domain_packs(solution_type?, domain?, stage?)`
 - `read_domain_pack(pack_id)`
 - `render_domain_context(solution_type?, domain?, stage?)`
+- `match_domain_packs(seed_json)`
 
 ## Notes
 
 - Packs are matched by `solution_types`, `domain`, `stage_focus`, and signals.
 - Pack content should stay concise enough to render into stage prompts.
 - Pack context is additive. It should not override explicit user requirements.
+
+## Matching
+
+`match_domain_packs(seed_json)` ranks packs deterministically using exact
+`solution_type`, exact `domain` / `app_domain`, text signal hits, and core
+entity hits across seed fields. The result includes `score`, `confidence`, and
+human-readable `reasons`.
 
 ## Built-in Packs
 

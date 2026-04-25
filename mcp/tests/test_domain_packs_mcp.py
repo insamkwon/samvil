@@ -1,7 +1,10 @@
 """MCP wrapper tests for Domain Packs."""
 
+import json
+
 from samvil_mcp.server import (
     list_domain_packs,
+    match_domain_packs,
     read_domain_pack,
     render_domain_context,
 )
@@ -36,3 +39,19 @@ def test_render_domain_context_tool_returns_stage_scoped_markdown():
     assert "browser-game" in result["context"]
     assert "QA focus" in result["context"]
     assert "Interview probes" not in result["context"]
+
+
+def test_match_domain_packs_tool_ranks_seed():
+    result = match_domain_packs(json.dumps({
+        "solution_type": "game",
+        "app_idea": "Player score game with collision and restart",
+    }))
+
+    assert result["status"] == "ok"
+    assert result["matches"][0]["pack_id"] == "browser-game"
+
+
+def test_match_domain_packs_tool_rejects_non_object():
+    result = match_domain_packs(json.dumps(["game"]))
+
+    assert result["status"] == "error"
