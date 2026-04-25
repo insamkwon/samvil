@@ -25,6 +25,17 @@ from .ac_leaf_schema import (
     validate_leaf as _validate_leaf_core,
 )
 from .claim_ledger import ClaimLedger, ClaimLedgerError
+from .decision_log import (
+    DecisionADR,
+    DecisionLogError,
+    adr_from_council_decision as _adr_from_council_decision,
+    adr_path as _decision_adr_path,
+    find_adrs_referencing as _find_adrs_referencing,
+    list_adrs as _list_decision_adrs,
+    read_adr as _read_decision_adr,
+    supersede_adr as _supersede_decision_adr,
+    write_adr as _write_decision_adr,
+)
 from .migrate_v3_2 import (
     apply_migration as _apply_migration,
     plan_migration as _plan_migration,
@@ -3068,6 +3079,183 @@ def refresh_manifest(project_root: str, project_name: str) -> dict:
         return result
     except Exception as e:
         _log_mcp_health("fail", "refresh_manifest", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+# ── Decision Log / ADR (v3.3) ────────────────────────────────────────
+
+
+def _decision_adr_from_json(adr_json: str) -> DecisionADR:
+    data = json.loads(adr_json)
+    if "adr_id" in data and "id" not in data:
+        data["id"] = data.pop("adr_id")
+    return DecisionADR.from_dict(data)
+
+
+def _write_decision_adr_impl(project_root: str, adr_json: str) -> dict:
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+
+    try:
+        adr = _decision_adr_from_json(adr_json)
+        path = _write_decision_adr(adr, project_root)
+        return {"status": "ok", "adr_id": adr.adr_id, "path": str(path)}
+    except (json.JSONDecodeError, KeyError, TypeError, DecisionLogError) as e:
+        return {"status": "error", "error": str(e)}
+
+
+def _read_decision_adr_impl(project_root: str, adr_id: str) -> dict:
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+
+    try:
+        path = _decision_adr_path(project_root, adr_id)
+    except DecisionLogError as e:
+        return {"status": "error", "error": str(e)}
+    if not path.exists():
+        return {"status": "missing"}
+
+    adr = _read_decision_adr(project_root, adr_id)
+    if adr is None:
+        return {"status": "corrupted", "path": str(path)}
+    return {"status": "ok", "adr": adr.to_dict()}
+
+
+def _list_decision_adrs_impl(project_root: str, status: str | None = None) -> dict:
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+
+    try:
+        adrs = _list_decision_adrs(project_root, status=status)
+    except DecisionLogError as e:
+        return {"status": "error", "error": str(e)}
+    return {
+        "status": "ok",
+        "count": len(adrs),
+        "adrs": [adr.to_dict() for adr in adrs],
+    }
+
+
+def _supersede_decision_adr_impl(
+    project_root: str,
+    old_id: str,
+    new_id: str,
+    reason: str,
+) -> dict:
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+
+    try:
+        adr = _supersede_decision_adr(project_root, old_id, new_id, reason)
+        return {"status": "ok", "adr": adr.to_dict()}
+    except DecisionLogError as e:
+        return {"status": "error", "error": str(e)}
+
+
+def _find_decision_adrs_referencing_impl(project_root: str, target: str) -> dict:
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+
+    try:
+        adr_ids = _find_adrs_referencing(project_root, target)
+        return {"status": "ok", "count": len(adr_ids), "adr_ids": adr_ids}
+    except DecisionLogError as e:
+        return {"status": "error", "error": str(e)}
+
+
+def _promote_council_decision_impl(project_root: str, decision_json: str) -> dict:
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+
+    try:
+        decision = json.loads(decision_json)
+        adr = _adr_from_council_decision(decision)
+        path = _write_decision_adr(adr, project_root)
+        return {"status": "ok", "adr": adr.to_dict(), "path": str(path)}
+    except (json.JSONDecodeError, TypeError, DecisionLogError) as e:
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def write_decision_adr(project_root: str, adr_json: str) -> dict:
+    """Write one decision ADR markdown file under `.samvil/decisions/`."""
+    try:
+        result = _write_decision_adr_impl(project_root, adr_json)
+        _log_mcp_health("ok", "write_decision_adr")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "write_decision_adr", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def read_decision_adr(project_root: str, adr_id: str) -> dict:
+    """Read one decision ADR by id."""
+    try:
+        result = _read_decision_adr_impl(project_root, adr_id)
+        _log_mcp_health("ok", "read_decision_adr")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "read_decision_adr", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def list_decision_adrs(project_root: str, status: str | None = None) -> dict:
+    """List decision ADRs, optionally filtered by status."""
+    try:
+        result = _list_decision_adrs_impl(project_root, status)
+        _log_mcp_health("ok", "list_decision_adrs")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "list_decision_adrs", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def supersede_decision_adr(
+    project_root: str,
+    old_id: str,
+    new_id: str,
+    reason: str,
+) -> dict:
+    """Mark an existing decision ADR as superseded by another ADR."""
+    try:
+        result = _supersede_decision_adr_impl(project_root, old_id, new_id, reason)
+        _log_mcp_health("ok", "supersede_decision_adr")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "supersede_decision_adr", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def find_decision_adrs_referencing(project_root: str, target: str) -> dict:
+    """Find ADR ids that mention target in evidence, tags, or body text."""
+    try:
+        result = _find_decision_adrs_referencing_impl(project_root, target)
+        _log_mcp_health("ok", "find_decision_adrs_referencing")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "find_decision_adrs_referencing", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def promote_council_decision(project_root: str, decision_json: str) -> dict:
+    """Promote a legacy council decision JSON row into an ADR markdown file."""
+    try:
+        result = _promote_council_decision_impl(project_root, decision_json)
+        _log_mcp_health("ok", "promote_council_decision")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "promote_council_decision", str(e))
         return {"status": "error", "error": str(e)}
 
 
