@@ -143,6 +143,30 @@ def test_write_manifest_is_atomic(tmp_path):
     assert not list((tmp_path / ".samvil").glob("*.tmp"))
 
 
+def test_render_for_context_includes_file_preview():
+    """Rendered context should expose representative files, not only module names."""
+    from samvil_mcp.manifest import render_for_context
+
+    manifest = Manifest(
+        schema_version="1.0",
+        project_name="proj",
+        project_root="/tmp/proj",
+        generated_at="2026-04-25T10:00:00Z",
+        modules=[
+            ModuleEntry(
+                name="src",
+                path="src",
+                files=["src/App.tsx", "src/main.tsx"],
+            )
+        ],
+    )
+
+    text = render_for_context(manifest)
+
+    assert "`src/App.tsx`" in text
+    assert "`src/main.tsx`" in text
+
+
 def test_discover_modules_finds_src_subdirs(tmp_path):
     """discover_modules treats each direct child of src/ as a module."""
     (tmp_path / "src" / "auth").mkdir(parents=True)
@@ -155,6 +179,34 @@ def test_discover_modules_finds_src_subdirs(tmp_path):
     modules = discover_modules(tmp_path)
     names = {m.name for m in modules}
     assert names == {"auth", "billing"}
+
+
+def test_discover_modules_includes_src_root_files(tmp_path):
+    """Small Vite/React apps often start with files directly under src/."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "App.tsx").write_text("export function App() { return null; }")
+    (tmp_path / "src" / "main.tsx").write_text("export {};")
+    (tmp_path / "src" / "styles.css").write_text("body {}")
+
+    from samvil_mcp.manifest import discover_modules
+
+    modules = discover_modules(tmp_path)
+    assert len(modules) == 1
+    assert modules[0].name == "src"
+    assert modules[0].path == "src"
+    assert modules[0].files == ["src/App.tsx", "src/main.tsx"]
+
+
+def test_discover_modules_combines_src_root_and_subdir_modules(tmp_path):
+    """Root src files and named child modules are both represented."""
+    (tmp_path / "src" / "auth").mkdir(parents=True)
+    (tmp_path / "src" / "App.tsx").write_text("export function App() { return null; }")
+    (tmp_path / "src" / "auth" / "index.ts").write_text("export const signIn = () => {};")
+
+    from samvil_mcp.manifest import discover_modules
+
+    modules = discover_modules(tmp_path)
+    assert [m.name for m in modules] == ["src", "auth"]
 
 
 def test_discover_modules_skips_node_modules(tmp_path):

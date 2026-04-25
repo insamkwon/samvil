@@ -127,10 +127,14 @@ _CODE_EXTS = frozenset({".ts", ".tsx", ".js", ".jsx", ".py"})
 
 
 def discover_modules(project_root: Path | str) -> list[ModuleEntry]:
-    """Walk src/ and treat each direct subdirectory as a module.
+    """Walk src/ and treat direct children as modules.
 
-    For projects without src/ this returns []. Caller decides whether to
-    fall back to root-level scan (out of scope for v3.3 — we assume src/).
+    Direct subdirectories become named modules. Root-level code files directly
+    under ``src/`` become a synthetic ``src`` module so small Vite/React-style
+    projects do not produce an empty manifest.
+
+    For projects without src/ this returns []. Caller decides whether to fall
+    back to root-level scan (out of scope for v3.3 — we assume src/).
 
     Symlinked directories are not followed (os.walk default).
     Broken symlinks are silently skipped (their is_file() check fails).
@@ -143,6 +147,22 @@ def discover_modules(project_root: Path | str) -> list[ModuleEntry]:
 
     modules: list[ModuleEntry] = []
     now = _now_iso()
+
+    root_files = sorted(
+        str(path.relative_to(root))
+        for path in src.iterdir()
+        if path.is_file() and path.suffix in _CODE_EXTS
+    )
+    if root_files:
+        modules.append(
+            ModuleEntry(
+                name="src",
+                path="src",
+                public_api=extract_public_api(src),
+                files=root_files,
+                last_updated=now,
+            )
+        )
 
     for child in sorted(src.iterdir()):
         if not child.is_dir():
@@ -366,6 +386,11 @@ def render_for_context(
             lines.append(f"- Summary: {m.summary}")
         if m.convention_tags:
             lines.append(f"- Tags: {', '.join(m.convention_tags)}")
+        if m.files:
+            file_preview = ", ".join(f"`{path}`" for path in m.files[:8])
+            if len(m.files) > 8:
+                file_preview += f", … (+{len(m.files) - 8} more)"
+            lines.append(f"- Files: {file_preview}")
         lines.append("")
 
     if truncated_count:

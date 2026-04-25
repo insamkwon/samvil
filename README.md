@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.3.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.3.1`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -14,14 +14,15 @@
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
 
-**v3.3.0 "4-Layer Portability Foundation"** — Skill / MCP / Host Adapter / SSOT를 분리해 Claude Code에 갇히지 않는 구조를 만든 릴리스. Codebase Manifest, Decision Log ADR, Orchestrator, HostCapability가 추가되어 Codex/OpenCode 같은 다른 코딩 에이전트로 옮겨갈 기반이 생겼습니다.
+**v3.3.1 "4-Layer Portability Foundation"** — Skill / MCP / Host Adapter / SSOT를 분리해 Claude Code에 갇히지 않는 구조를 만든 릴리스. Codebase Manifest, Decision Log ADR, Orchestrator, HostCapability가 추가되어 Codex/OpenCode 같은 다른 코딩 에이전트로 옮겨갈 기반이 생겼습니다.
 
-> **v3.3.0 주요 추가** (2026-04-26):
+> **v3.3.1 주요 추가** (2026-04-26):
 > - **Codebase Manifest** — `.samvil/manifest.json` 자동 생성. 모듈, public API, conventions를 AI context용으로 압축 렌더링.
 > - **Decision Log / ADR** — Council decision을 `.samvil/decisions/*.md`로 승격. supersession과 PM-readable audit trail 지원.
 > - **Orchestrator** — stage order, tier skip, proceed/block 판단, `complete_stage` MCP tool로 stage chaining을 중앙화.
 > - **HostCapability** — Claude Code / Codex CLI / OpenCode / generic host 차이를 데이터로 선언. `samvil-seed`가 첫 ultra-thin skill PoC로 전환.
-> - **검증**: 758 unit tests · 121 MCP tools · 4-layer integration smoke PASS · pre-commit-check PASS.
+> - **Dogfood patch** — 작은 Vite/React 앱처럼 `src/App.tsx`가 `src/` 바로 아래 있는 구조도 Manifest가 `src` 모듈로 인식하고, AI context 렌더링에 대표 파일 목록을 포함.
+> - **검증**: 761 unit tests · 121 MCP tools · 4-layer dogfood PASS · pre-commit-check PASS.
 
 **v3.2.0 "Contract Layer"** — v3.1.0 위에 Claim 레지스트리·Stage Gate 프레임워크·Role primitive·Model routing을 얹은 계약 기반 릴리스. 모든 stage 전환이 `.samvil/claims.jsonl`에 deterministic하게 기록되고 Generator ≠ Judge 규칙이 런타임에서 강제됩니다.
 

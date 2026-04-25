@@ -4,6 +4,29 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.3.1] — 2026-04-26 — v3.3 Dogfood Manifest Patch
+
+Patch release from direct v3.3 dogfood on a tiny Vite/React project.
+
+### Fixed
+- Codebase Manifest now represents files directly under `src/` as a synthetic
+  `src` module. Small apps that start with `src/App.tsx` / `src/main.tsx` no
+  longer produce an empty `.samvil/manifest.json`.
+- Rendered Manifest context now includes a capped file preview per module, so
+  stage-entry AI context exposes representative paths such as `src/App.tsx`
+  instead of only module names.
+
+### Verified
+- Dogfood flow: interview gate blocks seed before completion, seed validates
+  and saves, HostCapability selects `.samvil/next-skill.json` on Codex, standard
+  tier routes seed → council → design, Council decision promotes to ADR, claims
+  are posted for interview/seed/council exits, and Manifest context includes
+  the app file.
+- Full test suite: 761 passed.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.3.0] — 2026-04-26 — 4-Layer Portability Foundation
 
 Phase 1 of the multi-host SAMVIL architecture. This release separates the
