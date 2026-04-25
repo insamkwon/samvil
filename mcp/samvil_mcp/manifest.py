@@ -116,8 +116,10 @@ def read_manifest(project_root: Path | str) -> Manifest | None:
 
 
 _IGNORE_DIRS = frozenset({
-    "node_modules", ".next", ".git", ".turbo", "dist",
-    "build", ".samvil", "__pycache__", ".venv", "venv",
+    "node_modules", ".next", ".nuxt", ".svelte-kit", ".expo",
+    ".git", ".turbo", "dist", "build", "coverage", "target",
+    ".samvil", "__pycache__", ".venv", "venv",
+    ".idea", ".vscode",
 })
 
 _CODE_EXTS = frozenset({".ts", ".tsx", ".js", ".jsx", ".py"})
@@ -128,6 +130,10 @@ def discover_modules(project_root: Path | str) -> list[ModuleEntry]:
 
     For projects without src/ this returns []. Caller decides whether to
     fall back to root-level scan (out of scope for v3.3 — we assume src/).
+
+    Symlinked directories are not followed (os.walk default).
+    Broken symlinks are silently skipped (their is_file() check fails).
+    Dot-prefixed directories are skipped (treated like ignore-dirs).
     """
     root = Path(project_root)
     src = root / "src"
@@ -138,18 +144,22 @@ def discover_modules(project_root: Path | str) -> list[ModuleEntry]:
     now = _now_iso()
 
     for child in sorted(src.iterdir()):
-        if not child.is_dir() or child.name in _IGNORE_DIRS:
+        if not child.is_dir():
+            continue
+        if child.name in _IGNORE_DIRS or child.name.startswith("."):
             continue
 
         files: list[str] = []
-        for f in sorted(child.rglob("*")):
-            if not f.is_file():
-                continue
-            if any(p in _IGNORE_DIRS for p in f.parts):
-                continue
-            if f.suffix not in _CODE_EXTS:
-                continue
-            files.append(str(f.relative_to(root)))
+        for dirpath, dirnames, filenames in os.walk(child):
+            # Prune in-place so we never descend into ignore-dirs at all.
+            dirnames[:] = [d for d in dirnames if d not in _IGNORE_DIRS]
+            for fn in filenames:
+                ext = os.path.splitext(fn)[1]
+                if ext not in _CODE_EXTS:
+                    continue
+                full = os.path.join(dirpath, fn)
+                files.append(os.path.relpath(full, root))
+        files.sort()
 
         modules.append(
             ModuleEntry(

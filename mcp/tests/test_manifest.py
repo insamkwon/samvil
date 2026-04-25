@@ -198,3 +198,34 @@ def test_discover_modules_returns_empty_when_no_src(tmp_path):
     from samvil_mcp.manifest import discover_modules
 
     assert discover_modules(tmp_path) == []
+
+
+def test_discover_modules_skips_nested_ignore_dir(tmp_path):
+    """A node_modules INSIDE a module dir must not leak files."""
+    web = tmp_path / "src" / "web"
+    web.mkdir(parents=True)
+    (web / "page.tsx").write_text("export default () => null;")
+    nested_pkg = web / "node_modules" / "react"
+    nested_pkg.mkdir(parents=True)
+    (nested_pkg / "index.js").write_text("module.exports = {};")
+    (nested_pkg / "index.d.ts").write_text("export {};")
+
+    from samvil_mcp.manifest import discover_modules
+
+    modules = discover_modules(tmp_path)
+    assert len(modules) == 1
+    files = modules[0].files
+    assert files == ["src/web/page.tsx"]  # zero leakage from nested node_modules
+
+
+def test_discover_modules_skips_dot_prefixed_dirs(tmp_path):
+    """Directories like src/.cache/ are not treated as modules."""
+    (tmp_path / "src" / "auth").mkdir(parents=True)
+    (tmp_path / "src" / "auth" / "index.ts").write_text("export {};")
+    (tmp_path / "src" / ".cache").mkdir(parents=True)
+    (tmp_path / "src" / ".cache" / "stuff.ts").write_text("// cache")
+
+    from samvil_mcp.manifest import discover_modules
+
+    modules = discover_modules(tmp_path)
+    assert {m.name for m in modules} == {"auth"}
