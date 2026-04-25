@@ -74,6 +74,11 @@ from .pattern_registry import (
     list_patterns as _list_patterns,
     render_patterns as _render_patterns,
 )
+from .domain_packs import (
+    get_domain_pack as _get_domain_pack,
+    list_domain_packs as _list_domain_packs,
+    render_domain_packs as _render_domain_packs,
+)
 from .retro_v3_2 import (
     ExperimentRun as _ExperimentRun,
     Observation as _Observation,
@@ -3342,6 +3347,71 @@ def render_pattern_context(
         }
     except Exception as e:
         _log_mcp_health("fail", "render_pattern_context", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+# ── Domain Packs (v3.6) ─────────────────────────────────────────────
+
+
+@mcp.tool()
+def list_domain_packs(
+    solution_type: str = "",
+    domain: str = "",
+    stage: str = "",
+) -> dict:
+    """List Domain Pack entries, optionally filtered."""
+    try:
+        packs = _list_domain_packs(
+            solution_type=solution_type or None,
+            domain=domain or None,
+            stage=stage or None,
+        )
+        _log_mcp_health("ok", "list_domain_packs")
+        return {
+            "status": "ok",
+            "count": len(packs),
+            "packs": [pack.to_dict() for pack in packs],
+        }
+    except Exception as e:
+        _log_mcp_health("fail", "list_domain_packs", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def read_domain_pack(pack_id: str) -> dict:
+    """Read one Domain Pack entry by id."""
+    try:
+        pack = _get_domain_pack(pack_id)
+        _log_mcp_health("ok", "read_domain_pack")
+        if pack is None:
+            return {"status": "missing"}
+        return {"status": "ok", "pack": pack.to_dict()}
+    except Exception as e:
+        _log_mcp_health("fail", "read_domain_pack", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def render_domain_context(
+    solution_type: str = "",
+    domain: str = "",
+    stage: str = "",
+) -> dict:
+    """Render matching Domain Pack entries as compact markdown context."""
+    try:
+        packs = _list_domain_packs(
+            solution_type=solution_type or None,
+            domain=domain or None,
+            stage=stage or None,
+        )
+        _log_mcp_health("ok", "render_domain_context")
+        return {
+            "status": "ok",
+            "count": len(packs),
+            "context": _render_domain_packs(packs, stage=stage or None),
+        }
+    except Exception as e:
+        _log_mcp_health("fail", "render_domain_context", str(e))
         return {"status": "error", "error": str(e)}
 
 

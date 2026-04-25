@@ -53,3 +53,9 @@ Domain Packs answer product-domain questions:
 - Packs are matched by `solution_types`, `domain`, `stage_focus`, and signals.
 - Pack content should stay concise enough to render into stage prompts.
 - Pack context is additive. It should not override explicit user requirements.
+
+## Built-in Packs
+
+- `saas-dashboard`: metrics-heavy dashboard and reporting products.
+- `browser-game`: browser-playable games with score/input/restart loops.
+- `mobile-habit`: habit, routine, reminder, and streak tracking apps.
