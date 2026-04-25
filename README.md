@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.8.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.9.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.9.0 "Browser Runtime Dogfood"** — v3.8의 local runtime dogfood 위에 실제 `npm install`, Vite dev server, Playwright Chromium DOM/canvas/input 검증을 얹은 릴리스입니다.
+
+> **v3.9.0 주요 추가** (2026-04-26):
+> - **Browser runtime dogfood** — `scripts/phase7-browser-runtime-dogfood.py`가 Vite React SaaS dashboard와 Vite Phaser browser game을 temp dir에 생성하고 실제 `npm install` + `npm run build`를 수행.
+> - **Playwright Chromium checks** — dashboard는 heading/KPI/chart/table/filter interaction을 DOM에서 검증하고, game은 canvas nonblank pixel, ArrowRight input, score 증가, restart reset을 브라우저에서 검증.
+> - **External package evidence** — v3.8까지 제외했던 network-dependent package install과 real browser path를 의도적으로 release dogfood에 포함.
+> - **SAMVIL surface cross-check** — browser dogfood에서도 Domain Pack, Pattern Registry, Manifest, run report, status JSON, retro 후보 0개를 확인.
+> - **검증**: 801 unit tests · 133 MCP tools · browser runtime dogfood PASS · direct pytest dogfood PASS · cross-host replay PASS · pre-commit-check PASS.
 
 **v3.8.0 "Real Runtime Dogfood"** — v3.7의 full-chain dogfood 위에 실제 `npm run build`, `npm start`, localhost HTTP runtime, served HTML response 검증을 얹은 릴리스입니다.
 

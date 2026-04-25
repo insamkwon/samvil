@@ -4,6 +4,50 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.9.0] — 2026-04-26 — Browser Runtime Dogfood
+
+Phase 7 of the multi-host SAMVIL architecture. This release adds the first
+network-dependent browser dogfood path: generated apps install real npm
+packages, build with Vite, run on localhost, and pass Playwright Chromium
+checks.
+
+### Added
+- `scripts/phase7-browser-runtime-dogfood.py`, a browser runtime harness that
+  creates Vite React SaaS dashboard and Vite Phaser game projects in temp dirs.
+- `mcp/tests/test_phase7_browser_runtime_dogfood.py`, an opt-in pytest wrapper
+  enabled with `SAMVIL_RUN_BROWSER_DOGFOOD=1` for network/browser validation.
+- Phase 7 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.9-phase7.md`.
+
+### Covered
+- Real `npm install` for both generated browser projects.
+- `npm run build` for both generated browser projects.
+- Vite dev servers on dynamic localhost ports.
+- Playwright Chromium page load and screenshot capture.
+- Dashboard DOM checks: heading, KPI cards, chart text, table text, and filter
+  button interaction.
+- Browser game checks: canvas nonblank pixel, ArrowRight movement, score
+  increase, and restart reset.
+- Domain Pack matching, Pattern Registry lookup, Codebase Manifest generation,
+  run report generation, status JSON rendering, and zero retro candidates.
+
+### Dogfood
+- `vite-saas-dashboard-browser`: pack=`saas-dashboard`, confidence=high,
+  patterns=2, modules=1, events=18, retro=0, browser=`dashboard browser check ok`.
+- `vite-phaser-game-browser`: pack=`browser-game`, confidence=high,
+  patterns=1, modules=1, events=18, retro=0, browser=`game browser check ok`.
+
+### Verified
+- Direct browser dogfood: PASS.
+- Opt-in pytest browser dogfood:
+  `SAMVIL_RUN_BROWSER_DOGFOOD=1 ./.venv/bin/python -m pytest tests/test_phase7_browser_runtime_dogfood.py -q`: 1 passed.
+- Full test suite: 801 passed.
+- MCP server import smoke: 133 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.8.0] — 2026-04-26 — Real Runtime Dogfood
 
 Phase 6 of the multi-host SAMVIL architecture. This release moves beyond
