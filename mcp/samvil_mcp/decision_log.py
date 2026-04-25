@@ -242,6 +242,61 @@ def list_adrs(
     return sorted(out, key=lambda adr: (adr.created_at, adr.adr_id))
 
 
+def supersede_adr(
+    project_root: str | os.PathLike,
+    old_id: str,
+    new_id: str,
+    reason: str,
+    *,
+    reviewed_at: str | None = None,
+) -> DecisionADR:
+    """Mark `old_id` as superseded by `new_id` and write it atomically."""
+    old = read_adr(project_root, old_id)
+    if old is None:
+        raise DecisionLogError(f"old ADR not found: {old_id!r}")
+    new = read_adr(project_root, new_id)
+    if new is None:
+        raise DecisionLogError(f"replacement ADR not found: {new_id!r}")
+    if not reason:
+        raise DecisionLogError("supersession reason is required")
+
+    if old.status == "superseded":
+        if old.superseded_by == new_id:
+            return old
+        raise DecisionLogError(
+            f"ADR {old_id!r} is already superseded by {old.superseded_by!r}"
+        )
+
+    old.status = "superseded"
+    old.superseded_by = new_id
+    old.last_reviewed_at = reviewed_at or _now_iso()
+    old.supersession_reason = reason
+    write_adr(old, project_root)
+    return old
+
+
+def supersession_chain(
+    project_root: str | os.PathLike,
+    adr_id: str,
+    *,
+    max_depth: int = 50,
+) -> list[DecisionADR]:
+    """Return `adr_id` followed by replacement ADRs, stopping on loops."""
+    chain: list[DecisionADR] = []
+    seen: set[str] = set()
+    current_id: str | None = adr_id
+
+    while current_id and current_id not in seen and len(chain) < max_depth:
+        seen.add(current_id)
+        adr = read_adr(project_root, current_id)
+        if adr is None:
+            break
+        chain.append(adr)
+        current_id = adr.superseded_by
+
+    return chain
+
+
 def _section(body: str, heading: str) -> str:
     pattern = rf"^## {re.escape(heading)}\n(?P<content>.*?)(?=^## |\Z)"
     match = re.search(pattern, body, flags=re.M | re.S)

@@ -15,6 +15,8 @@ from samvil_mcp.decision_log import (
     parse_adr_markdown,
     read_adr,
     render_adr_markdown,
+    supersede_adr,
+    supersession_chain,
     write_adr,
 )
 
@@ -201,3 +203,145 @@ def test_decision_dir_is_project_local(tmp_path) -> None:
 def test_adr_path_rejects_path_traversal(tmp_path) -> None:
     with pytest.raises(DecisionLogError, match="ADR id"):
         adr_path(tmp_path, "../outside")
+
+
+def test_supersede_adr_updates_old_record(tmp_path) -> None:
+    old = DecisionADR(
+        adr_id="adr_old",
+        title="Use local JSON",
+        status="accepted",
+        authors=["samvil-council"],
+        created_at="2026-04-25T10:20:30Z",
+    )
+    new = DecisionADR(
+        adr_id="adr_new",
+        title="Use markdown ADR",
+        status="accepted",
+        authors=["samvil-council"],
+        created_at="2026-04-25T10:30:30Z",
+    )
+    write_adr(old, tmp_path)
+    write_adr(new, tmp_path)
+
+    updated = supersede_adr(
+        tmp_path,
+        "adr_old",
+        "adr_new",
+        "Markdown is easier for PM audit.",
+        reviewed_at="2026-04-25T10:40:30Z",
+    )
+
+    assert updated.status == "superseded"
+    assert updated.superseded_by == "adr_new"
+    assert updated.last_reviewed_at == "2026-04-25T10:40:30Z"
+    assert updated.supersession_reason == "Markdown is easier for PM audit."
+    assert read_adr(tmp_path, "adr_old").status == "superseded"
+
+
+def test_supersede_adr_requires_existing_old_and_new(tmp_path) -> None:
+    write_adr(
+        DecisionADR(adr_id="adr_new", title="New", authors=["samvil-council"]),
+        tmp_path,
+    )
+
+    with pytest.raises(DecisionLogError, match="old ADR"):
+        supersede_adr(tmp_path, "adr_missing", "adr_new", "reason")
+
+    with pytest.raises(DecisionLogError, match="replacement ADR"):
+        supersede_adr(tmp_path, "adr_new", "adr_missing", "reason")
+
+
+def test_supersede_adr_idempotent_for_same_target(tmp_path) -> None:
+    old = DecisionADR(
+        adr_id="adr_old",
+        title="Old",
+        status="superseded",
+        superseded_by="adr_new",
+        authors=["samvil-council"],
+    )
+    new = DecisionADR(adr_id="adr_new", title="New", authors=["samvil-council"])
+    write_adr(old, tmp_path)
+    write_adr(new, tmp_path)
+
+    updated = supersede_adr(tmp_path, "adr_old", "adr_new", "same")
+
+    assert updated.superseded_by == "adr_new"
+
+
+def test_supersede_adr_rejects_conflicting_target(tmp_path) -> None:
+    old = DecisionADR(
+        adr_id="adr_old",
+        title="Old",
+        status="superseded",
+        superseded_by="adr_new",
+        authors=["samvil-council"],
+    )
+    new = DecisionADR(adr_id="adr_new", title="New", authors=["samvil-council"])
+    other = DecisionADR(adr_id="adr_other", title="Other", authors=["samvil-council"])
+    write_adr(old, tmp_path)
+    write_adr(new, tmp_path)
+    write_adr(other, tmp_path)
+
+    with pytest.raises(DecisionLogError, match="already superseded"):
+        supersede_adr(tmp_path, "adr_old", "adr_other", "conflict")
+
+
+def test_supersession_chain_follows_replacements(tmp_path) -> None:
+    write_adr(
+        DecisionADR(
+            adr_id="adr_a",
+            title="A",
+            status="superseded",
+            superseded_by="adr_b",
+            authors=["samvil-council"],
+        ),
+        tmp_path,
+    )
+    write_adr(
+        DecisionADR(
+            adr_id="adr_b",
+            title="B",
+            status="superseded",
+            superseded_by="adr_c",
+            authors=["samvil-council"],
+        ),
+        tmp_path,
+    )
+    write_adr(
+        DecisionADR(adr_id="adr_c", title="C", authors=["samvil-council"]),
+        tmp_path,
+    )
+
+    assert [adr.adr_id for adr in supersession_chain(tmp_path, "adr_a")] == [
+        "adr_a",
+        "adr_b",
+        "adr_c",
+    ]
+
+
+def test_supersession_chain_stops_on_loop(tmp_path) -> None:
+    write_adr(
+        DecisionADR(
+            adr_id="adr_a",
+            title="A",
+            status="superseded",
+            superseded_by="adr_b",
+            authors=["samvil-council"],
+        ),
+        tmp_path,
+    )
+    write_adr(
+        DecisionADR(
+            adr_id="adr_b",
+            title="B",
+            status="superseded",
+            superseded_by="adr_a",
+            authors=["samvil-council"],
+        ),
+        tmp_path,
+    )
+
+    assert [adr.adr_id for adr in supersession_chain(tmp_path, "adr_a")] == [
+        "adr_a",
+        "adr_b",
+    ]
