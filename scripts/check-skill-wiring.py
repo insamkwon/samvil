@@ -74,6 +74,18 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
         ),
     ),
     (
+        "samvil-design",
+        "skills/samvil-design/SKILL.md",
+        (
+            "SKILL.legacy.md",
+            "get_orchestration_state",
+            "stage_can_proceed",
+            "host_chain_strategy",
+            "complete_stage",
+            "next-skill.json",
+        ),
+    ),
+    (
         "samvil-update",
         "skills/samvil-update/SKILL.md",
         (

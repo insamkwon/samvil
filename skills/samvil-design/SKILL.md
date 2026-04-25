@@ -1,649 +1,118 @@
 ---
 name: samvil-design
-description: "Generate project.blueprint.json with architecture decisions. Gate B design council for thorough+ tiers."
+description: "MCP-driven design stage: turn project.seed.json into project.blueprint.json and chain portably."
 ---
 
-# SAMVIL Design — Architecture & Blueprint Generation
+# SAMVIL Design - Thin Orchestrated Entry
 
-Generate the technical blueprint that translates the seed spec into concrete architecture decisions. Optionally run a design council (Gate B) for quality review.
+This is the v3.4 Phase 2 ultra-thin migration. Full blueprint rules are
+preserved in `skills/samvil-design/SKILL.legacy.md`; use it for schema
+mapping, design-council behavior, feasibility review, and output formats.
 
-## Boot Sequence (INV-1)
+## Inputs
 
-0. **TaskUpdate**: "Design" task를 `in_progress`로 설정
-1. Read `project.seed.json` → what we're building
-2. Read `project.state.json` → confirm `current_stage` is `"design"`, get `session_id`
-3. Read `project.config.json` → `selected_tier`
-4. Read `interview-summary.md` → user context
-5. Read `decisions.log` → binding decisions from Gate A (if exists)
-6. Read `references/seed-schema.md` → blueprint schema reference
-7. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
-8. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="design_started", stage="design", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:design"` 자동 기록.
+1. Read `project.state.json` for `session_id`, `current_stage`, and host name
+   (`host`, `runtime`, or `agent_host`; default `generic`).
+2. Read `project.config.json` for `selected_tier` / `samvil_tier`.
+3. Read `project.seed.json`; it is the design authority.
+4. Read `interview-summary.md` and `.samvil/decisions/*.md` if present.
+5. Read `.samvil/manifest.json` if present; if absent, build or refresh it.
+6. Read `skills/samvil-design/SKILL.legacy.md` for blueprint construction.
 
-## Step 1: Generate Blueprint
+## MCP Gate
 
-Adopt the `agents/tech-architect.md` persona. Read it for detailed behavior.
-
-Read `seed.solution_type` to determine blueprint format.
-
-### solution_type: "web-app" (기본)
-
-Create `project.blueprint.json` based on the seed:
-
-```json
-{
-  "screens": ["PrimaryScreen", "SecondaryScreen"],
-  "data_model": {
-    "EntityName": {
-      "id": "string",
-      "field": "type",
-      "createdAt": "string (ISO 8601)"
-    }
-  },
-  "api_routes": [],
-  "state_management": "zustand | useState | none",
-  "auth_strategy": "none | supabase | custom",
-  "key_libraries": ["zustand", "nanoid"],
-  "component_structure": {
-    "shared_ui": ["Button", "Card", "Input", "Modal"],
-    "feature_components": {
-      "feature-name": ["Component1", "Component2"]
-    }
-  },
-  "routing": {
-    "/": "HomePage or PrimaryScreen",
-    "/feature": "FeaturePage"
-  }
-}
-```
-
-### solution_type: "automation"
-
-Create `project.blueprint.json` with automation-specific structure:
-
-```json
-{
-  "entry_point": "src/main.py",
-  "modules": {
-    "core": ["main.py", "processor.py"],
-    "utils": ["logger.py", "config.py"]
-  },
-  "fixtures": {
-    "input": "fixtures/input/",
-    "expected": "fixtures/expected/"
-  },
-  "dependencies": ["requests"],
-  "error_handling": "retry_with_logging",
-  "execution": {
-    "type": "cli|cron|webhook|cc-skill",
-    "schedule": "0 9 * * *"
-  }
-}
-```
-
-### solution_type: "game"
-
-Create `project.blueprint.json` with game-specific structure:
-
-```json
-{
-  "scenes": ["BootScene", "MenuScene", "GameScene", "GameOverScene"],
-  "entities": ["Player", "Enemy", "Collectible"],
-  "game_config": {
-    "width": 800,
-    "height": 600,
-    "physics": "arcade",
-    "input": "keyboard"
-  },
-  "assets": {
-    "sprites": [],
-    "audio": []
-  },
-  "scene_flow": {
-    "BootScene": "MenuScene",
-    "MenuScene": "GameScene",
-    "GameScene": "GameOverScene",
-    "GameOverScene": "MenuScene"
-  },
-  "key_libraries": ["phaser"],
-  "state_management": "phaser-scene",
-  "component_structure": {
-    "scenes": ["BootScene", "MenuScene", "GameScene", "GameOverScene"],
-    "entities": ["Player", "Enemy", "Collectible"],
-    "config": ["game-config"]
-  }
-}
-```
-
-#### Game Blueprint Decision Rules
-
-- **scenes**: Always include BootScene (asset preloading), MenuScene (start/restart), GameScene (main gameplay), GameOverScene (score + restart). Additional scenes for levels.
-- **entities**: Derived from seed.features — each game mechanic maps to an entity class:
-  - player-movement → Player entity
-  - enemy-spawn → Enemy entity
-  - collision-detection → physics config between entities
-  - scoring-system → ScoreManager (scene-level)
-  - level-progression → LevelManager (scene-level)
-- **game_config**: Copied from `seed.core_experience.game_config`. Defaults: `{ width: 800, height: 600, physics: "arcade", input: "keyboard" }`
-- **assets.sprites**: If `seed.core_experience.graphics` = "pixel art" → note that pixel art sprites need to be generated in code (no external files). If "simple shapes" → all graphics via Phaser graphics primitives.
-- **assets.audio**: Empty by default (sound is optional). Add if seed.constraints include sound.
-- **scene_flow**: Standard game loop. BootScene → MenuScene → GameScene → GameOverScene → (restart) → MenuScene.
-- **key_libraries**: Always `["phaser"]`. No other game libraries.
-- **state_management**: `"phaser-scene"` — Phaser scenes manage their own state via `init()`, `create()`, `update()` lifecycle.
-
-### solution_type: "dashboard"
-
-Create `project.blueprint.json` based on the web-app blueprint, extended with dashboard-specific fields:
-
-```json
-{
-  "screens": ["DashboardOverview", "DetailPage"],
-  "data_model": {
-    "MetricName": {
-      "id": "string",
-      "value": "number",
-      "timestamp": "string (ISO 8601)"
-    }
-  },
-  "api_routes": [],
-  "state_management": "zustand | useState",
-  "auth_strategy": "none | supabase | custom",
-  "key_libraries": ["recharts", "date-fns", "lucide-react"],
-  "component_structure": {
-    "shared_ui": ["Card", "Button", "Input", "Modal"],
-    "feature_components": {
-      "charts": ["LineChart", "BarChart", "PieChart", "AreaChart"],
-      "widgets": ["KpiCard", "DataTable", "FilterPanel"]
-    }
-  },
-  "routing": {
-    "/": "DashboardOverview",
-    "/detail/:id": "DetailPage"
-  },
-  "chart_components": ["LineChart", "BarChart"],
-  "data_sources": [
-    { "name": "primary", "type": "localStorage|api|supabase", "refresh_interval": null }
-  ],
-  "refresh_interval": null,
-  "alert_thresholds": []
-}
-```
-
-#### Dashboard Blueprint Decision Rules
-
-- **screens**: `DashboardOverview` as primary (shows all charts/widgets at a glance). Add `DetailPage` if drill-down features exist.
-- **chart_components**: Derived from seed.features:
-  - trend/time-series data → `["LineChart", "AreaChart"]`
-  - comparison data → `["BarChart"]`
-  - composition data → `["PieChart", "DonutChart"]`
-  - KPI/summary → `["KpiCard"]`
-  - tabular data → `["DataTable"]`
-- **data_sources**: Derived from seed. Default `[{ "name": "primary", "type": "localStorage", "refresh_interval": null }]`. If seed mentions external API, set `type: "api"`.
-- **refresh_interval**: `null` by default. Set if seed.constraints or features mention real-time/auto-refresh (e.g., `30000` for 30 seconds).
-- **alert_thresholds**: Empty by default. Add if seed mentions notifications/alerts.
-- **key_libraries**: Always include `"recharts"`. Add based on features:
-  - date filtering → `+ ["date-fns"]`
-  - export → `+ ["xlsx"]` or `+ ["papaparse"]`
-  - complex tables → `+ ["@tanstack/react-table"]`
-- **state_management**: `"zustand"` if multi-source data or 3+ chart widgets. `"useState"` if simple single-page dashboard.
-- **component_structure.feature_components.charts**: One component per chart type from `chart_components`.
-- **component_structure.feature_components.widgets**: Non-chart UI components (filters, tables, KPI cards).
-
-#### Automation Blueprint Decision Rules
-
-- **entry_point**:
-  - Python: `"src/main.py"` | Node: `"src/main.ts"` | CC skill: `"SKILL.md"`
-- **modules.core**: Always include `main.py/ts` (entry + argparse) and `processor.py/ts` (core logic)
-- **modules.utils**: Always include `logger` and `config` (separation of concerns)
-- **fixtures**: Always include `input/` and `expected/` subdirectories
-- **dependencies**: Derived from `seed.features` and `seed.core_flow.input/output`
-  - API calls → `["requests"]` (Python) or `["axios"]` (Node)
-  - CSV processing → `+ ["pandas"]` or `["csv-parse"]`
-  - HTML parsing → `+ ["beautifulsoup4"]` or `["cheerio"]`
-  - Slack → `+ ["slack-sdk"]` or `["@slack/web-api"]`
-- **error_handling**: `"retry_with_logging"` (default) | `"skip_and_continue"` | `"fail_fast"` — from interview Phase 2 answer
-- **execution.type**: From `seed.core_flow.trigger`
-  - `"manual"` → `"cli"`
-  - `"cron: ..."` → `"cron"` (copy schedule)
-  - `"webhook"` → `"webhook"`
-  - CC skill → `"cc-skill"`
-- **execution.schedule**: Extracted from trigger if cron format (e.g., `"0 9 * * *"`)
-
-### Decision Rules
-
-- **state_management**: `"useState"` if ≤ 2 entities with no cross-component sharing. `"zustand"` if persistence needed or 3+ entities. `"none"` if static content.
-- **auth_strategy**: `"none"` unless seed explicitly requires auth. Respect Gate A decisions.
-- **api_routes**: Empty array if seed uses localStorage. Populate if seed needs API.
-- **key_libraries**: Only libraries the features actually need. Check seed.features for DnD, charts, dates, etc.
-- **screens**: Derive from seed.core_experience.primary_screen + one per major feature that needs its own page.
-
-## Step 2: Adopt UX Designer Perspective
-
-Read `agents/ux-designer.md`. Define for each screen:
+Call:
 
 ```
-Screen: PrimaryScreen
-  Purpose: [what user does here]
-  Components: [list]
-  States: Empty | Loading | Populated | Error
-  Primary action: [main CTA]
+mcp__samvil_mcp__get_orchestration_state(session_id="<session_id>")
+mcp__samvil_mcp__stage_can_proceed(session_id="<session_id>", target_stage="design")
+mcp__samvil_mcp__resolve_host_capability(host_name="<host>")
+mcp__samvil_mcp__host_chain_strategy(host_name="<host>")
 ```
 
-Include this as a comment section in the blueprint or present to user.
+If `stage_can_proceed.can_proceed` is false, show blockers and stop.
 
-## Step 3: Gate B — Design Council (if tier ≥ thorough)
-
-Read `config.selected_tier`. If `thorough` or `full`:
-
-### 3a. Pre-spawn heartbeat + progress announcement (v3.1.0, v3-016)
-
-Before spawning agents, print the batch plan and start the heartbeat:
+Best-effort entry event:
 
 ```
-[SAMVIL] Spawning N agents for Gate B (Design Review)
-  Tier: <thorough|full>  MAX_PARALLEL=<2|3>  Total agents: <N>
-  Batches: <N/MAX_PARALLEL> of size <MAX_PARALLEL>
-```
-
-**MCP heartbeat** (best-effort): update `last_progress_at` so `stall_detector` knows the session is alive:
-
-```
-mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")
-```
-
-If MCP is unavailable, skip silently — the health log will record it.
-
-### 3b. Spawn batches
-
-Spawn design council agents **in controlled parallel batches**:
-
-```
-MAX_PARALLEL = config.max_parallel || 2
-```
-
-Split design council agents into chunks of `MAX_PARALLEL`. Spawn each chunk in ONE message (parallel). Wait for all agents in a chunk to complete before spawning the next chunk.
-
-| Tier | Agents |
-|------|--------|
-| thorough | ui-designer, ux-researcher, responsive-checker, accessibility-expert |
-| full | + copywriter |
-
-**Game-specific addendum (v3.1.0, v3-015)**: When `seed.solution_type == "game"` and tier ≥ `standard`, add `game-art-architect` to the agent list. This agent translates `seed.art_design` answers into Phaser-ready specifications (sprite strategy, palette, HUD layout, animation plan, audio spec) and appends them to `blueprint.json.art_architecture`. samvil-build reads this section to drive Phaser config + asset scaffolding. Without this agent the build has to guess at art direction, causing expensive post-build redesign.
-
-```
-Agent(
-  description: "SAMVIL Gate B: <agent-name>",
-  model: config.model_routing.council || config.model_routing.default || "sonnet",
-  prompt: "You are <agent-name> for SAMVIL Gate B (Design Review).
-
-<paste agents/<agent-name>.md content>
-
-## Context
-Seed: <seed JSON>
-Blueprint: <blueprint JSON>
-Screen definitions: <screen definitions>
-
-## Task
-Review the design from your perspective. Follow your Output Format.
-Keep response under 400 words.",
-  subagent_type: "general-purpose"
+mcp__samvil_mcp__save_event(
+  session_id="<session_id>",
+  event_type="design_started",
+  stage="design",
+  data="{}"
 )
 ```
 
-### 3c. Per-agent progress line (v3.1.0, v3-016)
+## Context Refresh
 
-After each agent returns (batch by batch), emit a single-line progress log **AND** heartbeat:
-
-```
-[SAMVIL]   Agent <k>/<N> returned: <agent-name> → <one-line summary>
-```
+Prefer the manifest over ad-hoc repo scanning:
 
 ```
-mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")
+mcp__samvil_mcp__read_manifest(project_root="<project_root>")
+mcp__samvil_mcp__render_manifest_context(project_root="<project_root>", focus=null, max_modules=30)
 ```
 
-This is the specific regression from the mobile-game dogfood: the 25-minute hang happened because neither a progress line nor a heartbeat was emitted while Sonnet agents ran — the main session had no way to notice it was still alive.
-
-### 3d. Stall check between batches (v3.1.0, v3-016)
-
-Between batches, check whether the session has stalled:
+If missing:
 
 ```
-verdict = mcp__samvil_mcp__is_state_stalled(
-    state_path="project.state.json",
-    threshold_seconds=300,
-)
-if verdict["stalled"]:
-    count = mcp__samvil_mcp__increment_stall_recovery_count(state_path="project.state.json")
-    message = mcp__samvil_mcp__build_reawake_message(stage="design", detail=verdict, count=count)
-    # Print the reawake message AND continue the next batch — don't block.
+mcp__samvil_mcp__build_and_persist_manifest(project_root="<project_root>", project_name="<project_name>")
 ```
 
-If the reawake count reaches `MAX_REAWAKES` (3), stop spawning and surface the escalation message to the user with a skip/abort/retry AskUserQuestion.
+Use `list_decision_adrs(project_root="<project_root>", status="accepted")` to
+load binding council decisions when available. If any MCP call fails, continue
+from files and mention degraded orchestration.
 
-### Gate B Synthesis
+## Build Blueprint
 
-Same rules as Gate A (see `references/council-protocol.md`):
-- Majority APPROVE → proceed
-- CHALLENGE with changes → present to user
-- REJECT → hold for user
+Using `SKILL.legacy.md`, create a valid `project.blueprint.json` for the seed's
+`solution_type`. Preserve the legacy design rules:
 
-Append design decisions to `decisions.log`.
+- simplest architecture that satisfies the seed
+- no screens/features outside the seed
+- accepted ADRs override preferences
+- Gate B only for thorough/full tiers
+- feasibility review before user checkpoint
+- mobile considerations for form-heavy or mobile-first apps
 
-If changes recommended and user approves, update blueprint.
+Present the blueprint summary and ask for approval. If edits are requested,
+revise and re-present.
 
-## Step 3b: Blueprint Feasibility Check
+## After Approval
 
-Run a lightweight feasibility review before the user sees the final blueprint.
-
-Use the CC Agent tool:
+1. Write approved JSON to `project.blueprint.json`.
+2. Call:
 
 ```
-Agent(
-  description: "SAMVIL Blueprint feasibility check",
-  model: config.model_routing.design_reviewer || config.model_routing.default || "haiku",
-  prompt: "You are a build feasibility reviewer for SAMVIL.
-
-Read the final blueprint draft and answer:
-1. Are all key_libraries realistically installable and maintainable?
-2. Is the tech stack self-consistent with SAMVIL scaffold conventions?
-3. Are there known compatibility risks?
-4. Is the component/screen scope realistic for this build?
-
-Return one of:
-- GO
-- CONCERN: <list>
-- BLOCKER: <list>
-
-Keep the response under 200 words.",
-  subagent_type: "general-purpose"
+mcp__samvil_mcp__complete_stage(
+  session_id="<session_id>",
+  stage="design",
+  verdict="pass"
 )
 ```
 
-### Main-session ownership rules
+3. Append a short `.samvil/handoff.md` entry; never overwrite.
 
-- The main session remains the only writer of `project.blueprint.json` and `project.state.json`
-- **MCP (best-effort):** After feasibility check:
-  ```
-  mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="blueprint_feasibility_checked", stage="design", data='{"result":"GO|CONCERN|BLOCKER"}')
-  ```
-- If the result is `CONCERN` or `BLOCKER`, revise the blueprint in the main session first
-- For each issue carried forward:
-  ```
-  mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="blueprint_concern", stage="design", data='{"summary":"<brief issue>","severity":"concern|blocker"}')
-  ```
-- Only present the final blueprint to the user after feasibility review and any needed edits
+## Chain
 
-## Step 4: User Checkpoint
+Use `host_chain_strategy.chain_via`:
 
-Present the post-feasibility blueprint:
-
-```
-[SAMVIL] Blueprint Generated
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Screens: [list]
-Data Model: [summary]
-State: [strategy]
-Libraries: [list]
-Routes: [summary]
-
-{Gate B results if run}
-{Feasibility review results}
-
-Final blueprint (post-feasibility check) looks good? Say 'go' to start building, or tell me what to change.
-```
-
-## Step 5: Save and Chain (INV-4)
-
-1. Write `project.blueprint.json` to project directory
-2. **MCP (best-effort):** Save stage transition:
-   ```
-   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="blueprint_generated", stage="scaffold", data='{"screens":<N>,"libraries":[<list>]}')
-   ```
-3. Print progress:
-
-```
-[SAMVIL] Design ✓
-[SAMVIL] Stage 3/5: Scaffolding project...
-```
-
-4. Handoff Write → `.samvil/handoff.md`에 Design 섹션 append (Chain 섹션의 Handoff Write 포맷 참고)
-   Invoke the Skill tool with skill: `samvil-scaffold`
-
-## 모바일 우선 입력 UX 가이드
-
-폼이 많은 앱(이력서, 설문 등)에서는:
-- 섹션별 단계 wizard (한 화면에 전부 보여주지 않기)
-- Progress bar로 완료 현황 표시
-- Auto-save (입력 중 데이터 손실 방지)
-- 모바일 터치 타겟: 최소 44px
-
-blueprint에 `mobile_considerations` 필드를 추가하여 Build 단계에서 참조.
-
-## Output Format
-
-Write `~/dev/<project>/project.blueprint.json` — valid JSON with these required fields:
-
-### web-app
+- `skill_tool`: invoke `samvil-scaffold`.
+- `file_marker`: write `.samvil/next-skill.json`:
 
 ```json
 {
-  "screens": ["<PascalCase name>"],
-  "data_model": { "<Entity>": { "id": "string", "<field>": "<type>" } },
-  "api_routes": [],
-  "state_management": "zustand | useState | none",
-  "auth_strategy": "none | supabase | custom",
-  "key_libraries": ["<lib>"],
-  "component_structure": {
-    "shared_ui": ["<Component>"],
-    "feature_components": { "<feature>": ["<Component>"] }
-  },
-  "routing": { "/": "<Screen>" },
-  "mobile_considerations": {}
+  "next_skill": "samvil-scaffold",
+  "reason": "design completed",
+  "from_stage": "design"
 }
 ```
 
-Decision rules for each field:
-- `state_management`: "useState" if <= 2 entities, no cross-component sharing. "zustand" if persistence or 3+ entities. "none" if static.
-- `auth_strategy`: "none" unless seed explicitly requires auth.
-- `api_routes`: empty array if localStorage. Populate if API needed.
-- `key_libraries`: only libraries features actually need.
-- `screens`: primary_screen + one per major feature needing its own page.
+If MCP is unavailable, fall back to the legacy chaining rules in
+`SKILL.legacy.md` and mention that orchestration was degraded.
 
-### automation
+## Invariants
 
-```json
-{
-  "entry_point": "src/main.py",
-  "modules": {
-    "core": ["main.py", "processor.py"],
-    "utils": ["logger.py", "config.py"]
-  },
-  "fixtures": {
-    "input": "fixtures/input/",
-    "expected": "fixtures/expected/"
-  },
-  "dependencies": ["<dep>"],
-  "error_handling": "retry_with_logging|skip_and_continue|fail_fast",
-  "execution": {
-    "type": "cli|cron|webhook|cc-skill",
-    "schedule": "<cron expression or null>"
-  }
-}
-```
-
-Decision rules for each field:
-- `entry_point`: Python → `src/main.py`, Node → `src/main.ts`, CC skill → `SKILL.md`
-- `modules.core`: Always `main` (argparse + --dry-run) + `processor` (core logic)
-- `modules.utils`: Always `logger` + `config` (separation of concerns)
-- `dependencies`: Derived from features and I/O requirements
-- `error_handling`: From interview Phase 2 answer, default `"retry_with_logging"`
-- `execution.type`: Mapped from `seed.core_flow.trigger`
-
-### game
-
-```json
-{
-  "scenes": ["BootScene", "MenuScene", "GameScene", "GameOverScene"],
-  "entities": ["<Entity>"],
-  "game_config": { "width": 800, "height": 600, "physics": "arcade", "input": "keyboard" },
-  "assets": { "sprites": [], "audio": [] },
-  "scene_flow": { "BootScene": "MenuScene", "MenuScene": "GameScene", "GameScene": "GameOverScene", "GameOverScene": "MenuScene" },
-  "key_libraries": ["phaser"],
-  "state_management": "phaser-scene",
-  "component_structure": { "scenes": [], "entities": [], "config": [] }
-}
-```
-
-Decision rules for each field:
-- `scenes`: Always BootScene + MenuScene + GameScene + GameOverScene minimum
-- `entities`: Derived from seed.features (Player, Enemy, Collectible, etc.)
-- `game_config`: From `seed.core_experience.game_config`
-- `assets`: Empty arrays by default. All graphics generated in code.
-- `scene_flow`: Standard game loop chain
-- `key_libraries`: Always `["phaser"]`
-- `state_management`: Always `"phaser-scene"`
-
-### dashboard
-
-```json
-{
-  "screens": ["<PascalCase name>"],
-  "data_model": { "<Entity>": { "id": "string", "value": "number", "timestamp": "string" } },
-  "api_routes": [],
-  "state_management": "zustand | useState",
-  "auth_strategy": "none | supabase | custom",
-  "key_libraries": ["recharts", "<additional>"],
-  "component_structure": {
-    "shared_ui": ["<Component>"],
-    "feature_components": { "charts": ["<ChartComponent>"], "widgets": ["<WidgetComponent>"] }
-  },
-  "routing": { "/": "<DashboardScreen>" },
-  "chart_components": ["<ChartType>"],
-  "data_sources": [{ "name": "<source>", "type": "localStorage|api|supabase", "refresh_interval": null }],
-  "refresh_interval": null,
-  "alert_thresholds": [],
-  "mobile_considerations": {}
-}
-```
-
-Decision rules for each field:
-- `screens`: `DashboardOverview` as primary + optional detail page
-- `chart_components`: Derived from features (LineChart, BarChart, PieChart, AreaChart, KpiCard, DataTable)
-- `data_sources`: Default localStorage. API/Supabase if seed specifies.
-- `key_libraries`: Always includes `"recharts"`. Add date-fns, xlsx, @tanstack/react-table as needed.
-- `state_management`: "zustand" if multi-source or 3+ widgets. "useState" if simple.
-- `refresh_interval`: null unless seed mentions real-time updates.
-
-### mobile-app
-
-```json
-{
-  "screens": ["<PascalCase name>"],
-  "navigation": {
-    "type": "tabs|drawer|stack",
-    "tabs": [{ "name": "<Tab>", "screen": "<Screen>", "icon": "<icon>" }]
-  },
-  "data_model": { "<Entity>": { "id": "string", "<field>": "<type>" } },
-  "state_management": "zustand",
-  "native_modules": ["<expo-module>"],
-  "key_libraries": ["expo-router", "zustand"],
-  "component_structure": {
-    "shared_ui": ["<Component>"],
-    "feature_components": { "<feature>": ["<Component>"] }
-  }
-}
-```
-
-Decision rules for each field:
-- `screens`: primary_screen + one per major feature needing its own page
-- `navigation.type`: from seed.implementation.navigation, default `"tabs"`
-- `native_modules`: from seed.implementation.native_features, mapped to expo packages
-- `key_libraries`: always `["expo-router", "zustand"]` + feature-specific additions
-- `state_management`: always `"zustand"`
-
-### solution_type: "mobile-app"
-
-Create `project.blueprint.json` with mobile-specific structure:
-
-```json
-{
-  "screens": ["HomeScreen", "SettingsScreen"],
-  "navigation": {
-    "type": "tabs",
-    "tabs": [
-      { "name": "Home", "screen": "HomeScreen", "icon": "home" },
-      { "name": "Settings", "screen": "SettingsScreen", "icon": "settings" }
-    ]
-  },
-  "data_model": {
-    "EntityName": {
-      "id": "string",
-      "field": "type",
-      "createdAt": "string (ISO 8601)"
-    }
-  },
-  "state_management": "zustand",
-  "native_modules": [],
-  "key_libraries": ["expo-router", "zustand"],
-  "component_structure": {
-    "shared_ui": ["Button", "Card", "Input"],
-    "feature_components": {
-      "feature-name": ["Component1", "Component2"]
-    }
-  }
-}
-```
-
-#### Mobile Blueprint Decision Rules
-
-- **screens**: Derive from seed.core_experience.primary_screen + one per major feature. Each screen maps to an Expo Router page in `app/`.
-- **navigation.type**: From `seed.implementation.navigation`. Default `"tabs"`.
-  - `"tabs"` → `app/(tabs)/_layout.tsx` with BottomTabNavigator
-  - `"drawer"` → `app/(drawer)/_layout.tsx` with DrawerNavigator
-  - `"stack"` → `app/_layout.tsx` with StackNavigator
-- **native_modules**: From `seed.implementation.native_features`.
-  - camera → `expo-camera`
-  - gps → `expo-location`
-  - push → `expo-notifications`
-  - sensors → `expo-sensors`
-- **key_libraries**: Always `["expo-router", "zustand"]`. Add based on features:
-  - offline → `+ ["@react-native-async-storage/async-storage"]`
-  - maps → `+ ["react-native-maps"]`
-  - forms → `+ ["react-hook-form"]`
-- **state_management**: `"zustand"` for all mobile apps (same pattern as web-app).
-- **component_structure**: Same pattern as web-app but uses React Native components (View, Text, TextInput, ScrollView) instead of HTML elements.
-
-## Anti-Patterns
-
-1. Do NOT add screens for features not in seed
-2. Do NOT contradict Gate A binding decisions from decisions.log
-3. Do NOT include libraries without a clear feature-level justification
-
-## Rules
-
-1. **Blueprint must be consistent with seed** — don't add screens for features not in seed
-2. **Respect Gate A decisions** — read decisions.log, don't contradict binding decisions
-3. **Be opinionated** — choose the simplest architecture that supports all seed features
-4. **Gate B is optional** — only runs for thorough+ tiers
-5. **One file output** — everything goes in project.blueprint.json
-6. **Design은 모든 tier에서 실행** — minimal이라도 design preset 선택은 필수. 1분 안에 끝남.
-
-**TaskUpdate**: "Design" task를 `completed`로 설정
-## Chain (Runtime-specific)
-
-### Claude Code
-
-### Handoff Write
-
-`.samvil/handoff.md`에 append (**Write tool 금지, Bash `cat >>` 또는 Edit로 append**):
-- Theme: <선택된 테마>
-- Layout: <주요 레이아웃 결정>
-- Components: <핵심 컴포넌트 목록>
-- Architecture decisions: <주요 결정 사항>
-```
-
-Invoke the Skill tool with skill: `samvil-scaffold`
-
-### Codex CLI (future)
-Read `skills/samvil-scaffold/SKILL.md` and follow its instructions.
+- `project.seed.json` is the design authority.
+- Main session is the only writer of `project.blueprint.json`.
+- MCP orchestration is preferred; files remain recovery source.
+- Runtime-specific chaining must go through host capability.

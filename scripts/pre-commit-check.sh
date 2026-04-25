@@ -145,8 +145,18 @@ else
 fi
 
 
-# ── 6. MCP server import ────────────────────────────────────────────
-_section "6. MCP server import smoke"
+# ── 6. Skill thinness ────────────────────────────────────────────────
+_section "6. Skill thinness"
+
+if python3 scripts/skill-thinness-report.py --migrated-only --fail-over 120 >/dev/null 2>&1; then
+  _ok "migrated skills under 120 active lines"
+else
+  _fail "skill thinness FAILED — run scripts/skill-thinness-report.py --migrated-only --fail-over 120"
+fi
+
+
+# ── 7. MCP server import ────────────────────────────────────────────
+_section "7. MCP server import smoke"
 
 if [ -x mcp/.venv/bin/python ]; then
   out=$(mcp/.venv/bin/python -c "from samvil_mcp import server; print(len(list(server.mcp._tool_manager._tools)))" 2>&1)
