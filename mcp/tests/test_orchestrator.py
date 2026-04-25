@@ -8,6 +8,7 @@ from samvil_mcp.orchestrator import (
     PIPELINE_STAGES,
     StageEvent,
     OrchestratorError,
+    complete_stage_plan,
     get_next_stage,
     get_orchestration_state,
     stage_can_proceed,
@@ -166,3 +167,62 @@ def test_unknown_events_do_not_affect_state() -> None:
 
     assert state["completed_stages"] == []
     assert state["failed_stages"] == []
+
+
+def test_complete_stage_plan_for_pass_verdict() -> None:
+    session = {"current_stage": "interview", "samvil_tier": "standard"}
+
+    plan = complete_stage_plan(session, "interview", "pass")
+
+    assert plan["event_type"] == "interview_complete"
+    assert plan["event_stage"] == "seed"
+    assert plan["event_data"]["verdict"] == "pass"
+    assert plan["claim"]["type"] == "gate_verdict"
+    assert plan["claim"]["subject"] == "gate:interview_exit"
+    assert plan["claim"]["statement"] == "verdict=pass via complete_stage"
+    assert plan["next_stage"] == "seed"
+
+
+def test_complete_stage_plan_for_complete_verdict() -> None:
+    session = {"current_stage": "build", "samvil_tier": "standard"}
+
+    plan = complete_stage_plan(session, "build", "complete")
+
+    assert plan["event_type"] == "build_stage_complete"
+    assert plan["event_stage"] == "qa"
+    assert plan["next_stage"] == "qa"
+
+
+def test_complete_stage_plan_for_fail_verdict_has_no_next_stage() -> None:
+    session = {"current_stage": "build", "samvil_tier": "standard"}
+
+    plan = complete_stage_plan(session, "build", "fail")
+
+    assert plan["event_type"] == "build_fail"
+    assert plan["event_stage"] == "build"
+    assert plan["next_stage"] is None
+    assert plan["claim"]["statement"] == "verdict=fail via complete_stage"
+
+
+def test_complete_stage_plan_for_blocked_verdict() -> None:
+    session = {"current_stage": "qa", "samvil_tier": "standard"}
+
+    plan = complete_stage_plan(session, "qa", "blocked")
+
+    assert plan["event_type"] == "qa_blocked"
+    assert plan["event_stage"] == "qa"
+    assert plan["next_stage"] is None
+
+
+def test_complete_stage_plan_rejects_skipped_stage() -> None:
+    session = {"current_stage": "council", "samvil_tier": "minimal"}
+
+    with pytest.raises(OrchestratorError, match="skipped"):
+        complete_stage_plan(session, "council", "pass")
+
+
+def test_complete_stage_plan_rejects_unknown_verdict() -> None:
+    session = {"current_stage": "build", "samvil_tier": "standard"}
+
+    with pytest.raises(OrchestratorError, match="verdict"):
+        complete_stage_plan(session, "build", "maybe")

@@ -61,6 +61,31 @@ FAIL_EVENT_TO_STAGE: dict[str, str] = {
     "stall_abandoned": "",
 }
 
+SUCCESS_COMPLETE_EVENTS: dict[str, str] = {
+    "interview": "interview_complete",
+    "seed": "seed_generated",
+    "council": "council_verdict",
+    "design": "design_complete",
+    "scaffold": "scaffold_complete",
+    "build": "build_stage_complete",
+    "qa": "qa_pass",
+    "deploy": "deploy_complete",
+    "retro": "retro_complete",
+    "evolve": "evolve_converge",
+    "complete": "stage_end",
+}
+
+FAIL_COMPLETE_EVENTS: dict[str, str] = {
+    "build": "build_fail",
+    "qa": "qa_fail",
+}
+
+BLOCKED_COMPLETE_EVENTS: dict[str, str] = {
+    "qa": "qa_blocked",
+}
+
+COMPLETE_VERDICTS: tuple[str, ...] = ("pass", "complete", "fail", "blocked")
+
 
 @dataclass(frozen=True)
 class StageEvent:
@@ -180,6 +205,55 @@ def get_orchestration_state(session: Any, events: list[StageEvent]) -> dict[str,
             "total": len(executable_stages),
             "percent": round((len(completed) / len(executable_stages)) * 100, 1),
         },
+    }
+
+
+def complete_stage_plan(session: Any, stage: str, verdict: str) -> dict[str, Any]:
+    """Return the event + claim payloads needed to mark a stage complete.
+
+    This function is intentionally pure. The server wrapper owns EventStore and
+    ClaimLedger mutation.
+    """
+    samvil_tier = _session_tier(session)
+    _validate_stage(stage)
+    _validate_tier(samvil_tier)
+    if should_skip_stage(stage, samvil_tier):
+        raise OrchestratorError(f"stage {stage} is skipped for tier {samvil_tier}")
+    if verdict not in COMPLETE_VERDICTS:
+        raise OrchestratorError(f"unknown verdict: {verdict!r}")
+
+    success = verdict in ("pass", "complete")
+    if success:
+        event_type = SUCCESS_COMPLETE_EVENTS[stage]
+        next_stage = get_next_stage(stage, samvil_tier)
+        event_stage = next_stage or stage
+    elif verdict == "blocked":
+        event_type = BLOCKED_COMPLETE_EVENTS.get(stage, f"{stage}_blocked")
+        next_stage = None
+        event_stage = stage
+    else:
+        event_type = FAIL_COMPLETE_EVENTS.get(stage, f"{stage}_fail")
+        next_stage = None
+        event_stage = stage
+
+    return {
+        "event_type": event_type,
+        "event_stage": event_stage,
+        "event_data": {"verdict": verdict, "stage": stage},
+        "claim": {
+            "type": "gate_verdict",
+            "subject": f"gate:{stage}_exit",
+            "statement": f"verdict={verdict} via complete_stage",
+            "authority_file": "project.state.json",
+            "evidence": [f"event:{event_type}"],
+            "meta": {
+                "via": "complete_stage",
+                "verdict": verdict,
+                "stage": stage,
+                "next_stage": next_stage,
+            },
+        },
+        "next_stage": next_stage,
     }
 
 
