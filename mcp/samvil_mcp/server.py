@@ -140,6 +140,12 @@ from .routing import (
     route_task as _route_task_core,
     validate_profiles as _validate_profiles_core,
 )
+from .telemetry import (
+    build_run_report as _build_run_report,
+    read_run_report as _read_run_report_file,
+    render_run_report as _render_run_report,
+    write_run_report as _write_run_report,
+)
 
 mcp = FastMCP("samvil-mcp")
 
@@ -3334,6 +3340,69 @@ def render_pattern_context(
         }
     except Exception as e:
         _log_mcp_health("fail", "render_pattern_context", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+# ── Run Telemetry (v3.5) ────────────────────────────────────────────
+
+
+@mcp.tool()
+def build_run_report(
+    project_root: str,
+    persist: bool = True,
+    mcp_health_path: str = "",
+) -> dict:
+    """Build a run telemetry report from project-local .samvil files."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _build_run_report(
+            project_root,
+            mcp_health_path=mcp_health_path or None,
+        )
+        path = ""
+        if persist:
+            path = str(_write_run_report(report, project_root))
+        _log_mcp_health("ok", "build_run_report")
+        return {"status": "ok", "path": path, "report": report}
+    except Exception as e:
+        _log_mcp_health("fail", "build_run_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def read_run_report(project_root: str) -> dict:
+    """Read .samvil/run-report.json if present."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _read_run_report_file(project_root)
+        _log_mcp_health("ok", "read_run_report")
+        if report is None:
+            return {"status": "missing"}
+        return {"status": "ok", "report": report}
+    except Exception as e:
+        _log_mcp_health("fail", "read_run_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def render_run_report(project_root: str, refresh: bool = False) -> dict:
+    """Render a run report as markdown; optionally refresh it first."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _build_run_report(project_root) if refresh else _read_run_report_file(project_root)
+        if report is None:
+            return {"status": "missing"}
+        text = _render_run_report(report)
+        _log_mcp_health("ok", "render_run_report")
+        return {"status": "ok", "context": text}
+    except Exception as e:
+        _log_mcp_health("fail", "render_run_report", str(e))
         return {"status": "error", "error": str(e)}
 
 

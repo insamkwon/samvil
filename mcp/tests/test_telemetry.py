@@ -1,0 +1,114 @@
+"""Tests for run telemetry reports."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from samvil_mcp.telemetry import (
+    build_run_report,
+    read_run_report,
+    render_run_report,
+    write_run_report,
+)
+
+
+def _jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+
+def _sample_project(tmp_path: Path) -> Path:
+    root = tmp_path / "todo-app"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "session_id": "sess-1",
+        "project_name": "todo-app",
+        "current_stage": "design",
+        "samvil_tier": "minimal",
+        "seed_version": 1,
+    }), encoding="utf-8")
+    (samvil / "next-skill.json").write_text(json.dumps({
+        "schema_version": "1.0",
+        "chain_via": "file_marker",
+        "host": "codex_cli",
+        "next_skill": "samvil-design",
+        "reason": "minimal tier skips council",
+        "from_stage": "seed",
+        "created_by": "samvil-seed",
+    }), encoding="utf-8")
+    _jsonl(samvil / "events.jsonl", [
+        {"event_type": "interview_complete", "stage": "seed", "timestamp": "2026-04-26T01:00:00Z"},
+        {"event_type": "seed_generated", "stage": "design", "timestamp": "2026-04-26T01:01:00Z"},
+    ])
+    _jsonl(samvil / "claims.jsonl", [
+        {
+            "claim_id": "claim_1",
+            "type": "gate_verdict",
+            "subject": "gate:seed_exit",
+            "statement": "verdict=pass via complete_stage",
+            "authority_file": "project.state.json",
+            "evidence": ["event:seed_generated"],
+            "claimed_by": "agent:orchestrator-agent",
+            "status": "pending",
+            "ts": "2026-04-26T01:01:00Z",
+            "meta": {"verdict": "pass", "event_type": "seed_generated"},
+        },
+        {
+            "claim_id": "claim_2",
+            "type": "evidence_posted",
+            "subject": "stage:design",
+            "statement": "design_started",
+            "authority_file": "project.state.json",
+            "evidence": [],
+            "claimed_by": "agent:design",
+            "status": "pending",
+            "ts": "2026-04-26T01:02:00Z",
+            "meta": {},
+        },
+    ])
+    _jsonl(samvil / "mcp-health.jsonl", [
+        {"status": "ok", "tool": "stage_can_proceed", "timestamp": "2026-04-26T01:00:00Z"},
+        {"status": "fail", "tool": "read_manifest", "error": "missing", "timestamp": "2026-04-26T01:02:00Z"},
+    ])
+    return root
+
+
+def test_build_run_report_summarizes_project_files(tmp_path):
+    root = _sample_project(tmp_path)
+
+    report = build_run_report(root)
+
+    assert report["schema_version"] == "1.0"
+    assert report["state"]["current_stage"] == "design"
+    assert report["events"]["total"] == 2
+    assert report["claims"]["by_type"]["gate_verdict"] == 1
+    assert report["claims"]["pending_subjects"] == ["gate:seed_exit", "stage:design"]
+    assert report["mcp_health"]["failures_by_tool"] == {"read_manifest": 1}
+    assert report["continuation"]["next_skill"] == "samvil-design"
+    assert report["next_action"] == "continue with samvil-design"
+
+
+def test_write_and_read_run_report_roundtrip(tmp_path):
+    root = _sample_project(tmp_path)
+    report = build_run_report(root)
+
+    path = write_run_report(report, root)
+    read = read_run_report(root)
+
+    assert path == root / ".samvil" / "run-report.json"
+    assert read is not None
+    assert read["state"]["project_name"] == "todo-app"
+
+
+def test_render_run_report_includes_operator_summary(tmp_path):
+    root = _sample_project(tmp_path)
+    report = build_run_report(root)
+
+    text = render_run_report(report)
+
+    assert "# Run Report" in text
+    assert "Continuation: seed -> samvil-design" in text
+    assert "read_manifest: 1" in text
+    assert "Pending Claims" in text
