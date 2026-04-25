@@ -4,6 +4,56 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.4.0] — 2026-04-26 — Multi-Host Runtime + Pattern Registry
+
+Phase 2 of the multi-host SAMVIL architecture. This turns the v3.3 skeleton
+into a practical Codex/OpenCode-compatible runtime with repeatable skill
+migration rules, portable continuation markers, pattern lookup, smarter
+manifest context, and cross-host regression coverage.
+
+### Added
+- `references/skill-migration-checklist.md` and
+  `scripts/skill-thinness-report.py` for repeatable ultra-thin skill migration.
+- `references/host-continuation.md` and
+  `scripts/host-continuation-smoke.py` for `.samvil/next-skill.json` schema
+  validation.
+- `mcp/samvil_mcp/pattern_registry.py` with five built-in patterns:
+  Next.js app router, Vite React, Phaser game, Expo mobile, Recharts dashboard.
+- Pattern Registry MCP tools: `list_patterns`, `read_pattern`,
+  `render_pattern_context`.
+- Manifest schema `1.1`: TS/JS/Python import graph extraction, module
+  summaries, `summary_generated_by`, `summary_generated_at`, and confidence
+  tags such as `imports:regex` and `summary:heuristic`.
+- Cross-host replay fixture under `mcp/tests/fixtures/phase2/small-web-app/`
+  plus `scripts/phase2-cross-host-smoke.py`.
+
+### Changed
+- `skills/samvil-design/SKILL.md` is now a 120-line ultra-thin, host-aware
+  entry. The previous 649-line body is preserved as
+  `skills/samvil-design/SKILL.legacy.md`.
+- `skills/samvil-seed/SKILL.md` and `skills/samvil-design/SKILL.md` now use
+  the canonical continuation marker shape.
+- `skills/samvil-build/SKILL.md` and `skills/samvil-qa/SKILL.md` now request
+  Pattern Registry context by `solution_type` and framework.
+- `scripts/pre-commit-check.sh` now verifies migrated skill thinness and
+  cross-host continuation replay.
+
+### Still Legacy
+- Active high-traffic skills not yet ultra-thin: `samvil-interview`,
+  `samvil-build`, `samvil-qa`, `samvil-scaffold`.
+- Supporting legacy-active skills still to migrate or retire in later phases:
+  `samvil-council`, `samvil-retro`, `samvil-evolve`, `samvil-deploy`.
+
+### Verified
+- Full test suite: 773 passed.
+- MCP server import smoke: 124 tools.
+- Cross-host replay: `claude_code` (`skill_tool`) and `codex_cli`
+  (`file_marker`) both reach `seed_next=samvil-design` and
+  `design_next=samvil-scaffold`.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.3.1] — 2026-04-26 — v3.3 Dogfood Manifest Patch
 
 Patch release from direct v3.3 dogfood on a tiny Vite/React project.
