@@ -4,6 +4,48 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.6.0] — 2026-04-26 — Domain Packs
+
+Phase 4 of the multi-host SAMVIL architecture. This adds deterministic
+product-domain context that stages can request without embedding long domain
+rules in skill bodies.
+
+### Added
+- `references/domain-pack-schema.md` documenting the Domain Pack boundary,
+  schema, matching, and MCP tool surface.
+- `mcp/samvil_mcp/domain_packs.py` with three built-in packs:
+  `saas-dashboard`, `browser-game`, and `mobile-habit`.
+- Domain Pack MCP tools: `list_domain_packs`, `read_domain_pack`,
+  `render_domain_context`, and `match_domain_packs`.
+- Deterministic pack matching from seed `solution_type`, domain fields, text
+  signals, and core entity hits, including `score`, `confidence`, and
+  human-readable `reasons`.
+- Unit and MCP wrapper tests for pack filtering, rendering, matching, and
+  invalid input handling.
+
+### Changed
+- `samvil-interview`, `samvil-design`, `samvil-build`, and `samvil-qa` now
+  request `render_domain_context` with stage-specific filters instead of
+  copying domain prose.
+- `scripts/check-skill-wiring.py` now verifies Domain Pack tool references in
+  the wired stage skills.
+
+### Dogfood
+- Synthetic seeds for all three built-in packs selected the expected top match
+  with high confidence.
+- Live-ish SaaS dashboard seed rendered domain context for interview, design,
+  build, and QA stages.
+- MCP `match_domain_packs` returned `saas-dashboard` with score 11 for the
+  live-ish dashboard seed.
+
+### Verified
+- Full test suite: 799 passed.
+- MCP server import smoke: 133 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.5.0] — 2026-04-26 — Telemetry + Run Observability
 
 Phase 3 of the multi-host SAMVIL architecture. This adds a deterministic

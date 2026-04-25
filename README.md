@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.5.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.6.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.6.0 "Domain Packs"** — v3.5의 telemetry layer 위에 domain-specific product context, deterministic pack matching, and stage-scoped Interview/Design/Build/QA guidance를 얹은 릴리스입니다.
+
+> **v3.6.0 주요 추가** (2026-04-26):
+> - **Domain Pack registry** — `saas-dashboard`, `browser-game`, `mobile-habit` 3개 PoC pack을 추가하고 product/domain guidance를 skill body 밖으로 분리.
+> - **Domain Pack MCP tools** — `list_domain_packs`, `read_domain_pack`, `render_domain_context`, `match_domain_packs` 제공.
+> - **Stage-scoped context** — Interview/Design/Build/QA가 `render_domain_context(..., stage="<stage>")`로 필요한 도메인 질문, 엔티티, workflow, build/QA risk를 읽음.
+> - **Deterministic matching** — seed의 `solution_type`, domain, text signals, core entity hits로 pack 후보를 점수화하고 confidence/reasons를 반환.
+> - **검증**: 799 unit tests · 133 MCP tools · synthetic/live-ish domain dogfood · cross-host replay PASS · pre-commit-check PASS.
 
 **v3.5.0 "Telemetry + Run Observability"** — v3.4의 multi-host runtime 위에 deterministic run report, event timeline taxonomy, MCP health signatures, retro observation feed, status surface를 얹은 릴리스입니다.
 
