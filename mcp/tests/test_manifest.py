@@ -427,3 +427,30 @@ def test_detect_conventions_first_rule_wins_on_conflict(tmp_path):
     from samvil_mcp.manifest import detect_conventions
 
     assert detect_conventions(tmp_path)["framework"] == "next"
+
+
+def test_build_manifest_full_integration(tmp_path):
+    """build_manifest combines discover_modules + detect_conventions + meta."""
+    # Set up a minimal project
+    (tmp_path / "tsconfig.json").write_text("{}")
+    (tmp_path / "tailwind.config.ts").write_text("export default {};")
+    (tmp_path / "src" / "auth").mkdir(parents=True)
+    (tmp_path / "src" / "auth" / "index.ts").write_text(
+        "export { signIn } from './session';"
+    )
+
+    from samvil_mcp.manifest import build_manifest
+
+    m = build_manifest(tmp_path, project_name="todo-app")
+
+    assert m.schema_version == "1.0"
+    assert m.project_name == "todo-app"
+    assert m.project_root == str(tmp_path)
+    assert len(m.modules) == 1
+    assert m.modules[0].name == "auth"
+    assert m.modules[0].public_api == ["signIn"]
+    assert m.conventions["language"] == "typescript"
+    assert m.conventions["css"] == "tailwind"
+    assert m.public_apis == {"auth": ["signIn"]}
+    # generated_at is set
+    assert m.generated_at != ""

@@ -284,3 +284,31 @@ def detect_conventions(project_root: Path | str) -> dict[str, str]:
                 out[key] = value
                 break
     return out
+
+
+def build_manifest(project_root: Path | str, *, project_name: str) -> Manifest:
+    """End-to-end: walk filesystem, detect conventions, return Manifest.
+
+    Does NOT write to disk. Caller (orchestrator / MCP tool) decides when
+    to persist.
+
+    Note: ``project_root`` is recorded as ``str(Path(project_root))`` (no
+    ``.resolve()``) so the manifest preserves the exact path the caller
+    supplied. macOS in particular resolves ``/var/...`` symlinks to
+    ``/private/var/...`` which would surprise callers using temp dirs;
+    the caller can ``Path(...).resolve()`` themselves if needed.
+    """
+    root = Path(project_root)
+    modules = discover_modules(root)
+    conventions = detect_conventions(root)
+    public_apis = {m.name: list(m.public_api) for m in modules if m.public_api}
+
+    return Manifest(
+        schema_version=MANIFEST_SCHEMA_VERSION,
+        project_name=project_name,
+        project_root=str(root),
+        generated_at=_now_iso(),
+        modules=modules,
+        conventions=conventions,
+        public_apis=public_apis,
+    )
