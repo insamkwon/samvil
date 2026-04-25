@@ -71,6 +71,7 @@ def build_run_report(
     claim_counts = _count_by(latest_claims, "status", defaults=("pending", "verified", "rejected"))
     health_summary = _health_summary(health)
     event_summary = _event_summary(events)
+    timeline_summary = _timeline_summary(events)
 
     next_action = _next_action(marker, gate_verdicts, health_summary)
 
@@ -86,6 +87,7 @@ def build_run_report(
             "seed_version": state.get("seed_version"),
         },
         "events": event_summary,
+        "timeline": timeline_summary,
         "claims": {
             "total": len(latest_claims),
             "by_status": claim_counts,
@@ -131,6 +133,7 @@ def render_run_report(report: dict[str, Any]) -> str:
     events = report.get("events", {}) or {}
     claims = report.get("claims", {}) or {}
     health = report.get("mcp_health", {}) or {}
+    timeline = report.get("timeline", {}) or {}
     continuation = report.get("continuation", {}) or {}
 
     lines = [
@@ -141,6 +144,7 @@ def render_run_report(report: dict[str, Any]) -> str:
         f"- Tier: {state.get('samvil_tier') or '?'}",
         f"- Session: {state.get('session_id') or '?'}",
         f"- Events: {events.get('total', 0)} total",
+        f"- Failures/retries: {timeline.get('failure_count', 0)} failures, {timeline.get('retry_count', 0)} retries",
         f"- Claims: {claims.get('total', 0)} total",
         f"- MCP health: {health.get('failures', 0)} failures / {health.get('total', 0)} events",
     ]
@@ -149,6 +153,17 @@ def render_run_report(report: dict[str, Any]) -> str:
             f"- Continuation: {continuation.get('from_stage')} -> {continuation.get('next_skill')}"
         )
     lines.append(f"- Next action: {report.get('next_action')}")
+
+    stages = timeline.get("stages") or []
+    if stages:
+        lines.extend(["", "## Stage Timeline"])
+        for stage in stages:
+            duration = stage.get("duration_seconds")
+            duration_text = f"{duration:.1f}s" if isinstance(duration, (int, float)) else "?"
+            lines.append(
+                f"- {stage.get('stage')}: {stage.get('status')} "
+                f"({duration_text}, events={stage.get('event_count', 0)})"
+            )
 
     gate_verdicts = claims.get("latest_gate_verdicts") or []
     if gate_verdicts:
@@ -232,6 +247,107 @@ def _event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "failure_count": len(failure_events),
         "latest_event_at": latest,
     }
+
+
+def _timeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    by_stage: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    category_counts: Counter[str] = Counter()
+    retry_count = 0
+    failure_count = 0
+    for event in events:
+        category = _event_category(str(event.get("event_type", "")))
+        event["category"] = category
+        category_counts[category] += 1
+        if category == "retry":
+            retry_count += 1
+        if category == "fail":
+            failure_count += 1
+        by_stage[str(event.get("stage") or "unknown")].append(event)
+
+    stages: list[dict[str, Any]] = []
+    for stage, rows in sorted(by_stage.items()):
+        ordered = sorted(rows, key=lambda r: r.get("timestamp", ""))
+        categories = [str(r.get("category")) for r in ordered]
+        start_ts = _first_ts(ordered, {"start"}) or _first_ts(ordered)
+        end_ts = _last_ts(ordered, {"complete", "fail", "blocked", "skip"}) or _last_ts(ordered)
+        status = _stage_status_from_categories(categories)
+        duration = _duration_seconds(start_ts, end_ts)
+        stages.append({
+            "stage": stage,
+            "status": status,
+            "event_count": len(ordered),
+            "start_at": start_ts,
+            "end_at": end_ts,
+            "duration_seconds": duration,
+            "categories": dict(Counter(categories)),
+        })
+
+    return {
+        "category_counts": dict(sorted(category_counts.items())),
+        "failure_count": failure_count,
+        "retry_count": retry_count,
+        "stages": stages,
+    }
+
+
+def _event_category(event_type: str) -> str:
+    et = event_type.lower()
+    if "retry" in et or "fix_applied" in et or "reawake" in et:
+        return "retry"
+    if "blocked" in et or "stall" in et:
+        return "blocked"
+    if "skip" in et:
+        return "skip"
+    if "fail" in et or "error" in et or "revise" in et or "unimplemented" in et:
+        return "fail"
+    if (
+        "complete" in et
+        or et.endswith("_pass")
+        or et in {"seed_generated", "council_verdict", "blueprint_generated"}
+    ):
+        return "complete"
+    if "start" in et or "started" in et:
+        return "start"
+    return "other"
+
+
+def _stage_status_from_categories(categories: list[str]) -> str:
+    if "fail" in categories:
+        return "failed"
+    if "blocked" in categories:
+        return "blocked"
+    if "complete" in categories:
+        return "complete"
+    if "start" in categories:
+        return "in_progress"
+    if "skip" in categories:
+        return "skipped"
+    return "observed"
+
+
+def _first_ts(rows: list[dict[str, Any]], categories: set[str] | None = None) -> str:
+    for row in rows:
+        if categories is None or row.get("category") in categories:
+            return str(row.get("timestamp") or "")
+    return ""
+
+
+def _last_ts(rows: list[dict[str, Any]], categories: set[str] | None = None) -> str:
+    for row in reversed(rows):
+        if categories is None or row.get("category") in categories:
+            return str(row.get("timestamp") or "")
+    return ""
+
+
+def _duration_seconds(start_ts: str, end_ts: str) -> float | None:
+    if not start_ts or not end_ts:
+        return None
+    try:
+        start = datetime.fromisoformat(start_ts.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(end_ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return max(0.0, (end - start).total_seconds())
 
 
 def _health_summary(health: list[dict[str, Any]]) -> dict[str, Any]:

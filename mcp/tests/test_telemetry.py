@@ -112,3 +112,46 @@ def test_render_run_report_includes_operator_summary(tmp_path):
     assert "Continuation: seed -> samvil-design" in text
     assert "read_manifest: 1" in text
     assert "Pending Claims" in text
+
+
+def test_run_report_categorizes_events_and_stage_durations(tmp_path):
+    root = tmp_path / "retry-app"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "retry-app",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    _jsonl(samvil / "events.jsonl", [
+        {"event_type": "build_feature_start", "stage": "build", "timestamp": "2026-04-26T01:00:00Z"},
+        {"event_type": "build_fail", "stage": "build", "timestamp": "2026-04-26T01:02:00Z"},
+        {"event_type": "fix_applied", "stage": "build", "timestamp": "2026-04-26T01:03:00Z"},
+        {"event_type": "build_stage_complete", "stage": "build", "timestamp": "2026-04-26T01:05:00Z"},
+        {"event_type": "qa_started", "stage": "qa", "timestamp": "2026-04-26T01:06:00Z"},
+        {"event_type": "qa_blocked", "stage": "qa", "timestamp": "2026-04-26T01:07:00Z"},
+    ])
+
+    report = build_run_report(root)
+    timeline = report["timeline"]
+    by_stage = {stage["stage"]: stage for stage in timeline["stages"]}
+
+    assert timeline["category_counts"]["start"] == 2
+    assert timeline["category_counts"]["fail"] == 1
+    assert timeline["category_counts"]["retry"] == 1
+    assert timeline["category_counts"]["blocked"] == 1
+    assert timeline["failure_count"] == 1
+    assert timeline["retry_count"] == 1
+    assert by_stage["build"]["status"] == "failed"
+    assert by_stage["build"]["duration_seconds"] == 300.0
+    assert by_stage["qa"]["status"] == "blocked"
+
+
+def test_render_run_report_includes_stage_timeline(tmp_path):
+    root = _sample_project(tmp_path)
+    report = build_run_report(root)
+
+    text = render_run_report(report)
+
+    assert "Stage Timeline" in text
+    assert "- design:" in text

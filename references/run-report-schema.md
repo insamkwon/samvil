@@ -24,6 +24,28 @@ project run. It is deterministic and file-only; no LLM call is required.
     "failure_count": 0,
     "latest_event_at": "2026-04-26T12:00:00Z"
   },
+  "timeline": {
+    "category_counts": {
+      "start": 1,
+      "complete": 1
+    },
+    "failure_count": 0,
+    "retry_count": 0,
+    "stages": [
+      {
+        "stage": "seed",
+        "status": "complete",
+        "event_count": 2,
+        "start_at": "2026-04-26T12:00:00Z",
+        "end_at": "2026-04-26T12:01:00Z",
+        "duration_seconds": 60.0,
+        "categories": {
+          "start": 1,
+          "complete": 1
+        }
+      }
+    ]
+  },
   "claims": {
     "total": 2,
     "by_status": { "pending": 0, "verified": 0, "rejected": 0 },
@@ -62,3 +84,18 @@ project run. It is deterministic and file-only; no LLM call is required.
 - MCP health defaults to project-local `.samvil/mcp-health.jsonl`; callers can
   pass another path when they need to summarize the host-level health log.
 - Continuation is read from `.samvil/next-skill.json`.
+
+## Event Categories
+
+Phase 3 classifies event types into `start`, `complete`, `fail`, `retry`,
+`blocked`, `skip`, or `other`.
+
+- `*_started`, `*_start` → `start`
+- `*_complete`, `*_pass`, `seed_generated`, `blueprint_generated` →
+  `complete`
+- `*_fail`, `*_error`, `qa_revise`, `qa_unimplemented` → `fail`
+- `fix_applied`, `*retry*`, `*reawake*` → `retry`
+- `qa_blocked`, `*stall*` → `blocked`
+- `*skip*` → `skip`
+
+Durations are computed per stage when timestamps exist.
