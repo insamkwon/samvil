@@ -22,7 +22,7 @@ def test_module_entry_roundtrip():
         summary="Handles login/signup via Supabase",
         files=["src/auth/index.ts", "src/auth/session.ts"],
         convention_tags=["server-component", "uses-supabase"],
-        last_updated="2026-04-25T10-00-00Z",
+        last_updated="2026-04-25T10:00:00Z",
     )
     d = asdict(entry)
     assert d["name"] == "auth"
@@ -42,7 +42,7 @@ def test_manifest_to_dict_includes_all_fields():
         schema_version="1.0",
         project_name="todo-app",
         project_root="/Users/test/dev/todo-app",
-        generated_at="2026-04-25T10-00-00Z",
+        generated_at="2026-04-25T10:00:00Z",
         modules=[],
         conventions={"naming": "camelCase"},
         public_apis={"auth": ["signIn"]},
@@ -51,3 +51,25 @@ def test_manifest_to_dict_includes_all_fields():
     assert d["schema_version"] == "1.0"
     assert d["project_name"] == "todo-app"
     assert d["conventions"] == {"naming": "camelCase"}
+
+
+def test_manifest_from_dict_roundtrip():
+    """Manifest.from_dict(m.to_dict()) reconstructs the original manifest."""
+    original = Manifest(
+        schema_version="1.0",
+        project_name="todo-app",
+        project_root="/Users/test/dev/todo-app",
+        generated_at="2026-04-25T10:00:00Z",
+        modules=[
+            ModuleEntry(
+                name="auth",
+                path="src/auth",
+                public_api=["signIn"],
+                last_updated="2026-04-25T10:00:00Z",
+            )
+        ],
+        conventions={"language": "typescript"},
+        public_apis={"auth": ["signIn"]},
+    )
+    rebuilt = Manifest.from_dict(original.to_dict())
+    assert rebuilt == original

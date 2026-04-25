@@ -29,7 +29,7 @@ MANIFEST_SCHEMA_VERSION = "1.0"
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass(frozen=True)
