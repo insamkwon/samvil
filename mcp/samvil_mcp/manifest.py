@@ -245,31 +245,42 @@ def extract_public_api(module_dir: Path) -> list[str]:
     return out
 
 
-_CONVENTION_RULES: tuple[tuple[tuple[str, ...], str, str], ...] = (
-    # (file_globs, key, value)
-    (("tsconfig.json",), "language", "typescript"),
-    (("next.config.js", "next.config.mjs", "next.config.ts"), "framework", "next"),
-    (("vite.config.js", "vite.config.ts"), "framework", "vite"),
-    (("astro.config.mjs", "astro.config.ts"), "framework", "astro"),
-    (("tailwind.config.js", "tailwind.config.mjs", "tailwind.config.ts"), "css", "tailwind"),
-    ((".eslintrc", ".eslintrc.json", ".eslintrc.js", "eslint.config.js"), "linter", "eslint"),
-    (("supabase",), "auth_db", "supabase"),  # directory match
-    (("prisma",), "orm", "prisma"),  # directory match
+_CONVENTION_RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
+    # (names, key, value, kind) — kind ∈ {"file", "dir"}
+    (("tsconfig.json",), "language", "typescript", "file"),
+    (("next.config.js", "next.config.mjs", "next.config.ts"), "framework", "next", "file"),
+    (("vite.config.js", "vite.config.ts"), "framework", "vite", "file"),
+    (("astro.config.mjs", "astro.config.ts"), "framework", "astro", "file"),
+    (("tailwind.config.js", "tailwind.config.mjs", "tailwind.config.ts"), "css", "tailwind", "file"),
+    ((".eslintrc", ".eslintrc.json", ".eslintrc.js", "eslint.config.js"), "linter", "eslint", "file"),
+    (("supabase",), "auth_db", "supabase", "dir"),
+    (("prisma",), "orm", "prisma", "dir"),
 )
 
 
 def detect_conventions(project_root: Path | str) -> dict[str, str]:
-    """Inspect well-known config files to infer project conventions.
+    """Inspect well-known config files/directories to infer project conventions.
 
-    This is best-effort and intentionally narrow. Phase 2's Pattern Registry
-    will expand this with content-aware rules.
+    Best-effort and intentionally narrow. Phase 2's Pattern Registry will
+    expand this with content-aware rules. **First matching rule wins** on
+    key conflicts (e.g., if both next.config.* and vite.config.* exist,
+    `framework` resolves to `next` because the next rule appears first).
+
+    File vs directory distinction is enforced: a *file* named `supabase`
+    or `prisma` does NOT trigger the directory-based rules.
     """
     root = Path(project_root)
     out: dict[str, str] = {}
-    for patterns, key, value in _CONVENTION_RULES:
+    for patterns, key, value, kind in _CONVENTION_RULES:
+        if key in out:
+            continue  # first matching rule wins on key conflict
         for pat in patterns:
             candidate = root / pat
-            if candidate.exists():
+            if kind == "dir":
+                hit = candidate.is_dir()
+            else:
+                hit = candidate.is_file()
+            if hit:
                 out[key] = value
                 break
     return out

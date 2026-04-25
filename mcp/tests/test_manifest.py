@@ -382,3 +382,48 @@ def test_detect_conventions_returns_empty_for_bare_dir(tmp_path):
     from samvil_mcp.manifest import detect_conventions
 
     assert detect_conventions(tmp_path) == {}
+
+
+def test_detect_conventions_directory_vs_file_for_supabase(tmp_path):
+    """A *file* named 'supabase' must not trigger auth_db detection."""
+    (tmp_path / "supabase").write_text("not a real supabase project")
+
+    from samvil_mcp.manifest import detect_conventions
+
+    conv = detect_conventions(tmp_path)
+    assert "auth_db" not in conv
+
+
+def test_detect_conventions_finds_eslint(tmp_path):
+    """ESLint detection works across the various .eslintrc* shapes."""
+    (tmp_path / ".eslintrc.json").write_text("{}")
+
+    from samvil_mcp.manifest import detect_conventions
+
+    assert detect_conventions(tmp_path).get("linter") == "eslint"
+
+
+def test_detect_conventions_multiple_rules_fire(tmp_path):
+    """Realistic Next.js + TS + Tailwind project: all three keys present."""
+    (tmp_path / "tsconfig.json").write_text("{}")
+    (tmp_path / "next.config.mjs").write_text("export default {};")
+    (tmp_path / "tailwind.config.ts").write_text("export default {};")
+
+    from samvil_mcp.manifest import detect_conventions
+
+    conv = detect_conventions(tmp_path)
+    assert conv == {
+        "language": "typescript",
+        "framework": "next",
+        "css": "tailwind",
+    }
+
+
+def test_detect_conventions_first_rule_wins_on_conflict(tmp_path):
+    """When both next.config.* and vite.config.* exist, next wins (first rule)."""
+    (tmp_path / "next.config.mjs").write_text("")
+    (tmp_path / "vite.config.ts").write_text("")
+
+    from samvil_mcp.manifest import detect_conventions
+
+    assert detect_conventions(tmp_path)["framework"] == "next"
