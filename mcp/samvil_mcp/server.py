@@ -69,6 +69,11 @@ from .manifest import (
     read_manifest as _read_manifest_file,
     render_for_context,
 )
+from .pattern_registry import (
+    get_pattern as _get_pattern,
+    list_patterns as _list_patterns,
+    render_patterns as _render_patterns,
+)
 from .retro_v3_2 import (
     ExperimentRun as _ExperimentRun,
     Observation as _Observation,
@@ -3264,6 +3269,71 @@ def refresh_manifest(project_root: str, project_name: str) -> dict:
         return result
     except Exception as e:
         _log_mcp_health("fail", "refresh_manifest", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+# ── Pattern Registry (v3.4) ─────────────────────────────────────────
+
+
+@mcp.tool()
+def list_patterns(
+    solution_type: str = "",
+    framework: str = "",
+    category: str = "",
+) -> dict:
+    """List Pattern Registry entries, optionally filtered."""
+    try:
+        patterns = _list_patterns(
+            solution_type=solution_type or None,
+            framework=framework or None,
+            category=category or None,
+        )
+        _log_mcp_health("ok", "list_patterns")
+        return {
+            "status": "ok",
+            "count": len(patterns),
+            "patterns": [p.to_dict() for p in patterns],
+        }
+    except Exception as e:
+        _log_mcp_health("fail", "list_patterns", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def read_pattern(pattern_id: str) -> dict:
+    """Read one Pattern Registry entry by id."""
+    try:
+        pattern = _get_pattern(pattern_id)
+        _log_mcp_health("ok", "read_pattern")
+        if pattern is None:
+            return {"status": "missing"}
+        return {"status": "ok", "pattern": pattern.to_dict()}
+    except Exception as e:
+        _log_mcp_health("fail", "read_pattern", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def render_pattern_context(
+    solution_type: str = "",
+    framework: str = "",
+    category: str = "",
+) -> dict:
+    """Render matching Pattern Registry entries as compact markdown context."""
+    try:
+        patterns = _list_patterns(
+            solution_type=solution_type or None,
+            framework=framework or None,
+            category=category or None,
+        )
+        _log_mcp_health("ok", "render_pattern_context")
+        return {
+            "status": "ok",
+            "count": len(patterns),
+            "context": _render_patterns(patterns),
+        }
+    except Exception as e:
+        _log_mcp_health("fail", "render_pattern_context", str(e))
         return {"status": "error", "error": str(e)}
 
 

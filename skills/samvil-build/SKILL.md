@@ -23,8 +23,11 @@ You are adopting the role of **Full-Stack Developer**. Implement the seed spec a
    - game: `references/game-recipes.md`
    - mobile-app: `references/mobile-recipes.md`
    - dashboard: `references/dashboard-recipes.md`
-7. Check `completed_features` in state — skip already-built features
-8. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+7. **Pattern Registry (v3.4, best-effort)**: call
+   `mcp__samvil_mcp__render_pattern_context(solution_type="<seed.solution_type>", framework="<seed.tech_stack.framework>")`
+   and prefer returned pattern IDs over copying long framework rules.
+8. Check `completed_features` in state — skip already-built features
+9. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
 
 ## Structured Build Event Schema
 

@@ -50,6 +50,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "claim_post",
             "gate_check",
             "build_to_qa",
+            "render_pattern_context",
         ),
     ),
     (
@@ -62,6 +63,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "claim_verify",
             "consensus_trigger",
             "qa_to_deploy",
+            "render_pattern_context",
         ),
     ),
     (

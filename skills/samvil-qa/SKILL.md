@@ -14,8 +14,11 @@ You are adopting the role of **QA Judge**. Verify the built app against the seed
 2. Read `project.state.json` → completed features, failed features, qa_history, `session_id`
 3. Read `project.config.json` → `qa_max_iterations`, `selected_tier`
 4. Read `references/qa-checklist.md` from this plugin directory
-5. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
-6. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="qa_started", stage="qa", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:qa"` 자동 기록.
+5. **Pattern Registry (v3.4, best-effort)**: call
+   `mcp__samvil_mcp__render_pattern_context(solution_type="<seed.solution_type>", framework="<seed.tech_stack.framework>")`
+   and use `qa_focus` from matching pattern IDs.
+6. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+7. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="qa_started", stage="qa", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:qa"` 자동 기록.
 
 ### Seed 없는 경우 (Brownfield QA)
 
