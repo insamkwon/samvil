@@ -312,3 +312,61 @@ def build_manifest(project_root: Path | str, *, project_name: str) -> Manifest:
         conventions=conventions,
         public_apis=public_apis,
     )
+
+
+def render_for_context(
+    manifest: Manifest,
+    *,
+    focus: list[str] | None = None,
+    max_modules: int = 30,
+) -> str:
+    """Compress a Manifest into a context-budget-friendly markdown summary.
+
+    Args:
+        manifest: the manifest to render.
+        focus: if provided, only include modules whose name is in this list.
+        max_modules: hard cap. If exceeded, top-N by file count are kept and
+            the rest are summarized as "and N more".
+
+    The output is markdown intended for direct injection into an AI session.
+    """
+    relevant = manifest.modules
+    if focus:
+        focus_set = set(focus)
+        relevant = [m for m in relevant if m.name in focus_set]
+
+    truncated = False
+    if len(relevant) > max_modules:
+        relevant = sorted(relevant, key=lambda m: -len(m.files))[:max_modules]
+        truncated = True
+
+    lines: list[str] = [
+        f"# {manifest.project_name}",
+        f"_generated: {manifest.generated_at}_",
+        "",
+    ]
+
+    if manifest.conventions:
+        conv_str = ", ".join(f"{k}={v}" for k, v in sorted(manifest.conventions.items()))
+        lines.append(f"**Conventions:** {conv_str}")
+        lines.append("")
+
+    lines.append(f"## Modules ({len(relevant)} shown)")
+    for m in relevant:
+        lines.append(f"### {m.name}")
+        lines.append(f"- Path: `{m.path}`")
+        if m.public_api:
+            lines.append(f"- Public API: {', '.join(m.public_api[:8])}")
+        if m.depends_on:
+            lines.append(f"- Depends on: {', '.join(m.depends_on)}")
+        if m.summary:
+            lines.append(f"- Summary: {m.summary}")
+        if m.convention_tags:
+            lines.append(f"- Tags: {', '.join(m.convention_tags)}")
+        lines.append("")
+
+    if truncated:
+        omitted = len(manifest.modules) - max_modules
+        lines.append(f"_…and {omitted} more modules omitted (call read_manifest for full list)_")
+
+    return "\n".join(lines)

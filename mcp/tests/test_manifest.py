@@ -512,3 +512,74 @@ def test_build_manifest_preserves_relative_path(tmp_path, monkeypatch):
     assert m.project_root == "."
     # Module discovery still works on the resolved cwd
     assert len(m.modules) == 1
+
+
+def test_render_for_context_includes_project_name(tmp_path):
+    m = Manifest(
+        schema_version="1.0",
+        project_name="todo-app",
+        project_root=str(tmp_path),
+        generated_at="2026-04-25T10:00:00Z",
+        modules=[
+            ModuleEntry(name="auth", path="src/auth", public_api=["signIn"]),
+            ModuleEntry(name="billing", path="src/billing", public_api=["charge"]),
+        ],
+        conventions={"language": "typescript", "css": "tailwind"},
+    )
+
+    from samvil_mcp.manifest import render_for_context
+
+    text = render_for_context(m)
+    assert "todo-app" in text
+    assert "auth" in text
+    assert "billing" in text
+    assert "typescript" in text
+
+
+def test_render_for_context_focus_filter(tmp_path):
+    """focus=['auth'] returns only the auth module section."""
+    m = Manifest(
+        schema_version="1.0",
+        project_name="proj",
+        project_root=str(tmp_path),
+        generated_at="2026-04-25T10:00:00Z",
+        modules=[
+            ModuleEntry(name="auth", path="src/auth"),
+            ModuleEntry(name="billing", path="src/billing"),
+        ],
+    )
+
+    from samvil_mcp.manifest import render_for_context
+
+    text = render_for_context(m, focus=["auth"])
+    assert "auth" in text
+    assert "billing" not in text
+
+
+def test_render_for_context_under_5k_tokens_for_typical_project():
+    """20 modules with typical sizes still renders under 5000 chars (≈ 1.2K tokens)."""
+    modules = [
+        ModuleEntry(
+            name=f"mod{i}",
+            path=f"src/mod{i}",
+            public_api=[f"fn{j}" for j in range(5)],
+            depends_on=[f"mod{(i + 1) % 20}"],
+            summary=f"module number {i} summary",
+            convention_tags=["server-component"],
+        )
+        for i in range(20)
+    ]
+    m = Manifest(
+        schema_version="1.0",
+        project_name="big",
+        project_root="/tmp/big",
+        generated_at="2026-04-25T10:00:00Z",
+        modules=modules,
+    )
+
+    from samvil_mcp.manifest import render_for_context
+
+    text = render_for_context(m)
+    # Heuristic: 1 token ≈ 4 chars. 5000 tokens budget = 20K chars.
+    # We aim well below.
+    assert len(text) < 20_000
