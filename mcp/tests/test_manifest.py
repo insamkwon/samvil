@@ -452,5 +452,63 @@ def test_build_manifest_full_integration(tmp_path):
     assert m.conventions["language"] == "typescript"
     assert m.conventions["css"] == "tailwind"
     assert m.public_apis == {"auth": ["signIn"]}
-    # generated_at is set
+    # generated_at is a parseable ISO-8601 timestamp (RFC 3339 colon form)
+    from datetime import datetime
+    datetime.fromisoformat(m.generated_at.rstrip("Z"))  # raises if malformed
+
+
+def test_build_manifest_bare_project_returns_empty_modules_and_conventions(tmp_path):
+    """No src/, no config files → manifest with empty modules/conventions but populated meta."""
+    from samvil_mcp.manifest import build_manifest
+
+    m = build_manifest(tmp_path, project_name="bare")
+    assert m.modules == []
+    assert m.conventions == {}
+    assert m.public_apis == {}
+    assert m.schema_version == "1.0"
+    assert m.project_name == "bare"
+    assert m.project_root == str(tmp_path)
     assert m.generated_at != ""
+
+
+def test_build_manifest_excludes_empty_public_api_modules(tmp_path):
+    """A module with no index.ts appears in modules but NOT in public_apis."""
+    (tmp_path / "src" / "empty").mkdir(parents=True)
+    (tmp_path / "src" / "empty" / "foo.ts").write_text("// no index, just a stray file")
+
+    from samvil_mcp.manifest import build_manifest
+
+    m = build_manifest(tmp_path, project_name="proj")
+    # Module is discovered (it's a real subdir of src/)
+    assert any(mod.name == "empty" for mod in m.modules)
+    # But it's NOT in public_apis since extract_public_api returned []
+    assert "empty" not in m.public_apis
+
+
+def test_build_manifest_idempotent_modulo_timestamp(tmp_path):
+    """Two calls with the same input produce equal manifests except generated_at."""
+    (tmp_path / "src" / "auth").mkdir(parents=True)
+    (tmp_path / "src" / "auth" / "index.ts").write_text("export const x = 1;")
+
+    from samvil_mcp.manifest import build_manifest
+    from dataclasses import replace
+
+    m1 = build_manifest(tmp_path, project_name="p")
+    m2 = build_manifest(tmp_path, project_name="p")
+    # Strip the timestamp before comparing (deterministic except for `generated_at`)
+    assert replace(m1, generated_at="X") == replace(m2, generated_at="X")
+
+
+def test_build_manifest_preserves_relative_path(tmp_path, monkeypatch):
+    """Caller controls absolute vs relative — build_manifest does NOT resolve."""
+    (tmp_path / "src" / "auth").mkdir(parents=True)
+    (tmp_path / "src" / "auth" / "index.ts").write_text("export const x = 1;")
+
+    monkeypatch.chdir(tmp_path)
+    from samvil_mcp.manifest import build_manifest
+
+    # Pass a relative path. project_root must NOT be auto-absolutized.
+    m = build_manifest(".", project_name="rel")
+    assert m.project_root == "."
+    # Module discovery still works on the resolved cwd
+    assert len(m.modules) == 1
