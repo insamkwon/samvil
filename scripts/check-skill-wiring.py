@@ -39,6 +39,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "compute_seed_readiness",
             "gate_check",
             "interview_to_seed",
+            "render_domain_context",
         ),
     ),
     (
@@ -51,6 +52,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "gate_check",
             "build_to_qa",
             "render_pattern_context",
+            "render_domain_context",
         ),
     ),
     (
@@ -64,6 +66,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "consensus_trigger",
             "qa_to_deploy",
             "render_pattern_context",
+            "render_domain_context",
         ),
     ),
     (
@@ -85,6 +88,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "host_chain_strategy",
             "complete_stage",
             "next-skill.json",
+            "render_domain_context",
         ),
     ),
     (

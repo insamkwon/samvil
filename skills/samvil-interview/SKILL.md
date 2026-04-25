@@ -87,6 +87,17 @@ options:
 
 **커스텀 프리셋이 없는 경우**: 이 단계를 건너뛰고 Step 1로 진행
 
+## Step 0.6: Domain Pack Context (v3.6, best-effort)
+
+앱 아이디어와 preset 후보가 잡히면 Domain Pack context를 조회한다:
+
+```
+mcp__samvil_mcp__render_domain_context(solution_type="<candidate_solution_type>", stage="interview")
+```
+
+반환된 `interview_probes`, `risk_checks`, `core_entities`는 질문 후보로만
+사용한다. 사용자 요구보다 우선하지 않고, MCP 실패 시 기존 인터뷰로 진행한다.
+
 ## Step 0.7: PATH Routing + Rhythm Guard + Tracks (v2.4.0+, P2/P4)
 
 **v2.4.0부터 실제 활성화.** 상세 규칙은 `references/path-routing-guide.md` 참조.

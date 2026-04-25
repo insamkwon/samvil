@@ -44,22 +44,18 @@ mcp__samvil_mcp__save_event(
 
 ## Context Refresh
 
-Prefer the manifest over ad-hoc repo scanning:
+Prefer MCP context over ad-hoc repo scanning:
 
 ```
 mcp__samvil_mcp__read_manifest(project_root="<project_root>")
 mcp__samvil_mcp__render_manifest_context(project_root="<project_root>", focus=null, max_modules=30)
-```
-
-If missing:
-
-```
 mcp__samvil_mcp__build_and_persist_manifest(project_root="<project_root>", project_name="<project_name>")
+mcp__samvil_mcp__render_domain_context(solution_type="<seed.solution_type>", stage="design")
 ```
 
 Use `list_decision_adrs(project_root="<project_root>", status="accepted")` to
-load binding council decisions when available. If any MCP call fails, continue
-from files and mention degraded orchestration.
+load accepted decisions. If any MCP call fails, continue from files and mention
+degraded orchestration.
 
 ## Build Blueprint
 
