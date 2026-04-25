@@ -155,8 +155,18 @@ else
 fi
 
 
-# ── 7. MCP server import ────────────────────────────────────────────
-_section "7. MCP server import smoke"
+# ── 7. Cross-host continuation ──────────────────────────────────────
+_section "7. Cross-host continuation"
+
+if python3 scripts/phase2-cross-host-smoke.py >/dev/null 2>&1; then
+  _ok "phase2 cross-host replay: PASS"
+else
+  _fail "phase2 cross-host replay FAILED — run scripts/phase2-cross-host-smoke.py"
+fi
+
+
+# ── 8. MCP server import ────────────────────────────────────────────
+_section "8. MCP server import smoke"
 
 if [ -x mcp/.venv/bin/python ]; then
   out=$(mcp/.venv/bin/python -c "from samvil_mcp import server; print(len(list(server.mcp._tool_manager._tools)))" 2>&1)

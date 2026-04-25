@@ -1,0 +1,41 @@
+{
+  "name": "small-web-app",
+  "description": "Tiny local-first todo app for cross-host regression.",
+  "solution_type": "web-app",
+  "tech_stack": {
+    "framework": "vite-react",
+    "language": "typescript"
+  },
+  "core_experience": {
+    "primary_screen": "TodoHomeScreen",
+    "key_interactions": [
+      "Add a non-empty todo",
+      "See todos immediately",
+      "Ignore empty input"
+    ]
+  },
+  "features": [
+    {
+      "name": "todo-entry",
+      "priority": 1,
+      "independent": true,
+      "acceptance_criteria": [
+        {
+          "id": "AC-1",
+          "description": "User can add a non-empty todo and see it in the list immediately.",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "constraints": [
+    "No backend in v1"
+  ],
+  "out_of_scope": [
+    "User accounts",
+    "Cloud sync",
+    "Shared lists"
+  ],
+  "version": "3.4.0-fixture.1",
+  "schema_version": "3.0"
+}
