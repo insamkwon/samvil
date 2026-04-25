@@ -51,6 +51,13 @@ from .jurisdiction import (
     check_jurisdiction as _check_jurisdiction_core,
     loop_should_stop as _loop_should_stop,
 )
+from .manifest import (
+    build_manifest,
+    write_manifest,
+    manifest_path,
+    read_manifest as _read_manifest_file,
+    render_for_context,
+)
 from .retro_v3_2 import (
     ExperimentRun as _ExperimentRun,
     Observation as _Observation,
@@ -2913,6 +2920,94 @@ async def budget_status(
     except Exception as e:
         _log_mcp_health("fail", "budget_status", str(e))
         return json.dumps({"error": str(e)})
+
+
+# ── Codebase Manifest (v3.3) ──────────────────────────────────────────
+
+
+def _build_and_persist_manifest_impl(
+    project_root: str,
+    project_name: str,
+) -> dict:
+    """Build the manifest from filesystem and write to .samvil/manifest.json."""
+    m = build_manifest(project_root, project_name=project_name)
+    write_manifest(m, project_root)
+    return {
+        "status": "ok",
+        "module_count": len(m.modules),
+        "convention_count": len(m.conventions),
+        "path": str(manifest_path(project_root)),
+    }
+
+
+def _read_manifest_impl(project_root: str) -> dict:
+    m = _read_manifest_file(project_root)
+    if m is None:
+        return {"status": "missing"}
+    return {"status": "ok", "manifest": m.to_dict()}
+
+
+def _render_manifest_context_impl(
+    project_root: str,
+    focus: list[str] | None = None,
+    max_modules: int = 30,
+) -> dict:
+    m = _read_manifest_file(project_root)
+    if m is None:
+        return {"status": "missing"}
+    text = render_for_context(m, focus=focus, max_modules=max_modules)
+    return {"status": "ok", "context": text, "module_count": len(m.modules)}
+
+
+def _refresh_manifest_impl(project_root: str, project_name: str) -> dict:
+    """Convenience: rebuild + persist + return rendered context."""
+    build_result = _build_and_persist_manifest_impl(project_root, project_name)
+    if build_result["status"] != "ok":
+        return build_result
+    ctx = _render_manifest_context_impl(project_root)
+    return {**build_result, "context": ctx.get("context", "")}
+
+
+@mcp.tool()
+def build_and_persist_manifest(project_root: str, project_name: str) -> dict:
+    """Build a Codebase Manifest and write it to .samvil/manifest.json.
+
+    Args:
+        project_root: absolute path to the project directory.
+        project_name: human-readable project name.
+
+    Returns:
+        dict with status, module_count, convention_count, path.
+    """
+    return _build_and_persist_manifest_impl(project_root, project_name)
+
+
+@mcp.tool()
+def read_manifest(project_root: str) -> dict:
+    """Read .samvil/manifest.json. Returns {status: 'missing'} if absent."""
+    return _read_manifest_impl(project_root)
+
+
+@mcp.tool()
+def render_manifest_context(
+    project_root: str,
+    focus: list[str] | None = None,
+    max_modules: int = 30,
+) -> dict:
+    """Render manifest as a compressed markdown summary for AI context.
+
+    Args:
+        project_root: absolute path.
+        focus: optional list of module names to include (others omitted).
+        max_modules: hard cap; default 30.
+    """
+    return _render_manifest_context_impl(project_root, focus, max_modules)
+
+
+@mcp.tool()
+def refresh_manifest(project_root: str, project_name: str) -> dict:
+    """Rebuild manifest from filesystem, persist, and return fresh context."""
+    return _refresh_manifest_impl(project_root, project_name)
 
 
 # ── Entry point ───────────────────────────────────────────────
