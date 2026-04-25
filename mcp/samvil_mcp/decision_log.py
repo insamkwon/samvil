@@ -297,6 +297,37 @@ def supersession_chain(
     return chain
 
 
+def find_adrs_referencing(
+    project_root: str | os.PathLike,
+    target: str,
+) -> list[str]:
+    """Return ADR ids that mention `target` in evidence, tags, or body.
+
+    Phase 1 keeps this deterministic and case-sensitive. Later phases can add
+    indexes or semantic matching if the decision directory becomes large.
+    """
+    if not target:
+        raise DecisionLogError("target is required")
+
+    matches: list[str] = []
+    for adr in list_adrs(project_root):
+        haystacks = (
+            adr.evidence
+            + adr.tags
+            + [
+                adr.context,
+                adr.decision,
+                adr.consequences,
+                adr.alternatives,
+                adr.supersession_reason,
+            ]
+        )
+        if any(target in value for value in haystacks):
+            matches.append(adr.adr_id)
+
+    return matches
+
+
 def _section(body: str, heading: str) -> str:
     pattern = rf"^## {re.escape(heading)}\n(?P<content>.*?)(?=^## |\Z)"
     match = re.search(pattern, body, flags=re.M | re.S)

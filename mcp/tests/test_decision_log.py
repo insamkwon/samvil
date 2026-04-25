@@ -11,6 +11,7 @@ from samvil_mcp.decision_log import (
     adr_path,
     adr_id_for_title,
     decision_dir,
+    find_adrs_referencing,
     list_adrs,
     parse_adr_markdown,
     read_adr,
@@ -345,3 +346,63 @@ def test_supersession_chain_stops_on_loop(tmp_path) -> None:
         "adr_a",
         "adr_b",
     ]
+
+
+def test_find_adrs_referencing_matches_evidence_body_and_tags(tmp_path) -> None:
+    write_adr(
+        DecisionADR(
+            adr_id="adr_api",
+            title="API",
+            authors=["samvil-council"],
+            evidence=["mcp/samvil_mcp/server.py:2925"],
+            context="Manifest tools need server wiring.",
+        ),
+        tmp_path,
+    )
+    write_adr(
+        DecisionADR(
+            adr_id="adr_tags",
+            title="Tags",
+            authors=["samvil-council"],
+            tags=["decision-log"],
+            decision="Use markdown ADR files.",
+        ),
+        tmp_path,
+    )
+    write_adr(
+        DecisionADR(
+            adr_id="adr_unrelated",
+            title="Other",
+            authors=["samvil-council"],
+            context="No match here.",
+        ),
+        tmp_path,
+    )
+
+    assert find_adrs_referencing(tmp_path, "server.py") == ["adr_api"]
+    assert find_adrs_referencing(tmp_path, "decision-log") == ["adr_tags"]
+    assert find_adrs_referencing(tmp_path, "markdown ADR") == ["adr_tags"]
+
+
+def test_find_adrs_referencing_is_case_sensitive(tmp_path) -> None:
+    write_adr(
+        DecisionADR(
+            adr_id="adr_api",
+            title="API",
+            authors=["samvil-council"],
+            context="Manifest tools need server wiring.",
+        ),
+        tmp_path,
+    )
+
+    assert find_adrs_referencing(tmp_path, "manifest") == []
+    assert find_adrs_referencing(tmp_path, "Manifest") == ["adr_api"]
+
+
+def test_find_adrs_referencing_handles_empty_dir(tmp_path) -> None:
+    assert find_adrs_referencing(tmp_path, "anything") == []
+
+
+def test_find_adrs_referencing_requires_target(tmp_path) -> None:
+    with pytest.raises(DecisionLogError, match="target"):
+        find_adrs_referencing(tmp_path, "")
