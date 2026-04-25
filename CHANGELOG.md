@@ -4,6 +4,43 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.3.0] — 2026-04-26 — 4-Layer Portability Foundation
+
+Phase 1 of the multi-host SAMVIL architecture. This release separates the
+harness into Skill / MCP / Host Adapter / SSOT layers so future Codex,
+OpenCode, and larger-app support can build on explicit contracts instead of
+Claude Code assumptions.
+
+### Added
+- `mcp/samvil_mcp/manifest.py` + 4 MCP tools for Codebase Manifest build,
+  read, render, and refresh. Manifest writes to `.samvil/manifest.json`.
+- `mcp/samvil_mcp/decision_log.py` + 6 MCP tools for PM-readable ADRs under
+  `.samvil/decisions/*.md`, including supersession and council promotion.
+- `mcp/samvil_mcp/orchestrator.py` + 5 MCP tools for next-stage lookup,
+  skip policy, proceed/block checks, event-derived state, and `complete_stage`.
+- `mcp/samvil_mcp/host.py` + 2 MCP tools for `HostCapability` and chain
+  strategy resolution across Claude Code, Codex CLI, OpenCode, and generic
+  hosts.
+- Schema references: `references/manifest-schema.md`,
+  `references/decision-log-schema.md`, `references/orchestrator-schema.md`,
+  `references/host-capability-schema.md`.
+- Phase 2 planning document for the next mass-migration step.
+
+### Changed
+- `skills/samvil-seed/SKILL.md` is now an 87-line ultra-thin, host-aware PoC.
+  The previous 512-line body is preserved as `SKILL.legacy.md`.
+- `skills/samvil-council/SKILL.md` now promotes council decision rows to ADRs
+  through `promote_council_decision` on a best-effort basis.
+- Versioning policy now allows minor versions such as `3.10.0` through
+  `3.99.0`; minor reaching 10 no longer auto-promotes to major.
+
+### Verified
+- Full test suite: 758 passed.
+- MCP server import smoke: 121 tools.
+- 4-layer integration smoke: Manifest + Decision Log + Orchestrator +
+  HostCapability passed.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
 ## [3.2.3] — 2026-04-25 — README onboarding (contributors + end-users)
 
 Docs-only patch. No code or skill behavior change.

@@ -224,6 +224,13 @@ Single source of truth: `references/glossary.md`. Enforced in CI via
 - Contract ledger entry → **`claim`** with typed whitelist; see
   `mcp/samvil_mcp/claim_ledger.py`.
 
+| Term | Canonical file | v3.3 role |
+|---|---|---|
+| `Codebase Manifest` | `mcp/samvil_mcp/manifest.py` | compressed codebase context |
+| `Decision Log ADR` | `mcp/samvil_mcp/decision_log.py` | PM-readable decision history |
+| `Orchestrator` | `mcp/samvil_mcp/orchestrator.py` | stage order, skip, proceed/block |
+| `HostCapability` | `mcp/samvil_mcp/host.py` | runtime capability declaration |
+
 ## 🧬 Identity (v3)
 
 1. **Solo Developer First** — 1인 개발자 타겟. 팀 feature는 범위 밖.
@@ -231,6 +238,25 @@ Single source of truth: `references/glossary.md`. Enforced in CI via
 3. **Robustness First** — 견고성 > 속도. tier로 trade-off 조절.
 4. **Converge, Then Evolve** — 3-level 완성 (Build / QA / Evolve).
 5. **Self-Contained** — 단독 하네스. 외부 MCP Bridge는 future.
+
+## 🏛️ 4-Layer Architecture (v3.3)
+
+v3.3 separates SAMVIL into four layers so the same project can run across
+Claude Code, Codex CLI, OpenCode, or a generic host.
+
+| Layer | Owns | v3.3 files |
+|---|---|---|
+| Skill | user-facing workflow, summaries, approval checkpoints | `skills/*/SKILL.md` |
+| MCP | deterministic operations and contracts | `mcp/samvil_mcp/*.py` |
+| Host Adapter | runtime differences and chain strategy | `host.py`, `.samvil/next-skill.json` |
+| SSOT | durable project facts and audit files | `.samvil/manifest.json`, `.samvil/decisions/*.md`, `.samvil/claims.jsonl` |
+
+Rules:
+- Skills ask MCP for state instead of inferring stage flow from prompt text.
+- Host-specific chaining goes through `HostCapability`; do not assume the
+  Claude Code Skill tool exists.
+- `.samvil/*` files remain the recovery boundary when MCP or host features
+  degrade.
 
 ## ⚖️ 10 Core Principles (v3)
 
@@ -340,6 +366,13 @@ Supports multiple stacks (CLI-based scaffold, no template folder):
 | **MINOR** (0.+1.0) | 사용자가 새로운 걸 보거나 경험함 | 새 스킬/에이전트/프리셋, 새 단계 추가 (Smoke Run 등), 새 스택 지원, 새 설정 옵션, 수동→자동 전환 |
 | **MAJOR** (+1.0.0) | 기존 프로젝트가 깨질 수 있음 | seed 스키마 변경, INV 규칙 변경, config 필수 필드 변경, 체인 순서 변경 |
 
+### MINOR-bump cap relaxation (v3.3+)
+
+The MINOR position (second number) is no longer auto-promoted to MAJOR when it
+reaches 10. Versions like 3.10.0, 3.42.0, and 3.99.0 are valid and indicate
+cumulative MINOR work without breaking changes. MAJOR bumps are reserved for
+explicit breaking-change releases per the table above.
+
 ### 판정 테스트
 
 - PATCH: `/samvil` 실행 시 사용자 경험이 동일
@@ -422,6 +455,40 @@ chore: 설정, 버전, 구조 변경
 3. **실제 연동 기본화** — 인터뷰에 DB/Auth/API 질문 추가. Supabase 클라이언트 자동 설정. 스텁/하드코딩 금지. .env.example 자동 생성.
 4. **배포 준비** — next.config.mjs에 output:'standalone'. QA 완료 후 Vercel/Railway/수동 배포 옵션 제시.
 5. **Council 간접 토론** — Round 1 결과에서 논쟁점(consensus/debate/blind_spots) 추출 → Round 2 prompt에 주입.
+
+## v3.3.0 변경 내역 (v3.2.3 → v3.3.0) — 4-Layer Portability Foundation
+
+v3.3 Phase 1 구현 완료. 758 unit tests · 121 MCP tools · 4-layer integration
+smoke PASS · pre-commit-check PASS.
+
+### Week 1 — Codebase Manifest (Layer 4)
+- `mcp/samvil_mcp/manifest.py` — module discovery, public API extraction,
+  convention detection, atomic `.samvil/manifest.json`, context renderer.
+- MCP tools: `build_and_persist_manifest`, `read_manifest`,
+  `render_manifest_context`, `refresh_manifest`.
+- Reference: `references/manifest-schema.md`.
+
+### Week 2 — Decision Log / ADR (Layer 4)
+- `mcp/samvil_mcp/decision_log.py` — ADR markdown frontmatter, atomic I/O,
+  supersession chains, reference lookup, council decision promotion.
+- MCP tools: `write_decision_adr`, `read_decision_adr`,
+  `list_decision_adrs`, `supersede_decision_adr`,
+  `find_decision_adrs_referencing`, `promote_council_decision`.
+- Reference: `references/decision-log-schema.md`.
+
+### Week 3 — Orchestrator (Layer 2)
+- `mcp/samvil_mcp/orchestrator.py` — canonical stage order, tier skip policy,
+  event-derived proceed/block state, `complete_stage` planning.
+- MCP tools: `get_next_stage`, `should_skip_stage`, `stage_can_proceed`,
+  `complete_stage`, `get_orchestration_state`.
+- Reference: `references/orchestrator-schema.md`.
+
+### Week 4 — HostCapability + ultra-thin seed PoC (Layer 3 + Layer 1)
+- `mcp/samvil_mcp/host.py` — Claude Code / Codex CLI / OpenCode / generic
+  capability resolver and chain strategy.
+- `skills/samvil-seed/SKILL.md` reduced to 87-line MCP-driven PoC;
+  `SKILL.legacy.md` preserves the old 512-line body.
+- Reference: `references/host-capability-schema.md`.
 
 ## v3.2.0 변경 내역 (v3.1.0 → v3.2.0) — Contract Layer
 
