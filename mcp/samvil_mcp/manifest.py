@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -161,13 +162,71 @@ def discover_modules(project_root: Path | str) -> list[ModuleEntry]:
                 files.append(os.path.relpath(full, root))
         files.sort()
 
+        api = extract_public_api(child)
         modules.append(
             ModuleEntry(
                 name=child.name,
                 path=str(child.relative_to(root)),
+                public_api=api,
                 files=files,
                 last_updated=now,
             )
         )
 
     return modules
+
+
+_RE_NAMED_REEXPORT = re.compile(
+    r"export\s*\{([^}]+)\}\s*from\s*['\"][^'\"]+['\"]\s*;?"
+)
+_RE_DIRECT_NAMED_EXPORT = re.compile(
+    r"export\s+(?:const|function|class|let|var)\s+(\w+)"
+)
+_RE_DEFAULT_EXPORT = re.compile(r"export\s+default\b")
+
+
+def extract_public_api(module_dir: Path) -> list[str]:
+    """Parse module's index.ts to extract exported names.
+
+    Best-effort regex. Catches:
+      - export { a, b as c } from './x';
+      - export const X = ...
+      - export function foo() {}
+      - export default <anything>  → 'default'
+    """
+    index = module_dir / "index.ts"
+    if not index.exists():
+        index = module_dir / "index.tsx"
+    if not index.exists():
+        return []
+
+    text = index.read_text(encoding="utf-8")
+    names: list[str] = []
+
+    for match in _RE_NAMED_REEXPORT.finditer(text):
+        body = match.group(1)
+        for piece in body.split(","):
+            piece = piece.strip()
+            if not piece:
+                continue
+            # Handle "a as b" → take the alias (the externally visible name)
+            if " as " in piece:
+                _, alias = piece.split(" as ", 1)
+                names.append(alias.strip())
+            else:
+                names.append(piece)
+
+    for match in _RE_DIRECT_NAMED_EXPORT.finditer(text):
+        names.append(match.group(1))
+
+    if _RE_DEFAULT_EXPORT.search(text):
+        names.append("default")
+
+    # De-dup while preserving order
+    seen: set[str] = set()
+    out: list[str] = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out

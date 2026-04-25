@@ -229,3 +229,53 @@ def test_discover_modules_skips_dot_prefixed_dirs(tmp_path):
 
     modules = discover_modules(tmp_path)
     assert {m.name for m in modules} == {"auth"}
+
+
+def test_extract_public_api_from_index_ts(tmp_path):
+    """index.ts re-exports become the module's public API list."""
+    auth = tmp_path / "src" / "auth"
+    auth.mkdir(parents=True)
+    (auth / "index.ts").write_text(
+        "export { signIn, signOut } from './session';\n"
+        "export { getUser } from './user';\n"
+    )
+
+    from samvil_mcp.manifest import extract_public_api
+
+    api = extract_public_api(auth)
+    assert set(api) == {"signIn", "signOut", "getUser"}
+
+
+def test_extract_public_api_handles_default_export(tmp_path):
+    """`export default Foo;` becomes a 'default' entry."""
+    mod = tmp_path / "src" / "x"
+    mod.mkdir(parents=True)
+    (mod / "index.ts").write_text("export default class App {}\n")
+
+    from samvil_mcp.manifest import extract_public_api
+
+    api = extract_public_api(mod)
+    assert "default" in api
+
+
+def test_extract_public_api_returns_empty_when_no_index(tmp_path):
+    """No index.ts → empty public API (not an error)."""
+    mod = tmp_path / "src" / "x"
+    mod.mkdir(parents=True)
+    (mod / "thing.ts").write_text("export const X = 1;")
+
+    from samvil_mcp.manifest import extract_public_api
+
+    assert extract_public_api(mod) == []
+
+
+def test_discover_modules_populates_public_api(tmp_path):
+    """discover_modules wires extract_public_api into each ModuleEntry."""
+    auth = tmp_path / "src" / "auth"
+    auth.mkdir(parents=True)
+    (auth / "index.ts").write_text("export { signIn } from './session';")
+
+    from samvil_mcp.manifest import discover_modules
+
+    modules = discover_modules(tmp_path)
+    assert modules[0].public_api == ["signIn"]
