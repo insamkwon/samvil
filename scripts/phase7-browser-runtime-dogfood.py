@@ -316,14 +316,11 @@ def _write_events_and_claims(root: Path, scenario: BrowserScenario) -> None:
         "seed": "seed_generated",
         "design": "blueprint_generated",
         "scaffold": "scaffold_complete",
-        "install": "package_setup_complete",
+        "install": "install_complete",
         "build": "build_stage_complete",
         "browser": "browser_check_complete",
         "qa": "qa_pass",
         "retro": "retro_complete",
-    }
-    start_events = {
-        "install": "package_setup_started",
     }
     events: list[dict[str, Any]] = []
     claims: list[dict[str, Any]] = []
@@ -331,7 +328,7 @@ def _write_events_and_claims(root: Path, scenario: BrowserScenario) -> None:
     for stage in stages:
         start_ts = f"2026-04-26T05:{minute:02d}:00Z"
         end_ts = f"2026-04-26T05:{minute + 1:02d}:00Z"
-        events.append({"event_type": start_events.get(stage, f"{stage}_started"), "stage": stage, "timestamp": start_ts})
+        events.append({"event_type": f"{stage}_started", "stage": stage, "timestamp": start_ts})
         events.append({"event_type": complete[stage], "stage": stage, "timestamp": end_ts})
         claims.append({
             "claim_id": f"{scenario.name}-{stage}-gate",

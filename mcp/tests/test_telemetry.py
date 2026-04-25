@@ -150,6 +150,33 @@ def test_run_report_categorizes_events_and_stage_durations(tmp_path):
     assert by_stage["qa"]["status"] == "blocked"
 
 
+def test_install_stage_is_not_blocked_by_stall_substring(tmp_path):
+    root = tmp_path / "install-app"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "install-app",
+        "current_stage": "install",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    _jsonl(samvil / "events.jsonl", [
+        {"event_type": "install_started", "stage": "install", "timestamp": "2026-04-26T01:00:00Z"},
+        {"event_type": "install_complete", "stage": "install", "timestamp": "2026-04-26T01:01:00Z"},
+        {"event_type": "qa_stall_detected", "stage": "qa", "timestamp": "2026-04-26T01:02:00Z"},
+        {"event_type": "deploy_blocked", "stage": "deploy", "timestamp": "2026-04-26T01:03:00Z"},
+    ])
+
+    report = build_run_report(root)
+    by_stage = {stage["stage"]: stage for stage in report["timeline"]["stages"]}
+
+    assert report["timeline"]["category_counts"]["start"] == 1
+    assert report["timeline"]["category_counts"]["complete"] == 1
+    assert report["timeline"]["category_counts"]["blocked"] == 2
+    assert by_stage["install"]["status"] == "complete"
+    assert by_stage["qa"]["status"] == "blocked"
+    assert by_stage["deploy"]["status"] == "blocked"
+
+
 def test_derive_retro_observations_from_report_findings(tmp_path):
     root = tmp_path / "retro-app"
     samvil = root / ".samvil"

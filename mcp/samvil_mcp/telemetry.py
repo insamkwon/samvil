@@ -411,9 +411,11 @@ def _timeline_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _event_category(event_type: str) -> str:
     et = event_type.lower()
-    if "retry" in et or "fix_applied" in et or "reawake" in et:
+    tokens = _event_tokens(et)
+    token_set = set(tokens)
+    if {"retry", "retried", "retries", "reawake"} & token_set or et == "fix_applied":
         return "retry"
-    if "blocked" in et or "stall" in et:
+    if {"blocked", "stall", "stalled"} & token_set:
         return "blocked"
     if "skip" in et:
         return "skip"
@@ -428,6 +430,11 @@ def _event_category(event_type: str) -> str:
     if "start" in et or "started" in et:
         return "start"
     return "other"
+
+
+def _event_tokens(event_type: str) -> list[str]:
+    normalized = "".join(ch if ch.isalnum() else " " for ch in event_type.lower())
+    return [token for token in normalized.split() if token]
 
 
 def _stage_status_from_categories(categories: list[str]) -> str:

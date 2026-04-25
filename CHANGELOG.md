@@ -4,6 +4,35 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.9.1] — 2026-04-26 — Telemetry Classifier Patch
+
+Patch release for v3.9 browser dogfood. This fixes a telemetry classifier false
+positive where `install_started` was categorized as blocked because `install`
+contains the substring `stall`.
+
+### Fixed
+- Event categorization now treats `stall`, `stalled`, and `blocked` as explicit
+  tokens instead of arbitrary substrings.
+- `install_started` + `install_complete` now reports the install stage as
+  complete, not blocked.
+- Phase 7 browser dogfood now records `install_started`/`install_complete`
+  directly instead of using the temporary `package_setup_*` workaround.
+
+### Added
+- Regression coverage proving install events stay complete while
+  `qa_stall_detected` and `deploy_blocked` still report blocked stages.
+
+### Verified
+- Telemetry tests: 8 passed.
+- Direct browser dogfood: PASS with `install_started`/`install_complete` and
+  `retro=0`.
+- Full test suite: 802 passed.
+- MCP server import smoke: 133 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.9.0] — 2026-04-26 — Browser Runtime Dogfood
 
 Phase 7 of the multi-host SAMVIL architecture. This release adds the first

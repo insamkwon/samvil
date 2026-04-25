@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.9.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.9.1`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.9.1 "Telemetry Classifier Patch"** — v3.9 browser dogfood 중 발견한 `install_started` 오분류를 닫은 안정화 패치입니다.
+
+> **v3.9.1 주요 수정** (2026-04-26):
+> - **Event classifier precision** — `stall`/`blocked` 판정을 단어 토큰 기준으로 강화해 `install_started`가 blocked로 분류되지 않게 수정.
+> - **Regression coverage** — `install_started` + `install_complete`는 complete, `qa_stall_detected`와 `deploy_blocked`는 blocked로 남는 회귀 테스트 추가.
+> - **Dogfood workaround 제거** — Phase 7 browser dogfood가 다시 `install_started`/`install_complete`를 그대로 기록하며 `retro=0`을 확인.
+> - **검증**: telemetry tests PASS · browser runtime dogfood PASS · full pre-commit-check PASS.
 
 **v3.9.0 "Browser Runtime Dogfood"** — v3.8의 local runtime dogfood 위에 실제 `npm install`, Vite dev server, Playwright Chromium DOM/canvas/input 검증을 얹은 릴리스입니다.
 
