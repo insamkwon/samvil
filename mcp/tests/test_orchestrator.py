@@ -6,8 +6,11 @@ import pytest
 
 from samvil_mcp.orchestrator import (
     PIPELINE_STAGES,
+    StageEvent,
     OrchestratorError,
     get_next_stage,
+    get_orchestration_state,
+    stage_can_proceed,
     should_skip_stage,
 )
 
@@ -62,3 +65,104 @@ def test_unknown_stage_raises() -> None:
 def test_unknown_tier_raises() -> None:
     with pytest.raises(OrchestratorError, match="tier"):
         should_skip_stage("council", "enterprise")
+
+
+def test_stage_can_proceed_allows_first_stage_without_events() -> None:
+    session = {"current_stage": "interview", "samvil_tier": "standard"}
+    result = stage_can_proceed(session, [], "interview")
+    assert result["can_proceed"] is True
+    assert result["blockers"] == []
+
+
+def test_stage_can_proceed_requires_prior_successful_exits() -> None:
+    session = {"current_stage": "seed", "samvil_tier": "standard"}
+    result = stage_can_proceed(session, [], "seed")
+    assert result["can_proceed"] is False
+    assert result["blockers"] == ["stage interview is not complete"]
+
+    result = stage_can_proceed(
+        session,
+        [StageEvent(event_type="interview_complete", stage="seed")],
+        "seed",
+    )
+    assert result["can_proceed"] is True
+
+
+def test_stage_can_proceed_skips_minimal_council_prereq() -> None:
+    session = {"current_stage": "design", "samvil_tier": "minimal"}
+    events = [
+        StageEvent(event_type="interview_complete", stage="seed"),
+        StageEvent(event_type="seed_generated", stage="design"),
+    ]
+
+    result = stage_can_proceed(session, events, "design")
+
+    assert result["can_proceed"] is True
+
+
+def test_stage_can_proceed_blocks_on_failed_prior_stage() -> None:
+    session = {"current_stage": "qa", "samvil_tier": "standard"}
+    events = [
+        StageEvent(event_type="interview_complete", stage="seed"),
+        StageEvent(event_type="seed_generated", stage="council"),
+        StageEvent(event_type="council_verdict", stage="design"),
+        StageEvent(event_type="design_complete", stage="scaffold"),
+        StageEvent(event_type="scaffold_complete", stage="build"),
+        StageEvent(event_type="build_fail", stage="build"),
+    ]
+
+    result = stage_can_proceed(session, events, "qa")
+
+    assert result["can_proceed"] is False
+    assert result["blockers"] == ["stage build failed"]
+
+
+def test_later_success_clears_earlier_failure() -> None:
+    session = {"current_stage": "qa", "samvil_tier": "standard"}
+    events = [
+        StageEvent(event_type="interview_complete", stage="seed"),
+        StageEvent(event_type="seed_generated", stage="council"),
+        StageEvent(event_type="council_verdict", stage="design"),
+        StageEvent(event_type="design_complete", stage="scaffold"),
+        StageEvent(event_type="scaffold_complete", stage="build"),
+        StageEvent(event_type="build_fail", stage="build"),
+        StageEvent(event_type="build_pass", stage="qa"),
+    ]
+
+    result = stage_can_proceed(session, events, "qa")
+
+    assert result["can_proceed"] is True
+
+
+def test_stage_can_proceed_rejects_skipped_target() -> None:
+    session = {"current_stage": "deploy", "samvil_tier": "standard"}
+    result = stage_can_proceed(session, [], "deploy")
+    assert result["can_proceed"] is False
+    assert result["blockers"] == ["stage deploy is skipped for tier standard"]
+
+
+def test_get_orchestration_state_summarizes_progress() -> None:
+    session = {"current_stage": "design", "samvil_tier": "minimal"}
+    events = [
+        StageEvent(event_type="interview_complete", stage="seed"),
+        StageEvent(event_type="seed_generated", stage="design"),
+    ]
+
+    state = get_orchestration_state(session, events)
+
+    assert state["current_stage"] == "design"
+    assert state["next_stage"] == "scaffold"
+    assert state["completed_stages"] == ["interview", "seed"]
+    assert state["skipped_stages"] == ["council", "deploy"]
+    assert state["failed_stages"] == []
+    assert state["can_proceed"]["can_proceed"] is True
+
+
+def test_unknown_events_do_not_affect_state() -> None:
+    session = {"current_stage": "seed", "samvil_tier": "standard"}
+    events = [StageEvent(event_type="custom_metric", stage="interview")]
+
+    state = get_orchestration_state(session, events)
+
+    assert state["completed_stages"] == []
+    assert state["failed_stages"] == []
