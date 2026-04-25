@@ -47,11 +47,17 @@ Example marker:
 
 ```json
 {
+  "schema_version": "1.0",
+  "chain_via": "file_marker",
+  "host": "codex_cli",
   "next_skill": "samvil-council",
   "reason": "council required for selected tier",
-  "from_stage": "seed"
+  "from_stage": "seed",
+  "created_by": "samvil-seed"
 }
 ```
+
+See `references/host-continuation.md` for the canonical marker contract.
 
 ## MCP Tools
 

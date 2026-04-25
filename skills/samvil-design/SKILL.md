@@ -5,9 +5,8 @@ description: "MCP-driven design stage: turn project.seed.json into project.bluep
 
 # SAMVIL Design - Thin Orchestrated Entry
 
-This is the v3.4 Phase 2 ultra-thin migration. Full blueprint rules are
-preserved in `skills/samvil-design/SKILL.legacy.md`; use it for schema
-mapping, design-council behavior, feasibility review, and output formats.
+This is the v3.4 Phase 2 ultra-thin migration. Full blueprint rules live in
+`skills/samvil-design/SKILL.legacy.md`.
 
 ## Inputs
 
@@ -72,7 +71,7 @@ Using `SKILL.legacy.md`, create a valid `project.blueprint.json` for the seed's
 - accepted ADRs override preferences
 - Gate B only for thorough/full tiers
 - feasibility review before user checkpoint
-- mobile considerations for form-heavy or mobile-first apps
+- mobile considerations for form-heavy apps
 
 Present the blueprint summary and ask for approval. If edits are requested,
 revise and re-present.
@@ -101,14 +100,17 @@ Use `host_chain_strategy.chain_via`:
 
 ```json
 {
+  "schema_version": "1.0",
+  "chain_via": "file_marker",
+  "host": "<host>",
   "next_skill": "samvil-scaffold",
   "reason": "design completed",
-  "from_stage": "design"
+  "from_stage": "design",
+  "created_by": "samvil-design"
 }
 ```
 
-If MCP is unavailable, fall back to the legacy chaining rules in
-`SKILL.legacy.md` and mention that orchestration was degraded.
+If MCP is unavailable, fall back to `SKILL.legacy.md` chaining and mention degraded orchestration.
 
 ## Invariants
 

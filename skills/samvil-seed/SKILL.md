@@ -68,9 +68,13 @@ Use `host_chain_strategy.chain_via`:
 
 ```json
 {
+  "schema_version": "1.0",
+  "chain_via": "file_marker",
+  "host": "<host>",
   "next_skill": "samvil-design",
   "reason": "minimal tier skips council",
-  "from_stage": "seed"
+  "from_stage": "seed",
+  "created_by": "samvil-seed"
 }
 ```
 
