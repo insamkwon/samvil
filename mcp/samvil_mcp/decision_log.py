@@ -48,9 +48,13 @@ def adr_id_for_title(title: str, *, ts: str | None = None) -> str:
         raise DecisionLogError("title is required")
     ts = ts or _now_iso()
     compact_ts = ts.replace(":", "-").rstrip("Z")
-    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    slug = _slugify(title)
     slug = slug[:64].strip("-") or "decision"
     return f"adr_{compact_ts}_{slug}"
+
+
+def _slugify(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
 
 def decision_dir(project_root: str | os.PathLike) -> Path:
@@ -326,6 +330,96 @@ def find_adrs_referencing(
             matches.append(adr.adr_id)
 
     return matches
+
+
+def adr_from_council_decision(decision: dict[str, Any]) -> DecisionADR:
+    """Promote a legacy council `decisions.log` row into an ADR object."""
+    decision_text = str(decision.get("decision", "")).strip()
+    if not decision_text:
+        raise DecisionLogError("council decision text is required")
+
+    legacy_id = str(decision.get("id", "")).strip()
+    if legacy_id:
+        adr_id = f"adr_council_{_slugify(legacy_id)}"
+    else:
+        adr_id = adr_id_for_title(f"council {decision_text}")
+
+    binding = bool(decision.get("binding", False))
+    applied = bool(decision.get("applied", False))
+    dissenting = bool(decision.get("dissenting", False))
+    consensus_score = decision.get("consensus_score")
+    weak_consensus = (
+        isinstance(consensus_score, int | float) and float(consensus_score) < 0.60
+    )
+    status = (
+        "accepted"
+        if binding and applied and not dissenting and not weak_consensus
+        else "proposed"
+    )
+
+    agent = str(decision.get("agent", "")).strip()
+    authors = ["samvil-council"]
+    if agent:
+        authors.append(agent)
+
+    timestamp = str(decision.get("timestamp", "")).strip() or _now_iso()
+    title = f"Council: {decision_text[:96]}".rstrip()
+    gate = str(decision.get("gate", "")).strip()
+    severity = str(decision.get("severity", "")).strip()
+
+    context_lines = [
+        _kv("Gate", gate),
+        _kv("Round", decision.get("round")),
+        _kv("Agent", agent),
+        _kv("Reason", decision.get("reason")),
+        _kv("Severity", severity),
+        _kv("Consensus score", consensus_score),
+        _kv("Binding", binding),
+        _kv("Applied", applied),
+        _kv("Dissenting", dissenting),
+    ]
+    context = "\n".join(line for line in context_lines if line)
+
+    tags = ["council"]
+    if gate:
+        tags.append(f"gate:{gate}")
+    if agent:
+        tags.append(f"agent:{agent}")
+    if severity:
+        tags.append(f"severity:{severity.lower()}")
+    if binding:
+        tags.append("binding")
+    if not applied:
+        tags.append("unapplied")
+    if dissenting:
+        tags.append("dissenting")
+    if weak_consensus:
+        tags.append("weak-consensus")
+
+    if status == "accepted":
+        consequences = "Subsequent SAMVIL stages should respect this decision."
+    else:
+        consequences = "This council output is preserved but not binding until accepted."
+
+    return DecisionADR(
+        adr_id=adr_id,
+        title=title,
+        status=status,
+        created_at=timestamp,
+        last_reviewed_at=timestamp,
+        authors=authors,
+        context=context,
+        decision=decision_text,
+        consequences=consequences,
+        evidence=list(decision.get("evidence", [])),
+        tags=tags,
+    )
+
+
+def _kv(label: str, value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    return f"{label}: {value}"
 
 
 def _section(body: str, heading: str) -> str:

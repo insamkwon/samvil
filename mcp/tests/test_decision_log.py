@@ -8,6 +8,7 @@ from samvil_mcp.decision_log import (
     ADR_STATUSES,
     DecisionADR,
     DecisionLogError,
+    adr_from_council_decision,
     adr_path,
     adr_id_for_title,
     decision_dir,
@@ -406,3 +407,75 @@ def test_find_adrs_referencing_handles_empty_dir(tmp_path) -> None:
 def test_find_adrs_referencing_requires_target(tmp_path) -> None:
     with pytest.raises(DecisionLogError, match="target"):
         find_adrs_referencing(tmp_path, "")
+
+
+def test_adr_from_council_decision_accepts_binding_applied_majority() -> None:
+    adr = adr_from_council_decision(
+        {
+            "id": "d001",
+            "gate": "A",
+            "round": 2,
+            "agent": "simplifier",
+            "decision": "Remove dashboard from P1 features",
+            "reason": "P1 scope is too large.",
+            "severity": "MINOR",
+            "binding": True,
+            "applied": True,
+            "dissenting": False,
+            "consensus_score": 0.67,
+            "timestamp": "2026-04-04T18:30:00+09:00",
+        }
+    )
+
+    assert adr.adr_id == "adr_council_d001"
+    assert adr.status == "accepted"
+    assert adr.title == "Council: Remove dashboard from P1 features"
+    assert adr.authors == ["samvil-council", "simplifier"]
+    assert adr.created_at == "2026-04-04T18:30:00+09:00"
+    assert adr.decision == "Remove dashboard from P1 features"
+    assert "P1 scope is too large." in adr.context
+    assert "gate:A" in adr.tags
+    assert "binding" in adr.tags
+
+
+def test_adr_from_council_decision_keeps_dissenting_as_proposed() -> None:
+    adr = adr_from_council_decision(
+        {
+            "id": "d002",
+            "agent": "scope-guard",
+            "decision": "Auth should be P1, not P2",
+            "reason": "Production data needs auth.",
+            "binding": False,
+            "applied": False,
+            "dissenting": True,
+            "consensus_score": 0.33,
+        }
+    )
+
+    assert adr.status == "proposed"
+    assert "dissenting" in adr.tags
+    assert "weak-consensus" in adr.tags
+    assert "not binding" in adr.consequences.lower()
+
+
+def test_adr_from_council_decision_keeps_unapplied_as_proposed() -> None:
+    adr = adr_from_council_decision(
+        {
+            "id": "d003",
+            "agent": "ceo-advisor",
+            "decision": "Delay launch",
+            "reason": "Risk remains high.",
+            "binding": True,
+            "applied": False,
+            "dissenting": False,
+            "consensus_score": 0.8,
+        }
+    )
+
+    assert adr.status == "proposed"
+    assert "unapplied" in adr.tags
+
+
+def test_adr_from_council_decision_requires_decision_text() -> None:
+    with pytest.raises(DecisionLogError, match="decision"):
+        adr_from_council_decision({"id": "d004", "agent": "tester"})
