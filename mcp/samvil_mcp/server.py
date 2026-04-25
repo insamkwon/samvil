@@ -2925,11 +2925,33 @@ async def budget_status(
 # ── Codebase Manifest (v3.3) ──────────────────────────────────────────
 
 
+def _validate_project_root(project_root: str) -> dict | None:
+    """Return an error dict if project_root is invalid, else None.
+
+    Empty strings would silently pollute the MCP server's CWD; nonexistent
+    paths would silently materialise a directory tree on write. Both are
+    unsafe for the AI's first interaction surface, so we reject them here.
+    """
+    if not project_root:
+        return {"status": "error", "error": "project_root is empty"}
+    root = Path(project_root)
+    if not root.is_dir():
+        return {
+            "status": "error",
+            "error": f"project_root not a directory: {project_root!r}",
+        }
+    return None
+
+
 def _build_and_persist_manifest_impl(
     project_root: str,
     project_name: str,
 ) -> dict:
     """Build the manifest from filesystem and write to .samvil/manifest.json."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+
     m = build_manifest(project_root, project_name=project_name)
     write_manifest(m, project_root)
     return {
@@ -2941,9 +2963,17 @@ def _build_and_persist_manifest_impl(
 
 
 def _read_manifest_impl(project_root: str) -> dict:
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+
+    p = manifest_path(project_root)
+    if not p.exists():
+        return {"status": "missing"}
     m = _read_manifest_file(project_root)
     if m is None:
-        return {"status": "missing"}
+        # File exists but couldn't parse — corrupted or unreadable.
+        return {"status": "corrupted", "path": str(p)}
     return {"status": "ok", "manifest": m.to_dict()}
 
 
@@ -2952,9 +2982,16 @@ def _render_manifest_context_impl(
     focus: list[str] | None = None,
     max_modules: int = 30,
 ) -> dict:
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+
+    p = manifest_path(project_root)
+    if not p.exists():
+        return {"status": "missing"}
     m = _read_manifest_file(project_root)
     if m is None:
-        return {"status": "missing"}
+        return {"status": "corrupted", "path": str(p)}
     text = render_for_context(m, focus=focus, max_modules=max_modules)
     return {"status": "ok", "context": text, "module_count": len(m.modules)}
 
@@ -2979,13 +3016,25 @@ def build_and_persist_manifest(project_root: str, project_name: str) -> dict:
     Returns:
         dict with status, module_count, convention_count, path.
     """
-    return _build_and_persist_manifest_impl(project_root, project_name)
+    try:
+        result = _build_and_persist_manifest_impl(project_root, project_name)
+        _log_mcp_health("ok", "build_and_persist_manifest")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "build_and_persist_manifest", str(e))
+        return {"status": "error", "error": str(e)}
 
 
 @mcp.tool()
 def read_manifest(project_root: str) -> dict:
     """Read .samvil/manifest.json. Returns {status: 'missing'} if absent."""
-    return _read_manifest_impl(project_root)
+    try:
+        result = _read_manifest_impl(project_root)
+        _log_mcp_health("ok", "read_manifest")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "read_manifest", str(e))
+        return {"status": "error", "error": str(e)}
 
 
 @mcp.tool()
@@ -3001,13 +3050,25 @@ def render_manifest_context(
         focus: optional list of module names to include (others omitted).
         max_modules: hard cap; default 30.
     """
-    return _render_manifest_context_impl(project_root, focus, max_modules)
+    try:
+        result = _render_manifest_context_impl(project_root, focus, max_modules)
+        _log_mcp_health("ok", "render_manifest_context")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "render_manifest_context", str(e))
+        return {"status": "error", "error": str(e)}
 
 
 @mcp.tool()
 def refresh_manifest(project_root: str, project_name: str) -> dict:
     """Rebuild manifest from filesystem, persist, and return fresh context."""
-    return _refresh_manifest_impl(project_root, project_name)
+    try:
+        result = _refresh_manifest_impl(project_root, project_name)
+        _log_mcp_health("ok", "refresh_manifest")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "refresh_manifest", str(e))
+        return {"status": "error", "error": str(e)}
 
 
 # ── Entry point ───────────────────────────────────────────────
