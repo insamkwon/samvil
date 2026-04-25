@@ -345,3 +345,40 @@ def test_extract_public_api_index_tsx_fallback(tmp_path):
     from samvil_mcp.manifest import extract_public_api
     api = extract_public_api(mod)
     assert "default" in api
+
+
+def test_detect_conventions_finds_typescript(tmp_path):
+    """tsconfig.json present → conventions['language'] == 'typescript'."""
+    (tmp_path / "tsconfig.json").write_text("{}")
+
+    from samvil_mcp.manifest import detect_conventions
+
+    conv = detect_conventions(tmp_path)
+    assert conv.get("language") == "typescript"
+
+
+def test_detect_conventions_finds_tailwind(tmp_path):
+    """tailwind.config.* present → conventions['css'] == 'tailwind'."""
+    (tmp_path / "tailwind.config.ts").write_text("export default {};")
+
+    from samvil_mcp.manifest import detect_conventions
+
+    conv = detect_conventions(tmp_path)
+    assert conv.get("css") == "tailwind"
+
+
+def test_detect_conventions_finds_nextjs(tmp_path):
+    """next.config.* present → conventions['framework'] == 'next'."""
+    (tmp_path / "next.config.mjs").write_text("export default {};")
+
+    from samvil_mcp.manifest import detect_conventions
+
+    conv = detect_conventions(tmp_path)
+    assert conv.get("framework") == "next"
+
+
+def test_detect_conventions_returns_empty_for_bare_dir(tmp_path):
+    """No config files → empty dict (graceful, not error)."""
+    from samvil_mcp.manifest import detect_conventions
+
+    assert detect_conventions(tmp_path) == {}

@@ -243,3 +243,33 @@ def extract_public_api(module_dir: Path) -> list[str]:
             seen.add(n)
             out.append(n)
     return out
+
+
+_CONVENTION_RULES: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    # (file_globs, key, value)
+    (("tsconfig.json",), "language", "typescript"),
+    (("next.config.js", "next.config.mjs", "next.config.ts"), "framework", "next"),
+    (("vite.config.js", "vite.config.ts"), "framework", "vite"),
+    (("astro.config.mjs", "astro.config.ts"), "framework", "astro"),
+    (("tailwind.config.js", "tailwind.config.mjs", "tailwind.config.ts"), "css", "tailwind"),
+    ((".eslintrc", ".eslintrc.json", ".eslintrc.js", "eslint.config.js"), "linter", "eslint"),
+    (("supabase",), "auth_db", "supabase"),  # directory match
+    (("prisma",), "orm", "prisma"),  # directory match
+)
+
+
+def detect_conventions(project_root: Path | str) -> dict[str, str]:
+    """Inspect well-known config files to infer project conventions.
+
+    This is best-effort and intentionally narrow. Phase 2's Pattern Registry
+    will expand this with content-aware rules.
+    """
+    root = Path(project_root)
+    out: dict[str, str] = {}
+    for patterns, key, value in _CONVENTION_RULES:
+        for pat in patterns:
+            candidate = root / pat
+            if candidate.exists():
+                out[key] = value
+                break
+    return out
