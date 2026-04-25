@@ -80,3 +80,36 @@ class Manifest:
             conventions=dict(d.get("conventions", {})),
             public_apis={k: list(v) for k, v in d.get("public_apis", {}).items()},
         )
+
+
+def manifest_path(project_root: Path | str) -> Path:
+    """Return the canonical .samvil/manifest.json path for a project."""
+    root = Path(project_root)
+    return root / ".samvil" / "manifest.json"
+
+
+def write_manifest(manifest: Manifest, project_root: Path | str) -> Path:
+    """Atomic write to .samvil/manifest.json.
+
+    Strategy: write to .tmp file, then POSIX rename. The rename is atomic on
+    the same filesystem, so readers never see a half-written file.
+    """
+    target = manifest_path(project_root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    payload = json.dumps(manifest.to_dict(), indent=2, ensure_ascii=False)
+    tmp.write_text(payload, encoding="utf-8")
+    os.replace(tmp, target)
+    return target
+
+
+def read_manifest(project_root: Path | str) -> Manifest | None:
+    """Read .samvil/manifest.json. Returns None if missing or unreadable."""
+    target = manifest_path(project_root)
+    if not target.exists():
+        return None
+    try:
+        d = json.loads(target.read_text(encoding="utf-8"))
+        return Manifest.from_dict(d)
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
