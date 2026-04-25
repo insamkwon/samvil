@@ -58,6 +58,7 @@ project run. It is deterministic and file-only; no LLM call is required.
     "failures": 0,
     "oks_sampled": 1,
     "failures_by_tool": {},
+    "failure_signatures": [],
     "latest_failure": {}
   },
   "continuation": {
@@ -76,6 +77,8 @@ project run. It is deterministic and file-only; no LLM call is required.
 - `build_run_report(project_root, persist=true, mcp_health_path?)`
 - `read_run_report(project_root)`
 - `render_run_report(project_root, refresh=false)`
+- `derive_retro_observations(project_root, refresh=false, persist=false)`
+- `append_retro_observations(project_root, observations_json)`
 
 ## Notes
 
@@ -99,3 +102,30 @@ Phase 3 classifies event types into `start`, `complete`, `fail`, `retry`,
 - `*skip*` → `skip`
 
 Durations are computed per stage when timestamps exist.
+
+## Retro Observation Candidates
+
+Phase 3 can derive deterministic retro candidates from a run report. Candidates
+are structured observations from timeline, MCP health, and claim state.
+
+```json
+{
+  "id": "retro_abc123def456",
+  "source": "telemetry.timeline",
+  "severity": "medium",
+  "title": "Stage build required 1 retry event(s)",
+  "evidence": ["stage=build", "retry_count=1", "status=failed"],
+  "suggested_action": "Capture why build needed retries...",
+  "dedupe_key": "retry:build"
+}
+```
+
+Observation sources:
+
+- `telemetry.timeline`: failed/blocked stages and retry loops.
+- `telemetry.mcp_health`: grouped MCP tool failure signatures.
+- `telemetry.claims`: pending claims that still need verification or closure.
+
+Persisted observations are appended to `.samvil/retro-observations.jsonl` with
+`schema_version` and `recorded_at`. Existing `dedupe_key` values are skipped on
+append so repeated tool calls do not duplicate the same row.

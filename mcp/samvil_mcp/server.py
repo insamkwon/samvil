@@ -141,7 +141,9 @@ from .routing import (
     validate_profiles as _validate_profiles_core,
 )
 from .telemetry import (
+    append_retro_observations as _append_retro_observations,
     build_run_report as _build_run_report,
+    derive_retro_observations as _derive_retro_observations,
     read_run_report as _read_run_report_file,
     render_run_report as _render_run_report,
     write_run_report as _write_run_report,
@@ -3403,6 +3405,55 @@ def render_run_report(project_root: str, refresh: bool = False) -> dict:
         return {"status": "ok", "context": text}
     except Exception as e:
         _log_mcp_health("fail", "render_run_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def derive_retro_observations(
+    project_root: str,
+    refresh: bool = False,
+    persist: bool = False,
+) -> dict:
+    """Derive actionable retro observation candidates from a run report."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _build_run_report(project_root) if refresh else _read_run_report_file(project_root)
+        if report is None:
+            return {"status": "missing"}
+        observations = _derive_retro_observations(report)
+        path = ""
+        if persist:
+            path = str(_append_retro_observations(project_root, observations))
+        _log_mcp_health("ok", "derive_retro_observations")
+        return {
+            "status": "ok",
+            "count": len(observations),
+            "path": path,
+            "observations": observations,
+        }
+    except Exception as e:
+        _log_mcp_health("fail", "derive_retro_observations", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def append_retro_observations(project_root: str, observations_json: str) -> dict:
+    """Append selected retro observations to .samvil/retro-observations.jsonl."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        data = json.loads(observations_json)
+        observations = data if isinstance(data, list) else data.get("observations", [])
+        if not isinstance(observations, list):
+            return {"status": "error", "error": "observations_json must contain a list"}
+        path = _append_retro_observations(project_root, observations)
+        _log_mcp_health("ok", "append_retro_observations")
+        return {"status": "ok", "count": len(observations), "path": str(path)}
+    except Exception as e:
+        _log_mcp_health("fail", "append_retro_observations", str(e))
         return {"status": "error", "error": str(e)}
 
 

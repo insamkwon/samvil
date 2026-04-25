@@ -6,8 +6,11 @@ import json
 from pathlib import Path
 
 from samvil_mcp.telemetry import (
+    append_retro_observations,
     build_run_report,
+    derive_retro_observations,
     read_run_report,
+    retro_observation_path,
     render_run_report,
     write_run_report,
 )
@@ -145,6 +148,82 @@ def test_run_report_categorizes_events_and_stage_durations(tmp_path):
     assert by_stage["build"]["status"] == "failed"
     assert by_stage["build"]["duration_seconds"] == 300.0
     assert by_stage["qa"]["status"] == "blocked"
+
+
+def test_derive_retro_observations_from_report_findings(tmp_path):
+    root = tmp_path / "retro-app"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "retro-app",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    _jsonl(samvil / "events.jsonl", [
+        {"event_type": "build_feature_start", "stage": "build", "timestamp": "2026-04-26T01:00:00Z"},
+        {"event_type": "build_fail", "stage": "build", "timestamp": "2026-04-26T01:02:00Z"},
+        {"event_type": "fix_applied", "stage": "build", "timestamp": "2026-04-26T01:03:00Z"},
+        {"event_type": "qa_blocked", "stage": "qa", "timestamp": "2026-04-26T01:07:00Z"},
+    ])
+    _jsonl(samvil / "claims.jsonl", [
+        {
+            "claim_id": "claim_1",
+            "type": "evidence_posted",
+            "subject": "stage:qa",
+            "statement": "qa blocked",
+            "authority_file": "project.state.json",
+            "status": "pending",
+            "ts": "2026-04-26T01:07:00Z",
+        },
+    ])
+    _jsonl(samvil / "mcp-health.jsonl", [
+        {"status": "fail", "tool": "read_manifest", "error": "missing manifest", "timestamp": "2026-04-26T01:02:00Z"},
+        {"status": "fail", "tool": "read_manifest", "error": "missing manifest", "timestamp": "2026-04-26T01:03:00Z"},
+    ])
+
+    observations = derive_retro_observations(build_run_report(root))
+    keys = {obs["dedupe_key"] for obs in observations}
+
+    assert "stage:build:failed" in keys
+    assert "stage:qa:blocked" in keys
+    assert "retry:build" in keys
+    assert "mcp:read_manifest:missing manifest" in keys
+    assert "claims:pending" in keys
+    assert len(keys) == len(observations)
+
+
+def test_append_retro_observations_deduplicates_existing_keys(tmp_path):
+    root = tmp_path / "retro-log"
+    root.mkdir()
+    observations = [
+        {
+            "id": "retro_one",
+            "source": "telemetry.timeline",
+            "severity": "medium",
+            "title": "Build retried",
+            "evidence": ["retry_count=1"],
+            "suggested_action": "Add a fixture.",
+            "dedupe_key": "retry:build",
+        },
+        {
+            "id": "retro_two",
+            "source": "telemetry.timeline",
+            "severity": "medium",
+            "title": "Build retried duplicate",
+            "evidence": ["retry_count=1"],
+            "suggested_action": "Add a fixture.",
+            "dedupe_key": "retry:build",
+        },
+    ]
+
+    path = append_retro_observations(root, observations)
+    append_retro_observations(root, observations)
+    rows = [json.loads(line) for line in retro_observation_path(root).read_text(encoding="utf-8").splitlines()]
+
+    assert path == root / ".samvil" / "retro-observations.jsonl"
+    assert len(rows) == 1
+    assert rows[0]["schema_version"] == "1.0"
+    assert rows[0]["dedupe_key"] == "retry:build"
 
 
 def test_render_run_report_includes_stage_timeline(tmp_path):

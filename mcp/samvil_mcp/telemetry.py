@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+from hashlib import sha1
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 RUN_REPORT_SCHEMA_VERSION = "1.0"
+RETRO_OBSERVATION_SCHEMA_VERSION = "1.0"
 
 
 def _now_iso() -> str:
@@ -49,6 +51,10 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def run_report_path(project_root: Path | str) -> Path:
     return Path(project_root) / ".samvil" / "run-report.json"
+
+
+def retro_observation_path(project_root: Path | str) -> Path:
+    return Path(project_root) / ".samvil" / "retro-observations.jsonl"
 
 
 def build_run_report(
@@ -126,6 +132,119 @@ def read_run_report(project_root: Path | str) -> dict[str, Any] | None:
         return None
     report = _load_json(path)
     return report or None
+
+
+def derive_retro_observations(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert deterministic run report findings into retro candidates."""
+    observations: list[dict[str, Any]] = []
+    timeline = report.get("timeline", {}) or {}
+    claims = report.get("claims", {}) or {}
+    health = report.get("mcp_health", {}) or {}
+
+    for stage in timeline.get("stages") or []:
+        stage_name = str(stage.get("stage") or "unknown")
+        status = str(stage.get("status") or "observed")
+        if status in {"failed", "blocked"}:
+            observations.append(_retro_observation(
+                source="telemetry.timeline",
+                severity="high" if status == "failed" else "medium",
+                title=f"Stage {stage_name} is {status}",
+                evidence=[
+                    f"status={status}",
+                    f"events={stage.get('event_count', 0)}",
+                    f"duration_seconds={stage.get('duration_seconds')}",
+                ],
+                suggested_action=(
+                    f"Review the {stage_name} stage events and add a prevention item "
+                    "for the blocking or failing condition."
+                ),
+                dedupe_key=f"stage:{stage_name}:{status}",
+            ))
+
+        retry_count = int((stage.get("categories") or {}).get("retry", 0) or 0)
+        if retry_count > 0:
+            observations.append(_retro_observation(
+                source="telemetry.timeline",
+                severity="medium",
+                title=f"Stage {stage_name} required {retry_count} retry event(s)",
+                evidence=[
+                    f"stage={stage_name}",
+                    f"retry_count={retry_count}",
+                    f"status={status}",
+                ],
+                suggested_action=(
+                    f"Capture why {stage_name} needed retries and decide whether a "
+                    "checklist, fixture, or gate should catch it earlier."
+                ),
+                dedupe_key=f"retry:{stage_name}",
+            ))
+
+    for signature in health.get("failure_signatures") or []:
+        tool = str(signature.get("tool") or "unknown")
+        error_signature = str(signature.get("signature") or "unknown")
+        count = int(signature.get("count") or 0)
+        observations.append(_retro_observation(
+            source="telemetry.mcp_health",
+            severity="high" if count >= 3 else "medium",
+            title=f"MCP tool {tool} failed {count} time(s)",
+            evidence=[
+                f"tool={tool}",
+                f"signature={error_signature}",
+                f"latest_at={signature.get('latest_at') or ''}",
+            ],
+            suggested_action=(
+                f"Inspect {tool} failure handling and add a regression fixture for "
+                "this signature if it is reproducible."
+            ),
+            dedupe_key=f"mcp:{tool}:{error_signature}",
+        ))
+
+    pending_subjects = claims.get("pending_subjects") or []
+    if pending_subjects:
+        preview = ", ".join(str(s) for s in pending_subjects[:5])
+        observations.append(_retro_observation(
+            source="telemetry.claims",
+            severity="low",
+            title=f"{len(pending_subjects)} claim(s) remained pending",
+            evidence=[f"pending_subjects={preview}"],
+            suggested_action=(
+                "Close or verify pending claims before release so the run can be "
+                "reconstructed from committed evidence."
+            ),
+            dedupe_key="claims:pending",
+        ))
+
+    return _dedupe_observations(observations)
+
+
+def append_retro_observations(
+    project_root: Path | str,
+    observations: list[dict[str, Any]],
+) -> Path:
+    target = retro_observation_path(project_root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    existing_keys = {
+        str(row.get("dedupe_key"))
+        for row in _load_jsonl(target)
+        if row.get("dedupe_key")
+    }
+    now = _now_iso()
+    with target.open("a", encoding="utf-8") as f:
+        for observation in observations:
+            if not isinstance(observation, dict):
+                continue
+            dedupe_key = str(observation.get("dedupe_key") or "")
+            if dedupe_key and dedupe_key in existing_keys:
+                continue
+            row = {
+                "schema_version": RETRO_OBSERVATION_SCHEMA_VERSION,
+                "recorded_at": now,
+                **observation,
+            }
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            if dedupe_key:
+                existing_keys.add(dedupe_key)
+    return target
 
 
 def render_run_report(report: dict[str, Any]) -> str:
@@ -353,16 +472,77 @@ def _duration_seconds(start_ts: str, end_ts: str) -> float | None:
 def _health_summary(health: list[dict[str, Any]]) -> dict[str, Any]:
     failures = [h for h in health if h.get("status") == "fail"]
     failures_by_tool: dict[str, int] = defaultdict(int)
+    failure_signatures: dict[tuple[str, str], dict[str, Any]] = {}
     for row in failures:
-        failures_by_tool[str(row.get("tool", "unknown"))] += 1
+        tool = str(row.get("tool", "unknown"))
+        signature = _failure_signature(row)
+        failures_by_tool[tool] += 1
+        key = (tool, signature)
+        if key not in failure_signatures:
+            failure_signatures[key] = {
+                "tool": tool,
+                "signature": signature,
+                "count": 0,
+                "latest_at": "",
+            }
+        failure_signatures[key]["count"] += 1
+        ts = str(row.get("timestamp") or "")
+        if ts > str(failure_signatures[key].get("latest_at") or ""):
+            failure_signatures[key]["latest_at"] = ts
     latest_failure = max(failures, key=lambda r: r.get("timestamp", ""), default={})
     return {
         "total": len(health),
         "failures": len(failures),
         "oks_sampled": sum(1 for h in health if h.get("status") == "ok"),
         "failures_by_tool": dict(sorted(failures_by_tool.items())),
+        "failure_signatures": sorted(
+            failure_signatures.values(),
+            key=lambda item: (str(item.get("tool")), str(item.get("signature"))),
+        ),
         "latest_failure": latest_failure,
     }
+
+
+def _retro_observation(
+    *,
+    source: str,
+    severity: str,
+    title: str,
+    evidence: list[str],
+    suggested_action: str,
+    dedupe_key: str,
+) -> dict[str, Any]:
+    return {
+        "id": "retro_" + sha1(dedupe_key.encode("utf-8")).hexdigest()[:12],
+        "source": source,
+        "severity": severity,
+        "title": title,
+        "evidence": evidence,
+        "suggested_action": suggested_action,
+        "dedupe_key": dedupe_key,
+    }
+
+
+def _dedupe_observations(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_key: dict[str, dict[str, Any]] = {}
+    for observation in observations:
+        key = str(observation.get("dedupe_key") or observation.get("id"))
+        if key and key not in by_key:
+            by_key[key] = observation
+    severity_rank = {"high": 0, "medium": 1, "low": 2}
+    return sorted(
+        by_key.values(),
+        key=lambda obs: (
+            severity_rank.get(str(obs.get("severity")), 9),
+            str(obs.get("source")),
+            str(obs.get("dedupe_key")),
+        ),
+    )
+
+
+def _failure_signature(row: dict[str, Any]) -> str:
+    raw = str(row.get("error") or row.get("message") or row.get("reason") or "unknown")
+    return " ".join(raw.strip().split())[:160] or "unknown"
 
 
 def _next_action(

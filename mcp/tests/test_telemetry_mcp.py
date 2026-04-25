@@ -5,7 +5,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from samvil_mcp.server import build_run_report, read_run_report, render_run_report
+from samvil_mcp.server import (
+    append_retro_observations,
+    build_run_report,
+    derive_retro_observations,
+    read_run_report,
+    render_run_report,
+)
 
 
 def _project(tmp_path: Path) -> Path:
@@ -39,6 +45,30 @@ def test_build_read_render_run_report_tools(tmp_path):
     assert read["status"] == "ok"
     assert rendered["status"] == "ok"
     assert "continue with samvil-design" in rendered["context"]
+
+
+def test_derive_and_append_retro_observations_tools(tmp_path):
+    root = _project(tmp_path)
+    (root / ".samvil" / "events.jsonl").write_text(
+        json.dumps({
+            "event_type": "qa_blocked",
+            "stage": "qa",
+            "timestamp": "2026-04-26T01:00:00Z",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    build_run_report(str(root), persist=True)
+
+    derived = derive_retro_observations(str(root))
+    persisted = derive_retro_observations(str(root), persist=True)
+    appended = append_retro_observations(str(root), json.dumps(derived["observations"]))
+
+    assert derived["status"] == "ok"
+    assert derived["count"] >= 1
+    assert derived["observations"][0]["dedupe_key"] == "stage:qa:blocked"
+    assert persisted["status"] == "ok"
+    assert Path(persisted["path"]).exists()
+    assert appended["status"] == "ok"
 
 
 def test_read_run_report_missing(tmp_path):
