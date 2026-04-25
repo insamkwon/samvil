@@ -104,6 +104,17 @@ def test_status_json_includes_run_report_summary(tmp_path):
         "continuation": {"present": False},
         "next_action": "continue",
     })
+    _write_json(root / ".samvil" / "inspection-report.json", {
+        "generated_at": "2026-04-26T03:00:00Z",
+        "scenario": "proj",
+        "summary": {
+            "status": "pass",
+            "total_checks": 8,
+            "failed_checks": 0,
+            "console_errors": 0,
+            "screenshots": 2,
+        },
+    })
 
     data = json.loads(status.render_json(root))
 
@@ -114,7 +125,39 @@ def test_status_json_includes_run_report_summary(tmp_path):
     assert data["run_report"]["events_total"] == 2
     assert data["run_report"]["retry_count"] == 1
     assert data["run_report"]["stage_timeline"][0]["stage"] == "design"
+    assert data["inspection_report"]["present"] is True
+    assert data["inspection_report"]["status"] == "pass"
+    assert data["inspection_report"]["screenshots"] == 2
     assert data["next_recommended_action"] == "continue"
+
+
+def test_status_human_includes_inspection_report(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / "project.state.json", {
+        "project_name": "proj",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+    })
+    _write_json(root / ".samvil" / "inspection-report.json", {
+        "generated_at": "2026-04-26T03:00:00Z",
+        "scenario": "proj",
+        "summary": {
+            "status": "pass",
+            "passed_checks": 9,
+            "failed_checks": 0,
+            "warning_checks": 0,
+            "viewports": 2,
+            "console_errors": 0,
+            "screenshots": 2,
+        },
+    })
+
+    text = status.render_human(root)
+
+    assert "Inspect: pass (9 pass / 0 fail)" in text
+    assert "Inspection:" in text
+    assert "2 viewports, 0 console errors, 2 screenshots" in text
 
 
 def test_status_json_uses_unknown_stage_fallback(tmp_path):

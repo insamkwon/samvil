@@ -80,6 +80,12 @@ from .domain_packs import (
     match_domain_packs as _match_domain_packs,
     render_domain_packs as _render_domain_packs,
 )
+from .inspection import (
+    build_inspection_report as _build_inspection_report,
+    read_inspection_report as _read_inspection_report_file,
+    render_inspection_report as _render_inspection_report,
+    write_inspection_report as _write_inspection_report,
+)
 from .retro_v3_2 import (
     ExperimentRun as _ExperimentRun,
     Observation as _Observation,
@@ -3544,6 +3550,59 @@ def append_retro_observations(project_root: str, observations_json: str) -> dict
         return {"status": "ok", "count": len(observations), "path": str(path)}
     except Exception as e:
         _log_mcp_health("fail", "append_retro_observations", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def build_inspection_report(project_root: str, persist: bool = True) -> dict:
+    """Build an app inspection report from .samvil/inspection-evidence.json."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _build_inspection_report(project_root)
+        path = ""
+        if persist:
+            path = str(_write_inspection_report(report, project_root))
+        _log_mcp_health("ok", "build_inspection_report")
+        return {"status": "ok", "path": path, "report": report}
+    except Exception as e:
+        _log_mcp_health("fail", "build_inspection_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def read_inspection_report(project_root: str) -> dict:
+    """Read .samvil/inspection-report.json if present."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _read_inspection_report_file(project_root)
+        _log_mcp_health("ok", "read_inspection_report")
+        if report is None:
+            return {"status": "missing"}
+        return {"status": "ok", "report": report}
+    except Exception as e:
+        _log_mcp_health("fail", "read_inspection_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def render_inspection_report(project_root: str, refresh: bool = False) -> dict:
+    """Render an app inspection report as markdown; optionally refresh it first."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _build_inspection_report(project_root) if refresh else _read_inspection_report_file(project_root)
+        if report is None:
+            return {"status": "missing"}
+        text = _render_inspection_report(report)
+        _log_mcp_health("ok", "render_inspection_report")
+        return {"status": "ok", "context": text}
+    except Exception as e:
+        _log_mcp_health("fail", "render_inspection_report", str(e))
         return {"status": "error", "error": str(e)}
 
 

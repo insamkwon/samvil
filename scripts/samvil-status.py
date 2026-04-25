@@ -9,6 +9,7 @@ against local files only:
   .samvil/experiments.jsonl   (performance budget + initial-estimate tracking)
   .samvil/events.jsonl        (last activity)
   .samvil/run-report.json     (v3.5 telemetry rollup, if present)
+  .samvil/inspection-report.json (v3.10 browser inspection rollup, if present)
 
 Panes in MVP (other panes deferred to later sprints per §6.1):
   - Sprint + stage
@@ -63,6 +64,10 @@ def _load_state(root: Path) -> dict:
 
 def _load_run_report(root: Path) -> dict:
     return _load_json(root / ".samvil" / "run-report.json")
+
+
+def _load_inspection_report(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "inspection-report.json")
 
 
 def latest_gate_verdicts(claims: list[dict]) -> dict[str, dict]:
@@ -122,6 +127,7 @@ def budget_summary(state: dict) -> str:
 def render_human(root: Path) -> str:
     state = _load_state(root)
     report = _load_run_report(root)
+    inspection = _load_inspection_report(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
     report_state = report.get("state", {}) or {}
@@ -129,6 +135,7 @@ def render_human(root: Path) -> str:
     timeline = report.get("timeline", {}) or {}
     health = report.get("mcp_health", {}) or {}
     continuation = report.get("continuation", {}) or {}
+    inspection_summary = inspection.get("summary", {}) or {}
 
     # v3.1 stored the field under the legacy name. Read both, preferring
     # the new one. After v3.3 the legacy branch is removed.
@@ -155,6 +162,13 @@ def render_human(root: Path) -> str:
     lines.append(f"Tier:    {samvil_tier}")
     if report:
         lines.append(f"Report:  {report.get('generated_at') or '?'}")
+    if inspection:
+        lines.append(
+            "Inspect: "
+            f"{inspection_summary.get('status', '?')} "
+            f"({inspection_summary.get('passed_checks', 0)} pass / "
+            f"{inspection_summary.get('failed_checks', 0)} fail)"
+        )
     lines.append("")
     lines.append("Gate verdicts (latest):")
     report_gates = report_claims.get("latest_gate_verdicts") or []
@@ -222,6 +236,24 @@ def render_human(root: Path) -> str:
                     f"{str(row.get('status','?')):<11} "
                     f"{duration_text}"
                 )
+    if inspection:
+        lines.append("")
+        lines.append("Inspection:")
+        lines.append(
+            f"  Status:          {inspection_summary.get('status', '?')}"
+        )
+        lines.append(
+            "  Checks:          "
+            f"{inspection_summary.get('passed_checks', 0)} passed, "
+            f"{inspection_summary.get('failed_checks', 0)} failed, "
+            f"{inspection_summary.get('warning_checks', 0)} warnings"
+        )
+        lines.append(
+            "  Browser:         "
+            f"{inspection_summary.get('viewports', 0)} viewports, "
+            f"{inspection_summary.get('console_errors', 0)} console errors, "
+            f"{inspection_summary.get('screenshots', 0)} screenshots"
+        )
     lines.append("")
     lines.append(
         "Next action:       "
@@ -233,6 +265,7 @@ def render_human(root: Path) -> str:
 def render_json(root: Path) -> str:
     state = _load_state(root)
     report = _load_run_report(root)
+    inspection = _load_inspection_report(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
     report_state = report.get("state", {}) or {}
@@ -269,6 +302,16 @@ def render_json(root: Path) -> str:
                 "mcp_events_total": health.get("total", 0),
                 "continuation": continuation,
                 "stage_timeline": timeline.get("stages") or [],
+            },
+            "inspection_report": {
+                "present": bool(inspection),
+                "generated_at": inspection.get("generated_at"),
+                "scenario": inspection.get("scenario"),
+                "status": (inspection.get("summary", {}) or {}).get("status"),
+                "total_checks": (inspection.get("summary", {}) or {}).get("total_checks", 0),
+                "failed_checks": (inspection.get("summary", {}) or {}).get("failed_checks", 0),
+                "console_errors": (inspection.get("summary", {}) or {}).get("console_errors", 0),
+                "screenshots": (inspection.get("summary", {}) or {}).get("screenshots", 0),
             },
             "next_recommended_action": (
                 report.get("next_action") if report else next_recommended_action(gate_verdicts)
