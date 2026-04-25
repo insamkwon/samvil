@@ -250,7 +250,7 @@ def render_json(root: Path) -> str:
         {
             "root": str(root),
             "sprint": state.get("sprint"),
-            "stage": report_state.get("current_stage") or state.get("current_stage"),
+            "stage": report_state.get("current_stage") or state.get("current_stage") or "?",
             "samvil_tier": samvil_tier,
             "gate_verdicts_latest": report_claims.get("latest_gate_verdicts") or gate_verdicts,
             "pending_claims_count": pending_count,

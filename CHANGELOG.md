@@ -4,6 +4,50 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.5.0] — 2026-04-26 — Telemetry + Run Observability
+
+Phase 3 of the multi-host SAMVIL architecture. This adds a deterministic
+operator telemetry layer over project state, Claim Ledger, events, MCP health,
+continuation markers, retro candidates, and the status surface.
+
+### Added
+- `mcp/samvil_mcp/telemetry.py` for deterministic `.samvil/run-report.json`
+  generation, reading, markdown rendering, and retro observation derivation.
+- Run report MCP tools: `build_run_report`, `read_run_report`,
+  `render_run_report`.
+- Retro MCP tools: `derive_retro_observations`,
+  `append_retro_observations`.
+- Event timeline taxonomy for `start`, `complete`, `fail`, `retry`,
+  `blocked`, `skip`, and `other`, including per-stage duration and
+  failure/retry counters.
+- MCP health failure signatures grouped by tool and normalized error text.
+- `.samvil/retro-observations.jsonl` append flow with `dedupe_key` suppression.
+- `mcp/tests/test_samvil_status_script.py` coverage for the status surface.
+
+### Changed
+- `scripts/samvil-status.py` now reads `.samvil/run-report.json` when present
+  and prefers it for stage, tier, latest gate verdicts, pending claim count,
+  MCP health, continuation, stage timeline, and next action.
+- `references/run-report-schema.md` documents run report, retro observation,
+  MCP tool, and status-surface contracts.
+
+### Dogfood
+- Synthetic project produced a report with 1 failure, 1 retry, stage timeline
+  rendering, status output, and 5 retro candidates.
+- Live repo dogfood generated `.samvil/run-report.json` for this repository
+  and confirmed `samvil-status.py --format json` reports
+  `run_report.present=true`.
+- Dogfood caught a missing-stage JSON blind spot; status JSON now returns `?`
+  instead of `null` when project state has no stage.
+
+### Verified
+- Full test suite: 787 passed.
+- MCP server import smoke: 129 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.4.0] — 2026-04-26 — Multi-Host Runtime + Pattern Registry
 
 Phase 2 of the multi-host SAMVIL architecture. This turns the v3.3 skeleton

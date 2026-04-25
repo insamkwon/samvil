@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.4.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.5.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.5.0 "Telemetry + Run Observability"** — v3.4의 multi-host runtime 위에 deterministic run report, event timeline taxonomy, MCP health signatures, retro observation feed, status surface를 얹은 릴리스입니다.
+
+> **v3.5.0 주요 추가** (2026-04-26):
+> - **Run telemetry snapshot** — `.samvil/run-report.json`을 build/read/render하는 MCP 도구 추가. project state, claims, events, MCP health, continuation marker를 한 화면 report로 합침.
+> - **Event taxonomy** — stage events를 start/complete/fail/retry/blocked/skip/other로 분류하고 stage별 duration, failure/retry count를 계산.
+> - **Retro observation feed** — failed/blocked stage, retry loop, MCP failure signature, pending claims를 deterministic retro candidate로 변환하고 `.samvil/retro-observations.jsonl`에 dedupe append.
+> - **Status surface** — `scripts/samvil-status.py`가 run report를 우선 읽어 stage, gates, MCP health, continuation, next action, stage timeline을 표시.
+> - **검증**: 787 unit tests · 129 MCP tools · synthetic/live repo dogfood · cross-host replay PASS · pre-commit-check PASS.
 
 **v3.4.0 "Multi-Host Runtime + Pattern Registry"** — v3.3의 4-layer foundation 위에 실제 Codex/OpenCode continuation, ultra-thin skill migration harness, Pattern Registry, Manifest v2 intelligence, cross-host regression suite를 얹은 릴리스입니다.
 

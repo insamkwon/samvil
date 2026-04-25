@@ -115,3 +115,18 @@ def test_status_json_includes_run_report_summary(tmp_path):
     assert data["run_report"]["retry_count"] == 1
     assert data["run_report"]["stage_timeline"][0]["stage"] == "design"
     assert data["next_recommended_action"] == "continue"
+
+
+def test_status_json_uses_unknown_stage_fallback(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "run-report.json", {
+        "state": {"current_stage": None},
+        "claims": {"pending_subjects": []},
+        "timeline": {},
+        "mcp_health": {},
+    })
+
+    data = json.loads(status.render_json(root))
+
+    assert data["stage"] == "?"
