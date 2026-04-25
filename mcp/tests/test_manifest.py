@@ -583,3 +583,88 @@ def test_render_for_context_under_5k_tokens_for_typical_project():
     # Heuristic: 1 token ≈ 4 chars. 5000 tokens budget = 20K chars.
     # We aim well below.
     assert len(text) < 20_000
+
+
+def test_render_for_context_truncation_count_respects_focus():
+    """When focus + max_modules both apply, omitted count is post-focus, not raw."""
+    mods = [
+        ModuleEntry(
+            name=f"m{i}",
+            path=f"src/m{i}",
+            files=[f"src/m{i}/f{j}.ts" for j in range(i + 1)],
+        )
+        for i in range(50)
+    ]
+    m = Manifest(
+        schema_version="1.0",
+        project_name="big",
+        project_root="/tmp/big",
+        generated_at="2026-04-25T10:00:00Z",
+        modules=mods,
+    )
+
+    from samvil_mcp.manifest import render_for_context
+
+    text = render_for_context(m, focus=["m1", "m2", "m3", "m4", "m5"], max_modules=3)
+    # 5 focused, 3 shown → 2 omitted (NOT 47)
+    assert "and 2 more" in text
+    assert "47" not in text
+
+
+def test_render_for_context_empty_manifest():
+    """Empty manifest renders without crashing; produces well-formed output."""
+    m = Manifest(
+        schema_version="1.0",
+        project_name="void",
+        project_root="/tmp",
+        generated_at="2026-04-25T10:00:00Z",
+    )
+    from samvil_mcp.manifest import render_for_context
+
+    text = render_for_context(m)
+    assert "void" in text
+    assert "Modules (0 shown)" in text
+    assert len(text) > 0
+
+
+def test_render_for_context_is_deterministic():
+    """Same manifest → byte-identical output across calls."""
+    m = Manifest(
+        schema_version="1.0",
+        project_name="proj",
+        project_root="/tmp",
+        generated_at="2026-04-25T10:00:00Z",
+        modules=[
+            ModuleEntry(name="auth", path="src/auth", public_api=["signIn", "signOut"]),
+            ModuleEntry(name="billing", path="src/billing", public_api=["charge"]),
+        ],
+        conventions={"language": "typescript", "css": "tailwind"},
+    )
+    from samvil_mcp.manifest import render_for_context
+
+    assert render_for_context(m) == render_for_context(m)
+
+
+def test_render_for_context_public_api_truncation_indicator():
+    """Modules with > 8 public APIs render with a '+N more' indicator."""
+    m = Manifest(
+        schema_version="1.0",
+        project_name="big-api",
+        project_root="/tmp",
+        generated_at="2026-04-25T10:00:00Z",
+        modules=[
+            ModuleEntry(
+                name="huge",
+                path="src/huge",
+                public_api=[f"fn{i}" for i in range(15)],  # 15 entries
+            ),
+        ],
+    )
+    from samvil_mcp.manifest import render_for_context
+
+    text = render_for_context(m)
+    assert "fn0" in text
+    assert "fn7" in text  # 8th item, last shown
+    assert "+7 more" in text
+    # fn8 and later should NOT appear in the truncated preview
+    assert "fn8" not in text

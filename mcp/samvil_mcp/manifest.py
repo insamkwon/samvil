@@ -335,10 +335,10 @@ def render_for_context(
         focus_set = set(focus)
         relevant = [m for m in relevant if m.name in focus_set]
 
-    truncated = False
+    truncated_count = 0
     if len(relevant) > max_modules:
+        truncated_count = len(relevant) - max_modules
         relevant = sorted(relevant, key=lambda m: -len(m.files))[:max_modules]
-        truncated = True
 
     lines: list[str] = [
         f"# {manifest.project_name}",
@@ -356,7 +356,10 @@ def render_for_context(
         lines.append(f"### {m.name}")
         lines.append(f"- Path: `{m.path}`")
         if m.public_api:
-            lines.append(f"- Public API: {', '.join(m.public_api[:8])}")
+            api_preview = ", ".join(m.public_api[:8])
+            if len(m.public_api) > 8:
+                api_preview += f", … (+{len(m.public_api) - 8} more)"
+            lines.append(f"- Public API: {api_preview}")
         if m.depends_on:
             lines.append(f"- Depends on: {', '.join(m.depends_on)}")
         if m.summary:
@@ -365,8 +368,11 @@ def render_for_context(
             lines.append(f"- Tags: {', '.join(m.convention_tags)}")
         lines.append("")
 
-    if truncated:
-        omitted = len(manifest.modules) - max_modules
-        lines.append(f"_…and {omitted} more modules omitted (call read_manifest for full list)_")
+    if truncated_count:
+        # Use singular/plural correctly to avoid "and 1 more modules" awkwardness.
+        word = "module" if truncated_count == 1 else "modules"
+        lines.append(
+            f"_…and {truncated_count} more {word} (call read_manifest for full list)_"
+        )
 
     return "\n".join(lines)
