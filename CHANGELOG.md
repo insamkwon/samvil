@@ -4,6 +4,46 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.7.0] — 2026-04-26 — Dual Full-Chain Dogfood
+
+Phase 5 of the multi-host SAMVIL architecture. This release adds a
+deterministic dual dogfood harness that cross-checks a business dashboard and a
+browser game through the same product-domain, pattern, source, QA, telemetry,
+status, and retro surfaces.
+
+### Added
+- `scripts/phase5-dual-dogfood.py`, a network-free dogfood harness that
+  materializes both `saas-dashboard` and `browser-game` projects in temp dirs.
+- `mcp/tests/test_phase5_dual_dogfood.py`, a pytest wrapper that keeps the
+  dual dogfood in the full regression suite.
+- Phase 5 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.7-phase5.md`.
+
+### Covered
+- Domain Pack matching for both scenarios.
+- Pattern Registry context lookup for both scenarios.
+- Codebase Manifest generation and rendering over generated source files.
+- Scenario-specific QA checks:
+  - dashboard: KPI cards, date range filter, empty state, chart/table sync
+  - game: canvas surface, keyboard input, score loop, collision/restart
+- Telemetry run reports with complete stage timelines, zero failures, zero
+  retries, zero MCP failures, and zero retro candidates.
+- `samvil-status.py` JSON rendering over generated run reports.
+
+### Dogfood
+- `saas-dashboard`: pack=`saas-dashboard`, confidence=high, patterns=2,
+  modules=3, QA checks=4, events=14, retro=0.
+- `browser-game`: pack=`browser-game`, confidence=high, patterns=1,
+  modules=1, QA checks=4, events=14, retro=0.
+
+### Verified
+- Full test suite: 800 passed.
+- MCP server import smoke: 133 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.6.0] — 2026-04-26 — Domain Packs
 
 Phase 4 of the multi-host SAMVIL architecture. This adds deterministic

@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.6.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.7.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.7.0 "Dual Full-Chain Dogfood"** — v3.6의 Domain Pack runtime 위에 SaaS dashboard + browser game dual dogfood harness를 얹어 product-domain context, pattern context, generated source, QA, telemetry, status, retro를 한 번에 검증하는 릴리스입니다.
+
+> **v3.7.0 주요 추가** (2026-04-26):
+> - **Dual dogfood harness** — `scripts/phase5-dual-dogfood.py`가 `saas-dashboard`와 `browser-game` 프로젝트를 temp dir에 생성하고 full-chain regression을 수행.
+> - **Cross-domain QA** — SaaS dashboard는 KPI/filter/empty/chart-table sync, browser game은 canvas/input/score loop/collision-restart를 검증.
+> - **Telemetry/retro cross-check** — 두 시나리오 모두 events, verified claims, manifest, run report, status JSON, retro 후보 0개를 확인.
+> - **Pytest integration** — `mcp/tests/test_phase5_dual_dogfood.py`가 dual dogfood를 full suite에 포함.
+> - **검증**: 800 unit tests · 133 MCP tools · dual full-chain dogfood PASS · cross-host replay PASS · pre-commit-check PASS.
 
 **v3.6.0 "Domain Packs"** — v3.5의 telemetry layer 위에 domain-specific product context, deterministic pack matching, and stage-scoped Interview/Design/Build/QA guidance를 얹은 릴리스입니다.
 
