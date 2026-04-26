@@ -466,7 +466,7 @@ smoke PASS · pre-commit-check PASS.
   convention detection, atomic `.samvil/manifest.json`, context renderer.
 - MCP tools: `build_and_persist_manifest`, `read_manifest`,
   `render_manifest_context`, `refresh_manifest`.
-- Reference: `references/manifest-schema.md`.
+- Reference: `references/samvil-ssot-schema.md` (Layer 4a — Codebase Manifest).
 
 ### Week 2 — Decision Log / ADR (Layer 4)
 - `mcp/samvil_mcp/decision_log.py` — ADR markdown frontmatter, atomic I/O,
@@ -474,21 +474,21 @@ smoke PASS · pre-commit-check PASS.
 - MCP tools: `write_decision_adr`, `read_decision_adr`,
   `list_decision_adrs`, `supersede_decision_adr`,
   `find_decision_adrs_referencing`, `promote_council_decision`.
-- Reference: `references/decision-log-schema.md`.
+- Reference: `references/samvil-ssot-schema.md` (Layer 4b — Decision Log / ADR).
 
 ### Week 3 — Orchestrator (Layer 2)
 - `mcp/samvil_mcp/orchestrator.py` — canonical stage order, tier skip policy,
   event-derived proceed/block state, `complete_stage` planning.
 - MCP tools: `get_next_stage`, `should_skip_stage`, `stage_can_proceed`,
   `complete_stage`, `get_orchestration_state`.
-- Reference: `references/orchestrator-schema.md`.
+- Reference: `references/samvil-ssot-schema.md` (Layer 2 — Orchestrator state).
 
 ### Week 4 — HostCapability + ultra-thin seed PoC (Layer 3 + Layer 1)
 - `mcp/samvil_mcp/host.py` — Claude Code / Codex CLI / OpenCode / generic
   capability resolver and chain strategy.
 - `skills/samvil-seed/SKILL.md` reduced to 87-line MCP-driven PoC;
   `SKILL.legacy.md` preserves the old 512-line body.
-- Reference: `references/host-capability-schema.md`.
+- Reference: `references/samvil-ssot-schema.md` (Layer 3 — Host capability).
 
 ## v3.2.0 변경 내역 (v3.1.0 → v3.2.0) — Contract Layer
 
