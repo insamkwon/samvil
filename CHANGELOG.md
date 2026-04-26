@@ -4,6 +4,40 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.31.0] — 2026-04-26 — Evolve Cycle Closure
+
+Phase 29 of the multi-host SAMVIL architecture. This release records the
+post-rebuild QA outcome as an explicit cycle closure verdict so the harness can
+close, continue, or stop the evolve loop without relying on conversation state.
+
+### Added
+- `mcp/samvil_mcp/evolve_cycle.py` for deterministic evolve cycle closure.
+- `.samvil/evolve-cycle.json` materialization.
+- MCP `build_evolve_cycle_closure` and `materialize_evolve_cycle_closure`.
+- Run-report `evolve_cycle` summary.
+- `samvil-status` human/JSON output for cycle verdict, current QA verdict, and
+  next skill.
+- `scripts/phase29-evolve-cycle-closure-dogfood.py` proving post-rebuild QA
+  PASS closes the cycle and routes to `samvil-retro`.
+- Phase 29 dogfood as the first default release runner check.
+- Phase 29 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.31-phase29.md`.
+
+### Changed
+- Release readiness defaults now require Phase 29 before Phase 28 and earlier
+  recovery/evolve gates.
+
+### Verified
+- Phase 29 dogfood: PASS.
+- Evolve cycle, status, telemetry, release, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 938 passed.
+- MCP server import smoke: 173 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.30.0] — 2026-04-26 — Post-Rebuild QA Rejudge
 
 Phase 28 of the multi-host SAMVIL architecture. This release materializes the

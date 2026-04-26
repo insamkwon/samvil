@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.30.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.31.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.31.0 "Evolve Cycle Closure"** — post-rebuild QA 결과가 실제로 새 판정인지 확인한 뒤 cycle을 닫을지, 다시 evolve할지, 실패로 멈출지 파일 계약으로 고정하는 릴리스입니다.
+
+> **v3.31.0 주요 추가** (2026-04-26):
+> - **Cycle closure artifact** — `materialize_evolve_cycle_closure`가 `.samvil/evolve-cycle.json`을 생성.
+> - **Fresh QA guard** — post-rebuild QA 요청보다 최신 iteration인 QA 결과만 closure 판정에 사용.
+> - **Closure routing** — QA PASS는 `closed -> samvil-retro`, QA REVISE는 `continue_evolve -> samvil-evolve`, QA FAIL은 `failed -> samvil-retro`로 고정.
+> - **검증**: 938 unit tests · 173 MCP tools · Phase 29 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.30.0 "Post-Rebuild QA Rejudge"** — 재빌드 산출물이 현재 evolved seed와 일치할 때만 QA 재판정 요청을 만들고, 다음 호스트가 `samvil-qa`로 이어갈 수 있게 고정하는 릴리스입니다.
 
