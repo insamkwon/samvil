@@ -30,3 +30,19 @@ QA Pass 3 — reviews overall quality: responsive design, accessibility basics, 
 ## Output
 
 Scores table (Dimension | Score | Key Issues). Average Quality Score. Detailed Findings per dimension. Verdict: PASS / REVISE / FAIL. Top 3 Improvement Priorities.
+
+Also return a machine-readable fenced block named `QA_QUALITY_JSON`:
+
+```json
+{
+  "verdict": "PASS",
+  "average_score": 4.2,
+  "dimensions": {
+    "responsive": 4,
+    "accessibility": 4,
+    "code_structure": 5,
+    "ux_polish": 4
+  },
+  "issues": []
+}
+```

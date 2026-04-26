@@ -1230,6 +1230,24 @@ async def aggregate_run_feedback(checklists_json: str) -> str:
 
 
 @mcp.tool()
+async def synthesize_qa_evidence(evidence_json: str) -> str:
+    """Centrally synthesize independent QA evidence into PASS/REVISE/FAIL.
+
+    Args:
+        evidence_json: JSON object with pass1, pass2.items, pass3, and optional agent_writes
+
+    Returns: QA synthesis gate dict with verdict, reason, next_action, counts, and event drafts
+    """
+    try:
+        from .qa_synthesis import synthesize_qa_evidence as _synthesize
+        evidence = json.loads(evidence_json)
+        return json.dumps(_synthesize(evidence))
+    except Exception as e:
+        _log_mcp_health("fail", "synthesize_qa_evidence", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def validate_evidence(evidences_json: str, project_root: str) -> str:
     """Validate a list of file:line evidence strings against project files.
 

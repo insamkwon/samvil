@@ -641,15 +641,30 @@ Return a markdown section using the required output format.",
 
 ### Central Synthesis Rules
 
-After both independent agents return their markdown evidence:
+After both independent agents return their markdown evidence and machine-readable
+JSON blocks:
 
 1. Read Pass 1 result from main-session checks
-2. Read Pass 2 markdown returned by independent agent
-3. Read Pass 3 markdown returned by independent agent
-4. Apply verdict matrix from `references/qa-checklist.md`
-5. Write `.samvil/qa-report.md`
-6. **MCP (best-effort):** Emit all QA events via `mcp__samvil_mcp__save_event` (see Event Log section)
-7. Update `project.state.json` (only completed_features, failed, qa_history — NOT current_stage, which MCP manages)
+2. Read Pass 2 markdown and `QA_FUNCTIONAL_JSON` returned by independent agent
+3. Read Pass 3 markdown and `QA_QUALITY_JSON` returned by independent agent
+4. Build one synthesis input:
+   ```json
+   {
+     "iteration": <N>,
+     "max_iterations": <MAX>,
+     "pass1": {"status": "PASS|FAIL", "issues": []},
+     "pass2": <QA_FUNCTIONAL_JSON>,
+     "pass3": <QA_QUALITY_JSON>,
+     "agent_writes": []
+   }
+   ```
+5. Call `mcp__samvil_mcp__synthesize_qa_evidence(evidence_json=<json>)`
+6. Use the returned `verdict`, `reason`, `next_action`, and event drafts as the
+   central source of truth. Do not let independent agent text override it.
+7. Write `.samvil/qa-report.md`
+8. **MCP (best-effort):** Emit all QA events from the synthesis result via
+   `mcp__samvil_mcp__save_event` (see Event Log section)
+9. Update `project.state.json` (only completed_features, failed, qa_history — NOT current_stage, which MCP manages)
 
 ---
 

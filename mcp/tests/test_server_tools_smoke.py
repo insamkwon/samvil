@@ -20,6 +20,7 @@ from samvil_mcp.server import (
     increment_stall_recovery_count,
     is_state_stalled,
     suggest_ac_split,
+    synthesize_qa_evidence,
 )
 
 
@@ -43,6 +44,20 @@ def test_get_tier_phases_deep_includes_domain_deep() -> None:
     data = json.loads(_run(get_tier_phases(tier="deep")))
     assert "domain_deep" in data["phases"]
     assert data["ambiguity_target"] == 0.005
+
+
+def test_synthesize_qa_evidence_tool_returns_central_verdict() -> None:
+    out = _run(synthesize_qa_evidence(evidence_json=json.dumps({
+        "pass1": {"status": "PASS"},
+        "pass2": {"items": [
+            {"id": "AC-1", "criterion": "Create task", "verdict": "UNIMPLEMENTED", "reason": "stub"}
+        ]},
+        "pass3": {"verdict": "PASS"},
+    })))
+    data = json.loads(out)
+    assert data["gate"] == "qa_synthesis"
+    assert data["verdict"] == "REVISE"
+    assert data["next_action"] == "replace stubs or hardcoded paths with real implementation"
 
 
 # ── AC split (v3-011) ──────────────────────────────────────────
