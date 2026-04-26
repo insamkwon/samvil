@@ -1250,7 +1250,7 @@ async def materialize_evolve_context(project_root: str) -> str:
 async def materialize_evolve_proposal(project_root: str) -> str:
     """Persist evolve proposal JSON and markdown report."""
     try:
-        from .evolve_proposal import materialize_evolve_proposal as _materialize
+        from .evolve_execution import materialize_evolve_proposal as _materialize
         return json.dumps(_materialize(project_root))
     except Exception as e:
         _log_mcp_health("fail", "materialize_evolve_proposal", str(e))
@@ -1261,7 +1261,7 @@ async def materialize_evolve_proposal(project_root: str) -> str:
 async def materialize_evolve_apply_plan(project_root: str) -> str:
     """Persist evolve apply plan and evolved seed preview."""
     try:
-        from .evolve_apply import materialize_evolve_apply_plan as _materialize
+        from .evolve_execution import materialize_evolve_apply_plan as _materialize
         return json.dumps(_materialize(project_root))
     except Exception as e:
         _log_mcp_health("fail", "materialize_evolve_apply_plan", str(e))
@@ -1272,7 +1272,7 @@ async def materialize_evolve_apply_plan(project_root: str) -> str:
 async def apply_evolve_apply_plan(project_root: str) -> str:
     """Apply a ready evolve apply plan after current seed hash verification."""
     try:
-        from .evolve_apply import apply_evolve_apply_plan as _apply
+        from .evolve_execution import apply_evolve_apply_plan as _apply
         return json.dumps(_apply(project_root))
     except Exception as e:
         _log_mcp_health("fail", "apply_evolve_apply_plan", str(e))

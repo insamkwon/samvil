@@ -15,8 +15,10 @@ from .release import release_summary as _release_summary
 from .qa_synthesis import qa_summary as _qa_summary
 from .qa_routing import qa_routing_summary as _qa_routing_summary
 from .evolve_loop import evolve_context_summary as _evolve_context_summary
-from .evolve_proposal import evolve_proposal_summary as _evolve_proposal_summary
-from .evolve_apply import evolve_apply_summary as _evolve_apply_summary
+from .evolve_execution import (
+    evolve_apply_summary as _evolve_apply_summary,
+    evolve_proposal_summary as _evolve_proposal_summary,
+)
 from .evolve_rebuild import evolve_rebuild_summary as _evolve_rebuild_summary
 from .evolve_reentry import rebuild_reentry_summary as _rebuild_reentry_summary
 from .post_rebuild_qa import post_rebuild_qa_summary as _post_rebuild_qa_summary
