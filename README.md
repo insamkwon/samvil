@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.23.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.24.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.24.0 "QA Recovery Routing"** — blocked QA convergence를 다음 실행 경로로 바꿔 `samvil-evolve`, `samvil-build`, `samvil-retro` 중 어디로 이어갈지 고정하는 릴리스입니다.
+
+> **v3.24.0 주요 추가** (2026-04-26):
+> - **QA recovery route** — `qa_routing.py`가 blocked QA issue family를 분석해 1차 route와 alternative routes를 산출.
+> - **Portable continuation** — `materialize_qa_recovery_routing`이 `.samvil/qa-routing.json`과 `.samvil/next-skill.json`을 생성.
+> - **Status/run-report route surface** — `samvil-status`와 `build_run_report`가 blocked QA에서 generic 문구 대신 route action을 우선 노출.
+> - **검증**: 892 unit tests · 158 MCP tools · Phase 22 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.23.0 "QA Convergence Gate"** — 반복 QA revise loop가 실제로 수렴하는지 판단하고, 같은 이슈가 반복되면 blind auto-fix를 멈추는 릴리스입니다.
 

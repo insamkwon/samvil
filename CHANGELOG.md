@@ -4,6 +4,44 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.24.0] — 2026-04-26 — QA Recovery Routing
+
+Phase 22 of the multi-host SAMVIL architecture. This release converts blocked
+QA convergence into a deterministic recovery route and portable continuation
+marker.
+
+### Added
+- `mcp/samvil_mcp/qa_routing.py` for deterministic blocked-QA routing.
+- `.samvil/qa-routing.json` materialization with primary and alternative
+  recovery routes.
+- `.samvil/next-skill.json` materialization from blocked QA recovery routing.
+- MCP `build_qa_recovery_routing` and `materialize_qa_recovery_routing`.
+- Run-report `qa_routing` summary and route-prioritized next action.
+- `samvil-status` human/JSON output for QA recovery routes.
+- `scripts/phase22-qa-recovery-routing-dogfood.py`, including
+  `host-continuation-smoke.py` validation for the generated marker.
+- Phase 22 dogfood as the first default release runner check.
+- Phase 22 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.24-phase22.md`.
+
+### Changed
+- Blocked Pass 2 functional QA now routes primarily to `samvil-evolve`.
+- Blocked mechanical or quality-only QA routes primarily to `samvil-build`.
+- Ownership/process violations route primarily to `samvil-retro`.
+- `skills/samvil-qa/SKILL.md` now calls QA recovery routing when convergence is
+  blocked or failed.
+
+### Verified
+- Phase 22 dogfood: PASS.
+- QA routing, status, telemetry, release, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 892 passed.
+- MCP server import smoke: 158 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.23.0] — 2026-04-26 — QA Convergence Gate
 
 Phase 21 of the multi-host SAMVIL architecture. This release turns repeated QA
