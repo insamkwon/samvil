@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.14.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.15.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.15.0 "Release Check Runner"** — v3.14의 release readiness gate 위에 실제 명령 실행 runner를 얹어 Phase 12/11/10/8과 pre-commit 결과를 직접 실행 증거로 `.samvil/release-report.json`에 기록하는 릴리스입니다.
+
+> **v3.15.0 주요 추가** (2026-04-26):
+> - **Release check runner** — named release check commands를 실행하고 exit code, duration, stdout/stderr tail을 기록.
+> - **Runner-generated report** — `scripts/run-release-checks.py`와 MCP `run_release_checks`가 `.samvil/release-report.json`을 자동 생성.
+> - **Default release command set** — Phase 12 release readiness, Phase 11 repair orchestration, Phase 10 repair regression, Phase 8 browser inspection, full pre-commit을 순서대로 실행.
+> - **Runner dogfood** — all-pass, command-fail, timeout 세 상태에서 release gate pass/blocked와 status surface를 검증.
+> - **검증**: 845 unit tests · 150 MCP tools · default release runner PASS · Phase 13 dogfood PASS · Phase 12/11/10/8 regressions PASS · pre-commit-check PASS.
 
 **v3.14.0 "Release Readiness Gate"** — v3.13의 repair orchestration 위에 release report와 release gate를 얹어 repair verified 이후에도 required release checks가 끝나기 전에는 최종 릴리스를 막는 릴리스입니다.
 

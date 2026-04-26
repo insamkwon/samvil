@@ -4,6 +4,49 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.15.0] — 2026-04-26 — Release Check Runner
+
+Phase 13 of the multi-host SAMVIL architecture. This release makes release
+readiness evidence executable by adding a runner that executes release check
+commands and writes the release report directly.
+
+### Added
+- Default release check command set for Phase 12 release readiness, Phase 11
+  repair orchestration, Phase 10 repair regression, Phase 8 browser inspection,
+  and full pre-commit.
+- `run_release_checks` in `mcp/samvil_mcp/release.py`, capturing exit code,
+  duration, stdout/stderr tails, timeout status, and evidence rows.
+- `scripts/run-release-checks.py` CLI for generating
+  `.samvil/release-report.json` from actual command execution.
+- MCP tool `run_release_checks` for host/skill access to the same runner.
+- Runner source and execution evidence in rendered release reports and
+  `samvil-status.py`.
+- `scripts/phase13-release-check-runner-dogfood.py`, covering all-pass,
+  command-failed, and timeout runner states.
+- Phase 13 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.15-phase13.md`.
+
+### Dogfood
+- `runner-all-pass`: gate=pass, next_action=`ready to tag release`.
+- `runner-command-failed`: gate=blocked, next_action=`fix release check: runner_fail`.
+- `runner-command-timeout`: gate=blocked, next_action=`fix release check: runner_timeout`.
+- Default runner executed Phase 12/11/10/8 and full pre-commit with all five
+  checks passing.
+
+### Verified
+- Phase 13 release check runner dogfood: PASS.
+- Default release check runner: PASS.
+- Phase 12 release readiness regression: PASS.
+- Phase 11 repair orchestration regression: PASS.
+- Phase 10 inspection repair regression: PASS.
+- Phase 8 real browser inspection regression: PASS.
+- Full test suite: 845 passed.
+- MCP server import smoke: 150 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.14.0] — 2026-04-26 — Release Readiness Gate
 
 Phase 12 of the multi-host SAMVIL architecture. This release makes final
