@@ -4,6 +4,35 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.35.0] — 2026-04-26 — Tier 3 Phase A: Easy Skills Ultra-Thin
+
+**Theme:** Migrate Easy 4 skills (doctor/pm-interview/update/deploy) to ultra-thin shells with single-source-of-truth MCP tools.
+
+### Changed (skill migration)
+- `samvil-doctor`: 178 → 87 LOC (-51%)
+- `samvil-pm-interview`: 117 → 94 LOC (-20%)
+- `samvil-update`: 285 → 120 LOC (-58%)
+- `samvil-deploy`: 379 → 99 LOC (-74%)
+- Phase A total: 959 → 400 LOC (-58%)
+- Each skill preserves SKILL.legacy.md for rollback (frontmatter renamed to avoid name collision)
+
+### Added (MCP)
+- `diagnose_environment(project_root)` — single-source-of-truth diagnostic for samvil-doctor (mcp_health, tool_inventory, model_recommendation)
+- `evaluate_deploy_target(project_root, platform)` — single-source-of-truth for samvil-deploy (5 solution_types × 4-5 platforms catalog, QA gate, env validation)
+
+### Added (tests)
+- 41 new smoke tests pinning behavioral contracts (9 doctor + 8 pm-interview + 7 update + 17 deploy)
+
+### Counts
+- MCP tools: 139 → **141** (+2)
+- Tests: 938 → **979** (+41)
+- 6 thin skills total: samvil-seed (91), samvil-design (116), samvil-doctor (87), samvil-pm-interview (94), samvil-update (120), samvil-deploy (99) — all ≤120 LOC
+
+### Next
+Tier 4 — Phase B+C: Medium 4 + Hard 5 skills migration. Target v3.36.0+ → eventual v4.0.0.
+
+---
+
 ## [3.34.0] — 2026-04-26 — Consolidation Tier 2
 
 **Theme:** WARM cleanup, module consolidation, doc/CI hygiene.
