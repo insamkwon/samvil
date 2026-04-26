@@ -80,13 +80,6 @@ from .domain_packs import (
     match_domain_packs as _match_domain_packs,
     render_domain_packs as _render_domain_packs,
 )
-from .inspection import (
-    build_inspection_report as _build_inspection_report,
-    derive_inspection_observations as _derive_inspection_observations,
-    read_inspection_report as _read_inspection_report_file,
-    render_inspection_report as _render_inspection_report,
-    write_inspection_report as _write_inspection_report,
-)
 from .retro_v3_2 import (
     ExperimentRun as _ExperimentRun,
     Observation as _Observation,
@@ -162,16 +155,9 @@ from .telemetry import (
     write_run_report as _write_run_report,
 )
 from .repair import (
-    build_repair_plan as _build_repair_plan,
     build_repair_report as _build_repair_report,
-    derive_repair_policy_signals as _derive_repair_policy_signals,
-    evaluate_repair_gate as _evaluate_repair_gate,
-    read_repair_plan as _read_repair_plan_file,
     read_repair_report as _read_repair_report_file,
-    render_repair_plan as _render_repair_plan,
     render_repair_report as _render_repair_report,
-    write_repair_plan as _write_repair_plan,
-    write_repair_report as _write_repair_report,
 )
 from .release import (
     build_release_evidence_bundle as _build_release_evidence_bundle,
@@ -1250,17 +1236,6 @@ async def materialize_qa_recovery_routing(project_root: str, persist_next_skill:
 
 
 @mcp.tool()
-async def build_evolve_context(project_root: str) -> str:
-    """Build file-based evolve intake context from project artifacts."""
-    try:
-        from .evolve_loop import build_evolve_context_from_project as _build
-        return json.dumps(_build(project_root))
-    except Exception as e:
-        _log_mcp_health("fail", "build_evolve_context", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
 async def materialize_evolve_context(project_root: str) -> str:
     """Persist file-based evolve intake context to .samvil/evolve-context.json."""
     try:
@@ -1272,17 +1247,6 @@ async def materialize_evolve_context(project_root: str) -> str:
 
 
 @mcp.tool()
-async def build_evolve_proposal(project_root: str) -> str:
-    """Build an evolve proposal from .samvil/evolve-context.json."""
-    try:
-        from .evolve_proposal import build_evolve_proposal as _build
-        return json.dumps(_build(project_root))
-    except Exception as e:
-        _log_mcp_health("fail", "build_evolve_proposal", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
 async def materialize_evolve_proposal(project_root: str) -> str:
     """Persist evolve proposal JSON and markdown report."""
     try:
@@ -1290,17 +1254,6 @@ async def materialize_evolve_proposal(project_root: str) -> str:
         return json.dumps(_materialize(project_root))
     except Exception as e:
         _log_mcp_health("fail", "materialize_evolve_proposal", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def build_evolve_apply_plan(project_root: str) -> str:
-    """Build a guarded evolve apply plan from .samvil/evolve-proposal.json."""
-    try:
-        from .evolve_apply import build_evolve_apply_plan as _build
-        return json.dumps(_build(project_root))
-    except Exception as e:
-        _log_mcp_health("fail", "build_evolve_apply_plan", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -1323,17 +1276,6 @@ async def apply_evolve_apply_plan(project_root: str) -> str:
         return json.dumps(_apply(project_root))
     except Exception as e:
         _log_mcp_health("fail", "apply_evolve_apply_plan", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def build_evolve_rebuild_handoff(project_root: str) -> str:
-    """Build the continuation marker for rebuilding an applied evolved seed."""
-    try:
-        from .evolve_rebuild import build_evolve_rebuild_handoff as _build
-        return json.dumps(_build(project_root))
-    except Exception as e:
-        _log_mcp_health("fail", "build_evolve_rebuild_handoff", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -1389,28 +1331,6 @@ async def materialize_post_rebuild_qa(project_root: str, persist_next_skill: boo
         return json.dumps(_materialize(project_root, persist_next_skill=persist_next_skill))
     except Exception as e:
         _log_mcp_health("fail", "materialize_post_rebuild_qa", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def build_evolve_cycle_closure(project_root: str) -> str:
-    """Build the closure verdict for the latest evolve/rebuild/QA cycle."""
-    try:
-        from .evolve_cycle import build_evolve_cycle_closure as _build
-        return json.dumps(_build(project_root))
-    except Exception as e:
-        _log_mcp_health("fail", "build_evolve_cycle_closure", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def materialize_evolve_cycle_closure(project_root: str, persist_next_skill: bool = True) -> str:
-    """Persist evolve cycle closure and optional .samvil/next-skill.json marker."""
-    try:
-        from .evolve_cycle import materialize_evolve_cycle_closure as _materialize
-        return json.dumps(_materialize(project_root, persist_next_skill=persist_next_skill))
-    except Exception as e:
-        _log_mcp_health("fail", "materialize_evolve_cycle_closure", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -3419,159 +3339,6 @@ def append_retro_observations(project_root: str, observations_json: str) -> dict
 
 
 @mcp.tool()
-def build_inspection_report(project_root: str, persist: bool = True) -> dict:
-    """Build an app inspection report from .samvil/inspection-evidence.json."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        report = _build_inspection_report(project_root)
-        path = ""
-        if persist:
-            path = str(_write_inspection_report(report, project_root))
-        _log_mcp_health("ok", "build_inspection_report")
-        return {"status": "ok", "path": path, "report": report}
-    except Exception as e:
-        _log_mcp_health("fail", "build_inspection_report", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def read_inspection_report(project_root: str) -> dict:
-    """Read .samvil/inspection-report.json if present."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        report = _read_inspection_report_file(project_root)
-        _log_mcp_health("ok", "read_inspection_report")
-        if report is None:
-            return {"status": "missing"}
-        return {"status": "ok", "report": report}
-    except Exception as e:
-        _log_mcp_health("fail", "read_inspection_report", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def render_inspection_report(project_root: str, refresh: bool = False) -> dict:
-    """Render an app inspection report as markdown; optionally refresh it first."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        report = _build_inspection_report(project_root) if refresh else _read_inspection_report_file(project_root)
-        if report is None:
-            return {"status": "missing"}
-        text = _render_inspection_report(report)
-        _log_mcp_health("ok", "render_inspection_report")
-        return {"status": "ok", "context": text}
-    except Exception as e:
-        _log_mcp_health("fail", "render_inspection_report", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def derive_inspection_observations(
-    project_root: str,
-    refresh: bool = False,
-    persist: bool = False,
-) -> dict:
-    """Derive retro observation candidates from failed inspection checks."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        report = _build_inspection_report(project_root) if refresh else _read_inspection_report_file(project_root)
-        if report is None:
-            return {"status": "missing"}
-        observations = _derive_inspection_observations(report)
-        path = ""
-        if persist:
-            path = str(_append_retro_observations(project_root, observations))
-        _log_mcp_health("ok", "derive_inspection_observations")
-        return {
-            "status": "ok",
-            "count": len(observations),
-            "path": path,
-            "observations": observations,
-        }
-    except Exception as e:
-        _log_mcp_health("fail", "derive_inspection_observations", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def build_repair_plan(project_root: str, persist: bool = True) -> dict:
-    """Build a repair plan from a failed inspection report."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        plan = _build_repair_plan(project_root)
-        path = ""
-        if persist:
-            path = str(_write_repair_plan(plan, project_root))
-        _log_mcp_health("ok", "build_repair_plan")
-        return {"status": "ok", "path": path, "plan": plan}
-    except Exception as e:
-        _log_mcp_health("fail", "build_repair_plan", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def read_repair_plan(project_root: str) -> dict:
-    """Read .samvil/repair-plan.json if present."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        plan = _read_repair_plan_file(project_root)
-        _log_mcp_health("ok", "read_repair_plan")
-        if plan is None:
-            return {"status": "missing"}
-        return {"status": "ok", "plan": plan}
-    except Exception as e:
-        _log_mcp_health("fail", "read_repair_plan", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def render_repair_plan(project_root: str, refresh: bool = False) -> dict:
-    """Render a repair plan as markdown; optionally refresh it first."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        plan = _build_repair_plan(project_root) if refresh else _read_repair_plan_file(project_root)
-        if plan is None:
-            return {"status": "missing"}
-        _log_mcp_health("ok", "render_repair_plan")
-        return {"status": "ok", "context": _render_repair_plan(plan)}
-    except Exception as e:
-        _log_mcp_health("fail", "render_repair_plan", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def build_repair_report(project_root: str, persist: bool = True) -> dict:
-    """Build a repair report comparing before and after inspection reports."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        report = _build_repair_report(project_root)
-        path = ""
-        if persist:
-            path = str(_write_repair_report(report, project_root))
-        _log_mcp_health("ok", "build_repair_report")
-        return {"status": "ok", "path": path, "report": report}
-    except Exception as e:
-        _log_mcp_health("fail", "build_repair_report", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
 def read_repair_report(project_root: str) -> dict:
     """Read .samvil/repair-report.json if present."""
     err = _validate_project_root(project_root)
@@ -3602,37 +3369,6 @@ def render_repair_report(project_root: str, refresh: bool = False) -> dict:
         return {"status": "ok", "context": _render_repair_report(report)}
     except Exception as e:
         _log_mcp_health("fail", "render_repair_report", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def evaluate_repair_gate(project_root: str) -> dict:
-    """Evaluate whether repair state blocks progression."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        gate = _evaluate_repair_gate(project_root)
-        _log_mcp_health("ok", "evaluate_repair_gate")
-        return {"status": "ok", "gate": gate}
-    except Exception as e:
-        _log_mcp_health("fail", "evaluate_repair_gate", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def derive_repair_policy_signals(repair_reports_json: str, threshold: int = 2) -> dict:
-    """Derive retro/policy candidates from repeated repair failure types."""
-    try:
-        data = json.loads(repair_reports_json)
-        reports = data if isinstance(data, list) else data.get("reports", [])
-        if not isinstance(reports, list):
-            return {"status": "error", "error": "repair_reports_json must contain a list"}
-        signals = _derive_repair_policy_signals(reports, threshold=threshold)
-        _log_mcp_health("ok", "derive_repair_policy_signals")
-        return {"status": "ok", "count": len(signals), "signals": signals}
-    except Exception as e:
-        _log_mcp_health("fail", "derive_repair_policy_signals", str(e))
         return {"status": "error", "error": str(e)}
 
 

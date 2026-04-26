@@ -16,13 +16,8 @@ import pytest
 from samvil_mcp.server import (
     build_reawake_message,
     build_qa_recovery_routing,
-    build_evolve_context,
-    build_evolve_proposal,
-    build_evolve_apply_plan,
-    build_evolve_rebuild_handoff,
     build_rebuild_reentry,
     build_post_rebuild_qa,
-    build_evolve_cycle_closure,
     build_final_e2e_bundle,
     evaluate_qa_convergence,
     get_tier_phases,
@@ -38,7 +33,6 @@ from samvil_mcp.server import (
     materialize_evolve_rebuild_handoff,
     materialize_rebuild_reentry,
     materialize_post_rebuild_qa,
-    materialize_evolve_cycle_closure,
     materialize_final_e2e_bundle,
     suggest_ac_split,
     synthesize_qa_evidence,
@@ -163,10 +157,8 @@ def test_evolve_context_tools_write_context(tmp_path: Path) -> None:
         "primary_route": {"next_skill": "samvil-evolve", "route_type": "seed_evolve"},
     }), encoding="utf-8")
 
-    built = json.loads(_run(build_evolve_context(project_root=str(tmp_path))))
     materialized = json.loads(_run(materialize_evolve_context(project_root=str(tmp_path))))
 
-    assert built["focus"]["area"] == "functional_spec"
     assert materialized["next_skill"] == "samvil-evolve"
     assert (tmp_path / ".samvil" / "evolve-context.json").exists()
 
@@ -180,10 +172,8 @@ def test_evolve_proposal_tools_write_artifacts(tmp_path: Path) -> None:
         "routing": {"next_skill": "samvil-evolve", "route_type": "seed_evolve"},
     }), encoding="utf-8")
 
-    built = json.loads(_run(build_evolve_proposal(project_root=str(tmp_path))))
     materialized = json.loads(_run(materialize_evolve_proposal(project_root=str(tmp_path))))
 
-    assert built["proposed_changes"][0]["type"] == "clarify_or_split_ac"
     assert materialized["changes"] == 1
     assert (tmp_path / ".samvil" / "evolve-proposal.json").exists()
     assert (tmp_path / ".samvil" / "evolve-proposal.md").exists()
@@ -211,11 +201,9 @@ def test_evolve_apply_tools_write_and_apply_seed(tmp_path: Path) -> None:
         "proposed_changes": [{"type": "clarify_or_split_ac", "target": "AC-1"}],
     }), encoding="utf-8")
 
-    built = json.loads(_run(build_evolve_apply_plan(project_root=str(tmp_path))))
     materialized = json.loads(_run(materialize_evolve_apply_plan(project_root=str(tmp_path))))
     applied = json.loads(_run(apply_evolve_apply_plan(project_root=str(tmp_path))))
 
-    assert built["status"] == "ready"
     assert materialized["mutations"] == 1
     assert applied["status"] == "applied"
     assert (tmp_path / "seed_history" / "v1.json").exists()
@@ -229,11 +217,9 @@ def test_evolve_rebuild_tools_write_next_skill_marker(tmp_path: Path) -> None:
         "to_version": 2,
     }), encoding="utf-8")
 
-    built = json.loads(_run(build_evolve_rebuild_handoff(project_root=str(tmp_path))))
     materialized = json.loads(_run(materialize_evolve_rebuild_handoff(project_root=str(tmp_path))))
     marker = json.loads((tmp_path / ".samvil" / "next-skill.json").read_text(encoding="utf-8"))
 
-    assert built["status"] == "ready"
     assert materialized["next_skill"] == "samvil-scaffold"
     assert marker["from_stage"] == "evolve"
 
@@ -306,36 +292,6 @@ def test_post_rebuild_qa_tools_write_next_skill_marker(tmp_path: Path) -> None:
     assert built["status"] == "ready"
     assert materialized["next_skill"] == "samvil-qa"
     assert marker["from_stage"] == "scaffold"
-
-
-def test_evolve_cycle_tools_write_closure_marker(tmp_path: Path) -> None:
-    import hashlib
-
-    seed = {"name": "task-app", "version": 2}
-    digest = hashlib.sha256(
-        json.dumps(seed, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    ).hexdigest()
-    (tmp_path / ".samvil").mkdir()
-    (tmp_path / "project.seed.json").write_text(json.dumps(seed), encoding="utf-8")
-    (tmp_path / ".samvil" / "post-rebuild-qa.json").write_text(json.dumps({
-        "status": "ready",
-        "seed_name": "task-app",
-        "seed_version": 2,
-        "seed_sha256": digest,
-        "previous_qa": {"verdict": "REVISE", "iteration": 2, "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"]},
-    }), encoding="utf-8")
-    (tmp_path / ".samvil" / "qa-results.json").write_text(json.dumps({
-        "synthesis": {"verdict": "PASS", "iteration": 3, "max_iterations": 3, "issue_ids": []},
-        "convergence": {"verdict": "pass"},
-    }), encoding="utf-8")
-
-    built = json.loads(_run(build_evolve_cycle_closure(project_root=str(tmp_path))))
-    materialized = json.loads(_run(materialize_evolve_cycle_closure(project_root=str(tmp_path))))
-    marker = json.loads((tmp_path / ".samvil" / "next-skill.json").read_text(encoding="utf-8"))
-
-    assert built["verdict"] == "closed"
-    assert materialized["next_skill"] == "samvil-retro"
-    assert marker["cycle_verdict"] == "closed"
 
 
 def test_final_e2e_tools_write_bundle(tmp_path: Path) -> None:
