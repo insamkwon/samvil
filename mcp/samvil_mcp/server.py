@@ -68,6 +68,18 @@ from .diagnostic import (
 from .deploy_targets import (
     evaluate_deploy_target as _evaluate_deploy_target,
 )
+from .retro_aggregate import (
+    aggregate_retro_metrics as _aggregate_retro_metrics,
+)
+from .evolve_aggregate import (
+    aggregate_evolve_context as _aggregate_evolve_context,
+)
+from .council_synthesis import (
+    synthesize_council_verdicts as _synthesize_council_verdicts,
+)
+from .brownfield_analyzer import (
+    analyze_brownfield_project as _analyze_brownfield_project,
+)
 from .manifest import (
     build_manifest,
     write_manifest,
@@ -3770,6 +3782,175 @@ async def evaluate_deploy_target(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "evaluate_deploy_target", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def analyze_brownfield_project(
+    project_root: str,
+    project_name: str = "",
+) -> str:
+    """Aggregate every fact samvil-analyze needs to reverse-engineer a seed.
+
+    Reads `package.json` (or pyproject.toml), config files, and walks `src/`
+    to detect:
+      - framework / language / runtime / package_manager (with signal source)
+      - UI library, state management, data sources
+      - solution_type (web-app / mobile-app / game / automation / dashboard)
+      - feature modules (each becomes a v3 seed feature with status=existing)
+      - confidence tags (high / medium / low) per inferred field
+      - ADR-EXISTING-NNN entries explaining each heuristic decision
+
+    Returns a JSON string shaped per `BrownfieldReport.to_dict()`:
+      - seed: complete v3.0-shaped reverse-seed dict ready to write
+      - confidence_tags: per-field confidence (skill renders for review)
+      - adrs: ADR-EXISTING-NNN entries the skill appends to decisions.log
+      - summary_lines: pre-formatted Korean lines for the analysis pane
+      - warnings: re-confirm-with-user items (unknown framework, no features)
+
+    `project_name` is optional — falls back to package.json:name then to
+    the directory's basename.
+    """
+    try:
+        result = _analyze_brownfield_project(
+            project_root,
+            project_name=project_name or None,
+        )
+        _log_mcp_health("ok", "analyze_brownfield_project")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "analyze_brownfield_project", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_retro_metrics(
+    project_root: str,
+    plugin_root: str = "",
+    suggestion_major: int = 3,
+) -> str:
+    """Aggregate the run-feedback facts samvil-retro needs.
+
+    Reads (best-effort) from `project_root`:
+      - `project.seed.json`, `project.state.json`
+      - `.samvil/metrics.json`, `.samvil/events.jsonl`
+      - `.samvil/mcp-health.jsonl`
+      - `interview-summary.md`
+
+    And `harness-feedback.log` from `plugin_root` (or auto-detected
+    cache path) for cross-run pattern detection + ID assignment.
+
+    Returns a JSON string with:
+      - metrics: per-run counters + stage durations + bottlenecks.
+      - recurring_patterns: keywords seen in 3+ historical suggestions.
+      - flow_compliance: planned vs. actual stage sequence.
+      - agent_utilization: tier-configured vs. spawned agents.
+      - v3_leaf_stats: AC tree leaf events grouped by status.
+      - mcp_health: ok/fail counts + failed-tool top list.
+      - next_suggestion_id: `v<major>-NNN` for the new entry.
+
+    `suggestion_major` defaults to 3 (current schema). Bump when SAMVIL
+    crosses a major-version boundary that resets ID space.
+    """
+    try:
+        result = _aggregate_retro_metrics(
+            project_root,
+            plugin_root=plugin_root or "",
+            suggestion_major=int(suggestion_major or 3),
+        )
+        _log_mcp_health("ok", "aggregate_retro_metrics")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_retro_metrics", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_evolve_context(project_root: str) -> str:
+    """Boot-time aggregator for the samvil-evolve skill body (T4.2 ultra-thin).
+
+    Reads (best-effort) from `project_root`:
+      - `project.seed.json`, `project.state.json`, `project.config.json`
+      - `.samvil/qa-results.json`
+      - `interview-summary.md`
+
+    Returns a JSON string with:
+      - auto_trigger: whether Evolve should be auto-suggested + reasons.
+      - mode: resolved evolve_mode + cycle/build quota state.
+      - cycle: current cycle index + max + cap status.
+      - four_dim_baseline: raw inputs for Quality/Intent/Purpose/Beyond eval.
+      - errors: non-fatal warnings.
+
+    Companion to existing `materialize_evolve_context`,
+    `check_convergence_gates`, `record_qa_failure`, etc. — this tool covers
+    the auto-trigger / mode / 4-dim pre-flight that were inline in the
+    legacy 482-LOC skill body.
+    """
+    try:
+        result = _aggregate_evolve_context(project_root)
+        _log_mcp_health("ok", "aggregate_evolve_context")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_evolve_context", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def synthesize_council_verdicts(
+    round1_verdicts_json: str = "",
+    round2_verdicts_json: str = "",
+) -> str:
+    """Single-source-of-truth synthesis for Council Gate A (T4.3 ultra-thin).
+
+    The samvil-council skill spawns Round 1 + Round 2 agents in parallel
+    via the CC Agent tool (host-bound), then calls this tool to:
+
+      1. Extract Round 1 debate points (consensus / debate / blind_spots)
+         into a markdown block ready for Round 2 prompt injection.
+      2. Aggregate Round 2 per-section verdicts into consensus scores
+         (≥80% strong, 60-79% moderate, <60% weak), preserve dissenting
+         opinions (Devil's Advocate), and surface BLOCKING-severity
+         challenges as `blocking_objections`.
+      3. Decide the overall verdict:
+           PROCEED              — strong consensus on all sections.
+           PROCEED_WITH_CHANGES — moderate consensus, no blocking.
+           HOLD                 — weak consensus, blocking objection,
+                                  or majority-reject on any section.
+
+    Args:
+      round1_verdicts_json: JSON-encoded list of Round 1 outputs:
+        `[{"agent": "...", "topics": [{"topic": "...", "stance": "...",
+        "is_blind_spot": bool}]}, ...]`. Empty → Round 1 was skipped
+        (standard tier or below).
+      round2_verdicts_json: JSON-encoded list of Round 2 outputs:
+        `[{"agent": "...", "sections": [{"section": "...",
+        "verdict": "approve|challenge|reject", "severity": "minor|blocking",
+        "reasoning": "..."}]}, ...]`. Empty → no synthesis possible
+        (returns well-formed empty result).
+
+    Returns the synthesis dict described in
+    `samvil_mcp.council_synthesis.synthesize_council_verdicts`. Pure
+    function; idempotent; never raises.
+
+    Companion to `consensus_v3_2.py` (which is the v3.3-bound dispute
+    resolver). This tool is the legacy v3.1 Council Gate A that survives
+    in v3.2 only behind the `--council` opt-in flag.
+    """
+    try:
+        round1 = json.loads(round1_verdicts_json) if round1_verdicts_json else None
+        round2 = json.loads(round2_verdicts_json) if round2_verdicts_json else None
+        if round1 is not None and not isinstance(round1, list):
+            round1 = None
+        if round2 is not None and not isinstance(round2, list):
+            round2 = None
+        result = _synthesize_council_verdicts(
+            round1_verdicts=round1,
+            round2_verdicts=round2,
+        )
+        _log_mcp_health("ok", "synthesize_council_verdicts")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "synthesize_council_verdicts", str(e))
         return json.dumps({"error": str(e)})
 
 
