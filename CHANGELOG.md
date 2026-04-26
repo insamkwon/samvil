@@ -4,6 +4,39 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.20.0] — 2026-04-26 — Independent Evidence Contract
+
+Phase 18 of the multi-host SAMVIL architecture. This release locks the
+Independent Evidence, Central Verdict principle into an executable contract so
+future skill, agent, and checklist edits cannot silently drift from the intended
+design/build/QA/evolve pipeline.
+
+### Added
+- `scripts/phase18-independent-evidence-dogfood.py` to validate blueprint
+  feasibility ordering, structured build event emission, QA taxonomy alignment,
+  independent QA ownership, and evolve context inputs.
+- `mcp/tests/test_phase18_independent_evidence_dogfood.py` regression coverage.
+- Phase 18 dogfood as a default release runner check before full pre-commit.
+- Phase 18 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.20-phase18.md`.
+
+### Changed
+- `agents/qa-functional.md` now states that `PARTIAL` remains passable evidence
+  with a count, while `UNIMPLEMENTED` and `FAIL` drive revise/fail outcomes.
+- `agents/qa-quality.md` now explicitly reports stubs or missing core behavior
+  as quality concerns without reclassifying Pass 2 functional states.
+
+### Verified
+- Phase 18 dogfood: PASS.
+- Phase 18 pytest: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 867 passed.
+- MCP server import smoke: 153 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.19.1] — 2026-04-26 — Verified Publisher Fixture Patch
 
 Patch release for Phase 17. The first v3.19.0 publisher run correctly blocked

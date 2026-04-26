@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.19.1`
+# SAMVIL — AI 바이브코딩 하네스 `v3.20.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.20.0 "Independent Evidence Contract"** — design/build/QA/evolve에 흩어진 Independent Evidence, Central Verdict 원칙을 실행 가능한 dogfood 계약으로 고정한 릴리스입니다.
+
+> **v3.20.0 주요 추가** (2026-04-26):
+> - **Phase 18 dogfood** — `scripts/phase18-independent-evidence-dogfood.py`가 blueprint feasibility, structured build events, QA taxonomy, independent QA ownership, evolve context를 교차 검증.
+> - **Release runner integration** — Phase 18 계약 검증이 기본 release checks에 포함되어 pre-commit 전에 drift를 직접 드러냄.
+> - **QA taxonomy cleanup** — `PARTIAL`은 통과 가능한 evidence-limited 상태로 유지하고, `UNIMPLEMENTED`/`FAIL`만 revise/fail 트리거로 명확화.
+> - **검증**: 867 unit tests · 153 MCP tools · Phase 18 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.19.1 "Verified Publisher Fixture Patch"** — publisher fixture dry-run이 `--skip-local-release-checks`일 때 machine-local `.samvil/release-report.json` 상태를 읽지 않도록 고친 패치입니다.
 
