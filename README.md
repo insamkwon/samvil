@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.31.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.32.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.32.0 "Final E2E Bundle"** — blocked QA에서 evolve/rebuild/post-rebuild QA/closure까지 이어지는 전체 체인을 하나의 최종 bundle로 검증하는 릴리스입니다.
+
+> **v3.32.0 주요 추가** (2026-04-26):
+> - **Final E2E bundle** — `materialize_final_e2e_bundle`이 `.samvil/final-e2e-bundle.json`을 생성.
+> - **Whole-chain consistency gate** — QA route, evolve apply, rebuild handoff, reentry, scaffold output, post-rebuild QA, cycle closure가 같은 seed hash/version을 가리키는지 검증.
+> - **Final status surface** — `samvil-status`와 `build_run_report`가 final E2E pass/blocked와 issue count를 노출.
+> - **검증**: 945 unit tests · 175 MCP tools · Phase 30 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.31.0 "Evolve Cycle Closure"** — post-rebuild QA 결과가 실제로 새 판정인지 확인한 뒤 cycle을 닫을지, 다시 evolve할지, 실패로 멈출지 파일 계약으로 고정하는 릴리스입니다.
 

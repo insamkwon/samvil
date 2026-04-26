@@ -4,6 +4,40 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.32.0] — 2026-04-26 — Final E2E Bundle
+
+Phase 30 of the multi-host SAMVIL architecture. This release adds the final
+whole-chain bundle that verifies blocked QA -> evolve -> rebuild -> reentry ->
+post-rebuild QA -> cycle closure from project-local artifacts and seed hashes.
+
+### Added
+- `mcp/samvil_mcp/final_e2e.py` for deterministic whole-chain E2E bundle
+  generation.
+- `.samvil/final-e2e-bundle.json` materialization.
+- MCP `build_final_e2e_bundle` and `materialize_final_e2e_bundle`.
+- Run-report `final_e2e` summary.
+- `samvil-status` human/JSON output for final E2E status and issue count.
+- `scripts/phase30-final-e2e-bundle-dogfood.py` proving the full Phase 23-29
+  chain produces a passing final E2E bundle.
+- Phase 30 dogfood as the first default release runner check.
+- Phase 30 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.32-phase30.md`.
+
+### Changed
+- Release readiness defaults now require Phase 30 before Phase 29 and earlier
+  recovery/evolve gates.
+
+### Verified
+- Phase 30 dogfood: PASS.
+- Final E2E, status, telemetry, release, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 945 passed.
+- MCP server import smoke: 175 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.31.0] — 2026-04-26 — Evolve Cycle Closure
 
 Phase 29 of the multi-host SAMVIL architecture. This release records the
