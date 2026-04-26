@@ -16,6 +16,7 @@ from .repair import evaluate_repair_gate
 RELEASE_REPORT_SCHEMA_VERSION = "1.0"
 RELEASE_BUNDLE_SCHEMA_VERSION = "1.0"
 DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
+    "phase26_evolve_rebuild",
     "phase25_evolve_apply",
     "phase24_evolve_proposal",
     "phase23_evolve_intake_context",
@@ -31,6 +32,12 @@ DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
     "pre_commit",
 )
 DEFAULT_RELEASE_COMMANDS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "phase26_evolve_rebuild",
+        "label": "Phase 26 evolve rebuild handoff dogfood",
+        "command": "python3 scripts/phase26-evolve-rebuild-dogfood.py",
+        "timeout_seconds": 60,
+    },
     {
         "name": "phase25_evolve_apply",
         "label": "Phase 25 evolve apply dogfood",

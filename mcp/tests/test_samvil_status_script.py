@@ -456,6 +456,27 @@ def test_status_exposes_evolve_apply(tmp_path):
     assert "Evolve apply:" in text
 
 
+def test_status_exposes_evolve_rebuild(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "evolve-rebuild.json", {
+        "status": "ready",
+        "from_version": 1,
+        "to_version": 2,
+        "next_skill": "samvil-scaffold",
+        "next_action": "continue with samvil-scaffold",
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["evolve_rebuild"]["present"] is True
+    assert data["evolve_rebuild"]["next_skill"] == "samvil-scaffold"
+    assert data["evolve_rebuild"]["next_action"] == "continue with samvil-scaffold"
+    assert "Rebuild: ready -> samvil-scaffold" in text
+    assert "Evolve rebuild:" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

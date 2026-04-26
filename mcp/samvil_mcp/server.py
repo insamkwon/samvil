@@ -1386,6 +1386,28 @@ async def apply_evolve_apply_plan(project_root: str) -> str:
 
 
 @mcp.tool()
+async def build_evolve_rebuild_handoff(project_root: str) -> str:
+    """Build the continuation marker for rebuilding an applied evolved seed."""
+    try:
+        from .evolve_rebuild import build_evolve_rebuild_handoff as _build
+        return json.dumps(_build(project_root))
+    except Exception as e:
+        _log_mcp_health("fail", "build_evolve_rebuild_handoff", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def materialize_evolve_rebuild_handoff(project_root: str) -> str:
+    """Persist evolve rebuild handoff and .samvil/next-skill.json."""
+    try:
+        from .evolve_rebuild import materialize_evolve_rebuild_handoff as _materialize
+        return json.dumps(_materialize(project_root))
+    except Exception as e:
+        _log_mcp_health("fail", "materialize_evolve_rebuild_handoff", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def validate_evidence(evidences_json: str, project_root: str) -> str:
     """Validate a list of file:line evidence strings against project files.
 

@@ -96,6 +96,13 @@ mcp__samvil_mcp__apply_evolve_apply_plan(project_root="<project_root>")
 Do not hand-edit `project.seed.json` when an apply plan is ready; the apply
 tool verifies the original seed hash and writes `seed_history/vN.json`.
 
+For v3.28+ rebuild handoff runs, after a successful apply call:
+```
+mcp__samvil_mcp__materialize_evolve_rebuild_handoff(project_root="<project_root>")
+```
+This writes `.samvil/evolve-rebuild.json` and `.samvil/next-skill.json` so
+portable hosts resume with `samvil-scaffold` on the evolved seed.
+
 ## Step 1b: 4차원 진화 평가
 
 Wonder/Reflect 전에 현재 상태를 4차원으로 평가한다:
@@ -417,6 +424,8 @@ Invoke the Skill tool with skill: `samvil-retro`
 
 If user chose to rebuild with new seed:
 **MCP (best-effort):** `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="scaffold", data='{"reason":"rebuild_with_evolved_seed"}')`
+
+**v3.28+ MCP:** `mcp__samvil_mcp__materialize_evolve_rebuild_handoff(project_root="<project_root>")`
 
 ### Handoff Write
 

@@ -104,6 +104,10 @@ def _load_evolve_apply(root: Path) -> dict:
     return _load_json(root / ".samvil" / "evolve-apply-plan.json")
 
 
+def _load_evolve_rebuild(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "evolve-rebuild.json")
+
+
 def _load_release_report(root: Path) -> dict:
     return _load_json(root / ".samvil" / "release-report.json")
 
@@ -263,6 +267,7 @@ def render_human(root: Path) -> str:
     evolve_context = _load_evolve_context(root)
     evolve_proposal = _load_evolve_proposal(root)
     evolve_apply = _load_evolve_apply(root)
+    evolve_rebuild = _load_evolve_rebuild(root)
     release_report = _load_release_report(root)
     release_bundle = _release_bundle_path(root)
     qa_report = _qa_report_path(root)
@@ -280,6 +285,7 @@ def render_human(root: Path) -> str:
     report_evolve_context = report.get("evolve_context", {}) or {}
     report_evolve_proposal = report.get("evolve_proposal", {}) or {}
     report_evolve_apply = report.get("evolve_apply", {}) or {}
+    report_evolve_rebuild = report.get("evolve_rebuild", {}) or {}
     report_release = report.get("release", {}) or {}
     release_gate = report_release.get("gate", {}) or {}
     inspection_summary = inspection.get("summary", {}) or {}
@@ -387,6 +393,12 @@ def render_human(root: Path) -> str:
             "Apply:   "
             f"{evolve_apply.get('status', '?')} "
             f"({_mutation_count(evolve_apply.get('operations') or [])} mutations)"
+        )
+    if evolve_rebuild:
+        lines.append(
+            "Rebuild: "
+            f"{evolve_rebuild.get('status', '?')} -> "
+            f"{evolve_rebuild.get('next_skill') or '?'}"
         )
     if release_report:
         lines.append(
@@ -499,6 +511,12 @@ def render_human(root: Path) -> str:
                 "  Evolve apply:   "
                 f"{report_evolve_apply.get('status', '?')} / "
                 f"{report_evolve_apply.get('mutations', 0)} mutations"
+            )
+        if report_evolve_rebuild.get("present"):
+            lines.append(
+                "  Evolve rebuild: "
+                f"{report_evolve_rebuild.get('status', '?')} -> "
+                f"{report_evolve_rebuild.get('next_skill') or '?'}"
             )
         stages = timeline.get("stages") or []
         if stages:
@@ -619,6 +637,21 @@ def render_human(root: Path) -> str:
             "  Next action:     "
             f"{evolve_apply.get('next_action') or '?'}"
         )
+    if evolve_rebuild:
+        lines.append("")
+        lines.append("Evolve rebuild:")
+        lines.append(
+            "  Status:          "
+            f"{evolve_rebuild.get('status', '?')}"
+        )
+        lines.append(
+            "  Next skill:      "
+            f"{evolve_rebuild.get('next_skill') or '?'}"
+        )
+        lines.append(
+            "  Next action:     "
+            f"{evolve_rebuild.get('next_action') or '?'}"
+        )
     if release_report:
         lines.append("")
         lines.append("Release:")
@@ -652,6 +685,7 @@ def render_json(root: Path) -> str:
     evolve_context = _load_evolve_context(root)
     evolve_proposal = _load_evolve_proposal(root)
     evolve_apply = _load_evolve_apply(root)
+    evolve_rebuild = _load_evolve_rebuild(root)
     release_report = _load_release_report(root)
     release_bundle = _release_bundle_path(root)
     qa_report = _qa_report_path(root)
@@ -668,6 +702,7 @@ def render_json(root: Path) -> str:
     report_evolve_context = report.get("evolve_context", {}) or {}
     report_evolve_proposal = report.get("evolve_proposal", {}) or {}
     report_evolve_apply = report.get("evolve_apply", {}) or {}
+    report_evolve_rebuild = report.get("evolve_rebuild", {}) or {}
     report_release = report.get("release", {}) or {}
     samvil_tier = report_state.get("samvil_tier") or state.get("samvil_tier") or "standard"
     gate_verdicts = latest_gate_verdicts(claims)
@@ -704,6 +739,7 @@ def render_json(root: Path) -> str:
                 "evolve_context": report_evolve_context,
                 "evolve_proposal": report_evolve_proposal,
                 "evolve_apply": report_evolve_apply,
+                "evolve_rebuild": report_evolve_rebuild,
             },
             "inspection_report": {
                 "present": bool(inspection),
@@ -782,6 +818,17 @@ def render_json(root: Path) -> str:
                 "path": str(root / ".samvil" / "evolve-apply-plan.json") if evolve_apply else "",
                 "preview_path": str(root / ".samvil" / "evolved-seed.preview.json") if evolve_apply else "",
                 "run_report": report_evolve_apply,
+            },
+            "evolve_rebuild": {
+                "present": bool(evolve_rebuild),
+                "status": evolve_rebuild.get("status"),
+                "from_version": evolve_rebuild.get("from_version"),
+                "to_version": evolve_rebuild.get("to_version"),
+                "next_skill": evolve_rebuild.get("next_skill"),
+                "next_action": evolve_rebuild.get("next_action"),
+                "path": str(root / ".samvil" / "evolve-rebuild.json") if evolve_rebuild else "",
+                "next_skill_path": str(root / ".samvil" / "next-skill.json") if evolve_rebuild else "",
+                "run_report": report_evolve_rebuild,
             },
             "release": {
                 "report_present": bool(release_report),
