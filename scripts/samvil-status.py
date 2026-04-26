@@ -278,6 +278,8 @@ def render_human(root: Path) -> str:
             f"{release_report_summary.get('failed_checks', 0)} fail / "
             f"{release_report_summary.get('missing_checks', 0)} missing)"
         )
+        if release_report.get("source"):
+            lines.append(f"Release source: {release_report.get('source')}")
     lines.append("")
     lines.append("Gate verdicts (latest):")
     report_gates = report_claims.get("latest_gate_verdicts") or []
@@ -406,6 +408,8 @@ def render_human(root: Path) -> str:
             f"{release_report_summary.get('failed_checks', 0)} failed / "
             f"{release_report_summary.get('missing_checks', 0)} missing"
         )
+        if release_report.get("source"):
+            lines.append(f"  Source:          {release_report.get('source')}")
     lines.append("")
     lines.append(
         "Next action:       "
@@ -491,6 +495,7 @@ def render_json(root: Path) -> str:
                 "passed_checks": (release_report.get("summary", {}) or {}).get("passed_checks", 0),
                 "failed_checks": (release_report.get("summary", {}) or {}).get("failed_checks", 0),
                 "missing_checks": (release_report.get("summary", {}) or {}).get("missing_checks", 0),
+                "source": release_report.get("source"),
                 "next_action": release_report.get("next_action"),
             },
             "next_recommended_action": status_next_action(

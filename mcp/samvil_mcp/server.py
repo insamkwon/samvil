@@ -178,6 +178,7 @@ from .release import (
     evaluate_release_gate as _evaluate_release_gate,
     read_release_report as _read_release_report_file,
     render_release_report as _render_release_report,
+    run_release_checks as _run_release_checks,
     write_release_report as _write_release_report,
 )
 
@@ -3870,6 +3871,28 @@ def evaluate_release_gate(project_root: str) -> dict:
         return {"status": "ok", "gate": gate}
     except Exception as e:
         _log_mcp_health("fail", "evaluate_release_gate", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def run_release_checks(project_root: str, commands_json: str = "", persist: bool = True) -> dict:
+    """Run release check commands and write a runner-generated release report."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        commands = None
+        if commands_json:
+            data = json.loads(commands_json)
+            commands = data if isinstance(data, list) else data.get("commands", [])
+            if not isinstance(commands, list):
+                return {"status": "error", "error": "commands_json must contain a list"}
+        report = _run_release_checks(project_root, commands=commands, persist=persist)
+        gate = _evaluate_release_gate(project_root, release_report=report)
+        _log_mcp_health("ok", "run_release_checks")
+        return {"status": "ok", "report": report, "gate": gate}
+    except Exception as e:
+        _log_mcp_health("fail", "run_release_checks", str(e))
         return {"status": "error", "error": str(e)}
 
 

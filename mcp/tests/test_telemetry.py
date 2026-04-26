@@ -205,6 +205,7 @@ def test_run_report_includes_blocking_release_gate(tmp_path):
     repair_report = build_repair_report(root, plan=plan, before_report=before, after_report=after)
     write_repair_report(repair_report, root)
     release_report = build_release_report(root, checks=[
+        {"name": "phase12_release_readiness", "status": "pass"},
         {"name": "phase11_repair_orchestration", "status": "pass"},
         {"name": "phase10_repair_regression", "status": "pass"},
         {"name": "phase8_browser_inspection", "status": "pass"},

@@ -19,12 +19,14 @@ from samvil_mcp.release import (
     read_release_report,
     release_summary,
     render_release_report,
+    run_release_checks,
     write_release_report,
 )
 
 
 def _checks(status: str = "pass") -> list[dict]:
     return [
+        {"name": "phase12_release_readiness", "status": status, "command": "phase12"},
         {"name": "phase11_repair_orchestration", "status": status, "command": "phase11"},
         {"name": "phase10_repair_regression", "status": status, "command": "phase10"},
         {"name": "phase8_browser_inspection", "status": status, "command": "phase8"},
@@ -80,8 +82,8 @@ def test_release_report_normalizes_missing_required_checks(tmp_path):
 
     assert report["summary"]["status"] == "blocked"
     assert report["summary"]["passed_checks"] == 1
-    assert report["summary"]["missing_checks"] == 3
-    assert report["next_action"] == "run release check: phase11_repair_orchestration"
+    assert report["summary"]["missing_checks"] == 4
+    assert report["next_action"] == "run release check: phase12_release_readiness"
 
 
 def test_release_gate_blocks_repair_gate_before_release_checks(tmp_path):
@@ -142,3 +144,50 @@ def test_release_summary_and_render(tmp_path):
     assert summary["gate"]["verdict"] == "pass"
     assert "Release Readiness Report" in rendered
     assert "pre_commit" in rendered
+
+
+def test_run_release_checks_captures_pass_and_fail(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+
+    report = run_release_checks(root, commands=[
+        {
+            "name": "pass_check",
+            "command": "python3 -c 'print(\"ok\")'",
+            "timeout_seconds": 5,
+        },
+        {
+            "name": "fail_check",
+            "command": "python3 -c 'import sys; print(\"bad\"); sys.exit(7)'",
+            "timeout_seconds": 5,
+        },
+    ], persist=True)
+
+    by_name = {check["name"]: check for check in report["checks"]}
+    assert report["source"] == "runner"
+    assert report["summary"]["status"] == "blocked"
+    assert by_name["pass_check"]["status"] == "pass"
+    assert by_name["pass_check"]["exit_code"] == 0
+    assert by_name["fail_check"]["status"] == "fail"
+    assert by_name["fail_check"]["exit_code"] == 7
+    assert by_name["fail_check"]["stdout_tail"].strip() == "bad"
+    assert read_release_report(root)["source"] == "runner"
+
+
+def test_run_release_checks_captures_timeout(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+
+    report = run_release_checks(root, commands=[
+        {
+            "name": "slow_check",
+            "command": "python3 -c 'import time; time.sleep(2)'",
+            "timeout_seconds": 0.1,
+        },
+    ], persist=False)
+
+    check = report["checks"][0]
+    assert report["summary"]["status"] == "blocked"
+    assert check["status"] == "fail"
+    assert check["exit_code"] is None
+    assert "timed out" in check["message"]
