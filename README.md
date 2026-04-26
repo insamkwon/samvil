@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.17.3`
+# SAMVIL — AI 바이브코딩 하네스 `v3.18.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.18.0 "Remote Release Gate"** — GitHub Actions run success와 `samvil-release-evidence` artifact 내부 `release-runner.json` gate pass를 함께 확인해, 태그 전 원격 release evidence까지 막는 릴리스입니다.
+
+> **v3.18.0 주요 추가** (2026-04-26):
+> - **Remote release gate** — run status/conclusion, expected HEAD, artifact report status, artifact gate verdict를 함께 평가.
+> - **Live `gh` CLI** — `scripts/check-remote-release-gate.py`가 최신 main run의 artifact를 다운로드하고 gate를 검증.
+> - **Fixture mode** — GitHub 접근 없이 pass/fail/head mismatch/block artifact 케이스를 fixture JSON으로 회귀 테스트.
+> - **검증**: 858 unit tests · 153 MCP tools · remote gate fixture tests PASS · live remote gate PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.17.3 "External CI Mirror Fixture Patch"** — ignored local `harness-feedback.log`에 의존하던 retro schema 테스트를 committed fixture 기반으로 바꿔, GitHub Actions release runner가 로컬 상태 없이 통과하도록 한 패치입니다.
 

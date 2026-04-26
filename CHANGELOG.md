@@ -4,6 +4,43 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.18.0] — 2026-04-26 — Remote Release Gate
+
+Phase 16 of the multi-host SAMVIL architecture. This release makes remote CI
+evidence a deterministic gate by validating both the GitHub Actions run and
+the uploaded `samvil-release-evidence` runner artifact.
+
+### Added
+- `mcp/samvil_mcp/remote_release.py` for remote release gate evaluation and
+  markdown rendering.
+- `scripts/check-remote-release-gate.py` for live `gh` checks and deterministic
+  fixture mode.
+- Remote gate validation for run status/conclusion, expected HEAD, artifact
+  release report status, artifact gate verdict, and failed/missing checks.
+- Pass/fail remote run and runner artifact fixtures under `mcp/tests/fixtures/`.
+- Unit and CLI regression tests for pass, failed run, blocked artifact, and head
+  mismatch cases.
+- Phase 16 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.18-phase16.md`.
+
+### Dogfood
+- Fixture remote gate tests passed.
+- Live remote gate passed against the latest successful main run
+  `24948976774` for HEAD `60803ed`.
+- Default release runner executed Phase 12/11/10/8 and full pre-commit with all
+  five checks passing.
+
+### Verified
+- Remote gate fixture tests: PASS.
+- Live remote release gate: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 858 passed.
+- MCP server import smoke: 153 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.17.3] — 2026-04-26 — External CI Mirror Fixture Patch
 
 Patch release for Phase 15. The v3.17.2 remote run exposed that retro schema
