@@ -1,0 +1,64 @@
+name: SAMVIL Release Checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release-checks:
+    name: Release checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Python package
+        run: |
+          python3 -m venv mcp/.venv
+          mcp/.venv/bin/python -m pip install --upgrade pip wheel
+          mcp/.venv/bin/python -m pip install -e mcp
+
+      - name: Install browser system dependencies
+        run: npx --yes playwright install-deps chromium
+
+      - name: Run release check runner
+        run: python3 scripts/run-release-checks.py --format json | tee /tmp/samvil-release-runner.json
+
+      - name: Build release evidence bundle
+        run: python3 scripts/build-release-bundle.py --format json | tee /tmp/samvil-release-bundle.json
+
+      - name: Collect release artifacts
+        if: always()
+        run: |
+          mkdir -p .samvil/ci-artifacts
+          cp .samvil/release-report.json .samvil/ci-artifacts/release-report.json 2>/dev/null || true
+          cp .samvil/release-summary.md .samvil/ci-artifacts/release-summary.md 2>/dev/null || true
+          cp /tmp/samvil-release-runner.json .samvil/ci-artifacts/release-runner.json 2>/dev/null || true
+          cp /tmp/samvil-release-bundle.json .samvil/ci-artifacts/release-bundle.json 2>/dev/null || true
+
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: samvil-release-evidence
+          if-no-files-found: warn
+          path: |
+            .samvil/ci-artifacts/release-report.json
+            .samvil/ci-artifacts/release-summary.md
+            .samvil/ci-artifacts/release-runner.json
+            .samvil/ci-artifacts/release-bundle.json
