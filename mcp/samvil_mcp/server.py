@@ -68,6 +68,9 @@ from .diagnostic import (
 from .deploy_targets import (
     evaluate_deploy_target as _evaluate_deploy_target,
 )
+from .scaffold_targets import (
+    evaluate_scaffold_target as _evaluate_scaffold_target,
+)
 from .retro_aggregate import (
     aggregate_retro_metrics as _aggregate_retro_metrics,
 )
@@ -3786,6 +3789,61 @@ async def evaluate_deploy_target(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "evaluate_deploy_target", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── Scaffold target evaluator (T4.7, samvil-scaffold) ─────────
+
+
+@mcp.tool()
+async def evaluate_scaffold_target(
+    project_path: str,
+    framework: str = "",
+    seed_json: str = "",
+    run_sanity_checks: bool = False,
+) -> str:
+    """Aggregate the scaffold-readiness facts samvil-scaffold needs.
+
+    Reads `project.seed.json` from `project_path` (or accepts a
+    pre-loaded `seed_json` string) and `references/dependency-matrix.json`
+    from the SAMVIL repo, then returns a JSON string with:
+      - framework: resolved framework name (caller arg → seed →
+        solution_type default → `nextjs`).
+      - framework_source: which input determined the framework.
+      - cli_command: ready-to-run scaffold CLI with `<seed.name>`
+        substituted.
+      - post_install_steps: ordered checklist the skill renders.
+      - sanity_checks: Phase A.6 file/contents requirements.
+      - sanity_result: present only when `run_sanity_checks=True` and
+        the project tree exists.
+      - build_command + build_log_path: per-stack INV-2 build line.
+      - version_pins: matrix-derived pins for post-install verification.
+      - env_vars_needed: per-stack `.env.example` keys.
+      - existing_project: incremental-scaffold detection (`package.json`
+        / `requirements.txt` / `SKILL.md` signal).
+      - notes / blockers: human-readable diagnostics.
+
+    `framework` is optional — empty string means "let MCP pick from seed".
+    `seed_json` is optional — empty string means "read project.seed.json".
+    """
+    try:
+        seed_dict: dict | None = None
+        if seed_json:
+            try:
+                seed_dict = json.loads(seed_json)
+            except json.JSONDecodeError as exc:
+                return json.dumps({"error": f"invalid seed_json: {exc}"})
+
+        result = _evaluate_scaffold_target(
+            project_path,
+            framework=framework or None,
+            seed=seed_dict,
+            run_sanity_checks=bool(run_sanity_checks),
+        )
+        _log_mcp_health("ok", "evaluate_scaffold_target")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "evaluate_scaffold_target", str(e))
         return json.dumps({"error": str(e)})
 
 

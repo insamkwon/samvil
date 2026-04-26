@@ -111,6 +111,18 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "narrate_parse",
         ),
     ),
+    (
+        "samvil-scaffold",
+        "skills/samvil-scaffold/SKILL.md",
+        (
+            "SKILL.legacy.md",
+            "evaluate_scaffold_target",
+            "version_pins",
+            "sanity_checks",
+            "scaffold_started",
+            "scaffold_complete",
+        ),
+    ),
 ]
 
 
