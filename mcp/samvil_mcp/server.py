@@ -65,6 +65,9 @@ from .jurisdiction import (
 from .diagnostic import (
     diagnose_environment_async as _diagnose_environment_async,
 )
+from .deploy_targets import (
+    evaluate_deploy_target as _evaluate_deploy_target,
+)
 from .manifest import (
     build_manifest,
     write_manifest,
@@ -3730,6 +3733,43 @@ async def diagnose_environment() -> str:
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "diagnose_environment", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── Deploy target evaluator (T3.4, samvil-deploy) ─────────────
+
+
+@mcp.tool()
+async def evaluate_deploy_target(
+    project_root: str,
+    platform: str = "",
+) -> str:
+    """Aggregate the deploy-readiness facts samvil-deploy needs.
+
+    Reads `project.state.json`, `project.seed.json`, and `.env.example`
+    from `project_root` and returns a JSON string with:
+      - qa_gate: pass/blocked verdict + reason (QA must be PASS).
+      - platforms: per-`solution_type` deploy-target catalog rows.
+      - selected_platform: caller-pinned, then seed-pinned, then
+        recommended catalog entry.
+      - env_vars: required keys + placeholder/missing keys parsed from
+        `.env.example`.
+      - build_artifact: existence check for `.next/` (web-app/dashboard)
+        or `dist/` (game).
+      - ready: bool — true only when no blockers remain.
+      - blockers: human-readable strings the skill renders to the user.
+
+    `platform` is optional — empty string means "let MCP pick".
+    """
+    try:
+        result = _evaluate_deploy_target(
+            project_root,
+            platform=platform or None,
+        )
+        _log_mcp_health("ok", "evaluate_deploy_target")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "evaluate_deploy_target", str(e))
         return json.dumps({"error": str(e)})
 
 
