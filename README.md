@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.19.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.19.1`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,12 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.19.1 "Verified Publisher Fixture Patch"** — publisher fixture dry-run이 `--skip-local-release-checks`일 때 machine-local `.samvil/release-report.json` 상태를 읽지 않도록 고친 패치입니다.
+
+> **v3.19.1 주요 수정** (2026-04-26):
+> - **Fixture isolation** — skipped local release checks는 explicit pass stub을 사용해 CI/local `.samvil` 상태 차이에 영향받지 않음.
+> - **검증**: 866 unit tests · 153 MCP tools · publisher fixture tests PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.19.0 "Verified Release Publisher"** — branch push, GitHub Actions 대기, 원격 artifact gate 검증, tag push를 하나의 publish guard로 묶어 release tag가 remote evidence pass 이후에만 올라가게 한 릴리스입니다.
 

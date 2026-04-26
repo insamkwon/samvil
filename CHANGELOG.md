@@ -4,6 +4,28 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.19.1] — 2026-04-26 — Verified Publisher Fixture Patch
+
+Patch release for Phase 17. The first v3.19.0 publisher run correctly blocked
+tag publication when remote CI exposed that fixture dry-run tests still depended
+on local `.samvil/release-report.json` state.
+
+### Fixed
+- `scripts/publish-verified-release.py` now uses an explicit passing local gate
+  stub when `--skip-local-release-checks` is set.
+- Publisher fixture tests no longer depend on machine-local or CI-local
+  `.samvil/release-report.json` state.
+
+### Verified
+- Publisher fixture tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 866 passed.
+- MCP server import smoke: 153 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.19.0] — 2026-04-26 — Verified Release Publisher
 
 Phase 17 of the multi-host SAMVIL architecture. This release turns the remote

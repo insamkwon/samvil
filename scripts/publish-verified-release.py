@@ -57,10 +57,11 @@ def main() -> int:
     tag = release_tag(version)
     head = _git("rev-parse", "HEAD")
 
-    local_gate: dict[str, Any] = {}
     if not args.skip_local_release_checks:
         _run_checked(["python3", "scripts/run-release-checks.py", "--format", "json"])
-    local_gate = evaluate_release_gate(REPO, release_report=read_release_report(REPO))
+        local_gate = evaluate_release_gate(REPO, release_report=read_release_report(REPO))
+    else:
+        local_gate = {"verdict": "pass", "next_action": "local release checks skipped"}
 
     if not args.dry_run and not args.run_json:
         _run_checked(["git", "push", args.remote, args.branch])
