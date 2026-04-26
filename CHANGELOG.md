@@ -4,6 +4,44 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.12.0] — 2026-04-26 — Inspection Repair Execution Loop
+
+Phase 10 of the multi-host SAMVIL architecture. This release closes the first
+create -> inspect -> fail -> repair -> reinspect loop by adding repair plans
+and before/after repair reports.
+
+### Added
+- `mcp/samvil_mcp/repair.py` for deterministic repair plan/report generation,
+  reading, persistence, and markdown rendering.
+- Repair artifacts: `.samvil/repair-plan.json` and
+  `.samvil/repair-report.json`.
+- Repair MCP tools: `build_repair_plan`, `read_repair_plan`,
+  `render_repair_plan`, `build_repair_report`, `read_repair_report`, and
+  `render_repair_report`.
+- `samvil-status.py` repair summary in both human and JSON output.
+- `scripts/phase10-inspection-repair-dogfood.py`, a before/after repair
+  dogfood over broken dashboard and browser game fixtures.
+- Phase 10 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.12-phase10.md`.
+
+### Dogfood
+- `repair-dashboard`: before_failed=4, after_failed=0, actions=4,
+  resolved=4, status=verified.
+- `repair-game`: before_failed=3, after_failed=0, actions=3, resolved=3,
+  status=verified.
+- Both scenarios end with `repair verified: re-run release checks`.
+
+### Verified
+- Phase 10 inspection repair dogfood: PASS.
+- Phase 8 real browser inspection regression: PASS.
+- Targeted repair/status/MCP tests: 12 passed.
+- Full test suite: 821 passed.
+- MCP server import smoke: 143 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.11.0] — 2026-04-26 — Inspection Feedback Loop
 
 Phase 9 of the multi-host SAMVIL architecture. This release turns failed

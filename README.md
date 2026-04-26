@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.11.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.12.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.12.0 "Inspection Repair Execution Loop"** — v3.11의 failure feedback 위에 repair plan, before/after repair report, 재검수 verified status를 얹어 1차 create→inspect→repair 루프를 닫은 릴리스입니다.
+
+> **v3.12.0 주요 추가** (2026-04-26):
+> - **Repair plan contract** — failed inspection report를 `.samvil/repair-plan.json`의 ordered repair actions로 변환.
+> - **Repair report contract** — before/after inspection report를 비교해 resolved/remaining failures와 verified status를 기록.
+> - **Repair MCP/status surface** — build/read/render repair plan/report MCP 도구와 `samvil-status.py` repair summary 추가.
+> - **Repair dogfood** — `scripts/phase10-inspection-repair-dogfood.py`가 broken dashboard/game fixture를 repair plan → fixed after-inspection → verified repair report로 검증.
+> - **검증**: 821 unit tests · 143 MCP tools · Phase 10 repair dogfood PASS · Phase 8 browser inspection regression PASS · pre-commit-check PASS.
 
 **v3.11.0 "Inspection Feedback Loop"** — v3.10의 inspection gate 위에 실패 분류, repair hint, retro observation, status next action을 얹은 릴리스입니다.
 
