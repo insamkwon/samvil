@@ -4,6 +4,45 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.14.0] — 2026-04-26 — Release Readiness Gate
+
+Phase 12 of the multi-host SAMVIL architecture. This release makes final
+release readiness deterministic by adding a release report and release gate
+after the repair orchestration gate.
+
+### Added
+- `mcp/samvil_mcp/release.py` for deterministic release report generation,
+  reading, persistence, markdown rendering, and release gate evaluation.
+- Release artifact: `.samvil/release-report.json`.
+- Release MCP tools: `build_release_report`, `read_release_report`,
+  `render_release_report`, and `evaluate_release_gate`.
+- Run report release summary and release gate fields under
+  `.samvil/run-report.json`.
+- `samvil-status.py` release summary and release gate output in both human and
+  JSON modes.
+- `scripts/phase12-release-readiness-dogfood.py`, covering repair-blocked,
+  release-check-failed, and release-ready states.
+- Phase 12 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.14-phase12.md`.
+
+### Dogfood
+- `release-repair-blocked`: gate=blocked, reason=`repair gate is blocked`.
+- `release-check-failed`: gate=blocked, next_action=`fix release check: pre_commit`.
+- `release-ready`: gate=pass, next_action=`ready to tag release`.
+
+### Verified
+- Phase 12 release readiness dogfood: PASS.
+- Phase 11 repair orchestration regression: PASS.
+- Phase 10 inspection repair regression: PASS.
+- Phase 8 real browser inspection regression: PASS.
+- Targeted release/status/telemetry/MCP tests: 27 passed.
+- Full test suite: 840 passed.
+- MCP server import smoke: 149 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.13.0] — 2026-04-26 — Repair Orchestration Gate
 
 Phase 11 of the multi-host SAMVIL architecture. This release makes repair

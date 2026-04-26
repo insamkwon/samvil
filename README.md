@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.13.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.14.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.14.0 "Release Readiness Gate"** — v3.13의 repair orchestration 위에 release report와 release gate를 얹어 repair verified 이후에도 required release checks가 끝나기 전에는 최종 릴리스를 막는 릴리스입니다.
+
+> **v3.14.0 주요 추가** (2026-04-26):
+> - **Release report contract** — named release checks를 `.samvil/release-report.json`으로 정규화하고 pass/fail/missing summary를 기록.
+> - **Release gate verdict** — repair gate가 blocked면 release도 blocked, release check 실패/누락도 blocked, 전체 통과 시 `ready to tag release`.
+> - **Run report orchestration** — `.samvil/run-report.json`에 release summary와 release gate를 포함하고 repair gate 다음 우선순위로 release gate가 next action을 제어.
+> - **Release MCP/status surface** — build/read/render release report, evaluate release gate MCP 도구와 `samvil-status.py` release summary 추가.
+> - **검증**: 840 unit tests · 149 MCP tools · Phase 12 release readiness dogfood PASS · Phase 11/10/8 regressions PASS · pre-commit-check PASS.
 
 **v3.13.0 "Repair Orchestration Gate"** — v3.12의 repair execution loop 위에 deterministic repair gate를 얹어 repair가 미검증이면 다음 단계 진행을 막고, 검증 완료 시 release checks로 명확히 넘기는 릴리스입니다.
 
