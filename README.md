@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.25.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.26.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.26.0 "Evolve Proposal Materialization"** — evolve context를 바로 seed 수정으로 이어가지 않고, 먼저 검토 가능한 proposal artifact로 고정하는 릴리스입니다.
+
+> **v3.26.0 주요 추가** (2026-04-26):
+> - **Evolve proposal artifacts** — `materialize_evolve_proposal`이 `.samvil/evolve-proposal.json`과 `.samvil/evolve-proposal.md`를 생성.
+> - **Proposal-only seed evolution** — blocked functional QA를 `clarify_or_split_ac` 제안으로 변환하되 `project.seed.json`은 수정하지 않음.
+> - **Status/run-report proposal surface** — `samvil-status`와 `build_run_report`가 proposal readiness, change count, next action을 노출.
+> - **검증**: 903 unit tests · 162 MCP tools · Phase 24 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.25.0 "Evolve Intake Context"** — QA recovery route가 `samvil-evolve`로 이어질 때 seed, QA issue, route, ground-truth artifact를 하나의 파일 기반 context로 고정하는 릴리스입니다.
 

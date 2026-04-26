@@ -4,6 +4,44 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.26.0] — 2026-04-26 — Evolve Proposal Materialization
+
+Phase 24 of the multi-host SAMVIL architecture. This release turns
+file-based evolve context into reviewable proposal artifacts before any seed
+file is modified.
+
+### Added
+- `mcp/samvil_mcp/evolve_proposal.py` for deterministic evolve proposal
+  construction from `.samvil/evolve-context.json`.
+- `.samvil/evolve-proposal.json` and `.samvil/evolve-proposal.md`
+  materialization.
+- MCP `build_evolve_proposal` and `materialize_evolve_proposal`.
+- Run-report `evolve_proposal` summary.
+- `samvil-status` human/JSON output for proposal status, change count, and
+  next action.
+- `scripts/phase24-evolve-proposal-dogfood.py` proving blocked Pass 2 QA
+  becomes a ready proposal without modifying `project.seed.json`.
+- Phase 24 dogfood as the first default release runner check.
+- Phase 24 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.26-phase24.md`.
+
+### Changed
+- `skills/samvil-evolve/SKILL.md` now materializes and reviews the evolve
+  proposal before editing the seed.
+- Release readiness defaults now require Phase 24 before earlier recovery and
+  QA gates.
+
+### Verified
+- Phase 24 dogfood: PASS.
+- Evolve proposal, status, telemetry, release, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 903 passed.
+- MCP server import smoke: 162 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.25.0] — 2026-04-26 — Evolve Intake Context
 
 Phase 23 of the multi-host SAMVIL architecture. This release turns a blocked
