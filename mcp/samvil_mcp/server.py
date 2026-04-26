@@ -74,6 +74,9 @@ from .retro_aggregate import (
 from .evolve_aggregate import (
     aggregate_evolve_context as _aggregate_evolve_context,
 )
+from .interview_aggregate import (
+    aggregate_interview_state as _aggregate_interview_state,
+)
 from .council_synthesis import (
     synthesize_council_verdicts as _synthesize_council_verdicts,
 )
@@ -3939,6 +3942,53 @@ async def aggregate_orchestrator_state(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "aggregate_orchestrator_state", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_interview_state(
+    project_root: str = ".",
+    prompt: str = "",
+) -> str:
+    """Boot-time aggregator for the samvil-interview skill (T4.6 ultra-thin).
+
+    Reads (best-effort) from `project_root`:
+      - `project.state.json` / `.samvil/state.json` (session_id + tier)
+      - `project.config.json` (tier fallback)
+      - `<project_root>/package.json` etc. via `scan_manifest`
+
+    Reads (best-effort) from `~/.samvil/presets/*.json` (or
+    `$SAMVIL_PRESET_DIR/*.json` when set).
+
+    Returns a JSON string with:
+      - tier: resolved interview tier (`minimal/standard/thorough/full/deep`)
+        with precedence state > config > default.
+      - ambiguity_target: float threshold matching `interview_engine`.
+      - required_phases: list[str] in pipeline order
+        (`core/scope/lifecycle/...`).
+      - mode: `{is_zero_question, matched_signals}` from prompt scan.
+      - preset: best-match preset (custom > built-in).
+      - custom_presets_count: total `*.json` under preset dir.
+      - manifest: `scan_manifest()` output (may be `{}` for greenfield).
+      - paths: target locations for interview-summary.md, state.json,
+        config.json, and the preset directory.
+      - errors: non-fatal warnings.
+
+    Companion to existing `score_ambiguity`, `route_question`,
+    `update_answer_streak`, `manage_tracks`, `get_tier_phases`,
+    `compute_seed_readiness`, `gate_check` — this tool covers the boot
+    pre-flight (tier, mode, preset match, manifest scan) that was
+    inline in the legacy 1259-LOC interview skill body.
+    """
+    try:
+        result = _aggregate_interview_state(
+            project_root or ".",
+            prompt=prompt or "",
+        )
+        _log_mcp_health("ok", "aggregate_interview_state")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_interview_state", str(e))
         return json.dumps({"error": str(e)})
 
 
