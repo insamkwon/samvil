@@ -14,6 +14,7 @@ from typing import Any
 from .repair import evaluate_repair_gate
 
 RELEASE_REPORT_SCHEMA_VERSION = "1.0"
+RELEASE_BUNDLE_SCHEMA_VERSION = "1.0"
 DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
     "phase12_release_readiness",
     "phase11_repair_orchestration",
@@ -61,6 +62,10 @@ def _now_iso() -> str:
 
 def release_report_path(project_root: Path | str) -> Path:
     return Path(project_root) / ".samvil" / "release-report.json"
+
+
+def release_summary_path(project_root: Path | str) -> Path:
+    return Path(project_root) / ".samvil" / "release-summary.md"
 
 
 def build_release_report(
@@ -125,6 +130,118 @@ def write_release_report(report: dict[str, Any], project_root: Path | str) -> Pa
 def read_release_report(project_root: Path | str) -> dict[str, Any] | None:
     data = _load_json(release_report_path(project_root))
     return data or None
+
+
+def build_release_evidence_bundle(
+    project_root: Path | str,
+    *,
+    release_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a one-file release evidence bundle from the latest report."""
+    root = Path(project_root)
+    report = release_report if release_report is not None else read_release_report(root) or {}
+    gate = evaluate_release_gate(root, release_report=report)
+    summary = report.get("summary", {}) or {}
+    return {
+        "schema_version": RELEASE_BUNDLE_SCHEMA_VERSION,
+        "project_root": str(root),
+        "generated_at": _now_iso(),
+        "path": str(release_summary_path(root)),
+        "release_report_path": str(release_report_path(root)),
+        "release": {
+            "status": summary.get("status"),
+            "source": report.get("source") or "manual",
+            "generated_at": report.get("generated_at"),
+            "total_checks": summary.get("total_checks", 0),
+            "passed_checks": summary.get("passed_checks", 0),
+            "failed_checks": summary.get("failed_checks", 0),
+            "missing_checks": summary.get("missing_checks", 0),
+            "next_action": report.get("next_action"),
+        },
+        "gate": gate,
+        "git": _git_summary(root),
+        "versions": _version_summary(root),
+        "checks": [_bundle_check(row) for row in report.get("checks") or []],
+    }
+
+
+def write_release_evidence_bundle(bundle: dict[str, Any], project_root: Path | str) -> Path:
+    target = release_summary_path(project_root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(render_release_evidence_bundle(bundle), encoding="utf-8")
+    os.replace(tmp, target)
+    return target
+
+
+def read_release_evidence_bundle(project_root: Path | str) -> str | None:
+    path = release_summary_path(project_root)
+    if not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def render_release_evidence_bundle(bundle: dict[str, Any]) -> str:
+    """Render a release bundle as review-friendly markdown."""
+    release = bundle.get("release", {}) or {}
+    gate = bundle.get("gate", {}) or {}
+    git = bundle.get("git", {}) or {}
+    versions = bundle.get("versions", {}) or {}
+    checks = bundle.get("checks") or []
+    tags = git.get("tags_at_head") or []
+    lines = [
+        "# Release Evidence Bundle",
+        f"_generated: {bundle.get('generated_at', '')}_",
+        "",
+        "## Verdict",
+        f"- Gate: {gate.get('verdict') or '?'}",
+        f"- Reason: {gate.get('reason') or '?'}",
+        f"- Next action: {gate.get('next_action') or '?'}",
+        "",
+        "## Release Report",
+        f"- Source: {release.get('source') or '?'}",
+        f"- Status: {release.get('status') or '?'}",
+        f"- Checks: {release.get('passed_checks', 0)} passed / "
+        f"{release.get('failed_checks', 0)} failed / "
+        f"{release.get('missing_checks', 0)} missing",
+        f"- Report path: {bundle.get('release_report_path') or '?'}",
+        "",
+        "## Git",
+        f"- Branch: {git.get('branch') or '?'}",
+        f"- HEAD: {git.get('head') or '?'}",
+        f"- Tags at HEAD: {', '.join(tags) if tags else '(none)'}",
+        f"- Dirty: {git.get('dirty')}",
+        "",
+        "## Versions",
+        f"- Plugin: {versions.get('plugin') or '?'}",
+        f"- Package: {versions.get('package') or '?'}",
+        f"- README: {versions.get('readme') or '?'}",
+        f"- Synced: {versions.get('synced')}",
+        "",
+        "## Checks",
+    ]
+    if not checks:
+        lines.append("- (no checks recorded)")
+    for check in checks:
+        lines.append(
+            f"- [{str(check.get('status', '?')).upper()}] {check.get('name')}: "
+            f"exit={check.get('exit_code')} duration={check.get('duration_seconds')}s"
+        )
+        if check.get("command"):
+            lines.append(f"  command: `{check.get('command')}`")
+        if check.get("message"):
+            lines.append(f"  message: {check.get('message')}")
+        if check.get("status") != "pass":
+            stdout = str(check.get("stdout_tail") or "").strip()
+            stderr = str(check.get("stderr_tail") or "").strip()
+            if stdout:
+                lines.extend(["  stdout tail:", "  ```text", _indent_block(stdout), "  ```"])
+            if stderr:
+                lines.extend(["  stderr tail:", "  ```text", _indent_block(stderr), "  ```"])
+    return "\n".join(lines) + "\n"
 
 
 def render_release_report(report: dict[str, Any]) -> str:
@@ -357,6 +474,94 @@ def _tail(text: str, *, limit: int = 2000) -> str:
     if len(text) <= limit:
         return text
     return text[-limit:]
+
+
+def _bundle_check(check: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": check.get("name"),
+        "label": check.get("label"),
+        "status": check.get("status"),
+        "command": check.get("command"),
+        "message": check.get("message"),
+        "exit_code": check.get("exit_code"),
+        "duration_seconds": check.get("duration_seconds"),
+        "stdout_tail": check.get("stdout_tail") or "",
+        "stderr_tail": check.get("stderr_tail") or "",
+    }
+
+
+def _git_summary(root: Path) -> dict[str, Any]:
+    return {
+        "branch": _git(root, "rev-parse", "--abbrev-ref", "HEAD"),
+        "head": _git(root, "rev-parse", "HEAD"),
+        "short_head": _git(root, "rev-parse", "--short", "HEAD"),
+        "tags_at_head": [
+            tag for tag in _git(root, "tag", "--points-at", "HEAD").splitlines() if tag
+        ],
+        "dirty": bool(_git(root, "status", "--porcelain")),
+    }
+
+
+def _git(root: Path, *args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def _version_summary(root: Path) -> dict[str, Any]:
+    plugin = _json_version(root / ".claude-plugin" / "plugin.json")
+    package = _package_version(root / "mcp" / "samvil_mcp" / "__init__.py")
+    readme = _readme_version(root / "README.md")
+    values = [v for v in (plugin, package, readme) if v]
+    return {
+        "plugin": plugin,
+        "package": package,
+        "readme": readme,
+        "synced": bool(values) and len(set(values)) == 1 and len(values) == 3,
+    }
+
+
+def _json_version(path: Path) -> str:
+    data = _load_json(path)
+    value = data.get("version")
+    return str(value) if value else ""
+
+
+def _package_version(path: Path) -> str:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+    marker = '__version__ = "'
+    if marker not in text:
+        return ""
+    return text.split(marker, 1)[1].split('"', 1)[0]
+
+
+def _readme_version(path: Path) -> str:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+    marker = "`v"
+    if marker not in text:
+        return ""
+    return text.split(marker, 1)[1].split("`", 1)[0]
+
+
+def _indent_block(text: str) -> str:
+    return "\n".join(f"  {line}" for line in text.splitlines())
 
 
 def _load_json(path: Path) -> dict[str, Any]:

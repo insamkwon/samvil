@@ -277,6 +277,7 @@ def test_status_exposes_run_report_release_gate(tmp_path):
         "next_action": "fix release check: pre_commit",
     })
     _write_json(root / ".samvil" / "release-report.json", {
+        "source": "runner",
         "summary": {
             "status": "blocked",
             "passed_checks": 3,
@@ -285,15 +286,21 @@ def test_status_exposes_run_report_release_gate(tmp_path):
         },
         "next_action": "fix release check: pre_commit",
     })
+    bundle_path = root / ".samvil" / "release-summary.md"
+    bundle_path.write_text("# Release Evidence Bundle\n", encoding="utf-8")
 
     data = json.loads(status.render_json(root))
     text = status.render_human(root)
 
     assert data["run_report"]["release"]["gate"]["verdict"] == "blocked"
     assert data["release"]["report_status"] == "blocked"
+    assert data["release"]["source"] == "runner"
+    assert data["release"]["bundle_present"] is True
+    assert data["release"]["bundle_path"] == str(bundle_path)
     assert data["next_recommended_action"] == "fix release check: pre_commit"
     assert "Gate:    release=blocked" in text
     assert "Release gate:    blocked - required release checks" in text
+    assert f"Release bundle: {bundle_path}" in text
 
 
 def test_status_json_uses_unknown_stage_fallback(tmp_path):

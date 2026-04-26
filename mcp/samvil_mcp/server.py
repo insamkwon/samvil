@@ -174,11 +174,15 @@ from .repair import (
     write_repair_report as _write_repair_report,
 )
 from .release import (
+    build_release_evidence_bundle as _build_release_evidence_bundle,
     build_release_report as _build_release_report,
     evaluate_release_gate as _evaluate_release_gate,
+    read_release_evidence_bundle as _read_release_evidence_bundle_file,
     read_release_report as _read_release_report_file,
+    render_release_evidence_bundle as _render_release_evidence_bundle,
     render_release_report as _render_release_report,
     run_release_checks as _run_release_checks,
+    write_release_evidence_bundle as _write_release_evidence_bundle,
     write_release_report as _write_release_report,
 )
 
@@ -3893,6 +3897,62 @@ def run_release_checks(project_root: str, commands_json: str = "", persist: bool
         return {"status": "ok", "report": report, "gate": gate}
     except Exception as e:
         _log_mcp_health("fail", "run_release_checks", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def build_release_evidence_bundle(project_root: str, persist: bool = True) -> dict:
+    """Build a markdown release evidence bundle from the latest release report."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        bundle = _build_release_evidence_bundle(project_root)
+        path = ""
+        if persist:
+            path = str(_write_release_evidence_bundle(bundle, project_root))
+        _log_mcp_health("ok", "build_release_evidence_bundle")
+        return {"status": "ok", "path": path, "bundle": bundle}
+    except Exception as e:
+        _log_mcp_health("fail", "build_release_evidence_bundle", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def read_release_evidence_bundle(project_root: str) -> dict:
+    """Read .samvil/release-summary.md if present."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        context = _read_release_evidence_bundle_file(project_root)
+        _log_mcp_health("ok", "read_release_evidence_bundle")
+        if context is None:
+            return {"status": "missing"}
+        return {"status": "ok", "context": context}
+    except Exception as e:
+        _log_mcp_health("fail", "read_release_evidence_bundle", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def render_release_evidence_bundle(project_root: str, refresh: bool = False) -> dict:
+    """Render release evidence bundle context; optionally refresh it first."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        if refresh:
+            bundle = _build_release_evidence_bundle(project_root)
+            context = _render_release_evidence_bundle(bundle)
+        else:
+            context = _read_release_evidence_bundle_file(project_root)
+        if context is None:
+            return {"status": "missing"}
+        _log_mcp_health("ok", "render_release_evidence_bundle")
+        return {"status": "ok", "context": context}
+    except Exception as e:
+        _log_mcp_health("fail", "render_release_evidence_bundle", str(e))
         return {"status": "error", "error": str(e)}
 
 

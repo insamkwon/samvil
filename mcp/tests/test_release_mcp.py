@@ -6,9 +6,12 @@ import json
 from pathlib import Path
 
 from samvil_mcp.server import (
+    build_release_evidence_bundle,
     build_release_report,
     evaluate_release_gate,
+    read_release_evidence_bundle,
     read_release_report,
+    render_release_evidence_bundle,
     render_release_report,
     run_release_checks,
 )
@@ -49,6 +52,9 @@ def test_release_tools_validate_project_root():
     assert render_release_report("")["status"] == "error"
     assert evaluate_release_gate("")["status"] == "error"
     assert run_release_checks("", commands_json="[]")["status"] == "error"
+    assert build_release_evidence_bundle("")["status"] == "error"
+    assert read_release_evidence_bundle("")["status"] == "error"
+    assert render_release_evidence_bundle("")["status"] == "error"
 
 
 def test_release_report_rejects_non_list_checks(tmp_path):
@@ -75,3 +81,24 @@ def test_run_release_checks_tool(tmp_path):
     assert result["report"]["summary"]["status"] == "pass"
     assert result["report"]["checks"][0]["exit_code"] == 0
     assert result["gate"]["verdict"] in {"blocked", "pass", "not-applicable"}
+
+
+def test_release_evidence_bundle_tools(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    commands = json.dumps([
+        {"name": "ok", "command": "python3 -c 'print(\"ok\")'", "timeout_seconds": 5},
+    ])
+    run_release_checks(str(root), commands_json=commands, persist=True)
+
+    built = build_release_evidence_bundle(str(root), persist=True)
+    read = read_release_evidence_bundle(str(root))
+    rendered = render_release_evidence_bundle(str(root))
+
+    assert built["status"] == "ok"
+    assert Path(built["path"]).exists()
+    assert built["bundle"]["release"]["source"] == "runner"
+    assert read["status"] == "ok"
+    assert "Release Evidence Bundle" in read["context"]
+    assert rendered["status"] == "ok"
+    assert rendered["context"] == read["context"]

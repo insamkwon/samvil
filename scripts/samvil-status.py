@@ -13,6 +13,7 @@ against local files only:
   .samvil/repair-plan.json    (v3.12 repair plan, if present)
   .samvil/repair-report.json  (v3.12 repair report, if present)
   .samvil/release-report.json (v3.14 release readiness report, if present)
+  .samvil/release-summary.md  (v3.16 release evidence bundle, if present)
 
 Panes in MVP (other panes deferred to later sprints per §6.1):
   - Sprint + stage
@@ -83,6 +84,10 @@ def _load_repair_report(root: Path) -> dict:
 
 def _load_release_report(root: Path) -> dict:
     return _load_json(root / ".samvil" / "release-report.json")
+
+
+def _release_bundle_path(root: Path) -> Path:
+    return root / ".samvil" / "release-summary.md"
 
 
 def latest_gate_verdicts(claims: list[dict]) -> dict[str, dict]:
@@ -199,6 +204,7 @@ def render_human(root: Path) -> str:
     repair_plan = _load_repair_plan(root)
     repair_report = _load_repair_report(root)
     release_report = _load_release_report(root)
+    release_bundle = _release_bundle_path(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
     report_state = report.get("state", {}) or {}
@@ -280,6 +286,8 @@ def render_human(root: Path) -> str:
         )
         if release_report.get("source"):
             lines.append(f"Release source: {release_report.get('source')}")
+    if release_bundle.exists():
+        lines.append(f"Release bundle: {release_bundle}")
     lines.append("")
     lines.append("Gate verdicts (latest):")
     report_gates = report_claims.get("latest_gate_verdicts") or []
@@ -410,6 +418,8 @@ def render_human(root: Path) -> str:
         )
         if release_report.get("source"):
             lines.append(f"  Source:          {release_report.get('source')}")
+        if release_bundle.exists():
+            lines.append(f"  Bundle:          {release_bundle}")
     lines.append("")
     lines.append(
         "Next action:       "
@@ -425,6 +435,7 @@ def render_json(root: Path) -> str:
     repair_plan = _load_repair_plan(root)
     repair_report = _load_repair_report(root)
     release_report = _load_release_report(root)
+    release_bundle = _release_bundle_path(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
     report_state = report.get("state", {}) or {}
@@ -496,6 +507,8 @@ def render_json(root: Path) -> str:
                 "failed_checks": (release_report.get("summary", {}) or {}).get("failed_checks", 0),
                 "missing_checks": (release_report.get("summary", {}) or {}).get("missing_checks", 0),
                 "source": release_report.get("source"),
+                "bundle_present": release_bundle.exists(),
+                "bundle_path": str(release_bundle) if release_bundle.exists() else "",
                 "next_action": release_report.get("next_action"),
             },
             "next_recommended_action": status_next_action(

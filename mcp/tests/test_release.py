@@ -14,12 +14,16 @@ from samvil_mcp.repair import (
     write_repair_report,
 )
 from samvil_mcp.release import (
+    build_release_evidence_bundle,
     build_release_report,
     evaluate_release_gate,
+    read_release_evidence_bundle,
     read_release_report,
+    render_release_evidence_bundle,
     release_summary,
     render_release_report,
     run_release_checks,
+    write_release_evidence_bundle,
     write_release_report,
 )
 
@@ -191,3 +195,26 @@ def test_run_release_checks_captures_timeout(tmp_path):
     assert check["status"] == "fail"
     assert check["exit_code"] is None
     assert "timed out" in check["message"]
+
+
+def test_release_evidence_bundle_renders_runner_report(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    run_release_checks(root, commands=[
+        {"name": "ok", "command": "python3 -c 'print(\"ok\")'", "timeout_seconds": 5},
+        {"name": "bad", "command": "python3 -c 'import sys; print(\"bad out\"); sys.exit(2)'", "timeout_seconds": 5},
+    ], persist=True)
+
+    bundle = build_release_evidence_bundle(root)
+    path = write_release_evidence_bundle(bundle, root)
+    rendered = render_release_evidence_bundle(bundle)
+    persisted = read_release_evidence_bundle(root) or ""
+
+    assert path.exists()
+    assert bundle["release"]["source"] == "runner"
+    assert bundle["release"]["failed_checks"] == 1
+    assert bundle["gate"]["verdict"] == "blocked"
+    assert bundle["checks"][1]["stdout_tail"].strip() == "bad out"
+    assert "Release Evidence Bundle" in rendered
+    assert "stdout tail" in rendered
+    assert persisted == rendered
