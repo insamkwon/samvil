@@ -1,0 +1,28 @@
+{
+  "report": {
+    "summary": {
+      "status": "pass",
+      "total_checks": 5,
+      "passed_checks": 5,
+      "failed_checks": 0,
+      "missing_checks": 0
+    },
+    "checks": [
+      {
+        "name": "phase8_browser_inspection",
+        "status": "pass",
+        "exit_code": 0
+      },
+      {
+        "name": "pre_commit",
+        "status": "pass",
+        "exit_code": 0
+      }
+    ],
+    "next_action": "release checks passed"
+  },
+  "gate": {
+    "verdict": "pass",
+    "next_action": "ready to tag release"
+  }
+}

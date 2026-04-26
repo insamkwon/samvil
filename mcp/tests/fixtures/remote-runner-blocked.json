@@ -1,0 +1,24 @@
+{
+  "report": {
+    "summary": {
+      "status": "blocked",
+      "total_checks": 5,
+      "passed_checks": 4,
+      "failed_checks": 1,
+      "missing_checks": 0
+    },
+    "checks": [
+      {
+        "name": "pre_commit",
+        "status": "fail",
+        "exit_code": 1,
+        "message": "command exited 1"
+      }
+    ],
+    "next_action": "fix release check: pre_commit"
+  },
+  "gate": {
+    "verdict": "blocked",
+    "next_action": "fix release check: pre_commit"
+  }
+}

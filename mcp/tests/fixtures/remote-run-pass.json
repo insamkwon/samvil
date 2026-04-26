@@ -1,0 +1,8 @@
+{
+  "databaseId": 123,
+  "workflowName": "SAMVIL Release Checks",
+  "status": "completed",
+  "conclusion": "success",
+  "headSha": "abc123",
+  "url": "https://example.invalid/run/123"
+}
