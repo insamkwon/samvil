@@ -30,6 +30,7 @@ from samvil_mcp.release import (
 
 def _checks(status: str = "pass") -> list[dict]:
     return [
+        {"name": "phase30_final_e2e_bundle", "status": status, "command": "phase30"},
         {"name": "phase29_evolve_cycle_closure", "status": status, "command": "phase29"},
         {"name": "phase28_post_rebuild_qa", "status": status, "command": "phase28"},
         {"name": "phase27_rebuild_reentry", "status": status, "command": "phase27"},
@@ -98,8 +99,8 @@ def test_release_report_normalizes_missing_required_checks(tmp_path):
 
     assert report["summary"]["status"] == "blocked"
     assert report["summary"]["passed_checks"] == 1
-    assert report["summary"]["missing_checks"] == 16
-    assert report["next_action"] == "run release check: phase29_evolve_cycle_closure"
+    assert report["summary"]["missing_checks"] == 17
+    assert report["next_action"] == "run release check: phase30_final_e2e_bundle"
 
 
 def test_release_gate_blocks_repair_gate_before_release_checks(tmp_path):

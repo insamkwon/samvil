@@ -435,6 +435,31 @@ def test_run_report_includes_evolve_cycle_summary(tmp_path):
     assert report["evolve_cycle"]["next_skill"] == "samvil-retro"
 
 
+def test_run_report_includes_final_e2e_summary(tmp_path):
+    root = tmp_path / "final-e2e"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "final-e2e",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    (samvil / "final-e2e-bundle.json").write_text(json.dumps({
+        "status": "pass",
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "issues": [],
+        "chain": {"cycle_verdict": "closed", "cycle_next": "samvil-retro"},
+        "next_action": "final E2E bundle passed",
+    }), encoding="utf-8")
+
+    report = build_run_report(root)
+
+    assert report["final_e2e"]["present"] is True
+    assert report["final_e2e"]["status"] == "pass"
+    assert report["final_e2e"]["issue_count"] == 0
+
+
 def test_run_report_categorizes_events_and_stage_durations(tmp_path):
     root = tmp_path / "retry-app"
     samvil = root / ".samvil"

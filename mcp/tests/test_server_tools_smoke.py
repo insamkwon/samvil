@@ -23,6 +23,7 @@ from samvil_mcp.server import (
     build_rebuild_reentry,
     build_post_rebuild_qa,
     build_evolve_cycle_closure,
+    build_final_e2e_bundle,
     evaluate_qa_convergence,
     get_tier_phases,
     heartbeat_state,
@@ -38,6 +39,7 @@ from samvil_mcp.server import (
     materialize_rebuild_reentry,
     materialize_post_rebuild_qa,
     materialize_evolve_cycle_closure,
+    materialize_final_e2e_bundle,
     suggest_ac_split,
     synthesize_qa_evidence,
 )
@@ -334,6 +336,40 @@ def test_evolve_cycle_tools_write_closure_marker(tmp_path: Path) -> None:
     assert built["verdict"] == "closed"
     assert materialized["next_skill"] == "samvil-retro"
     assert marker["cycle_verdict"] == "closed"
+
+
+def test_final_e2e_tools_write_bundle(tmp_path: Path) -> None:
+    import hashlib
+
+    seed = {"name": "task-app", "version": 2}
+    digest = hashlib.sha256(
+        json.dumps(seed, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / "project.seed.json").write_text(json.dumps(seed), encoding="utf-8")
+    fixtures = {
+        "qa-results.json": {"synthesis": {"verdict": "PASS", "iteration": 3}, "convergence": {"verdict": "pass"}},
+        "qa-routing.json": {"primary_route": {"next_skill": "samvil-evolve"}},
+        "evolve-context.json": {"focus": {"area": "functional_spec"}},
+        "evolve-proposal.json": {"status": "ready"},
+        "evolve-apply-plan.json": {"status": "applied"},
+        "evolve-rebuild.json": {"status": "ready", "next_skill": "samvil-scaffold"},
+        "rebuild-reentry.json": {"status": "ready", "next_skill": "samvil-scaffold", "seed_version": 2, "seed_sha256": digest},
+        "scaffold-input.json": {"seed_version": 2, "seed_sha256": digest},
+        "scaffold-output.json": {"status": "built", "seed_version": 2, "seed_sha256": digest},
+        "post-rebuild-qa.json": {"status": "ready", "next_skill": "samvil-qa", "seed_version": 2, "seed_sha256": digest},
+        "evolve-cycle.json": {"status": "ready", "verdict": "closed", "next_skill": "samvil-retro", "seed_version": 2, "seed_sha256": digest},
+        "run-report.json": {"evolve_cycle": {"present": True, "verdict": "closed"}},
+    }
+    for name, payload in fixtures.items():
+        (tmp_path / ".samvil" / name).write_text(json.dumps(payload), encoding="utf-8")
+
+    built = json.loads(_run(build_final_e2e_bundle(project_root=str(tmp_path))))
+    materialized = json.loads(_run(materialize_final_e2e_bundle(project_root=str(tmp_path))))
+
+    assert built["status"] == "pass"
+    assert materialized["status"] == "pass"
+    assert (tmp_path / ".samvil" / "final-e2e-bundle.json").exists()
 
 
 # ── AC split (v3-011) ──────────────────────────────────────────

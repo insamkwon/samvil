@@ -552,6 +552,33 @@ def test_status_exposes_evolve_cycle(tmp_path):
     assert "Evolve cycle:" in text
 
 
+def test_status_exposes_final_e2e_bundle(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "final-e2e-bundle.json", {
+        "status": "pass",
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "issues": [],
+        "chain": {
+            "qa_route": "samvil-evolve",
+            "rebuild": "samvil-scaffold",
+            "post_rebuild_qa": "samvil-qa",
+            "cycle_verdict": "closed",
+        },
+        "next_action": "final E2E bundle passed",
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["final_e2e"]["present"] is True
+    assert data["final_e2e"]["status"] == "pass"
+    assert data["final_e2e"]["issue_count"] == 0
+    assert "Final E2E: pass" in text
+    assert "Final E2E:" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

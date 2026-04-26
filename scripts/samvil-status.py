@@ -120,6 +120,10 @@ def _load_evolve_cycle(root: Path) -> dict:
     return _load_json(root / ".samvil" / "evolve-cycle.json")
 
 
+def _load_final_e2e(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "final-e2e-bundle.json")
+
+
 def _load_release_report(root: Path) -> dict:
     return _load_json(root / ".samvil" / "release-report.json")
 
@@ -283,6 +287,7 @@ def render_human(root: Path) -> str:
     rebuild_reentry = _load_rebuild_reentry(root)
     post_rebuild_qa = _load_post_rebuild_qa(root)
     evolve_cycle = _load_evolve_cycle(root)
+    final_e2e = _load_final_e2e(root)
     release_report = _load_release_report(root)
     release_bundle = _release_bundle_path(root)
     qa_report = _qa_report_path(root)
@@ -304,6 +309,7 @@ def render_human(root: Path) -> str:
     report_rebuild_reentry = report.get("rebuild_reentry", {}) or {}
     report_post_rebuild_qa = report.get("post_rebuild_qa", {}) or {}
     report_evolve_cycle = report.get("evolve_cycle", {}) or {}
+    report_final_e2e = report.get("final_e2e", {}) or {}
     report_release = report.get("release", {}) or {}
     release_gate = report_release.get("gate", {}) or {}
     inspection_summary = inspection.get("summary", {}) or {}
@@ -435,6 +441,11 @@ def render_human(root: Path) -> str:
             "Evolve cycle: "
             f"{evolve_cycle.get('verdict', '?')} -> "
             f"{evolve_cycle.get('next_skill') or '?'}"
+        )
+    if final_e2e:
+        lines.append(
+            "Final E2E: "
+            f"{final_e2e.get('status', '?')}"
         )
     if release_report:
         lines.append(
@@ -571,6 +582,12 @@ def render_human(root: Path) -> str:
                 "  Evolve cycle:"
                 f" {report_evolve_cycle.get('verdict', '?')} -> "
                 f"{report_evolve_cycle.get('next_skill') or '?'}"
+            )
+        if report_final_e2e.get("present"):
+            lines.append(
+                "  Final E2E:"
+                f" {report_final_e2e.get('status', '?')} "
+                f"({report_final_e2e.get('issue_count', 0)} issues)"
             )
         stages = timeline.get("stages") or []
         if stages:
@@ -761,6 +778,19 @@ def render_human(root: Path) -> str:
             "  Next skill:      "
             f"{evolve_cycle.get('next_skill') or '?'}"
         )
+    if final_e2e:
+        chain = final_e2e.get("chain") or {}
+        lines.append("")
+        lines.append("Final E2E:")
+        lines.append(
+            "  Status:          "
+            f"{final_e2e.get('status', '?')} / {len(final_e2e.get('issues') or [])} issues"
+        )
+        lines.append(
+            "  Chain:           "
+            f"{chain.get('qa_route') or '?'} -> {chain.get('rebuild') or '?'} -> "
+            f"{chain.get('post_rebuild_qa') or '?'} -> {chain.get('cycle_verdict') or '?'}"
+        )
     if release_report:
         lines.append("")
         lines.append("Release:")
@@ -798,6 +828,7 @@ def render_json(root: Path) -> str:
     rebuild_reentry = _load_rebuild_reentry(root)
     post_rebuild_qa = _load_post_rebuild_qa(root)
     evolve_cycle = _load_evolve_cycle(root)
+    final_e2e = _load_final_e2e(root)
     release_report = _load_release_report(root)
     release_bundle = _release_bundle_path(root)
     qa_report = _qa_report_path(root)
@@ -818,6 +849,7 @@ def render_json(root: Path) -> str:
     report_rebuild_reentry = report.get("rebuild_reentry", {}) or {}
     report_post_rebuild_qa = report.get("post_rebuild_qa", {}) or {}
     report_evolve_cycle = report.get("evolve_cycle", {}) or {}
+    report_final_e2e = report.get("final_e2e", {}) or {}
     report_release = report.get("release", {}) or {}
     samvil_tier = report_state.get("samvil_tier") or state.get("samvil_tier") or "standard"
     gate_verdicts = latest_gate_verdicts(claims)
@@ -858,6 +890,7 @@ def render_json(root: Path) -> str:
                 "rebuild_reentry": report_rebuild_reentry,
                 "post_rebuild_qa": report_post_rebuild_qa,
                 "evolve_cycle": report_evolve_cycle,
+                "final_e2e": report_final_e2e,
             },
             "inspection_report": {
                 "present": bool(inspection),
@@ -989,6 +1022,17 @@ def render_json(root: Path) -> str:
                 "next_action": evolve_cycle.get("next_action"),
                 "path": str(root / ".samvil" / "evolve-cycle.json") if evolve_cycle else "",
                 "run_report": report_evolve_cycle,
+            },
+            "final_e2e": {
+                "present": bool(final_e2e),
+                "status": final_e2e.get("status"),
+                "seed_name": final_e2e.get("seed_name"),
+                "seed_version": final_e2e.get("seed_version"),
+                "issue_count": len(final_e2e.get("issues") or []),
+                "next_action": final_e2e.get("next_action"),
+                "path": str(root / ".samvil" / "final-e2e-bundle.json") if final_e2e else "",
+                "chain": final_e2e.get("chain") or {},
+                "run_report": report_final_e2e,
             },
             "release": {
                 "report_present": bool(release_report),

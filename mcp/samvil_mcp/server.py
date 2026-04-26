@@ -1474,6 +1474,28 @@ async def materialize_evolve_cycle_closure(project_root: str, persist_next_skill
 
 
 @mcp.tool()
+async def build_final_e2e_bundle(project_root: str) -> str:
+    """Build final E2E bundle from all evolve/rebuild/QA closure artifacts."""
+    try:
+        from .final_e2e import build_final_e2e_bundle as _build
+        return json.dumps(_build(project_root))
+    except Exception as e:
+        _log_mcp_health("fail", "build_final_e2e_bundle", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def materialize_final_e2e_bundle(project_root: str) -> str:
+    """Persist final E2E bundle."""
+    try:
+        from .final_e2e import materialize_final_e2e_bundle as _materialize
+        return json.dumps(_materialize(project_root))
+    except Exception as e:
+        _log_mcp_health("fail", "materialize_final_e2e_bundle", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def validate_evidence(evidences_json: str, project_root: str) -> str:
     """Validate a list of file:line evidence strings against project files.
 
