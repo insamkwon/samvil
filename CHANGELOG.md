@@ -4,6 +4,43 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.36.0] — 2026-04-26 — Tier 4 Phase B: Medium Skills Ultra-Thin
+
+**Theme:** All 4 Medium skills (retro/evolve/council/analyze) migrated to ultra-thin shells. Single-source-of-truth aggregate MCP tools pattern proven across post-processing, autonomous loops, parallel agents, and brownfield analysis.
+
+### Changed (skill migration)
+- `samvil-retro`: 506 → 117 LOC (-77%)
+- `samvil-evolve`: 482 → 91 LOC (-81%)
+- `samvil-council`: 554 → 107 LOC (-81%) — parallel Agent() calls preserved in skill, before/after logic in MCP
+- `samvil-analyze`: 677 → 80 LOC (-88%) — heaviest reverse-engineering moved to MCP
+- Phase B total: 2,219 → 395 LOC (-82%, target was -69%)
+- Each skill preserves SKILL.legacy.md (frontmatter renamed to avoid loader collision)
+
+### Added (MCP — aggregate pattern)
+- `aggregate_retro_metrics(project_root, plugin_root, suggestion_major)` — single source of truth for retro metric aggregation, recurring-pattern detection, suggestion ID increment
+- `aggregate_evolve_context(project_root)` — boot-time aggregator for auto-trigger detection, mode resolution, cycle counter, 4-dim baseline
+- `synthesize_council_verdicts(round1_verdicts_json, round2_verdicts_json)` — Round 1 → debate-point extraction + Round 2 prompt assembly + final consensus/dissent/blocking aggregation
+- `analyze_brownfield_project(project_root)` — reverse-seed generation from existing code (framework detection / module discovery / feature inference / confidence tagging / ADR-EXISTING suggestions)
+
+### Added (tests)
+- 85 new smoke tests (16 retro + 19 evolve + 22 council + 28 analyze) pinning behavior contracts
+
+### Behavior changes (intentional)
+- **samvil-analyze framework precedence**: Phaser/Expo deps now win over Vite/Astro config files (was: legacy false-positive `framework: react` for Phaser-on-Vite). Re-analyzing brownfield projects may produce a different `framework` value if they're games. Intentional fix per v3.1.0 universal builder design.
+
+### Counts
+- MCP tools: 141 → **145** (+4)
+- Tests: 979 → **1064** (+85)
+- 10 thin skills total (Phase A 6 + Phase B 4) — all ≤120 LOC active
+
+### Limitations (deferred)
+- `samvil-analyze` feature inference assumes `src/` layout. Next.js App Router projects with `app/`-only layouts produce empty features + warning. Future patch can extend `discover_modules`.
+
+### Next
+Tier 4 Phase C — Hard 5 skills migration (samvil / interview / build / scaffold / qa). Most complex tier. Target eventual v4.0.0 (consolidation milestone).
+
+---
+
 ## [3.35.0] — 2026-04-26 — Tier 3 Phase A: Easy Skills Ultra-Thin
 
 **Theme:** Migrate Easy 4 skills (doctor/pm-interview/update/deploy) to ultra-thin shells with single-source-of-truth MCP tools.
