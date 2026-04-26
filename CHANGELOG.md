@@ -4,6 +4,42 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.19.0] — 2026-04-26 — Verified Release Publisher
+
+Phase 17 of the multi-host SAMVIL architecture. This release turns the remote
+release gate into a guarded publish workflow that pushes the release branch,
+waits for GitHub Actions, verifies artifact evidence, and only then publishes
+the release tag.
+
+### Added
+- `mcp/samvil_mcp/release_publish.py` for deterministic publish guard
+  evaluation and rendering.
+- `scripts/publish-verified-release.py` for verified branch push, Actions wait,
+  remote artifact gate check, and tag push.
+- Publish guard inputs for clean tree, version sync, local/remote tag
+  existence, local release gate, remote release gate, branch, and HEAD.
+- Dry-run fixture mode for deterministic pass/fail publisher testing.
+- Unit and CLI tests for pass, dirty tree, existing tag, and blocked remote
+  gate cases.
+- Phase 17 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.19-phase17.md`.
+
+### Dogfood
+- Publish guard unit tests passed.
+- Publisher dry-run fixture pass/fail tests passed.
+- Default release runner executed Phase 12/11/10/8 and full pre-commit with all
+  five checks passing.
+
+### Verified
+- Publisher fixture tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 866 passed.
+- MCP server import smoke: 153 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.18.0] — 2026-04-26 — Remote Release Gate
 
 Phase 16 of the multi-host SAMVIL architecture. This release makes remote CI

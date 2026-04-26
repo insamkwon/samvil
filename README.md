@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.18.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.19.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.19.0 "Verified Release Publisher"** — branch push, GitHub Actions 대기, 원격 artifact gate 검증, tag push를 하나의 publish guard로 묶어 release tag가 remote evidence pass 이후에만 올라가게 한 릴리스입니다.
+
+> **v3.19.0 주요 추가** (2026-04-26):
+> - **Verified publisher** — `scripts/publish-verified-release.py`가 main push 후 Actions 완료와 artifact gate pass를 확인한 뒤 tag를 push.
+> - **Publish guard core** — clean tree, version sync, local/remote tag existence, local release gate, remote release gate를 함께 평가.
+> - **Dry-run fixture mode** — 실제 push 없이 pass/blocked remote evidence 흐름을 테스트.
+> - **검증**: 866 unit tests · 153 MCP tools · publisher fixture tests PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.18.0 "Remote Release Gate"** — GitHub Actions run success와 `samvil-release-evidence` artifact 내부 `release-runner.json` gate pass를 함께 확인해, 태그 전 원격 release evidence까지 막는 릴리스입니다.
 
