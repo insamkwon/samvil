@@ -670,6 +670,11 @@ JSON blocks:
 9. Continue from the materialized verdict and convergence gate. If convergence
    is `blocked` or `failed`, stop the blind Ralph loop and report the gate's
    `next_action`.
+   - For blocked/failed convergence, call
+     `mcp__samvil_mcp__materialize_qa_recovery_routing(project_root="<project_root>")`
+     to write `.samvil/qa-routing.json` and `.samvil/next-skill.json`.
+   - Continue with the routing primary `next_skill` unless the user explicitly
+     chooses an alternative route.
 10. Only update completed_features, failed, and qa_history; do NOT update
    current_stage directly, which MCP manages.
 
@@ -1484,6 +1489,9 @@ If verdict is REVISE:
 SAMVIL v3.23 also materializes this as a `qa_convergence` gate in
 `.samvil/qa-results.json`; blocked/failed convergence takes priority over
 another automatic fix attempt.
+SAMVIL v3.24 then materializes `.samvil/qa-routing.json` plus a portable
+`.samvil/next-skill.json` marker so hosts can continue into `samvil-evolve`,
+`samvil-build`, or `samvil-retro` from the blocked QA evidence.
 
 **BLOCKED detection (PHI-04):** Compare issue lists across iterations:
 - Extract issue identifiers from each iteration's `qa_history` entry

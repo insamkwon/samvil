@@ -15,12 +15,14 @@ import pytest
 
 from samvil_mcp.server import (
     build_reawake_message,
+    build_qa_recovery_routing,
     evaluate_qa_convergence,
     get_tier_phases,
     heartbeat_state,
     increment_stall_recovery_count,
     is_state_stalled,
     materialize_qa_synthesis,
+    materialize_qa_recovery_routing,
     suggest_ac_split,
     synthesize_qa_evidence,
 )
@@ -103,6 +105,28 @@ def test_evaluate_qa_convergence_tool_reads_history(tmp_path: Path) -> None:
 
     assert data["gate"] == "qa_convergence"
     assert data["verdict"] == "blocked"
+
+
+def test_qa_recovery_routing_tools_write_next_skill_marker(tmp_path: Path) -> None:
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / ".samvil" / "qa-results.json").write_text(json.dumps({
+        "synthesis": {
+            "verdict": "REVISE",
+            "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"],
+        },
+        "convergence": {
+            "verdict": "blocked",
+            "reason": "identical QA issues persisted across two consecutive iterations",
+            "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"],
+        },
+    }), encoding="utf-8")
+
+    built = json.loads(_run(build_qa_recovery_routing(project_root=str(tmp_path))))
+    materialized = json.loads(_run(materialize_qa_recovery_routing(project_root=str(tmp_path))))
+
+    assert built["primary_route"]["next_skill"] == "samvil-evolve"
+    assert materialized["primary_route"]["next_skill"] == "samvil-evolve"
+    assert (tmp_path / ".samvil" / "next-skill.json").exists()
 
 
 # ── AC split (v3-011) ──────────────────────────────────────────

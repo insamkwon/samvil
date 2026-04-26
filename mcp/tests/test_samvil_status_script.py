@@ -359,6 +359,45 @@ def test_status_prioritizes_blocked_qa_convergence(tmp_path):
     assert "Convergence:     blocked - identical QA issues persisted" in text
 
 
+def test_status_exposes_qa_recovery_routing(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "qa-results.json", {
+        "synthesis": {
+            "verdict": "REVISE",
+            "reason": "functional QA found unimplemented ACs",
+            "next_action": "replace stubs or hardcoded paths with real implementation",
+            "pass2": {"counts": {"PASS": 0, "PARTIAL": 0, "UNIMPLEMENTED": 1, "FAIL": 0}},
+            "pass3": {"verdict": "PASS"},
+        },
+        "convergence": {
+            "verdict": "blocked",
+            "reason": "identical QA issues persisted across two consecutive iterations",
+            "next_action": "manual intervention: evolve seed, skip to retro, or fix manually",
+            "issue_count": 1,
+        },
+    })
+    _write_json(root / ".samvil" / "qa-routing.json", {
+        "status": "ready",
+        "next_action": "evolve the seed or acceptance criteria before another build loop",
+        "primary_route": {
+            "next_skill": "samvil-evolve",
+            "route_type": "seed_evolve",
+            "reason": "functional acceptance criteria did not converge",
+            "next_action": "evolve the seed or acceptance criteria before another build loop",
+        },
+        "alternative_routes": [],
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["qa_routing"]["next_skill"] == "samvil-evolve"
+    assert data["next_recommended_action"] == "evolve the seed or acceptance criteria before another build loop"
+    assert "QA route: samvil-evolve (seed_evolve)" in text
+    assert "Route:           samvil-evolve - functional acceptance criteria did not converge" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

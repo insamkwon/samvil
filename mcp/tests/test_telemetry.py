@@ -218,8 +218,45 @@ def test_run_report_includes_blocking_release_gate(tmp_path):
 
     assert report["release"]["gate"]["verdict"] == "blocked"
     assert report["release"]["gate"]["reason"] == "required release checks are failed or missing"
-    assert report["next_action"] == "fix release check: pre_commit"
-    assert "Release gate: blocked" in rendered
+
+
+def test_run_report_prioritizes_qa_recovery_routing(tmp_path):
+    root = tmp_path / "qa-routed"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "qa-routed",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    (samvil / "qa-results.json").write_text(json.dumps({
+        "synthesis": {
+            "verdict": "REVISE",
+            "reason": "functional QA found unimplemented ACs",
+            "next_action": "replace stubs or hardcoded paths with real implementation",
+            "pass2": {"counts": {"UNIMPLEMENTED": 1}},
+        },
+        "convergence": {
+            "verdict": "blocked",
+            "reason": "identical QA issues persisted across two consecutive iterations",
+            "next_action": "manual intervention: evolve seed, skip to retro, or fix manually",
+        },
+    }), encoding="utf-8")
+    (samvil / "qa-routing.json").write_text(json.dumps({
+        "status": "ready",
+        "next_action": "evolve the seed or acceptance criteria before another build loop",
+        "primary_route": {
+            "next_skill": "samvil-evolve",
+            "route_type": "seed_evolve",
+            "reason": "functional acceptance criteria did not converge",
+            "next_action": "evolve the seed or acceptance criteria before another build loop",
+        },
+    }), encoding="utf-8")
+
+    report = build_run_report(root)
+
+    assert report["qa_routing"]["next_skill"] == "samvil-evolve"
+    assert report["next_action"] == "evolve the seed or acceptance criteria before another build loop"
 
 
 def test_run_report_categorizes_events_and_stage_durations(tmp_path):

@@ -78,6 +78,7 @@ def _evidence(scenario: str, *, fixed: bool) -> dict[str, Any]:
 
 def _checks(*, failed: str = "") -> list[dict[str, Any]]:
     rows = [
+        ("phase22_qa_recovery_routing", "python3 scripts/phase22-qa-recovery-routing-dogfood.py"),
         ("phase21_qa_convergence_gate", "python3 scripts/phase21-qa-convergence-gate-dogfood.py"),
         ("phase20_qa_materialization", "python3 scripts/phase20-qa-materialization-dogfood.py"),
         ("phase19_qa_synthesis_gate", "python3 scripts/phase19-qa-synthesis-gate-dogfood.py"),

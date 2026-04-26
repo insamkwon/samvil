@@ -16,6 +16,7 @@ from .repair import evaluate_repair_gate
 RELEASE_REPORT_SCHEMA_VERSION = "1.0"
 RELEASE_BUNDLE_SCHEMA_VERSION = "1.0"
 DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
+    "phase22_qa_recovery_routing",
     "phase21_qa_convergence_gate",
     "phase20_qa_materialization",
     "phase19_qa_synthesis_gate",
@@ -27,6 +28,12 @@ DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
     "pre_commit",
 )
 DEFAULT_RELEASE_COMMANDS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "phase22_qa_recovery_routing",
+        "label": "Phase 22 QA recovery routing dogfood",
+        "command": "python3 scripts/phase22-qa-recovery-routing-dogfood.py",
+        "timeout_seconds": 60,
+    },
     {
         "name": "phase21_qa_convergence_gate",
         "label": "Phase 21 QA convergence gate dogfood",

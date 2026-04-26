@@ -13,6 +13,7 @@ from typing import Any
 from .repair import repair_summary as _repair_summary
 from .release import release_summary as _release_summary
 from .qa_synthesis import qa_summary as _qa_summary
+from .qa_routing import qa_routing_summary as _qa_routing_summary
 
 RUN_REPORT_SCHEMA_VERSION = "1.0"
 RETRO_OBSERVATION_SCHEMA_VERSION = "1.0"
@@ -85,8 +86,17 @@ def build_run_report(
     repair_summary = _repair_summary(root)
     release_summary = _release_summary(root)
     qa_summary = _qa_summary(root)
+    qa_routing_summary = _qa_routing_summary(root)
 
-    next_action = _next_action(marker, gate_verdicts, health_summary, repair_summary, release_summary, qa_summary)
+    next_action = _next_action(
+        marker,
+        gate_verdicts,
+        health_summary,
+        repair_summary,
+        release_summary,
+        qa_summary,
+        qa_routing_summary,
+    )
 
     return {
         "schema_version": RUN_REPORT_SCHEMA_VERSION,
@@ -116,6 +126,7 @@ def build_run_report(
         "repair": repair_summary,
         "release": release_summary,
         "qa": qa_summary,
+        "qa_routing": qa_routing_summary,
         "continuation": {
             "present": bool(marker),
             "next_skill": marker.get("next_skill"),
@@ -605,6 +616,7 @@ def _next_action(
     repair: dict[str, Any] | None = None,
     release: dict[str, Any] | None = None,
     qa: dict[str, Any] | None = None,
+    qa_routing: dict[str, Any] | None = None,
 ) -> str:
     repair_gate = (repair or {}).get("gate", {}) or {}
     if repair_gate.get("verdict") == "blocked":
@@ -617,6 +629,9 @@ def _next_action(
     qa = qa or {}
     qa_convergence = qa.get("convergence") or {}
     if qa.get("present") and qa_convergence.get("verdict") in {"blocked", "failed"}:
+        qa_routing = qa_routing or {}
+        if qa_routing.get("present") and qa_routing.get("next_action"):
+            return str(qa_routing.get("next_action"))
         return str(qa_convergence.get("next_action") or "resolve QA convergence gate")
     if qa.get("present") and qa.get("verdict") in {"REVISE", "FAIL"}:
         return str(qa.get("next_action") or "fix QA findings")

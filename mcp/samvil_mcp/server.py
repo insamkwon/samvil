@@ -1287,6 +1287,28 @@ async def evaluate_qa_convergence(project_root: str, synthesis_json: str) -> str
 
 
 @mcp.tool()
+async def build_qa_recovery_routing(project_root: str) -> str:
+    """Build the recommended next skill route for blocked QA convergence."""
+    try:
+        from .qa_routing import build_qa_recovery_routing as _build
+        return json.dumps(_build(project_root))
+    except Exception as e:
+        _log_mcp_health("fail", "build_qa_recovery_routing", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def materialize_qa_recovery_routing(project_root: str, persist_next_skill: bool = True) -> str:
+    """Persist QA recovery route and optional .samvil/next-skill.json marker."""
+    try:
+        from .qa_routing import materialize_qa_recovery_routing as _materialize
+        return json.dumps(_materialize(project_root, persist_next_skill=persist_next_skill))
+    except Exception as e:
+        _log_mcp_health("fail", "materialize_qa_recovery_routing", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def validate_evidence(evidences_json: str, project_root: str) -> str:
     """Validate a list of file:line evidence strings against project files.
 
