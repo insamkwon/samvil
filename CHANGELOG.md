@@ -4,6 +4,40 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.33.0] — 2026-04-25 — Consolidation Tier 1
+
+First milestone of the Consolidation phase. Reduces v3.32.0 noise (49%
+dead/disconnected baseline) without behavior change. PATCH-only discipline
+holds inside consolidation; the MINOR bump reflects user-visible tool
+count drop (175 → 155) per the versioning policy.
+
+### Added
+- `mcp/tests/test_post_rebuild_qa.py` regression guard for missing
+  scaffold-input contract (T1.1, defense-in-depth — bug already fixed in
+  `e4f93b1`).
+
+### Changed
+- Merged `regression_detector` + `convergence_gate` modules into
+  `convergence_check` (T1.3). Module count 60 → 59. Public surface
+  preserved through re-exports.
+
+### Removed
+- 20 confirmed-COLD MCP tools (T1.2). Tool count 175 → 155 (-12%).
+  No skill or test reference remained for the removed tools.
+
+### Verified
+- Full test suite: 946 passed (unchanged from v3.32.0).
+- MCP server import smoke: 155 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+- LOC delta: net negative (server.py -426 lines; merged module is
+  smaller than the two it replaces).
+
+### Next
+- Tier 2 — WARM analysis + 2 module merges + docs slim. Target
+  v3.34-v3.36.
+
+---
+
 ## [3.32.0] — 2026-04-26 — Final E2E Bundle
 
 Phase 30 of the multi-host SAMVIL architecture. This release adds the final
