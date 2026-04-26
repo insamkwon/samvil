@@ -279,6 +279,31 @@ def test_run_report_includes_evolve_context_summary(tmp_path):
     assert report["evolve_context"]["focus_area"] == "functional_spec"
 
 
+def test_run_report_includes_evolve_proposal_summary(tmp_path):
+    root = tmp_path / "evolve-proposal"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "evolve-proposal",
+        "current_stage": "evolve",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    (samvil / "evolve-proposal.json").write_text(json.dumps({
+        "status": "ready",
+        "seed_name": "task-app",
+        "from_version": 1,
+        "to_version": 2,
+        "focus": {"area": "functional_spec"},
+        "proposed_changes": [{"type": "clarify_or_split_ac"}],
+        "next_action": "review/apply evolve proposal",
+    }), encoding="utf-8")
+
+    report = build_run_report(root)
+
+    assert report["evolve_proposal"]["present"] is True
+    assert report["evolve_proposal"]["changes"] == 1
+
+
 def test_run_report_categorizes_events_and_stage_durations(tmp_path):
     root = tmp_path / "retry-app"
     samvil = root / ".samvil"

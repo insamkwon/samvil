@@ -416,6 +416,25 @@ def test_status_exposes_evolve_context(tmp_path):
     assert "Evolve context:" in text
 
 
+def test_status_exposes_evolve_proposal(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "evolve-proposal.json", {
+        "status": "ready",
+        "next_action": "review/apply evolve proposal",
+        "proposed_changes": [{"type": "clarify_or_split_ac"}],
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["evolve_proposal"]["present"] is True
+    assert data["evolve_proposal"]["changes"] == 1
+    assert data["evolve_proposal"]["next_action"] == "review/apply evolve proposal"
+    assert "Proposal: ready (1 changes)" in text
+    assert "Evolve proposal:" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

@@ -16,6 +16,7 @@ from .repair import evaluate_repair_gate
 RELEASE_REPORT_SCHEMA_VERSION = "1.0"
 RELEASE_BUNDLE_SCHEMA_VERSION = "1.0"
 DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
+    "phase24_evolve_proposal",
     "phase23_evolve_intake_context",
     "phase22_qa_recovery_routing",
     "phase21_qa_convergence_gate",
@@ -29,6 +30,12 @@ DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
     "pre_commit",
 )
 DEFAULT_RELEASE_COMMANDS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "phase24_evolve_proposal",
+        "label": "Phase 24 evolve proposal dogfood",
+        "command": "python3 scripts/phase24-evolve-proposal-dogfood.py",
+        "timeout_seconds": 60,
+    },
     {
         "name": "phase23_evolve_intake_context",
         "label": "Phase 23 evolve intake context dogfood",

@@ -77,6 +77,13 @@ Then use `.samvil/evolve-context.json` as the source of truth for current seed,
 QA issue IDs, blocked convergence reason, recovery route, and focused evolve
 instructions.
 
+For v3.26+ proposal-first runs, call:
+```
+mcp__samvil_mcp__materialize_evolve_proposal(project_root="<project_root>")
+```
+Review `.samvil/evolve-proposal.json` and `.samvil/evolve-proposal.md` before
+editing `project.seed.json`.
+
 ## Step 1b: 4차원 진화 평가
 
 Wonder/Reflect 전에 현재 상태를 4차원으로 평가한다:

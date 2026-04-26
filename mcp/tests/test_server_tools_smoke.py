@@ -17,6 +17,7 @@ from samvil_mcp.server import (
     build_reawake_message,
     build_qa_recovery_routing,
     build_evolve_context,
+    build_evolve_proposal,
     evaluate_qa_convergence,
     get_tier_phases,
     heartbeat_state,
@@ -25,6 +26,7 @@ from samvil_mcp.server import (
     materialize_qa_synthesis,
     materialize_qa_recovery_routing,
     materialize_evolve_context,
+    materialize_evolve_proposal,
     suggest_ac_split,
     synthesize_qa_evidence,
 )
@@ -154,6 +156,24 @@ def test_evolve_context_tools_write_context(tmp_path: Path) -> None:
     assert built["focus"]["area"] == "functional_spec"
     assert materialized["next_skill"] == "samvil-evolve"
     assert (tmp_path / ".samvil" / "evolve-context.json").exists()
+
+
+def test_evolve_proposal_tools_write_artifacts(tmp_path: Path) -> None:
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / ".samvil" / "evolve-context.json").write_text(json.dumps({
+        "current_seed": {"name": "task-app", "version": 1},
+        "qa": {"issue_ids": ["pass2:AC-1:UNIMPLEMENTED"]},
+        "focus": {"area": "functional_spec", "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"]},
+        "routing": {"next_skill": "samvil-evolve", "route_type": "seed_evolve"},
+    }), encoding="utf-8")
+
+    built = json.loads(_run(build_evolve_proposal(project_root=str(tmp_path))))
+    materialized = json.loads(_run(materialize_evolve_proposal(project_root=str(tmp_path))))
+
+    assert built["proposed_changes"][0]["type"] == "clarify_or_split_ac"
+    assert materialized["changes"] == 1
+    assert (tmp_path / ".samvil" / "evolve-proposal.json").exists()
+    assert (tmp_path / ".samvil" / "evolve-proposal.md").exists()
 
 
 # ── AC split (v3-011) ──────────────────────────────────────────
