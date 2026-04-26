@@ -16,6 +16,7 @@ from .repair import evaluate_repair_gate
 RELEASE_REPORT_SCHEMA_VERSION = "1.0"
 RELEASE_BUNDLE_SCHEMA_VERSION = "1.0"
 DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
+    "phase29_evolve_cycle_closure",
     "phase28_post_rebuild_qa",
     "phase27_rebuild_reentry",
     "phase26_evolve_rebuild",
@@ -34,6 +35,12 @@ DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
     "pre_commit",
 )
 DEFAULT_RELEASE_COMMANDS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "phase29_evolve_cycle_closure",
+        "label": "Phase 29 evolve cycle closure dogfood",
+        "command": "python3 scripts/phase29-evolve-cycle-closure-dogfood.py",
+        "timeout_seconds": 60,
+    },
     {
         "name": "phase28_post_rebuild_qa",
         "label": "Phase 28 post-rebuild QA dogfood",

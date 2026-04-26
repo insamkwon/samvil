@@ -22,6 +22,7 @@ from samvil_mcp.server import (
     build_evolve_rebuild_handoff,
     build_rebuild_reentry,
     build_post_rebuild_qa,
+    build_evolve_cycle_closure,
     evaluate_qa_convergence,
     get_tier_phases,
     heartbeat_state,
@@ -36,6 +37,7 @@ from samvil_mcp.server import (
     materialize_evolve_rebuild_handoff,
     materialize_rebuild_reentry,
     materialize_post_rebuild_qa,
+    materialize_evolve_cycle_closure,
     suggest_ac_split,
     synthesize_qa_evidence,
 )
@@ -302,6 +304,36 @@ def test_post_rebuild_qa_tools_write_next_skill_marker(tmp_path: Path) -> None:
     assert built["status"] == "ready"
     assert materialized["next_skill"] == "samvil-qa"
     assert marker["from_stage"] == "scaffold"
+
+
+def test_evolve_cycle_tools_write_closure_marker(tmp_path: Path) -> None:
+    import hashlib
+
+    seed = {"name": "task-app", "version": 2}
+    digest = hashlib.sha256(
+        json.dumps(seed, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / "project.seed.json").write_text(json.dumps(seed), encoding="utf-8")
+    (tmp_path / ".samvil" / "post-rebuild-qa.json").write_text(json.dumps({
+        "status": "ready",
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "seed_sha256": digest,
+        "previous_qa": {"verdict": "REVISE", "iteration": 2, "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"]},
+    }), encoding="utf-8")
+    (tmp_path / ".samvil" / "qa-results.json").write_text(json.dumps({
+        "synthesis": {"verdict": "PASS", "iteration": 3, "max_iterations": 3, "issue_ids": []},
+        "convergence": {"verdict": "pass"},
+    }), encoding="utf-8")
+
+    built = json.loads(_run(build_evolve_cycle_closure(project_root=str(tmp_path))))
+    materialized = json.loads(_run(materialize_evolve_cycle_closure(project_root=str(tmp_path))))
+    marker = json.loads((tmp_path / ".samvil" / "next-skill.json").read_text(encoding="utf-8"))
+
+    assert built["verdict"] == "closed"
+    assert materialized["next_skill"] == "samvil-retro"
+    assert marker["cycle_verdict"] == "closed"
 
 
 # ── AC split (v3-011) ──────────────────────────────────────────

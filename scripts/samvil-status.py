@@ -116,6 +116,10 @@ def _load_post_rebuild_qa(root: Path) -> dict:
     return _load_json(root / ".samvil" / "post-rebuild-qa.json")
 
 
+def _load_evolve_cycle(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "evolve-cycle.json")
+
+
 def _load_release_report(root: Path) -> dict:
     return _load_json(root / ".samvil" / "release-report.json")
 
@@ -278,6 +282,7 @@ def render_human(root: Path) -> str:
     evolve_rebuild = _load_evolve_rebuild(root)
     rebuild_reentry = _load_rebuild_reentry(root)
     post_rebuild_qa = _load_post_rebuild_qa(root)
+    evolve_cycle = _load_evolve_cycle(root)
     release_report = _load_release_report(root)
     release_bundle = _release_bundle_path(root)
     qa_report = _qa_report_path(root)
@@ -298,6 +303,7 @@ def render_human(root: Path) -> str:
     report_evolve_rebuild = report.get("evolve_rebuild", {}) or {}
     report_rebuild_reentry = report.get("rebuild_reentry", {}) or {}
     report_post_rebuild_qa = report.get("post_rebuild_qa", {}) or {}
+    report_evolve_cycle = report.get("evolve_cycle", {}) or {}
     report_release = report.get("release", {}) or {}
     release_gate = report_release.get("gate", {}) or {}
     inspection_summary = inspection.get("summary", {}) or {}
@@ -423,6 +429,12 @@ def render_human(root: Path) -> str:
             "Post-rebuild QA: "
             f"{post_rebuild_qa.get('status', '?')} -> "
             f"{post_rebuild_qa.get('next_skill') or '?'}"
+        )
+    if evolve_cycle:
+        lines.append(
+            "Evolve cycle: "
+            f"{evolve_cycle.get('verdict', '?')} -> "
+            f"{evolve_cycle.get('next_skill') or '?'}"
         )
     if release_report:
         lines.append(
@@ -553,6 +565,12 @@ def render_human(root: Path) -> str:
                 "  Post-rebuild QA:"
                 f" {report_post_rebuild_qa.get('status', '?')} -> "
                 f"{report_post_rebuild_qa.get('next_skill') or '?'}"
+            )
+        if report_evolve_cycle.get("present"):
+            lines.append(
+                "  Evolve cycle:"
+                f" {report_evolve_cycle.get('verdict', '?')} -> "
+                f"{report_evolve_cycle.get('next_skill') or '?'}"
             )
         stages = timeline.get("stages") or []
         if stages:
@@ -723,6 +741,26 @@ def render_human(root: Path) -> str:
             "  Next skill:      "
             f"{post_rebuild_qa.get('next_skill') or '?'}"
         )
+    if evolve_cycle:
+        current = evolve_cycle.get("current_qa") or {}
+        lines.append("")
+        lines.append("Evolve cycle:")
+        lines.append(
+            "  Status:          "
+            f"{evolve_cycle.get('status', '?')} / {len(evolve_cycle.get('issues') or [])} issues"
+        )
+        lines.append(
+            "  Verdict:         "
+            f"{evolve_cycle.get('verdict') or '?'}"
+        )
+        lines.append(
+            "  Current QA:      "
+            f"{current.get('verdict') or '?'} / iteration {current.get('iteration') or '?'}"
+        )
+        lines.append(
+            "  Next skill:      "
+            f"{evolve_cycle.get('next_skill') or '?'}"
+        )
     if release_report:
         lines.append("")
         lines.append("Release:")
@@ -759,6 +797,7 @@ def render_json(root: Path) -> str:
     evolve_rebuild = _load_evolve_rebuild(root)
     rebuild_reentry = _load_rebuild_reentry(root)
     post_rebuild_qa = _load_post_rebuild_qa(root)
+    evolve_cycle = _load_evolve_cycle(root)
     release_report = _load_release_report(root)
     release_bundle = _release_bundle_path(root)
     qa_report = _qa_report_path(root)
@@ -778,6 +817,7 @@ def render_json(root: Path) -> str:
     report_evolve_rebuild = report.get("evolve_rebuild", {}) or {}
     report_rebuild_reentry = report.get("rebuild_reentry", {}) or {}
     report_post_rebuild_qa = report.get("post_rebuild_qa", {}) or {}
+    report_evolve_cycle = report.get("evolve_cycle", {}) or {}
     report_release = report.get("release", {}) or {}
     samvil_tier = report_state.get("samvil_tier") or state.get("samvil_tier") or "standard"
     gate_verdicts = latest_gate_verdicts(claims)
@@ -817,6 +857,7 @@ def render_json(root: Path) -> str:
                 "evolve_rebuild": report_evolve_rebuild,
                 "rebuild_reentry": report_rebuild_reentry,
                 "post_rebuild_qa": report_post_rebuild_qa,
+                "evolve_cycle": report_evolve_cycle,
             },
             "inspection_report": {
                 "present": bool(inspection),
@@ -934,6 +975,20 @@ def render_json(root: Path) -> str:
                 "path": str(root / ".samvil" / "post-rebuild-qa.json") if post_rebuild_qa else "",
                 "scaffold_output_path": str(root / ".samvil" / "scaffold-output.json") if post_rebuild_qa else "",
                 "run_report": report_post_rebuild_qa,
+            },
+            "evolve_cycle": {
+                "present": bool(evolve_cycle),
+                "status": evolve_cycle.get("status"),
+                "verdict": evolve_cycle.get("verdict"),
+                "seed_name": evolve_cycle.get("seed_name"),
+                "seed_version": evolve_cycle.get("seed_version"),
+                "current_verdict": (evolve_cycle.get("current_qa") or {}).get("verdict"),
+                "current_iteration": (evolve_cycle.get("current_qa") or {}).get("iteration"),
+                "next_skill": evolve_cycle.get("next_skill"),
+                "issue_count": len(evolve_cycle.get("issues") or []),
+                "next_action": evolve_cycle.get("next_action"),
+                "path": str(root / ".samvil" / "evolve-cycle.json") if evolve_cycle else "",
+                "run_report": report_evolve_cycle,
             },
             "release": {
                 "report_present": bool(release_report),

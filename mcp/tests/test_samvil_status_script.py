@@ -528,6 +528,30 @@ def test_status_exposes_post_rebuild_qa(tmp_path):
     assert "Post-rebuild QA:" in text
 
 
+def test_status_exposes_evolve_cycle(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "evolve-cycle.json", {
+        "status": "ready",
+        "verdict": "closed",
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "current_qa": {"verdict": "PASS", "iteration": 3},
+        "next_skill": "samvil-retro",
+        "issues": [],
+        "next_action": "evolve cycle closed; capture retro or proceed to release",
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["evolve_cycle"]["present"] is True
+    assert data["evolve_cycle"]["verdict"] == "closed"
+    assert data["evolve_cycle"]["next_skill"] == "samvil-retro"
+    assert "Evolve cycle: closed -> samvil-retro" in text
+    assert "Evolve cycle:" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

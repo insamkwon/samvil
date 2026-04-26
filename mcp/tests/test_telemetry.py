@@ -408,6 +408,33 @@ def test_run_report_includes_post_rebuild_qa_summary(tmp_path):
     assert report["post_rebuild_qa"]["previous_issue_count"] == 1
 
 
+def test_run_report_includes_evolve_cycle_summary(tmp_path):
+    root = tmp_path / "evolve-cycle"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "evolve-cycle",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    (samvil / "evolve-cycle.json").write_text(json.dumps({
+        "status": "ready",
+        "verdict": "closed",
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "current_qa": {"verdict": "PASS", "iteration": 3},
+        "next_skill": "samvil-retro",
+        "issues": [],
+        "next_action": "evolve cycle closed; capture retro or proceed to release",
+    }), encoding="utf-8")
+
+    report = build_run_report(root)
+
+    assert report["evolve_cycle"]["present"] is True
+    assert report["evolve_cycle"]["verdict"] == "closed"
+    assert report["evolve_cycle"]["next_skill"] == "samvil-retro"
+
+
 def test_run_report_categorizes_events_and_stage_durations(tmp_path):
     root = tmp_path / "retry-app"
     samvil = root / ".samvil"
