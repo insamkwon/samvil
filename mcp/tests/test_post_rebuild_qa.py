@@ -109,3 +109,15 @@ def test_post_rebuild_qa_blocks_hash_mismatch(tmp_path: Path) -> None:
     assert payload["status"] == "blocked"
     assert "scaffold output seed hash does not match project seed" in payload["issues"]
     assert payload["qa_request"] == {}
+
+
+def test_post_rebuild_qa_flags_missing_scaffold_input(tmp_path: Path) -> None:
+    """When scaffold-input.json is absent, _issues must report it (T1.1 regression guard)."""
+    _ready_project(tmp_path)
+    # Remove scaffold-input.json — simulate scaffold not being invoked
+    (tmp_path / ".samvil" / "scaffold-input.json").unlink()
+
+    payload = build_post_rebuild_qa(tmp_path)
+
+    assert payload["status"] == "blocked"
+    assert any("scaffold-input.json" in issue for issue in payload["issues"])
