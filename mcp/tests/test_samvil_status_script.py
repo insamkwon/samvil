@@ -477,6 +477,29 @@ def test_status_exposes_evolve_rebuild(tmp_path):
     assert "Evolve rebuild:" in text
 
 
+def test_status_exposes_rebuild_reentry(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "rebuild-reentry.json", {
+        "status": "ready",
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "target_version": 2,
+        "next_skill": "samvil-scaffold",
+        "issues": [],
+        "next_action": "run samvil-scaffold with scaffold input",
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["rebuild_reentry"]["present"] is True
+    assert data["rebuild_reentry"]["status"] == "ready"
+    assert data["rebuild_reentry"]["next_skill"] == "samvil-scaffold"
+    assert "Reentry: ready -> samvil-scaffold" in text
+    assert "Rebuild reentry:" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

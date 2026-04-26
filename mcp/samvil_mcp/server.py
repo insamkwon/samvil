@@ -1408,6 +1408,28 @@ async def materialize_evolve_rebuild_handoff(project_root: str) -> str:
 
 
 @mcp.tool()
+async def build_rebuild_reentry(project_root: str) -> str:
+    """Build scaffold reentry input from evolved seed and rebuild handoff."""
+    try:
+        from .evolve_reentry import build_rebuild_reentry as _build
+        return json.dumps(_build(project_root))
+    except Exception as e:
+        _log_mcp_health("fail", "build_rebuild_reentry", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def materialize_rebuild_reentry(project_root: str) -> str:
+    """Persist scaffold reentry contract and scaffold input."""
+    try:
+        from .evolve_reentry import materialize_rebuild_reentry as _materialize
+        return json.dumps(_materialize(project_root))
+    except Exception as e:
+        _log_mcp_health("fail", "materialize_rebuild_reentry", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def validate_evidence(evidences_json: str, project_root: str) -> str:
     """Validate a list of file:line evidence strings against project files.
 

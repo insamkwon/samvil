@@ -352,6 +352,32 @@ def test_run_report_includes_evolve_rebuild_summary(tmp_path):
     assert report["evolve_rebuild"]["next_skill"] == "samvil-scaffold"
 
 
+def test_run_report_includes_rebuild_reentry_summary(tmp_path):
+    root = tmp_path / "rebuild-reentry"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "rebuild-reentry",
+        "current_stage": "scaffold",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    (samvil / "rebuild-reentry.json").write_text(json.dumps({
+        "status": "ready",
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "target_version": 2,
+        "next_skill": "samvil-scaffold",
+        "issues": [],
+        "next_action": "run samvil-scaffold with scaffold input",
+    }), encoding="utf-8")
+
+    report = build_run_report(root)
+
+    assert report["rebuild_reentry"]["present"] is True
+    assert report["rebuild_reentry"]["status"] == "ready"
+    assert report["rebuild_reentry"]["issue_count"] == 0
+
+
 def test_run_report_categorizes_events_and_stage_durations(tmp_path):
     root = tmp_path / "retry-app"
     samvil = root / ".samvil"
