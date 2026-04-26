@@ -1810,7 +1810,7 @@ async def check_convergence_gates(eval_result_json: str, history_json: str = "[]
     Returns: ConvergenceVerdict with converged, blocked_by[], reasons[], regressions[]
     """
     try:
-        from .convergence_gate import check_all_gates, GateConfig
+        from .convergence_check import check_all_gates, GateConfig
         eval_result = json.loads(eval_result_json)
         history = json.loads(history_json)
         verdict = check_all_gates(eval_result, history, GateConfig())
