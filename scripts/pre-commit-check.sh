@@ -181,6 +181,18 @@ else
 fi
 
 
+# ── 9. Markdown reference integrity ─────────────────────────────────
+_section "9. Markdown reference integrity"
+
+if bash scripts/check-broken-references.sh >/tmp/samvil-mdrefs.log 2>&1; then
+  summary=$(tail -1 /tmp/samvil-mdrefs.log | sed -E 's/^[[:space:]]*✓[[:space:]]*//')
+  _ok "$summary"
+else
+  _fail "broken markdown reference(s):"
+  cat /tmp/samvil-mdrefs.log | sed 's/^/      /'
+fi
+
+
 # ── Summary ─────────────────────────────────────────────────────────
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
