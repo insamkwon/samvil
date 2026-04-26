@@ -74,6 +74,9 @@ from .retro_aggregate import (
 from .evolve_aggregate import (
     aggregate_evolve_context as _aggregate_evolve_context,
 )
+from .council_synthesis import (
+    synthesize_council_verdicts as _synthesize_council_verdicts,
+)
 from .manifest import (
     build_manifest,
     write_manifest,
@@ -3848,6 +3851,65 @@ async def aggregate_evolve_context(project_root: str) -> str:
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "aggregate_evolve_context", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def synthesize_council_verdicts(
+    round1_verdicts_json: str = "",
+    round2_verdicts_json: str = "",
+) -> str:
+    """Single-source-of-truth synthesis for Council Gate A (T4.3 ultra-thin).
+
+    The samvil-council skill spawns Round 1 + Round 2 agents in parallel
+    via the CC Agent tool (host-bound), then calls this tool to:
+
+      1. Extract Round 1 debate points (consensus / debate / blind_spots)
+         into a markdown block ready for Round 2 prompt injection.
+      2. Aggregate Round 2 per-section verdicts into consensus scores
+         (≥80% strong, 60-79% moderate, <60% weak), preserve dissenting
+         opinions (Devil's Advocate), and surface BLOCKING-severity
+         challenges as `blocking_objections`.
+      3. Decide the overall verdict:
+           PROCEED              — strong consensus on all sections.
+           PROCEED_WITH_CHANGES — moderate consensus, no blocking.
+           HOLD                 — weak consensus, blocking objection,
+                                  or majority-reject on any section.
+
+    Args:
+      round1_verdicts_json: JSON-encoded list of Round 1 outputs:
+        `[{"agent": "...", "topics": [{"topic": "...", "stance": "...",
+        "is_blind_spot": bool}]}, ...]`. Empty → Round 1 was skipped
+        (standard tier or below).
+      round2_verdicts_json: JSON-encoded list of Round 2 outputs:
+        `[{"agent": "...", "sections": [{"section": "...",
+        "verdict": "approve|challenge|reject", "severity": "minor|blocking",
+        "reasoning": "..."}]}, ...]`. Empty → no synthesis possible
+        (returns well-formed empty result).
+
+    Returns the synthesis dict described in
+    `samvil_mcp.council_synthesis.synthesize_council_verdicts`. Pure
+    function; idempotent; never raises.
+
+    Companion to `consensus_v3_2.py` (which is the v3.3-bound dispute
+    resolver). This tool is the legacy v3.1 Council Gate A that survives
+    in v3.2 only behind the `--council` opt-in flag.
+    """
+    try:
+        round1 = json.loads(round1_verdicts_json) if round1_verdicts_json else None
+        round2 = json.loads(round2_verdicts_json) if round2_verdicts_json else None
+        if round1 is not None and not isinstance(round1, list):
+            round1 = None
+        if round2 is not None and not isinstance(round2, list):
+            round2 = None
+        result = _synthesize_council_verdicts(
+            round1_verdicts=round1,
+            round2_verdicts=round2,
+        )
+        _log_mcp_health("ok", "synthesize_council_verdicts")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "synthesize_council_verdicts", str(e))
         return json.dumps({"error": str(e)})
 
 

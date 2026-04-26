@@ -76,6 +76,8 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "council_deprecation_warning",
             "council-retirement-migration",
             "--council",
+            "synthesize_council_verdicts",
+            "SKILL.legacy.md",
         ),
     ),
     (
