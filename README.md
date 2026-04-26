@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.29.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.30.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.30.0 "Post-Rebuild QA Rejudge"** — 재빌드 산출물이 현재 evolved seed와 일치할 때만 QA 재판정 요청을 만들고, 다음 호스트가 `samvil-qa`로 이어갈 수 있게 고정하는 릴리스입니다.
+
+> **v3.30.0 주요 추가** (2026-04-26):
+> - **Post-rebuild QA artifact** — `materialize_post_rebuild_qa`가 `.samvil/post-rebuild-qa.json`을 생성.
+> - **Scaffold output hash gate** — `.samvil/scaffold-output.json`의 seed version/hash가 현재 seed와 맞을 때만 QA 재판정 허용.
+> - **QA rejudge continuation** — `samvil-status`와 `build_run_report`가 post-rebuild QA readiness와 `samvil-qa` next skill을 노출.
+> - **검증**: 931 unit tests · 171 MCP tools · Phase 28 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.29.0 "Rebuild Reentry Contract"** — rebuild handoff 이후 다음 호스트가 seed 경로/버전/hash를 추론하지 않고 바로 scaffold에 재진입할 수 있도록 명시적 scaffold input을 남기는 릴리스입니다.
 

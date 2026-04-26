@@ -4,6 +4,44 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.30.0] — 2026-04-26 — Post-Rebuild QA Rejudge
+
+Phase 28 of the multi-host SAMVIL architecture. This release materializes the
+QA rejudge request after rebuilt scaffold output exists, pinning the evolved
+seed hash and prior QA issues before routing back to `samvil-qa`.
+
+### Added
+- `mcp/samvil_mcp/post_rebuild_qa.py` for deterministic post-rebuild QA
+  request generation.
+- `.samvil/post-rebuild-qa.json` materialization.
+- `.samvil/scaffold-output.json` contract checks for rebuilt seed version and
+  sha256.
+- MCP `build_post_rebuild_qa` and `materialize_post_rebuild_qa`.
+- Run-report `post_rebuild_qa` summary.
+- `samvil-status` human/JSON output for post-rebuild QA readiness and previous
+  QA issue count.
+- `scripts/phase28-post-rebuild-qa-dogfood.py` proving QA blocked -> evolve
+  context -> proposal -> apply -> rebuild -> reentry -> scaffold output -> QA
+  rejudge.
+- Phase 28 dogfood as the first default release runner check.
+- Phase 28 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.30-phase28.md`.
+
+### Changed
+- Release readiness defaults now require Phase 28 before Phase 27 and earlier
+  recovery/evolve gates.
+
+### Verified
+- Phase 28 dogfood: PASS.
+- Post-rebuild QA, status, telemetry, release, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 931 passed.
+- MCP server import smoke: 171 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.29.0] — 2026-04-26 — Rebuild Reentry Contract
 
 Phase 27 of the multi-host SAMVIL architecture. This release turns the rebuild
