@@ -173,6 +173,13 @@ from .repair import (
     write_repair_plan as _write_repair_plan,
     write_repair_report as _write_repair_report,
 )
+from .release import (
+    build_release_report as _build_release_report,
+    evaluate_release_gate as _evaluate_release_gate,
+    read_release_report as _read_release_report_file,
+    render_release_report as _render_release_report,
+    write_release_report as _write_release_report,
+)
 
 mcp = FastMCP("samvil-mcp")
 
@@ -3781,6 +3788,88 @@ def derive_repair_policy_signals(repair_reports_json: str, threshold: int = 2) -
         return {"status": "ok", "count": len(signals), "signals": signals}
     except Exception as e:
         _log_mcp_health("fail", "derive_repair_policy_signals", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def build_release_report(project_root: str, checks_json: str = "", persist: bool = True) -> dict:
+    """Build a release readiness report from release check evidence."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        checks = []
+        if checks_json:
+            data = json.loads(checks_json)
+            checks = data if isinstance(data, list) else data.get("checks", [])
+            if not isinstance(checks, list):
+                return {"status": "error", "error": "checks_json must contain a list"}
+        report = _build_release_report(project_root, checks=checks)
+        path = ""
+        if persist:
+            path = str(_write_release_report(report, project_root))
+        _log_mcp_health("ok", "build_release_report")
+        return {"status": "ok", "path": path, "report": report}
+    except Exception as e:
+        _log_mcp_health("fail", "build_release_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def read_release_report(project_root: str) -> dict:
+    """Read .samvil/release-report.json if present."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _read_release_report_file(project_root)
+        _log_mcp_health("ok", "read_release_report")
+        if report is None:
+            return {"status": "missing"}
+        return {"status": "ok", "report": report}
+    except Exception as e:
+        _log_mcp_health("fail", "read_release_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def render_release_report(project_root: str, refresh: bool = False, checks_json: str = "") -> dict:
+    """Render release readiness as markdown; optionally refresh it first."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        if refresh:
+            checks = []
+            if checks_json:
+                data = json.loads(checks_json)
+                checks = data if isinstance(data, list) else data.get("checks", [])
+                if not isinstance(checks, list):
+                    return {"status": "error", "error": "checks_json must contain a list"}
+            report = _build_release_report(project_root, checks=checks)
+        else:
+            report = _read_release_report_file(project_root)
+        if report is None:
+            return {"status": "missing"}
+        _log_mcp_health("ok", "render_release_report")
+        return {"status": "ok", "context": _render_release_report(report)}
+    except Exception as e:
+        _log_mcp_health("fail", "render_release_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def evaluate_release_gate(project_root: str) -> dict:
+    """Evaluate whether release readiness blocks final progression."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        gate = _evaluate_release_gate(project_root)
+        _log_mcp_health("ok", "evaluate_release_gate")
+        return {"status": "ok", "gate": gate}
+    except Exception as e:
+        _log_mcp_health("fail", "evaluate_release_gate", str(e))
         return {"status": "error", "error": str(e)}
 
 

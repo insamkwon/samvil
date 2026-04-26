@@ -259,6 +259,43 @@ def test_status_exposes_run_report_repair_gate(tmp_path):
     assert "Repair gate:     blocked - repair plan exists" in text
 
 
+def test_status_exposes_run_report_release_gate(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "run-report.json", {
+        "state": {"current_stage": "qa", "samvil_tier": "standard"},
+        "claims": {"pending_subjects": []},
+        "timeline": {},
+        "mcp_health": {},
+        "release": {
+            "gate": {
+                "verdict": "blocked",
+                "reason": "required release checks are failed or missing",
+                "next_action": "fix release check: pre_commit",
+            }
+        },
+        "next_action": "fix release check: pre_commit",
+    })
+    _write_json(root / ".samvil" / "release-report.json", {
+        "summary": {
+            "status": "blocked",
+            "passed_checks": 3,
+            "failed_checks": 1,
+            "missing_checks": 0,
+        },
+        "next_action": "fix release check: pre_commit",
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["run_report"]["release"]["gate"]["verdict"] == "blocked"
+    assert data["release"]["report_status"] == "blocked"
+    assert data["next_recommended_action"] == "fix release check: pre_commit"
+    assert "Gate:    release=blocked" in text
+    assert "Release gate:    blocked - required release checks" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

@@ -15,7 +15,8 @@ from samvil_mcp.telemetry import (
     write_run_report,
 )
 from samvil_mcp.inspection import build_inspection_report, write_inspection_report
-from samvil_mcp.repair import build_repair_plan, write_repair_plan
+from samvil_mcp.repair import build_repair_plan, build_repair_report, write_repair_plan, write_repair_report
+from samvil_mcp.release import build_release_report, write_release_report
 
 
 def _jsonl(path: Path, rows: list[dict]) -> None:
@@ -155,6 +156,69 @@ def test_run_report_includes_blocking_repair_gate(tmp_path):
     assert report["repair"]["gate"]["reason"] == "repair plan exists but repair is not verified"
     assert report["next_action"].startswith("Fix browser console")
     assert "Repair gate: blocked" in rendered
+
+
+def test_run_report_includes_blocking_release_gate(tmp_path):
+    root = tmp_path / "release-blocked"
+    root.mkdir()
+    (root / "shot.png").write_text("png", encoding="utf-8")
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "release-blocked",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    before = build_inspection_report(root, evidence={
+        "schema_version": "1.0",
+        "scenario": "release-blocked",
+        "viewports": [
+            {
+                "name": "desktop",
+                "loaded": True,
+                "console_errors": ["ReferenceError: broken"],
+                "overflow_count": 0,
+                "screenshot": "shot.png",
+            }
+        ],
+        "interactions": [
+            {"id": "primary-flow", "status": "pass", "message": "primary flow worked"}
+        ],
+    })
+    after = build_inspection_report(root, evidence={
+        "schema_version": "1.0",
+        "scenario": "release-blocked",
+        "viewports": [
+            {
+                "name": "desktop",
+                "loaded": True,
+                "console_errors": [],
+                "overflow_count": 0,
+                "screenshot": "shot.png",
+            }
+        ],
+        "interactions": [
+            {"id": "primary-flow", "status": "pass", "message": "primary flow worked"}
+        ],
+    })
+    write_inspection_report(before, root)
+    plan = build_repair_plan(root, inspection_report=before)
+    write_repair_plan(plan, root)
+    repair_report = build_repair_report(root, plan=plan, before_report=before, after_report=after)
+    write_repair_report(repair_report, root)
+    release_report = build_release_report(root, checks=[
+        {"name": "phase11_repair_orchestration", "status": "pass"},
+        {"name": "phase10_repair_regression", "status": "pass"},
+        {"name": "phase8_browser_inspection", "status": "pass"},
+        {"name": "pre_commit", "status": "fail"},
+    ])
+    write_release_report(release_report, root)
+
+    report = build_run_report(root)
+    rendered = render_run_report(report)
+
+    assert report["release"]["gate"]["verdict"] == "blocked"
+    assert report["release"]["gate"]["reason"] == "required release checks are failed or missing"
+    assert report["next_action"] == "fix release check: pre_commit"
+    assert "Release gate: blocked" in rendered
 
 
 def test_run_report_categorizes_events_and_stage_durations(tmp_path):

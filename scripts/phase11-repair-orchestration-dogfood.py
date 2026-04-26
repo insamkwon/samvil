@@ -147,7 +147,8 @@ def _assert_case(root: Path, expected_verdict: str, expected_action: str) -> dic
     status_gate = status_json["run_report"]["repair"]["gate"]
     if run_gate["verdict"] != expected_verdict or status_gate["verdict"] != expected_verdict:
         raise AssertionError(f"{root.name}: run/status gate mismatch")
-    if expected_action not in report["next_action"] and expected_action not in status_json["next_recommended_action"]:
+    actions = [gate["next_action"], report["next_action"], status_json["next_recommended_action"]]
+    if expected_action not in actions:
         raise AssertionError(f"{root.name}: next action mismatch")
     return {
         "name": root.name,

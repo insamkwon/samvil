@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .repair import repair_summary as _repair_summary
+from .release import release_summary as _release_summary
 
 RUN_REPORT_SCHEMA_VERSION = "1.0"
 RETRO_OBSERVATION_SCHEMA_VERSION = "1.0"
@@ -81,8 +82,9 @@ def build_run_report(
     event_summary = _event_summary(events)
     timeline_summary = _timeline_summary(events)
     repair_summary = _repair_summary(root)
+    release_summary = _release_summary(root)
 
-    next_action = _next_action(marker, gate_verdicts, health_summary, repair_summary)
+    next_action = _next_action(marker, gate_verdicts, health_summary, repair_summary, release_summary)
 
     return {
         "schema_version": RUN_REPORT_SCHEMA_VERSION,
@@ -110,6 +112,7 @@ def build_run_report(
         },
         "mcp_health": health_summary,
         "repair": repair_summary,
+        "release": release_summary,
         "continuation": {
             "present": bool(marker),
             "next_skill": marker.get("next_skill"),
@@ -260,6 +263,8 @@ def render_run_report(report: dict[str, Any]) -> str:
     continuation = report.get("continuation", {}) or {}
     repair = report.get("repair", {}) or {}
     repair_gate = repair.get("gate", {}) or {}
+    release = report.get("release", {}) or {}
+    release_gate = release.get("gate", {}) or {}
 
     lines = [
         f"# Run Report — {state.get('project_name') or 'unknown'}",
@@ -276,6 +281,10 @@ def render_run_report(report: dict[str, Any]) -> str:
     if repair_gate:
         lines.append(
             f"- Repair gate: {repair_gate.get('verdict')} ({repair_gate.get('reason')})"
+        )
+    if release_gate:
+        lines.append(
+            f"- Release gate: {release_gate.get('verdict')} ({release_gate.get('reason')})"
         )
     if continuation.get("present"):
         lines.append(
@@ -304,6 +313,17 @@ def render_run_report(report: dict[str, Any]) -> str:
         )
         if repair_gate:
             lines.append(f"- Gate next action: {repair_gate.get('next_action')}")
+
+    if release:
+        lines.extend(["", "## Release"])
+        lines.append(
+            f"- Report: {release.get('report_status')} "
+            f"({release.get('passed_checks', 0)} passed / "
+            f"{release.get('failed_checks', 0)} failed / "
+            f"{release.get('missing_checks', 0)} missing)"
+        )
+        if release_gate:
+            lines.append(f"- Gate next action: {release_gate.get('next_action')}")
 
     gate_verdicts = claims.get("latest_gate_verdicts") or []
     if gate_verdicts:
@@ -580,10 +600,16 @@ def _next_action(
     gate_verdicts: list[dict[str, Any]],
     health: dict[str, Any],
     repair: dict[str, Any] | None = None,
+    release: dict[str, Any] | None = None,
 ) -> str:
     repair_gate = (repair or {}).get("gate", {}) or {}
     if repair_gate.get("verdict") == "blocked":
         return str(repair_gate.get("next_action") or "repair gate blocked")
+    release_gate = (release or {}).get("gate", {}) or {}
+    if release_gate.get("verdict") == "blocked":
+        return str(release_gate.get("next_action") or "release gate blocked")
+    if release_gate.get("verdict") == "pass":
+        return str(release_gate.get("next_action") or "release ready")
     blocking = [
         gate for gate in gate_verdicts
         if gate.get("verdict") not in (None, "pass", "skip", "unknown")

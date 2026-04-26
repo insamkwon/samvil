@@ -12,6 +12,7 @@ against local files only:
   .samvil/inspection-report.json (v3.10 browser inspection rollup, if present)
   .samvil/repair-plan.json    (v3.12 repair plan, if present)
   .samvil/repair-report.json  (v3.12 repair report, if present)
+  .samvil/release-report.json (v3.14 release readiness report, if present)
 
 Panes in MVP (other panes deferred to later sprints per §6.1):
   - Sprint + stage
@@ -80,6 +81,10 @@ def _load_repair_report(root: Path) -> dict:
     return _load_json(root / ".samvil" / "repair-report.json")
 
 
+def _load_release_report(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "release-report.json")
+
+
 def latest_gate_verdicts(claims: list[dict]) -> dict[str, dict]:
     latest: dict[str, dict] = {}
     for r in claims:
@@ -118,10 +123,21 @@ def inspection_recommended_action(inspection: dict) -> str | None:
 
 def repair_recommended_action(repair_plan: dict, repair_report: dict) -> str | None:
     if repair_report:
+        if (repair_report.get("summary", {}) or {}).get("status") == "verified":
+            return None
         return repair_report.get("next_action") or "review repair report"
     actions = repair_plan.get("actions") or []
     if actions:
         return f"execute repair plan: {actions[0].get('instruction')}"
+    return None
+
+
+def release_recommended_action(report: dict, release_report: dict) -> str | None:
+    release_gate = ((report.get("release", {}) or {}).get("gate", {}) or {})
+    if release_gate.get("verdict") == "blocked":
+        return release_gate.get("next_action") or "clear release gate"
+    if release_report and (release_report.get("summary", {}) or {}).get("status") != "pass":
+        return release_report.get("next_action") or "fix release checks"
     return None
 
 
@@ -131,13 +147,21 @@ def status_next_action(
     inspection: dict,
     repair_plan: dict,
     repair_report: dict,
+    release_report: dict | None = None,
 ) -> str:
     repair_action = repair_recommended_action(repair_plan, repair_report)
     if repair_action:
         return repair_action
-    inspection_action = inspection_recommended_action(inspection)
-    if inspection_action:
-        return inspection_action
+    repair_verified = (repair_report.get("summary", {}) or {}).get("status") == "verified"
+    release_action = release_recommended_action(report, release_report or {})
+    if release_action:
+        return release_action
+    if repair_verified and not report and not release_report:
+        return repair_report.get("next_action") or "repair verified: re-run release checks"
+    if not repair_verified:
+        inspection_action = inspection_recommended_action(inspection)
+        if inspection_action:
+            return inspection_action
     if report:
         return report.get("next_action") or next_recommended_action(gate_verdicts)
     return next_recommended_action(gate_verdicts)
@@ -174,6 +198,7 @@ def render_human(root: Path) -> str:
     inspection = _load_inspection_report(root)
     repair_plan = _load_repair_plan(root)
     repair_report = _load_repair_report(root)
+    release_report = _load_release_report(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
     report_state = report.get("state", {}) or {}
@@ -183,9 +208,12 @@ def render_human(root: Path) -> str:
     continuation = report.get("continuation", {}) or {}
     report_repair = report.get("repair", {}) or {}
     repair_gate = report_repair.get("gate", {}) or {}
+    report_release = report.get("release", {}) or {}
+    release_gate = report_release.get("gate", {}) or {}
     inspection_summary = inspection.get("summary", {}) or {}
     repair_plan_summary = repair_plan.get("summary", {}) or {}
     repair_report_summary = repair_report.get("summary", {}) or {}
+    release_report_summary = release_report.get("summary", {}) or {}
 
     # v3.1 stored the field under the legacy name. Read both, preferring
     # the new one. After v3.3 the legacy branch is removed.
@@ -217,6 +245,11 @@ def render_human(root: Path) -> str:
             "Gate:    "
             f"repair={repair_gate.get('verdict', '?')}"
         )
+    if release_gate:
+        lines.append(
+            "Gate:    "
+            f"release={release_gate.get('verdict', '?')}"
+        )
     if inspection:
         lines.append(
             "Inspect: "
@@ -236,6 +269,14 @@ def render_human(root: Path) -> str:
             "Repair:  "
             f"{repair_plan_summary.get('status', '?')} "
             f"({repair_plan_summary.get('total_actions', 0)} actions)"
+        )
+    if release_report:
+        lines.append(
+            "Release: "
+            f"{release_report_summary.get('status', '?')} "
+            f"({release_report_summary.get('passed_checks', 0)} pass / "
+            f"{release_report_summary.get('failed_checks', 0)} fail / "
+            f"{release_report_summary.get('missing_checks', 0)} missing)"
         )
     lines.append("")
     lines.append("Gate verdicts (latest):")
@@ -298,6 +339,11 @@ def render_human(root: Path) -> str:
                 "  Repair gate:     "
                 f"{repair_gate.get('verdict', '?')} - {repair_gate.get('reason', '')}"
             )
+        if release_gate:
+            lines.append(
+                "  Release gate:    "
+                f"{release_gate.get('verdict', '?')} - {release_gate.get('reason', '')}"
+            )
         stages = timeline.get("stages") or []
         if stages:
             lines.append("  Stage timeline:")
@@ -350,10 +396,20 @@ def render_human(root: Path) -> str:
                 f"{repair_report_summary.get('resolved_failures', 0)} resolved / "
                 f"{repair_report_summary.get('remaining_failures', 0)} remaining"
             )
+    if release_report:
+        lines.append("")
+        lines.append("Release:")
+        lines.append(
+            "  Report:          "
+            f"{release_report_summary.get('status', '?')} / "
+            f"{release_report_summary.get('passed_checks', 0)} passed / "
+            f"{release_report_summary.get('failed_checks', 0)} failed / "
+            f"{release_report_summary.get('missing_checks', 0)} missing"
+        )
     lines.append("")
     lines.append(
         "Next action:       "
-        f"{status_next_action(report, gate_verdicts, inspection, repair_plan, repair_report)}"
+        f"{status_next_action(report, gate_verdicts, inspection, repair_plan, repair_report, release_report)}"
     )
     return "\n".join(lines)
 
@@ -364,6 +420,7 @@ def render_json(root: Path) -> str:
     inspection = _load_inspection_report(root)
     repair_plan = _load_repair_plan(root)
     repair_report = _load_repair_report(root)
+    release_report = _load_release_report(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
     report_state = report.get("state", {}) or {}
@@ -372,6 +429,7 @@ def render_json(root: Path) -> str:
     health = report.get("mcp_health", {}) or {}
     continuation = report.get("continuation", {}) or {}
     report_repair = report.get("repair", {}) or {}
+    report_release = report.get("release", {}) or {}
     samvil_tier = report_state.get("samvil_tier") or state.get("samvil_tier") or "standard"
     gate_verdicts = latest_gate_verdicts(claims)
     pending = [c for c in claims if c.get("status") == "pending"]
@@ -402,6 +460,7 @@ def render_json(root: Path) -> str:
                 "continuation": continuation,
                 "stage_timeline": timeline.get("stages") or [],
                 "repair": report_repair,
+                "release": report_release,
             },
             "inspection_report": {
                 "present": bool(inspection),
@@ -426,12 +485,21 @@ def render_json(root: Path) -> str:
                 "remaining_failures": (repair_report.get("summary", {}) or {}).get("remaining_failures", 0),
                 "next_action": repair_report.get("next_action") or repair_plan.get("next_action"),
             },
+            "release": {
+                "report_present": bool(release_report),
+                "report_status": (release_report.get("summary", {}) or {}).get("status"),
+                "passed_checks": (release_report.get("summary", {}) or {}).get("passed_checks", 0),
+                "failed_checks": (release_report.get("summary", {}) or {}).get("failed_checks", 0),
+                "missing_checks": (release_report.get("summary", {}) or {}).get("missing_checks", 0),
+                "next_action": release_report.get("next_action"),
+            },
             "next_recommended_action": status_next_action(
                 report,
                 gate_verdicts,
                 inspection,
                 repair_plan,
                 repair_report,
+                release_report,
             ),
         },
         ensure_ascii=False,
