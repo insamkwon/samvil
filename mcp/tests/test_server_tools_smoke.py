@@ -18,6 +18,7 @@ from samvil_mcp.server import (
     build_qa_recovery_routing,
     build_evolve_context,
     build_evolve_proposal,
+    build_evolve_apply_plan,
     evaluate_qa_convergence,
     get_tier_phases,
     heartbeat_state,
@@ -27,6 +28,8 @@ from samvil_mcp.server import (
     materialize_qa_recovery_routing,
     materialize_evolve_context,
     materialize_evolve_proposal,
+    materialize_evolve_apply_plan,
+    apply_evolve_apply_plan,
     suggest_ac_split,
     synthesize_qa_evidence,
 )
@@ -174,6 +177,38 @@ def test_evolve_proposal_tools_write_artifacts(tmp_path: Path) -> None:
     assert materialized["changes"] == 1
     assert (tmp_path / ".samvil" / "evolve-proposal.json").exists()
     assert (tmp_path / ".samvil" / "evolve-proposal.md").exists()
+
+
+def test_evolve_apply_tools_write_and_apply_seed(tmp_path: Path) -> None:
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / "project.seed.json").write_text(json.dumps({
+        "schema_version": "3.2",
+        "name": "task-app",
+        "mode": "web",
+        "version": 1,
+        "core_experience": {"description": "Create tasks"},
+        "features": [{
+            "name": "tasks",
+            "acceptance_criteria": [
+                {"id": "AC-1", "description": "Create task", "children": [], "status": "pending", "evidence": []}
+            ],
+        }],
+    }), encoding="utf-8")
+    (tmp_path / ".samvil" / "evolve-proposal.json").write_text(json.dumps({
+        "status": "ready",
+        "from_version": 1,
+        "to_version": 2,
+        "proposed_changes": [{"type": "clarify_or_split_ac", "target": "AC-1"}],
+    }), encoding="utf-8")
+
+    built = json.loads(_run(build_evolve_apply_plan(project_root=str(tmp_path))))
+    materialized = json.loads(_run(materialize_evolve_apply_plan(project_root=str(tmp_path))))
+    applied = json.loads(_run(apply_evolve_apply_plan(project_root=str(tmp_path))))
+
+    assert built["status"] == "ready"
+    assert materialized["mutations"] == 1
+    assert applied["status"] == "applied"
+    assert (tmp_path / "seed_history" / "v1.json").exists()
 
 
 # ── AC split (v3-011) ──────────────────────────────────────────

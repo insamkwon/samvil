@@ -84,6 +84,18 @@ mcp__samvil_mcp__materialize_evolve_proposal(project_root="<project_root>")
 Review `.samvil/evolve-proposal.json` and `.samvil/evolve-proposal.md` before
 editing `project.seed.json`.
 
+For v3.27+ guarded apply runs, convert the reviewed proposal to a seed preview:
+```
+mcp__samvil_mcp__materialize_evolve_apply_plan(project_root="<project_root>")
+```
+Review `.samvil/evolve-apply-plan.json`, `.samvil/evolved-seed.preview.json`,
+and `.samvil/evolve-apply-report.md`. Apply with:
+```
+mcp__samvil_mcp__apply_evolve_apply_plan(project_root="<project_root>")
+```
+Do not hand-edit `project.seed.json` when an apply plan is ready; the apply
+tool verifies the original seed hash and writes `seed_history/vN.json`.
+
 ## Step 1b: 4차원 진화 평가
 
 Wonder/Reflect 전에 현재 상태를 4차원으로 평가한다:
@@ -193,7 +205,8 @@ Propose concrete seed changes. Follow your Output Format. Under 400 words.",
 
 ## Step 4: Generate New Seed
 
-Apply reflect-proposer's recommendations to create seed v(N+1):
+Apply reflect-proposer's recommendations to create seed v(N+1). For v3.27+
+runs, prefer the guarded apply plan from Step 1 over manual seed writes:
 
 1. Read current seed
 2. **Backup current seed** (PHI-03):

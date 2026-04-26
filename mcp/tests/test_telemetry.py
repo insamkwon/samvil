@@ -304,6 +304,31 @@ def test_run_report_includes_evolve_proposal_summary(tmp_path):
     assert report["evolve_proposal"]["changes"] == 1
 
 
+def test_run_report_includes_evolve_apply_summary(tmp_path):
+    root = tmp_path / "evolve-apply"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "evolve-apply",
+        "current_stage": "evolve",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    (samvil / "evolve-apply-plan.json").write_text(json.dumps({
+        "status": "ready",
+        "seed_name": "task-app",
+        "from_version": 1,
+        "to_version": 2,
+        "operations": [{"status": "mutated"}],
+        "next_action": "review evolved seed preview, then apply evolve plan",
+    }), encoding="utf-8")
+
+    report = build_run_report(root)
+
+    assert report["evolve_apply"]["present"] is True
+    assert report["evolve_apply"]["status"] == "ready"
+    assert report["evolve_apply"]["mutations"] == 1
+
+
 def test_run_report_categorizes_events_and_stage_durations(tmp_path):
     root = tmp_path / "retry-app"
     samvil = root / ".samvil"

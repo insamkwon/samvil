@@ -435,6 +435,27 @@ def test_status_exposes_evolve_proposal(tmp_path):
     assert "Evolve proposal:" in text
 
 
+def test_status_exposes_evolve_apply(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "evolve-apply-plan.json", {
+        "status": "ready",
+        "from_version": 1,
+        "to_version": 2,
+        "next_action": "review evolved seed preview, then apply evolve plan",
+        "operations": [{"status": "mutated"}],
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["evolve_apply"]["present"] is True
+    assert data["evolve_apply"]["mutations"] == 1
+    assert data["evolve_apply"]["next_action"] == "review evolved seed preview, then apply evolve plan"
+    assert "Apply:   ready (1 mutations)" in text
+    assert "Evolve apply:" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

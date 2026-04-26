@@ -100,6 +100,10 @@ def _load_evolve_proposal(root: Path) -> dict:
     return _load_json(root / ".samvil" / "evolve-proposal.json")
 
 
+def _load_evolve_apply(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "evolve-apply-plan.json")
+
+
 def _load_release_report(root: Path) -> dict:
     return _load_json(root / ".samvil" / "release-report.json")
 
@@ -110,6 +114,10 @@ def _release_bundle_path(root: Path) -> Path:
 
 def _qa_report_path(root: Path) -> Path:
     return root / ".samvil" / "qa-report.md"
+
+
+def _mutation_count(operations: list[dict]) -> int:
+    return sum(1 for item in operations if item.get("status") == "mutated")
 
 
 def latest_gate_verdicts(claims: list[dict]) -> dict[str, dict]:
@@ -254,6 +262,7 @@ def render_human(root: Path) -> str:
     qa_routing = _load_qa_routing(root)
     evolve_context = _load_evolve_context(root)
     evolve_proposal = _load_evolve_proposal(root)
+    evolve_apply = _load_evolve_apply(root)
     release_report = _load_release_report(root)
     release_bundle = _release_bundle_path(root)
     qa_report = _qa_report_path(root)
@@ -270,6 +279,7 @@ def render_human(root: Path) -> str:
     report_qa_routing = report.get("qa_routing", {}) or {}
     report_evolve_context = report.get("evolve_context", {}) or {}
     report_evolve_proposal = report.get("evolve_proposal", {}) or {}
+    report_evolve_apply = report.get("evolve_apply", {}) or {}
     report_release = report.get("release", {}) or {}
     release_gate = report_release.get("gate", {}) or {}
     inspection_summary = inspection.get("summary", {}) or {}
@@ -371,6 +381,12 @@ def render_human(root: Path) -> str:
             "Proposal:"
             f" {evolve_proposal.get('status', '?')} "
             f"({len(evolve_proposal.get('proposed_changes') or [])} changes)"
+        )
+    if evolve_apply:
+        lines.append(
+            "Apply:   "
+            f"{evolve_apply.get('status', '?')} "
+            f"({_mutation_count(evolve_apply.get('operations') or [])} mutations)"
         )
     if release_report:
         lines.append(
@@ -478,6 +494,12 @@ def render_human(root: Path) -> str:
                 f" {report_evolve_proposal.get('status', '?')} / "
                 f"{report_evolve_proposal.get('changes', 0)} changes"
             )
+        if report_evolve_apply.get("present"):
+            lines.append(
+                "  Evolve apply:   "
+                f"{report_evolve_apply.get('status', '?')} / "
+                f"{report_evolve_apply.get('mutations', 0)} mutations"
+            )
         stages = timeline.get("stages") or []
         if stages:
             lines.append("  Stage timeline:")
@@ -582,6 +604,21 @@ def render_human(root: Path) -> str:
             "  Next action:     "
             f"{evolve_proposal.get('next_action') or '?'}"
         )
+    if evolve_apply:
+        lines.append("")
+        lines.append("Evolve apply:")
+        lines.append(
+            "  Status:          "
+            f"{evolve_apply.get('status', '?')} / {_mutation_count(evolve_apply.get('operations') or [])} mutations"
+        )
+        lines.append(
+            "  Version:         "
+            f"v{evolve_apply.get('from_version') or '?'} -> v{evolve_apply.get('to_version') or '?'}"
+        )
+        lines.append(
+            "  Next action:     "
+            f"{evolve_apply.get('next_action') or '?'}"
+        )
     if release_report:
         lines.append("")
         lines.append("Release:")
@@ -614,6 +651,7 @@ def render_json(root: Path) -> str:
     qa_routing = _load_qa_routing(root)
     evolve_context = _load_evolve_context(root)
     evolve_proposal = _load_evolve_proposal(root)
+    evolve_apply = _load_evolve_apply(root)
     release_report = _load_release_report(root)
     release_bundle = _release_bundle_path(root)
     qa_report = _qa_report_path(root)
@@ -629,6 +667,7 @@ def render_json(root: Path) -> str:
     report_qa_routing = report.get("qa_routing", {}) or {}
     report_evolve_context = report.get("evolve_context", {}) or {}
     report_evolve_proposal = report.get("evolve_proposal", {}) or {}
+    report_evolve_apply = report.get("evolve_apply", {}) or {}
     report_release = report.get("release", {}) or {}
     samvil_tier = report_state.get("samvil_tier") or state.get("samvil_tier") or "standard"
     gate_verdicts = latest_gate_verdicts(claims)
@@ -664,6 +703,7 @@ def render_json(root: Path) -> str:
                 "qa_routing": report_qa_routing,
                 "evolve_context": report_evolve_context,
                 "evolve_proposal": report_evolve_proposal,
+                "evolve_apply": report_evolve_apply,
             },
             "inspection_report": {
                 "present": bool(inspection),
@@ -730,6 +770,18 @@ def render_json(root: Path) -> str:
                 "next_action": evolve_proposal.get("next_action"),
                 "path": str(root / ".samvil" / "evolve-proposal.json") if evolve_proposal else "",
                 "run_report": report_evolve_proposal,
+            },
+            "evolve_apply": {
+                "present": bool(evolve_apply),
+                "status": evolve_apply.get("status"),
+                "operations": len(evolve_apply.get("operations") or []),
+                "mutations": _mutation_count(evolve_apply.get("operations") or []),
+                "from_version": evolve_apply.get("from_version"),
+                "to_version": evolve_apply.get("to_version"),
+                "next_action": evolve_apply.get("next_action"),
+                "path": str(root / ".samvil" / "evolve-apply-plan.json") if evolve_apply else "",
+                "preview_path": str(root / ".samvil" / "evolved-seed.preview.json") if evolve_apply else "",
+                "run_report": report_evolve_apply,
             },
             "release": {
                 "report_present": bool(release_report),

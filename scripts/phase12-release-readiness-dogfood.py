@@ -78,6 +78,7 @@ def _evidence(scenario: str, *, fixed: bool) -> dict[str, Any]:
 
 def _checks(*, failed: str = "") -> list[dict[str, Any]]:
     rows = [
+        ("phase25_evolve_apply", "python3 scripts/phase25-evolve-apply-dogfood.py"),
         ("phase24_evolve_proposal", "python3 scripts/phase24-evolve-proposal-dogfood.py"),
         ("phase23_evolve_intake_context", "python3 scripts/phase23-evolve-intake-context-dogfood.py"),
         ("phase22_qa_recovery_routing", "python3 scripts/phase22-qa-recovery-routing-dogfood.py"),
