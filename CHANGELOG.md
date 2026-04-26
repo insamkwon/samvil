@@ -4,6 +4,46 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.23.0] — 2026-04-26 — QA Convergence Gate
+
+Phase 21 of the multi-host SAMVIL architecture. This release turns repeated QA
+revise loops into a deterministic convergence gate so SAMVIL can stop blind
+auto-fix attempts when the same issues keep returning.
+
+### Added
+- `evaluate_qa_convergence` in `mcp/samvil_mcp/qa_synthesis.py` to compare
+  current QA synthesis issue IDs against `project.state.json.qa_history`.
+- Stable QA `issue_ids` from mechanical, functional, quality, and protected
+  write findings.
+- `qa_convergence` gate materialization inside `.samvil/qa-results.json`.
+- `last_qa_convergence` and convergence metadata in `qa_history`.
+- `qa_blocked` / `qa_failed` event drafts when convergence blocks or exhausts.
+- MCP `evaluate_qa_convergence` smoke coverage.
+- `scripts/phase21-qa-convergence-gate-dogfood.py` proving repeated issues
+  become blocked and status/run-report recommend manual intervention.
+- Phase 21 dogfood as the first default release runner check.
+- Phase 21 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.23-phase21.md`.
+
+### Changed
+- `materialize_qa_synthesis` now embeds convergence gate output in persisted
+  QA results and state history.
+- `build_run_report` and `samvil-status` prioritize blocked/failed QA
+  convergence before ordinary `REVISE` next actions.
+- `skills/samvil-qa/SKILL.md` now treats blocked convergence as a stop signal
+  for the Ralph loop.
+
+### Verified
+- Phase 21 dogfood: PASS.
+- QA convergence, status, release, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 885 passed.
+- MCP server import smoke: 156 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.22.0] — 2026-04-26 — QA Materialization
 
 Phase 20 of the multi-host SAMVIL architecture. This release persists the

@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.22.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.23.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.23.0 "QA Convergence Gate"** — 반복 QA revise loop가 실제로 수렴하는지 판단하고, 같은 이슈가 반복되면 blind auto-fix를 멈추는 릴리스입니다.
+
+> **v3.23.0 주요 추가** (2026-04-26):
+> - **QA convergence gate** — `evaluate_qa_convergence`가 `qa_history`와 현재 synthesis의 `issue_ids`를 비교해 `continue / blocked / failed / pass`를 판정.
+> - **Blocked loop protection** — 동일 QA 이슈가 2회 연속 남거나 이슈 수가 줄지 않으면 `qa_blocked` 이벤트와 수동 개입 next action을 생성.
+> - **Status/run-report priority** — `samvil-status`와 `build_run_report`가 blocked/failed convergence를 일반 REVISE보다 우선 노출.
+> - **검증**: 885 unit tests · 156 MCP tools · Phase 21 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.22.0 "QA Materialization"** — 중앙 QA synthesis 판정을 실제 `.samvil` 산출물과 status surface에 고정한 릴리스입니다.
 
