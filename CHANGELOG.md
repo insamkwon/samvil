@@ -4,6 +4,48 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.13.0] — 2026-04-26 — Repair Orchestration Gate
+
+Phase 11 of the multi-host SAMVIL architecture. This release makes repair
+state part of deterministic progression by adding a repair gate that blocks
+unverified repair and passes verified repair into release checks.
+
+### Added
+- Deterministic repair gate evaluation with `pass`, `blocked`, and
+  `not-applicable` verdicts.
+- Run report repair summary and repair gate fields under
+  `.samvil/run-report.json`.
+- Status output for repair gate verdict, reason, and next action in both human
+  and JSON modes.
+- Repair lifecycle event classification for repair start, plan generation,
+  application, verification, and failure events.
+- Repeated repair type policy signal candidates via
+  `derive_repair_policy_signals`.
+- MCP tools: `evaluate_repair_gate` and `derive_repair_policy_signals`.
+- `scripts/phase11-repair-orchestration-dogfood.py`, covering blocked missing
+  plan, blocked unverified plan, and pass verified repair states.
+- Phase 11 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.13-phase11.md`.
+
+### Dogfood
+- `repair-gate-missing-plan`: gate=blocked, next_action=`build repair plan`.
+- `repair-gate-plan-only`: gate=blocked, next_action=repair plan action.
+- `repair-gate-verified`: gate=pass, next_action=`continue to release checks`.
+- Repeated `console-error` repair reports produce
+  `repair-policy:console-error`.
+
+### Verified
+- Phase 11 repair orchestration dogfood: PASS.
+- Phase 10 inspection repair regression: PASS.
+- Phase 8 real browser inspection regression: PASS.
+- Targeted repair/status/telemetry/MCP tests: 28 passed.
+- Full test suite: 830 passed.
+- MCP server import smoke: 145 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.12.0] — 2026-04-26 — Inspection Repair Execution Loop
 
 Phase 10 of the multi-host SAMVIL architecture. This release closes the first
