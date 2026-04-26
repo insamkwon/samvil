@@ -4,6 +4,37 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.34.0] — 2026-04-26 — Consolidation Tier 2
+
+**Theme:** WARM cleanup, module consolidation, doc/CI hygiene.
+
+### Removed
+- 7 unused @mcp.tool() registrations (inspection/repair/evolve dead surface)
+- evolve_proposal.py + evolve_apply.py (merged into evolve_execution.py)
+- release_publish.py + remote_release.py (merged into release_guards.py)
+
+### Internalized (kept as Python helpers, no MCP exposure)
+- 9 inspection/repair/release/evolve helpers
+
+### Changed
+- Schema docs: 4 individual schemas → 1 unified `references/samvil-ssot-schema.md` (+ 4 redirect stubs)
+- CLAUDE.md: 705 → 457 lines (legacy v0.x~v3.2 versions → docs/CHANGELOG-legacy.md; numeric thresholds → references/decision-boundaries.md)
+- Pre-push hook: tag-only pushes no longer trigger version check (was a bug requiring --no-verify on every tag push)
+
+### Added
+- scripts/check-broken-references.sh — verifies all .md cross-links resolve
+- pre-commit section 9: "Markdown reference integrity" (90 files scanned)
+
+### Counts
+- MCP tools: 155 → **139** (-16)
+- Modules: 60 → **57** (-3)
+- Tests: 946 → **938** (-8 MCP wrapper tests removed; behavior coverage preserved)
+
+### Next
+Tier 3 — Phase A skill migration (4 Easy skills → ultra-thin). Target v3.35-v3.38.
+
+---
+
 ## [3.33.0] — 2026-04-25 — Consolidation Tier 1
 
 First milestone of the Consolidation phase. Reduces v3.32.0 noise (49%
