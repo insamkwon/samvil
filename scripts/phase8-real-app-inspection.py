@@ -298,7 +298,7 @@ def main() -> int:
     if args.keep:
         base = Path(tempfile.mkdtemp(prefix="samvil-phase8-"))
     else:
-        temp = tempfile.TemporaryDirectory(prefix="samvil-phase8-")
+        temp = tempfile.TemporaryDirectory(prefix="samvil-phase8-", ignore_cleanup_errors=True)
         base = Path(temp.name)
     try:
         results = [run_scenario(base, scenario) for scenario in SCENARIOS]
