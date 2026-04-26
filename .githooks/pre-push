@@ -1,5 +1,30 @@
 #!/usr/bin/env bash
-# SAMVIL pre-push hook: block push if version wasn't bumped
+# SAMVIL pre-push hook: block push if version wasn't bumped.
+#
+# Skip the version-bump check entirely for tag-only pushes — tags
+# reference an existing commit and never bump plugin.json. The bug this
+# guards against (forgetting to bump version on a main branch push)
+# only applies to branch refs.
+
+# Read the refs being pushed from stdin. Format per `githooks(5)`:
+#   <local_ref> <local_sha> <remote_ref> <remote_sha>
+TAG_ONLY=true
+HAS_REFS=false
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "$local_ref" ] && continue
+  HAS_REFS=true
+  case "$local_ref" in
+    refs/tags/*) ;;  # tag push, OK to skip version check for this ref
+    *) TAG_ONLY=false ;;
+  esac
+done
+
+# If stdin had only tag refs, exit 0 without checking version-bump.
+# If stdin was empty (some clients), fall through and run the check
+# against current HEAD vs origin/main as before.
+if [ "$HAS_REFS" = "true" ] && [ "$TAG_ONLY" = "true" ]; then
+  exit 0
+fi
 
 CURRENT=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])" 2>/dev/null)
 REMOTE=$(git show origin/main:.claude-plugin/plugin.json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])" 2>/dev/null)

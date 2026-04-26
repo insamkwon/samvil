@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .evolve_apply import read_evolve_apply_plan
+from .evolve_execution import read_evolve_apply_plan
 
 EVOLVE_REBUILD_SCHEMA_VERSION = "1.0"
 

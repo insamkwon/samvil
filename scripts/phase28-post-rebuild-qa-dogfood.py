@@ -14,9 +14,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "mcp"))
 
-from samvil_mcp.evolve_apply import apply_evolve_apply_plan, materialize_evolve_apply_plan  # noqa: E402
+from samvil_mcp.evolve_execution import (  # noqa: E402
+    apply_evolve_apply_plan,
+    materialize_evolve_apply_plan,
+    materialize_evolve_proposal,
+)
 from samvil_mcp.evolve_loop import materialize_evolve_context  # noqa: E402
-from samvil_mcp.evolve_proposal import materialize_evolve_proposal  # noqa: E402
 from samvil_mcp.evolve_rebuild import materialize_evolve_rebuild_handoff  # noqa: E402
 from samvil_mcp.evolve_reentry import materialize_rebuild_reentry  # noqa: E402
 from samvil_mcp.post_rebuild_qa import materialize_post_rebuild_qa  # noqa: E402

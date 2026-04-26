@@ -15,7 +15,7 @@ from typing import Any
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "mcp"))
 
-from samvil_mcp.remote_release import evaluate_remote_release_gate, render_remote_release_gate  # noqa: E402
+from samvil_mcp.release_guards import evaluate_remote_release_gate, render_remote_release_gate  # noqa: E402
 
 
 def main() -> int:

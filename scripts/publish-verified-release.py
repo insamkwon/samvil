@@ -15,8 +15,12 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "mcp"))
 
 from samvil_mcp.release import evaluate_release_gate, read_release_report  # noqa: E402
-from samvil_mcp.release_publish import evaluate_publish_guard, release_tag, render_publish_guard  # noqa: E402
-from samvil_mcp.remote_release import evaluate_remote_release_gate  # noqa: E402
+from samvil_mcp.release_guards import (  # noqa: E402
+    evaluate_publish_guard,
+    evaluate_remote_release_gate,
+    release_tag,
+    render_publish_guard,
+)
 
 import importlib.util  # noqa: E402
 
