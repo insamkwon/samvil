@@ -68,6 +68,9 @@ from .diagnostic import (
 from .deploy_targets import (
     evaluate_deploy_target as _evaluate_deploy_target,
 )
+from .retro_aggregate import (
+    aggregate_retro_metrics as _aggregate_retro_metrics,
+)
 from .manifest import (
     build_manifest,
     write_manifest,
@@ -3770,6 +3773,48 @@ async def evaluate_deploy_target(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "evaluate_deploy_target", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_retro_metrics(
+    project_root: str,
+    plugin_root: str = "",
+    suggestion_major: int = 3,
+) -> str:
+    """Aggregate the run-feedback facts samvil-retro needs.
+
+    Reads (best-effort) from `project_root`:
+      - `project.seed.json`, `project.state.json`
+      - `.samvil/metrics.json`, `.samvil/events.jsonl`
+      - `.samvil/mcp-health.jsonl`
+      - `interview-summary.md`
+
+    And `harness-feedback.log` from `plugin_root` (or auto-detected
+    cache path) for cross-run pattern detection + ID assignment.
+
+    Returns a JSON string with:
+      - metrics: per-run counters + stage durations + bottlenecks.
+      - recurring_patterns: keywords seen in 3+ historical suggestions.
+      - flow_compliance: planned vs. actual stage sequence.
+      - agent_utilization: tier-configured vs. spawned agents.
+      - v3_leaf_stats: AC tree leaf events grouped by status.
+      - mcp_health: ok/fail counts + failed-tool top list.
+      - next_suggestion_id: `v<major>-NNN` for the new entry.
+
+    `suggestion_major` defaults to 3 (current schema). Bump when SAMVIL
+    crosses a major-version boundary that resets ID space.
+    """
+    try:
+        result = _aggregate_retro_metrics(
+            project_root,
+            plugin_root=plugin_root or "",
+            suggestion_major=int(suggestion_major or 3),
+        )
+        _log_mcp_health("ok", "aggregate_retro_metrics")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_retro_metrics", str(e))
         return json.dumps({"error": str(e)})
 
 
