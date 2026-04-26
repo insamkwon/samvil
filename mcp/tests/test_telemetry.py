@@ -14,6 +14,8 @@ from samvil_mcp.telemetry import (
     render_run_report,
     write_run_report,
 )
+from samvil_mcp.inspection import build_inspection_report, write_inspection_report
+from samvil_mcp.repair import build_repair_plan, write_repair_plan
 
 
 def _jsonl(path: Path, rows: list[dict]) -> None:
@@ -117,6 +119,44 @@ def test_render_run_report_includes_operator_summary(tmp_path):
     assert "Pending Claims" in text
 
 
+def test_run_report_includes_blocking_repair_gate(tmp_path):
+    root = tmp_path / "repair-blocked"
+    root.mkdir()
+    (root / "shot.png").write_text("png", encoding="utf-8")
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "repair-blocked",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    before = build_inspection_report(root, evidence={
+        "schema_version": "1.0",
+        "scenario": "repair-blocked",
+        "viewports": [
+            {
+                "name": "desktop",
+                "loaded": True,
+                "console_errors": ["ReferenceError: broken"],
+                "overflow_count": 0,
+                "screenshot": "shot.png",
+            }
+        ],
+        "interactions": [
+            {"id": "primary-flow", "status": "pass", "message": "primary flow worked"}
+        ],
+    })
+    write_inspection_report(before, root)
+    plan = build_repair_plan(root, inspection_report=before)
+    write_repair_plan(plan, root)
+
+    report = build_run_report(root)
+    rendered = render_run_report(report)
+
+    assert report["repair"]["gate"]["verdict"] == "blocked"
+    assert report["repair"]["gate"]["reason"] == "repair plan exists but repair is not verified"
+    assert report["next_action"].startswith("Fix browser console")
+    assert "Repair gate: blocked" in rendered
+
+
 def test_run_report_categorizes_events_and_stage_durations(tmp_path):
     root = tmp_path / "retry-app"
     samvil = root / ".samvil"
@@ -175,6 +215,29 @@ def test_install_stage_is_not_blocked_by_stall_substring(tmp_path):
     assert by_stage["install"]["status"] == "complete"
     assert by_stage["qa"]["status"] == "blocked"
     assert by_stage["deploy"]["status"] == "blocked"
+
+
+def test_repair_lifecycle_events_are_visible(tmp_path):
+    root = tmp_path / "repair-events"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "repair-events",
+        "current_stage": "repair",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    _jsonl(samvil / "events.jsonl", [
+        {"event_type": "repair_started", "stage": "repair", "timestamp": "2026-04-26T01:00:00Z"},
+        {"event_type": "repair_plan_generated", "stage": "repair", "timestamp": "2026-04-26T01:01:00Z"},
+        {"event_type": "repair_applied", "stage": "repair", "timestamp": "2026-04-26T01:02:00Z"},
+        {"event_type": "repair_verified", "stage": "repair", "timestamp": "2026-04-26T01:03:00Z"},
+    ])
+
+    report = build_run_report(root)
+    by_stage = {stage["stage"]: stage for stage in report["timeline"]["stages"]}
+
+    assert by_stage["repair"]["status"] == "complete"
+    assert by_stage["repair"]["categories"]["complete"] == 2
 
 
 def test_derive_retro_observations_from_report_findings(tmp_path):

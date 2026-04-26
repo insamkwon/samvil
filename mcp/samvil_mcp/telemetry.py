@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .repair import repair_summary as _repair_summary
+
 RUN_REPORT_SCHEMA_VERSION = "1.0"
 RETRO_OBSERVATION_SCHEMA_VERSION = "1.0"
 
@@ -78,8 +80,9 @@ def build_run_report(
     health_summary = _health_summary(health)
     event_summary = _event_summary(events)
     timeline_summary = _timeline_summary(events)
+    repair_summary = _repair_summary(root)
 
-    next_action = _next_action(marker, gate_verdicts, health_summary)
+    next_action = _next_action(marker, gate_verdicts, health_summary, repair_summary)
 
     return {
         "schema_version": RUN_REPORT_SCHEMA_VERSION,
@@ -106,6 +109,7 @@ def build_run_report(
             "latest_gate_verdicts": gate_verdicts,
         },
         "mcp_health": health_summary,
+        "repair": repair_summary,
         "continuation": {
             "present": bool(marker),
             "next_skill": marker.get("next_skill"),
@@ -254,6 +258,8 @@ def render_run_report(report: dict[str, Any]) -> str:
     health = report.get("mcp_health", {}) or {}
     timeline = report.get("timeline", {}) or {}
     continuation = report.get("continuation", {}) or {}
+    repair = report.get("repair", {}) or {}
+    repair_gate = repair.get("gate", {}) or {}
 
     lines = [
         f"# Run Report — {state.get('project_name') or 'unknown'}",
@@ -267,6 +273,10 @@ def render_run_report(report: dict[str, Any]) -> str:
         f"- Claims: {claims.get('total', 0)} total",
         f"- MCP health: {health.get('failures', 0)} failures / {health.get('total', 0)} events",
     ]
+    if repair_gate:
+        lines.append(
+            f"- Repair gate: {repair_gate.get('verdict')} ({repair_gate.get('reason')})"
+        )
     if continuation.get("present"):
         lines.append(
             f"- Continuation: {continuation.get('from_stage')} -> {continuation.get('next_skill')}"
@@ -283,6 +293,17 @@ def render_run_report(report: dict[str, Any]) -> str:
                 f"- {stage.get('stage')}: {stage.get('status')} "
                 f"({duration_text}, events={stage.get('event_count', 0)})"
             )
+
+    if repair:
+        lines.extend(["", "## Repair"])
+        lines.append(f"- Inspection: {repair.get('inspection_status')} ({repair.get('inspection_failed_checks', 0)} failed checks)")
+        lines.append(f"- Plan: {repair.get('plan_status')} ({repair.get('plan_actions', 0)} actions)")
+        lines.append(
+            f"- Report: {repair.get('report_status')} "
+            f"({repair.get('resolved_failures', 0)} resolved / {repair.get('remaining_failures', 0)} remaining)"
+        )
+        if repair_gate:
+            lines.append(f"- Gate next action: {repair_gate.get('next_action')}")
 
     gate_verdicts = claims.get("latest_gate_verdicts") or []
     if gate_verdicts:
@@ -413,6 +434,8 @@ def _event_category(event_type: str) -> str:
     et = event_type.lower()
     tokens = _event_tokens(et)
     token_set = set(tokens)
+    if "repair" in token_set and {"applied", "verified"} & token_set:
+        return "complete"
     if {"retry", "retried", "retries", "reawake"} & token_set or et == "fix_applied":
         return "retry"
     if {"blocked", "stall", "stalled"} & token_set:
@@ -556,7 +579,11 @@ def _next_action(
     marker: dict[str, Any],
     gate_verdicts: list[dict[str, Any]],
     health: dict[str, Any],
+    repair: dict[str, Any] | None = None,
 ) -> str:
+    repair_gate = (repair or {}).get("gate", {}) or {}
+    if repair_gate.get("verdict") == "blocked":
+        return str(repair_gate.get("next_action") or "repair gate blocked")
     blocking = [
         gate for gate in gate_verdicts
         if gate.get("verdict") not in (None, "pass", "skip", "unknown")
@@ -564,6 +591,8 @@ def _next_action(
     if blocking:
         gate = blocking[0]
         return f"resolve gate {gate.get('subject')} ({gate.get('verdict')})"
+    if repair_gate.get("verdict") == "pass":
+        return str(repair_gate.get("next_action") or "continue after verified repair")
     if marker.get("next_skill"):
         return f"continue with {marker['next_skill']}"
     if health.get("failures"):

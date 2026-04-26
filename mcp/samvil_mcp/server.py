@@ -164,6 +164,8 @@ from .telemetry import (
 from .repair import (
     build_repair_plan as _build_repair_plan,
     build_repair_report as _build_repair_report,
+    derive_repair_policy_signals as _derive_repair_policy_signals,
+    evaluate_repair_gate as _evaluate_repair_gate,
     read_repair_plan as _read_repair_plan_file,
     read_repair_report as _read_repair_report_file,
     render_repair_plan as _render_repair_plan,
@@ -3748,6 +3750,37 @@ def render_repair_report(project_root: str, refresh: bool = False) -> dict:
         return {"status": "ok", "context": _render_repair_report(report)}
     except Exception as e:
         _log_mcp_health("fail", "render_repair_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def evaluate_repair_gate(project_root: str) -> dict:
+    """Evaluate whether repair state blocks progression."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        gate = _evaluate_repair_gate(project_root)
+        _log_mcp_health("ok", "evaluate_repair_gate")
+        return {"status": "ok", "gate": gate}
+    except Exception as e:
+        _log_mcp_health("fail", "evaluate_repair_gate", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def derive_repair_policy_signals(repair_reports_json: str, threshold: int = 2) -> dict:
+    """Derive retro/policy candidates from repeated repair failure types."""
+    try:
+        data = json.loads(repair_reports_json)
+        reports = data if isinstance(data, list) else data.get("reports", [])
+        if not isinstance(reports, list):
+            return {"status": "error", "error": "repair_reports_json must contain a list"}
+        signals = _derive_repair_policy_signals(reports, threshold=threshold)
+        _log_mcp_health("ok", "derive_repair_policy_signals")
+        return {"status": "ok", "count": len(signals), "signals": signals}
+    except Exception as e:
+        _log_mcp_health("fail", "derive_repair_policy_signals", str(e))
         return {"status": "error", "error": str(e)}
 
 

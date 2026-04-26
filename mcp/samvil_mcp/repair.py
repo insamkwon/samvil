@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
+from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
@@ -183,6 +184,136 @@ def render_repair_report(report: dict[str, Any]) -> str:
         for failure in remaining:
             lines.append(f"- {failure.get('type')}: {failure.get('check_id')}")
     return "\n".join(lines)
+
+
+def evaluate_repair_gate(
+    project_root: Path | str,
+    *,
+    inspection_report: dict[str, Any] | None = None,
+    repair_plan: dict[str, Any] | None = None,
+    repair_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return deterministic repair gate verdict for progression decisions."""
+    root = Path(project_root)
+    inspection = inspection_report if inspection_report is not None else read_inspection_report(root) or {}
+    plan = repair_plan if repair_plan is not None else read_repair_plan(root) or {}
+    report = repair_report if repair_report is not None else read_repair_report(root) or {}
+
+    inspection_status = (inspection.get("summary", {}) or {}).get("status")
+    report_status = (report.get("summary", {}) or {}).get("status")
+    plan_status = (plan.get("summary", {}) or {}).get("status")
+    failed_checks = int((inspection.get("summary", {}) or {}).get("failed_checks") or 0)
+    plan_actions = int((plan.get("summary", {}) or {}).get("total_actions") or 0)
+    remaining_failures = int((report.get("summary", {}) or {}).get("remaining_failures") or 0)
+
+    if inspection_status in {None, "pass", "warn"} and not report:
+        verdict = "not-applicable"
+        reason = "inspection has no blocking failures"
+        next_action = "continue"
+    elif report_status == "verified":
+        verdict = "pass"
+        reason = "repair report verified after inspection"
+        next_action = "continue to release checks"
+    elif report_status == "failed" or remaining_failures > 0:
+        verdict = "blocked"
+        reason = "repair report still has remaining failures"
+        next_action = report.get("next_action") or "continue repair"
+    elif inspection_status == "fail" and not plan:
+        verdict = "blocked"
+        reason = "inspection failed but no repair plan exists"
+        next_action = "build repair plan"
+    elif inspection_status == "fail" and plan_status == "ready" and not report:
+        verdict = "blocked"
+        reason = "repair plan exists but repair is not verified"
+        next_action = plan.get("next_action") or "execute repair plan"
+    elif inspection_status == "fail":
+        verdict = "blocked"
+        reason = "inspection failure is not repaired"
+        next_action = "build repair report after reinspection"
+    else:
+        verdict = "not-applicable"
+        reason = "repair gate found no blocking state"
+        next_action = "continue"
+
+    return {
+        "gate": "repair",
+        "verdict": verdict,
+        "reason": reason,
+        "next_action": next_action,
+        "inspection_status": inspection_status,
+        "failed_checks": failed_checks,
+        "repair_plan_status": plan_status,
+        "repair_actions": plan_actions,
+        "repair_report_status": report_status,
+        "remaining_failures": remaining_failures,
+    }
+
+
+def repair_summary(project_root: Path | str) -> dict[str, Any]:
+    """Read project repair artifacts into a compact run-report summary."""
+    root = Path(project_root)
+    inspection = read_inspection_report(root) or {}
+    plan = read_repair_plan(root) or {}
+    report = read_repair_report(root) or {}
+    gate = evaluate_repair_gate(
+        root,
+        inspection_report=inspection,
+        repair_plan=plan,
+        repair_report=report,
+    )
+    return {
+        "inspection_present": bool(inspection),
+        "inspection_status": (inspection.get("summary", {}) or {}).get("status"),
+        "inspection_failed_checks": (inspection.get("summary", {}) or {}).get("failed_checks", 0),
+        "plan_present": bool(plan),
+        "plan_status": (plan.get("summary", {}) or {}).get("status"),
+        "plan_actions": (plan.get("summary", {}) or {}).get("total_actions", 0),
+        "report_present": bool(report),
+        "report_status": (report.get("summary", {}) or {}).get("status"),
+        "resolved_failures": (report.get("summary", {}) or {}).get("resolved_failures", 0),
+        "remaining_failures": (report.get("summary", {}) or {}).get("remaining_failures", 0),
+        "gate": gate,
+    }
+
+
+def derive_repair_policy_signals(
+    repair_reports: list[dict[str, Any]],
+    *,
+    threshold: int = 2,
+) -> list[dict[str, Any]]:
+    """Suggest policy candidates when the same repair type repeats."""
+    counts: dict[str, int] = {}
+    examples: dict[str, list[str]] = {}
+    for report in repair_reports:
+        scenario = str(report.get("scenario") or "unknown")
+        for action in report.get("actions") or []:
+            failure_type = str(action.get("failure_type") or "")
+            if not failure_type:
+                continue
+            counts[failure_type] = counts.get(failure_type, 0) + 1
+            examples.setdefault(failure_type, []).append(f"{scenario}:{action.get('check_id')}")
+
+    signals: list[dict[str, Any]] = []
+    for failure_type, count in sorted(counts.items()):
+        if count < threshold:
+            continue
+        dedupe_key = f"repair-policy:{failure_type}"
+        signals.append({
+            "id": f"retro_{sha1(dedupe_key.encode('utf-8')).hexdigest()[:12]}",
+            "source": "repair.policy",
+            "severity": "medium",
+            "title": f"Repeated repair type: {failure_type}",
+            "evidence": [
+                f"failure_type={failure_type}",
+                f"count={count}",
+                f"examples={', '.join(examples.get(failure_type, [])[:5])}",
+            ],
+            "suggested_action": (
+                f"Promote a reusable checklist or domain guidance item for {failure_type} repairs."
+            ),
+            "dedupe_key": dedupe_key,
+        })
+    return signals
 
 
 def _repair_action(index: int, failure: dict[str, Any]) -> dict[str, Any]:

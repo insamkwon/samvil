@@ -233,6 +233,32 @@ def test_status_includes_verified_repair_report(tmp_path):
     assert "Repair:  verified (1 resolved / 0 remaining)" in text
 
 
+def test_status_exposes_run_report_repair_gate(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "run-report.json", {
+        "state": {"current_stage": "qa", "samvil_tier": "standard"},
+        "claims": {"pending_subjects": []},
+        "timeline": {},
+        "mcp_health": {},
+        "repair": {
+            "gate": {
+                "verdict": "blocked",
+                "reason": "repair plan exists but repair is not verified",
+                "next_action": "execute repair plan",
+            }
+        },
+        "next_action": "execute repair plan",
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["run_report"]["repair"]["gate"]["verdict"] == "blocked"
+    assert "Gate:    repair=blocked" in text
+    assert "Repair gate:     blocked - repair plan exists" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

@@ -10,6 +10,8 @@ from samvil_mcp.repair import after_inspection_report_path
 from samvil_mcp.server import (
     build_repair_plan,
     build_repair_report,
+    derive_repair_policy_signals,
+    evaluate_repair_gate,
     read_repair_plan,
     read_repair_report,
     render_repair_plan,
@@ -67,6 +69,7 @@ def test_repair_plan_and_report_tools(tmp_path):
     report = build_repair_report(str(root), persist=True)
     read_report = read_repair_report(str(root))
     rendered_report = render_repair_report(str(root))
+    gate = evaluate_repair_gate(str(root))
 
     assert plan["status"] == "ok"
     assert Path(plan["path"]).exists()
@@ -78,8 +81,22 @@ def test_repair_plan_and_report_tools(tmp_path):
     assert read_report["status"] == "ok"
     assert rendered_report["status"] == "ok"
     assert "repair verified" in rendered_report["context"]
+    assert gate["status"] == "ok"
+    assert gate["gate"]["verdict"] == "pass"
 
 
 def test_repair_tools_validate_project_root():
     assert build_repair_plan("", persist=True)["status"] == "error"
     assert build_repair_report("", persist=True)["status"] == "error"
+
+
+def test_derive_repair_policy_signals_tool(tmp_path):
+    root = _project(tmp_path)
+    build_repair_plan(str(root), persist=True)
+    report = build_repair_report(str(root), persist=True)["report"]
+
+    result = derive_repair_policy_signals(json.dumps([report, {**report, "scenario": "other"}]))
+
+    assert result["status"] == "ok"
+    assert result["count"] == 1
+    assert result["signals"][0]["dedupe_key"] == "repair-policy:console-error"

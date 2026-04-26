@@ -181,6 +181,8 @@ def render_human(root: Path) -> str:
     timeline = report.get("timeline", {}) or {}
     health = report.get("mcp_health", {}) or {}
     continuation = report.get("continuation", {}) or {}
+    report_repair = report.get("repair", {}) or {}
+    repair_gate = report_repair.get("gate", {}) or {}
     inspection_summary = inspection.get("summary", {}) or {}
     repair_plan_summary = repair_plan.get("summary", {}) or {}
     repair_report_summary = repair_report.get("summary", {}) or {}
@@ -210,6 +212,11 @@ def render_human(root: Path) -> str:
     lines.append(f"Tier:    {samvil_tier}")
     if report:
         lines.append(f"Report:  {report.get('generated_at') or '?'}")
+    if repair_gate:
+        lines.append(
+            "Gate:    "
+            f"repair={repair_gate.get('verdict', '?')}"
+        )
     if inspection:
         lines.append(
             "Inspect: "
@@ -286,6 +293,11 @@ def render_human(root: Path) -> str:
             )
         else:
             lines.append("  Continuation:    (none)")
+        if repair_gate:
+            lines.append(
+                "  Repair gate:     "
+                f"{repair_gate.get('verdict', '?')} - {repair_gate.get('reason', '')}"
+            )
         stages = timeline.get("stages") or []
         if stages:
             lines.append("  Stage timeline:")
@@ -359,6 +371,7 @@ def render_json(root: Path) -> str:
     timeline = report.get("timeline", {}) or {}
     health = report.get("mcp_health", {}) or {}
     continuation = report.get("continuation", {}) or {}
+    report_repair = report.get("repair", {}) or {}
     samvil_tier = report_state.get("samvil_tier") or state.get("samvil_tier") or "standard"
     gate_verdicts = latest_gate_verdicts(claims)
     pending = [c for c in claims if c.get("status") == "pending"]
@@ -388,6 +401,7 @@ def render_json(root: Path) -> str:
                 "mcp_events_total": health.get("total", 0),
                 "continuation": continuation,
                 "stage_timeline": timeline.get("stages") or [],
+                "repair": report_repair,
             },
             "inspection_report": {
                 "present": bool(inspection),
