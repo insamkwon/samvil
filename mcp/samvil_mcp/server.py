@@ -71,6 +71,9 @@ from .deploy_targets import (
 from .retro_aggregate import (
     aggregate_retro_metrics as _aggregate_retro_metrics,
 )
+from .evolve_aggregate import (
+    aggregate_evolve_context as _aggregate_evolve_context,
+)
 from .manifest import (
     build_manifest,
     write_manifest,
@@ -3815,6 +3818,36 @@ async def aggregate_retro_metrics(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "aggregate_retro_metrics", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_evolve_context(project_root: str) -> str:
+    """Boot-time aggregator for the samvil-evolve skill body (T4.2 ultra-thin).
+
+    Reads (best-effort) from `project_root`:
+      - `project.seed.json`, `project.state.json`, `project.config.json`
+      - `.samvil/qa-results.json`
+      - `interview-summary.md`
+
+    Returns a JSON string with:
+      - auto_trigger: whether Evolve should be auto-suggested + reasons.
+      - mode: resolved evolve_mode + cycle/build quota state.
+      - cycle: current cycle index + max + cap status.
+      - four_dim_baseline: raw inputs for Quality/Intent/Purpose/Beyond eval.
+      - errors: non-fatal warnings.
+
+    Companion to existing `materialize_evolve_context`,
+    `check_convergence_gates`, `record_qa_failure`, etc. — this tool covers
+    the auto-trigger / mode / 4-dim pre-flight that were inline in the
+    legacy 482-LOC skill body.
+    """
+    try:
+        result = _aggregate_evolve_context(project_root)
+        _log_mcp_health("ok", "aggregate_evolve_context")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_evolve_context", str(e))
         return json.dumps({"error": str(e)})
 
 
