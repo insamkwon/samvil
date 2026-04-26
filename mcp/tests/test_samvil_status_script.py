@@ -398,6 +398,24 @@ def test_status_exposes_qa_recovery_routing(tmp_path):
     assert "Route:           samvil-evolve - functional acceptance criteria did not converge" in text
 
 
+def test_status_exposes_evolve_context(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "evolve-context.json", {
+        "routing": {"next_skill": "samvil-evolve", "route_type": "seed_evolve"},
+        "focus": {"area": "functional_spec", "issue_count": 2},
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["evolve_context"]["present"] is True
+    assert data["evolve_context"]["focus_area"] == "functional_spec"
+    assert data["evolve_context"]["next_skill"] == "samvil-evolve"
+    assert "Evolve:  functional_spec (2 issues)" in text
+    assert "Evolve context:" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

@@ -2,7 +2,16 @@
 
 import pytest
 from samvil_mcp.seed_manager import compare_seeds, check_convergence
-from samvil_mcp.evolve_loop import validate_evolved_seed, generate_evolve_context
+import json
+
+from samvil_mcp.evolve_loop import (
+    build_evolve_context_from_project,
+    evolve_context_summary,
+    generate_evolve_context,
+    materialize_evolve_context,
+    read_evolve_context,
+    validate_evolved_seed,
+)
 
 
 SEED_V1 = {
@@ -127,3 +136,47 @@ def test_evolve_context_with_history():
     context = generate_evolve_context(v2, qa, [SEED_V1, v2])
     assert "convergence" in context
     assert context["convergence"]["generations"] == 2
+
+
+def test_file_based_evolve_context_includes_qa_route_and_focus(tmp_path):
+    (tmp_path / "project.seed.json").write_text(json.dumps(SEED_V1), encoding="utf-8")
+    (tmp_path / "project.state.json").write_text(json.dumps({
+        "session_id": "s1",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+        "qa_history": [{"iteration": 1}, {"iteration": 2}],
+    }), encoding="utf-8")
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / ".samvil" / "qa-results.json").write_text(json.dumps({
+        "synthesis": {
+            "verdict": "REVISE",
+            "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"],
+            "pass2": {"counts": {"UNIMPLEMENTED": 1}},
+            "pass3": {"verdict": "PASS"},
+        },
+        "convergence": {
+            "verdict": "blocked",
+            "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"],
+        },
+    }), encoding="utf-8")
+    (tmp_path / ".samvil" / "qa-routing.json").write_text(json.dumps({
+        "primary_route": {
+            "next_skill": "samvil-evolve",
+            "route_type": "seed_evolve",
+            "reason": "functional acceptance criteria did not converge",
+            "next_action": "evolve the seed or acceptance criteria before another build loop",
+        },
+        "next_action": "evolve the seed or acceptance criteria before another build loop",
+    }), encoding="utf-8")
+
+    context = build_evolve_context_from_project(tmp_path)
+    result = materialize_evolve_context(tmp_path)
+
+    assert context["current_seed"]["name"] == "task-app"
+    assert context["routing"]["next_skill"] == "samvil-evolve"
+    assert context["focus"]["area"] == "functional_spec"
+    assert context["qa"]["issue_ids"] == ["pass2:AC-1:UNIMPLEMENTED"]
+    assert context["state"]["qa_history_count"] == 2
+    assert result["next_skill"] == "samvil-evolve"
+    assert read_evolve_context(tmp_path)["focus"]["area"] == "functional_spec"
+    assert evolve_context_summary(tmp_path)["focus_area"] == "functional_spec"

@@ -28,10 +28,13 @@ Improve the seed based on QA feedback. Spawn wonder + reflect agents, generate a
 1. Read `project.seed.json` → current seed
 2. Read `project.state.json` → current stage, qa_history, `session_id`
 3. Read `project.config.json` → `evolve_max_cycles`, `evolve_mode`, `max_total_builds`
-4. Read `.samvil/qa-report.md` → QA results
-5. Read `decisions.log` → binding decisions (if exists)
-6. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
-7. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="evolve_gen", stage="evolve", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:evolve"` 자동 기록.
+4. Read `.samvil/evolve-context.json` if present. If missing, call
+   `mcp__samvil_mcp__materialize_evolve_context(project_root="<project_root>")`.
+5. Read `.samvil/qa-report.md`, `.samvil/qa-results.json`, and
+   `.samvil/qa-routing.json` → QA ground truth and recovery route.
+6. Read `decisions.log` → binding decisions (if exists)
+7. **Follow `references/boot-sequence.md`** for metrics start/end and checkpoint rules.
+8. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="evolve_gen", stage="evolve", data="{}")`. Best-effort, MCP 내부 auto-claim이 `.samvil/claims.jsonl`에 `evidence_posted subject="stage:evolve"` 자동 기록.
 
 ## Step 0: Mode Selection
 
@@ -66,6 +69,13 @@ Wonder → Reflect → seed 수정 → Build → QA
 mcp__samvil_mcp__get_evolve_context(session_id="<session_id>", qa_result='<qa-report JSON summary>')
 → Returns: current seed, QA result, convergence trend, previous changes
 ```
+For v3.25+ file-based runs, prefer:
+```
+mcp__samvil_mcp__materialize_evolve_context(project_root="<project_root>")
+```
+Then use `.samvil/evolve-context.json` as the source of truth for current seed,
+QA issue IDs, blocked convergence reason, recovery route, and focused evolve
+instructions.
 
 ## Step 1b: 4차원 진화 평가
 
@@ -104,6 +114,7 @@ Agent(
 ## Context
 Current seed (v{N}): <seed JSON>
 QA Report: <qa-report.md content>
+Evolve Context: <.samvil/evolve-context.json, especially focus + routing>
 {convergence info if available}
 
 ## Additional Ground Truth
@@ -163,6 +174,7 @@ Agent(
 ## Context
 Current seed (v{N}): <seed JSON>
 Wonder Analysis: <wonder output>
+Evolve Context: <.samvil/evolve-context.json focus + routing>
 AC Split Candidates (v3-011, Step 2.5): <JSON array from suggest_ac_split; empty if none>
 {convergence info}
 

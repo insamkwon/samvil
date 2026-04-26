@@ -259,6 +259,26 @@ def test_run_report_prioritizes_qa_recovery_routing(tmp_path):
     assert report["next_action"] == "evolve the seed or acceptance criteria before another build loop"
 
 
+def test_run_report_includes_evolve_context_summary(tmp_path):
+    root = tmp_path / "evolve-context"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "evolve-context",
+        "current_stage": "evolve",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    (samvil / "evolve-context.json").write_text(json.dumps({
+        "routing": {"next_skill": "samvil-evolve", "route_type": "seed_evolve"},
+        "focus": {"area": "functional_spec", "issue_count": 2},
+    }), encoding="utf-8")
+
+    report = build_run_report(root)
+
+    assert report["evolve_context"]["present"] is True
+    assert report["evolve_context"]["focus_area"] == "functional_spec"
+
+
 def test_run_report_categorizes_events_and_stage_durations(tmp_path):
     root = tmp_path / "retry-app"
     samvil = root / ".samvil"

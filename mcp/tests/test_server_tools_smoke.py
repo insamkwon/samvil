@@ -16,6 +16,7 @@ import pytest
 from samvil_mcp.server import (
     build_reawake_message,
     build_qa_recovery_routing,
+    build_evolve_context,
     evaluate_qa_convergence,
     get_tier_phases,
     heartbeat_state,
@@ -23,6 +24,7 @@ from samvil_mcp.server import (
     is_state_stalled,
     materialize_qa_synthesis,
     materialize_qa_recovery_routing,
+    materialize_evolve_context,
     suggest_ac_split,
     synthesize_qa_evidence,
 )
@@ -127,6 +129,31 @@ def test_qa_recovery_routing_tools_write_next_skill_marker(tmp_path: Path) -> No
     assert built["primary_route"]["next_skill"] == "samvil-evolve"
     assert materialized["primary_route"]["next_skill"] == "samvil-evolve"
     assert (tmp_path / ".samvil" / "next-skill.json").exists()
+
+
+def test_evolve_context_tools_write_context(tmp_path: Path) -> None:
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / "project.seed.json").write_text(json.dumps({
+        "name": "task-app",
+        "mode": "web",
+        "version": 1,
+        "core_experience": {"description": "Create tasks"},
+        "features": [{"name": "tasks"}],
+    }), encoding="utf-8")
+    (tmp_path / ".samvil" / "qa-results.json").write_text(json.dumps({
+        "synthesis": {"verdict": "REVISE", "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"]},
+        "convergence": {"verdict": "blocked", "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"]},
+    }), encoding="utf-8")
+    (tmp_path / ".samvil" / "qa-routing.json").write_text(json.dumps({
+        "primary_route": {"next_skill": "samvil-evolve", "route_type": "seed_evolve"},
+    }), encoding="utf-8")
+
+    built = json.loads(_run(build_evolve_context(project_root=str(tmp_path))))
+    materialized = json.loads(_run(materialize_evolve_context(project_root=str(tmp_path))))
+
+    assert built["focus"]["area"] == "functional_spec"
+    assert materialized["next_skill"] == "samvil-evolve"
+    assert (tmp_path / ".samvil" / "evolve-context.json").exists()
 
 
 # ── AC split (v3-011) ──────────────────────────────────────────

@@ -14,6 +14,7 @@ from .repair import repair_summary as _repair_summary
 from .release import release_summary as _release_summary
 from .qa_synthesis import qa_summary as _qa_summary
 from .qa_routing import qa_routing_summary as _qa_routing_summary
+from .evolve_loop import evolve_context_summary as _evolve_context_summary
 
 RUN_REPORT_SCHEMA_VERSION = "1.0"
 RETRO_OBSERVATION_SCHEMA_VERSION = "1.0"
@@ -87,6 +88,7 @@ def build_run_report(
     release_summary = _release_summary(root)
     qa_summary = _qa_summary(root)
     qa_routing_summary = _qa_routing_summary(root)
+    evolve_context_summary = _evolve_context_summary(root)
 
     next_action = _next_action(
         marker,
@@ -127,6 +129,7 @@ def build_run_report(
         "release": release_summary,
         "qa": qa_summary,
         "qa_routing": qa_routing_summary,
+        "evolve_context": evolve_context_summary,
         "continuation": {
             "present": bool(marker),
             "next_skill": marker.get("next_skill"),

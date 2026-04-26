@@ -1309,6 +1309,28 @@ async def materialize_qa_recovery_routing(project_root: str, persist_next_skill:
 
 
 @mcp.tool()
+async def build_evolve_context(project_root: str) -> str:
+    """Build file-based evolve intake context from project artifacts."""
+    try:
+        from .evolve_loop import build_evolve_context_from_project as _build
+        return json.dumps(_build(project_root))
+    except Exception as e:
+        _log_mcp_health("fail", "build_evolve_context", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def materialize_evolve_context(project_root: str) -> str:
+    """Persist file-based evolve intake context to .samvil/evolve-context.json."""
+    try:
+        from .evolve_loop import materialize_evolve_context as _materialize
+        return json.dumps(_materialize(project_root))
+    except Exception as e:
+        _log_mcp_health("fail", "materialize_evolve_context", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def validate_evidence(evidences_json: str, project_root: str) -> str:
     """Validate a list of file:line evidence strings against project files.
 
