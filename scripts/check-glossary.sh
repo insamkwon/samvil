@@ -34,7 +34,7 @@ declare -a CHECKS=(
 # changelog). We flag it only in NEW artifacts: skills/, agents/, mcp/,
 # references/ (excluding explicit allow-list).
 EVOLVE_GATE_PATHS=("mcp/" "skills/" "agents/")
-EVOLVE_GATE_ALLOW_REGEX='(convergence_gate.py|evolve-protocol.md|glossary.md)'
+EVOLVE_GATE_ALLOW_REGEX='(convergence_check.py|evolve-protocol.md|glossary.md)'
 
 VIOLATIONS=0
 

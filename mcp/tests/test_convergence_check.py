@@ -1,8 +1,8 @@
-"""Tests for convergence_gate.py + regression_detector.py (v2.5.0, Phase 4)."""
+"""Tests for convergence_check.py (consolidated from prior test_convergence_gate.py + test_regression_detector.py — T1.3)."""
 
 import pytest
 
-from samvil_mcp.convergence_gate import (
+from samvil_mcp.convergence_check import (
     check_all_gates,
     check_eval_gate,
     check_per_ac_gate,
@@ -10,8 +10,9 @@ from samvil_mcp.convergence_gate import (
     check_evolution_gate,
     check_validation_gate,
     GateConfig,
+    detect_regressions,
+    has_regressions,
 )
-from samvil_mcp.regression_detector import detect_regressions, has_regressions
 
 
 # ── Regression detector ──────────────────────────────────────

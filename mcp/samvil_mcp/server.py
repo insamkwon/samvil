@@ -257,29 +257,6 @@ def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
 # ── Session tools ─────────────────────────────────────────────
 
 
-@mcp.tool()
-async def health_check() -> str:
-    """Check MCP server health. Returns server status and DB connectivity."""
-    try:
-        store = await get_store()
-        # Test DB connectivity with a lightweight query
-        sessions = await store.list_sessions(limit=1)
-        return json.dumps({
-            "status": "ok",
-            "db_path": str(DB_PATH),
-            "sessions_accessible": True,
-        })
-    except Exception as e:
-        _log_mcp_health("fail", "health_check", str(e))
-        return json.dumps({
-            "status": "error",
-            "error": str(e),
-            "db_path": str(DB_PATH),
-        })
-
-
-
-
 
 @mcp.tool()
 async def create_session(
@@ -345,21 +322,6 @@ async def list_sessions(limit: int = 10) -> str:
         "current_stage": s.current_stage,
         "updated_at": s.updated_at,
     } for s in sessions])
-
-
-@mcp.tool()
-async def resume_session(project_name: str) -> str:
-    """Find the most recent session for a project. Returns session data or null."""
-    store = await get_store()
-    session = await store.find_session_by_project(project_name)
-    if not session:
-        return json.dumps({"found": False})
-    return json.dumps({
-        "found": True,
-        "session_id": session.id,
-        "current_stage": session.current_stage,
-        "seed_version": session.seed_version,
-    })
 
 
 # ── Event tools ───────────────────────────────────────────────
@@ -923,18 +885,6 @@ async def save_seed_version(
     return json.dumps({"id": sv.id, "version": version, "saved": True})
 
 
-@mcp.tool()
-async def get_seed_history(session_id: str) -> str:
-    """Get all seed versions for a session, ordered by version."""
-    store = await get_store()
-    versions = await store.get_seed_versions(session_id)
-    return json.dumps([{
-        "version": v.version,
-        "change_summary": v.change_summary,
-        "created_at": v.created_at,
-    } for v in versions])
-
-
 # ── Evolve tools ──────────────────────────────────────────────
 
 
@@ -1160,15 +1110,6 @@ async def validate_state(state_json: str) -> str:
     from .seed_manager import validate_state as _validate
     state = json.loads(state_json)
     result = _validate(state)
-    return json.dumps(result)
-
-
-@mcp.tool()
-async def check_db_integrity() -> str:
-    """Check SQLite database integrity via PRAGMA integrity_check.
-    Returns {status: 'ok'|'error', details: ...}."""
-    store = await get_store()
-    result = await store.check_integrity()
     return json.dumps(result)
 
 
@@ -1564,24 +1505,6 @@ async def semantic_check_llm(code: str, ac_description: str, tier: str = "standa
         return json.dumps({"risk_level": "LOW", "error": str(e), "should_use_llm": False})
 
 
-@mcp.tool()
-async def merge_llm_result(heuristic_json: str, llm_response_json: str) -> str:
-    """Merge LLM verdict into heuristic result after skill calls LLM.
-
-    Args:
-        heuristic_json: Original heuristic result from semantic_check_llm
-        llm_response_json: LLM response {is_real_implementation, confidence, reasoning}
-    """
-    try:
-        from .semantic_checker import merge_llm_verdict
-        heuristic = json.loads(heuristic_json)
-        llm_resp = json.loads(llm_response_json)
-        return json.dumps(merge_llm_verdict(heuristic, llm_resp))
-    except Exception as e:
-        _log_mcp_health("fail", "merge_llm_result", str(e))
-        return heuristic_json
-
-
 # ── Research WebFetch tools (v2.7.0, PATH 4) ─────────────────
 
 
@@ -1611,26 +1534,6 @@ async def format_research(results_json: str) -> str:
 
 
 # ── Skip Externally Satisfied ACs tools (v2.6.0, #08) ────────
-
-
-@mcp.tool()
-async def mark_externally_satisfied(seed_json: str, project_path: str) -> str:
-    """Mark ACs that are already satisfied by existing code (from analysis.json).
-
-    Args:
-        seed_json: Full seed as JSON string
-        project_path: Project root path containing .samvil/analysis.json
-
-    Returns: Updated seed JSON with external_satisfied annotations
-    """
-    try:
-        from .skip_ac import mark_seed_with_external
-        seed = json.loads(seed_json)
-        seed = mark_seed_with_external(seed, project_path)
-        return json.dumps(seed)
-    except Exception as e:
-        _log_mcp_health("fail", "mark_externally_satisfied", str(e))
-        return seed_json  # Return unchanged on failure (INV-5)
 
 
 @mcp.tool()
@@ -1907,7 +1810,7 @@ async def check_convergence_gates(eval_result_json: str, history_json: str = "[]
     Returns: ConvergenceVerdict with converged, blocked_by[], reasons[], regressions[]
     """
     try:
-        from .convergence_gate import check_all_gates, GateConfig
+        from .convergence_check import check_all_gates, GateConfig
         eval_result = json.loads(eval_result_json)
         history = json.loads(history_json)
         verdict = check_all_gates(eval_result, history, GateConfig())
@@ -1915,27 +1818,6 @@ async def check_convergence_gates(eval_result_json: str, history_json: str = "[]
     except Exception as e:
         _log_mcp_health("fail", "check_convergence_gates", str(e))
         return json.dumps({"converged": False, "error": str(e)})
-
-
-@mcp.tool()
-async def detect_ac_regressions(current_states_json: str, history_json: str) -> str:
-    """Detect ACs that regressed (PASS → FAIL) across cycles.
-
-    Args:
-        current_states_json: {ac_id: "PASS" | "FAIL" | "PARTIAL"}
-        history_json: Array of cycle snapshots
-
-    Returns: list of ACRegression dicts
-    """
-    try:
-        from .regression_detector import detect_regressions
-        current = json.loads(current_states_json)
-        history = json.loads(history_json)
-        regressions = detect_regressions(current, history)
-        return json.dumps([r.to_dict() for r in regressions])
-    except Exception as e:
-        _log_mcp_health("fail", "detect_ac_regressions", str(e))
-        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -2523,56 +2405,6 @@ async def claim_reject(
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
-async def claim_query_by_subject(project_root: str, subject: str) -> str:
-    """Return all claims (latest state) for a given subject."""
-    try:
-        ledger = _ledger_for(project_root)
-        rows = ledger.query_by_subject(subject)
-        _log_mcp_health("ok", "claim_query_by_subject")
-        from dataclasses import asdict
-
-        return json.dumps([asdict(c) for c in rows])
-    except Exception as e:
-        _log_mcp_health("fail", "claim_query_by_subject", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def claim_materialize_view(
-    project_root: str,
-    authority_file: str,
-) -> str:
-    """Return the verified claims that back an authority file (e.g. seed.json).
-
-    Read-only. Skills handle the file-writing step since each authority file
-    has its own shape.
-    """
-    try:
-        ledger = _ledger_for(project_root)
-        rows = ledger.materialize_view(authority_file)
-        _log_mcp_health("ok", "claim_materialize_view")
-        from dataclasses import asdict
-
-        return json.dumps([asdict(c) for c in rows])
-    except Exception as e:
-        _log_mcp_health("fail", "claim_materialize_view", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def claim_ledger_stats(project_root: str) -> str:
-    """Return counts by status and type. Used by view-claims.py and samvil status."""
-    try:
-        ledger = _ledger_for(project_root)
-        s = ledger.stats()
-        _log_mcp_health("ok", "claim_ledger_stats")
-        return json.dumps(s)
-    except Exception as e:
-        _log_mcp_health("fail", "claim_ledger_stats", str(e))
-        return json.dumps({"error": str(e)})
-
-
 # ── v3.2.0 Sprint 1 — Gate framework (⑥) ──────────────────────
 #
 # `gate_check` is the single entry point. Callers gather runtime metrics
@@ -2636,26 +2468,6 @@ async def gate_check(
         return json.dumps(asdict(verdict))
     except Exception as e:
         _log_mcp_health("fail", "gate_check", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def gate_list() -> str:
-    """Return the list of configured gates with their per-tier thresholds.
-
-    Used by view-gates.py and samvil status to render the gate pane.
-    """
-    try:
-        cfg = _load_gate_config(None)
-        _log_mcp_health("ok", "gate_list")
-        return json.dumps(
-            {
-                "gates": list(cfg["gates"].keys()),
-                "config": cfg,
-            }
-        )
-    except Exception as e:
-        _log_mcp_health("fail", "gate_list", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -2767,34 +2579,6 @@ async def route_task(
         return json.dumps({"error": str(e)})
     except Exception as e:
         _log_mcp_health("fail", "route_task", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def list_profiles(project_root: str = ".") -> str:
-    """Return the model profiles currently loaded for the project."""
-    try:
-        profiles_path = _profiles_path_for(project_root)
-        profiles = _load_profiles(profiles_path)
-        _log_mcp_health("ok", "list_profiles")
-        return json.dumps(
-            {
-                "profiles_path": profiles_path,
-                "profiles": [
-                    {
-                        "provider": p.provider,
-                        "model_id": p.model_id,
-                        "cost_tier": p.cost_tier.value,
-                        "nickname": p.nickname,
-                        "max_tokens_out": p.max_tokens_out,
-                        "notes": p.notes,
-                    }
-                    for p in profiles
-                ],
-            }
-        )
-    except Exception as e:
-        _log_mcp_health("fail", "list_profiles", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -2938,36 +2722,6 @@ async def compute_seed_readiness(
 
 
 @mcp.tool()
-async def resolve_interview_level(
-    requested: str,
-    project_prompt: str = "",
-    solution_type: str = "",
-    samvil_tier: str = "standard",
-    provider_router_ready: bool = False,
-) -> str:
-    """Turn `auto` into a concrete level via PAL (T6) and downgrade
-    `max` if ④ routing isn't ready.
-    """
-    try:
-        lvl = _resolve_level(
-            requested,
-            project_prompt=project_prompt or None,
-            solution_type=solution_type or None,
-            samvil_tier=samvil_tier,
-            provider_router_ready=provider_router_ready,
-        )
-        techs = [t.value for t in _techniques_for_level(lvl)]
-        _log_mcp_health("ok", "resolve_interview_level")
-        return json.dumps({"level": lvl.value, "techniques": techs})
-    except ValueError as e:
-        _log_mcp_health("fail", "resolve_interview_level", str(e))
-        return json.dumps({"error": str(e)})
-    except Exception as e:
-        _log_mcp_health("fail", "resolve_interview_level", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
 async def meta_probe_prompt(phase: str, answers_summary: str) -> str:
     """Build the T2 Meta Self-Probe prompt. Caller runs the LLM and pipes
     the raw response into `meta_probe_parse`.
@@ -2978,37 +2732,6 @@ async def meta_probe_prompt(phase: str, answers_summary: str) -> str:
         return json.dumps({"prompt": prompt})
     except Exception as e:
         _log_mcp_health("fail", "meta_probe_prompt", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def meta_probe_parse(raw: str) -> str:
-    """Parse the T2 LLM response. Returns
-    `{"blind_spots": [...], "followups": [...]}`."""
-    try:
-        out = _parse_meta_result(raw)
-        _log_mcp_health("ok", "meta_probe_parse")
-        return json.dumps(out)
-    except Exception as e:
-        _log_mcp_health("fail", "meta_probe_parse", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def confidence_followup(
-    answer: str, confidence: int, low_threshold: int = 2
-) -> str:
-    """Return a tacit-extraction follow-up when confidence ≤ threshold,
-    or `{"followup": null}` when high enough.
-    """
-    try:
-        q = _confidence_follow_up(
-            answer=answer, confidence=confidence, low_threshold=low_threshold
-        )
-        _log_mcp_health("ok", "confidence_followup")
-        return json.dumps({"followup": q})
-    except Exception as e:
-        _log_mcp_health("fail", "confidence_followup", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -3171,101 +2894,6 @@ def _retro_from_dict(d: dict) -> _RetroReport:
     return _from_dict(d)
 
 
-@mcp.tool()
-async def experiment_record_run(
-    path: str,
-    experiment_id: str,
-    verdict: str,
-    value_seen: str = "",
-    note: str = "",
-    source: str = "dogfood",
-) -> str:
-    """Append an ExperimentRun to the named experiment in the retro file.
-
-    `value_seen` is a string — callers JSON-encode scalars if needed.
-    Re-saves the file atomically after the append.
-    """
-    try:
-        report = _load_retro(path)
-        target = next(
-            (e for e in report.policy_experiments if e.id == experiment_id),
-            None,
-        )
-        if target is None:
-            return json.dumps(
-                {"error": f"experiment {experiment_id!r} not in {path}"}
-            )
-        import datetime as _dt
-
-        target.record_run(
-            _ExperimentRun(
-                ts=_dt.datetime.now(_dt.timezone.utc).isoformat(),
-                value_seen=value_seen,
-                verdict=verdict,
-                note=note,
-                source=source,
-            )
-        )
-        _save_retro(report, path)
-        _log_mcp_health("ok", "experiment_record_run")
-        return json.dumps(
-            {
-                "ok": True,
-                "run_count": len(target.results),
-                "should_promote": target.should_promote(),
-            }
-        )
-    except Exception as e:
-        _log_mcp_health("fail", "experiment_record_run", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def experiment_promote(
-    path: str, experiment_id: str, supersedes_json: str = "[]"
-) -> str:
-    """Attempt to promote an experiment to adopted_policies. Returns the
-    new AdoptedPolicy dict or `{"error": ...}` if preconditions fail."""
-    try:
-        supersedes = json.loads(supersedes_json or "[]")
-        report = _load_retro(path)
-        adopted = _retro_promote(report, experiment_id, supersedes=supersedes)
-        if adopted is None:
-            return json.dumps(
-                {"error": "promotion blocked (not found, already terminal, or not enough runs)"}
-            )
-        _save_retro(report, path)
-        from dataclasses import asdict
-
-        _log_mcp_health("ok", "experiment_promote")
-        return json.dumps(asdict(adopted))
-    except Exception as e:
-        _log_mcp_health("fail", "experiment_promote", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def experiment_reject(
-    path: str, experiment_id: str, reason: str
-) -> str:
-    """Move an experiment to rejected_policies."""
-    try:
-        report = _load_retro(path)
-        r = _retro_reject(report, experiment_id, reason=reason)
-        if r is None:
-            return json.dumps(
-                {"error": "rejection blocked (not found or already terminal)"}
-            )
-        _save_retro(report, path)
-        from dataclasses import asdict
-
-        _log_mcp_health("ok", "experiment_reject")
-        return json.dumps(asdict(r))
-    except Exception as e:
-        _log_mcp_health("fail", "experiment_reject", str(e))
-        return json.dumps({"error": str(e)})
-
-
 # ── v3.2.0 Sprint 5b — Stagnation (⑩) + Consensus (⑨) ─────────
 
 
@@ -3401,39 +3029,6 @@ async def migrate_apply(project_root: str = ".", dry_run: bool = False) -> str:
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
-async def budget_status(
-    samvil_tier: str,
-    consumed_json: str,
-    project_root: str = ".",
-    exempt_consensus: bool = True,
-    consensus_cost_json: str = "",
-) -> str:
-    """Return BudgetStatus as JSON.
-
-    `consumed_json`: {"wall_time_minutes": 5, "llm_calls": 20, "estimated_cost_usd": 0.3}
-    """
-    try:
-        budget_path = Path(project_root) / ".samvil" / "performance_budget.yaml"
-        budget = _load_budget(budget_path if budget_path.exists() else None)
-        consumed = Consumption(**json.loads(consumed_json or "{}"))
-        consensus_cost = None
-        if consensus_cost_json:
-            consensus_cost = Consumption(**json.loads(consensus_cost_json))
-        status = _budget_evaluate_status(
-            budget=budget,
-            samvil_tier=samvil_tier,
-            consumed=consumed,
-            exempt_consensus=exempt_consensus,
-            consensus_cost=consensus_cost,
-        )
-        _log_mcp_health("ok", "budget_status")
-        return json.dumps(status.to_dict())
-    except Exception as e:
-        _log_mcp_health("fail", "budget_status", str(e))
-        return json.dumps({"error": str(e)})
-
-
 # ── Codebase Manifest (v3.3) ──────────────────────────────────────────
 
 
@@ -3508,15 +3103,6 @@ def _render_manifest_context_impl(
     return {"status": "ok", "context": text, "module_count": len(m.modules)}
 
 
-def _refresh_manifest_impl(project_root: str, project_name: str) -> dict:
-    """Convenience: rebuild + persist + return rendered context."""
-    build_result = _build_and_persist_manifest_impl(project_root, project_name)
-    if build_result["status"] != "ok":
-        return build_result
-    ctx = _render_manifest_context_impl(project_root)
-    return {**build_result, "context": ctx.get("context", "")}
-
-
 @mcp.tool()
 def build_and_persist_manifest(project_root: str, project_name: str) -> dict:
     """Build a Codebase Manifest and write it to .samvil/manifest.json.
@@ -3568,18 +3154,6 @@ def render_manifest_context(
         return result
     except Exception as e:
         _log_mcp_health("fail", "render_manifest_context", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def refresh_manifest(project_root: str, project_name: str) -> dict:
-    """Rebuild manifest from filesystem, persist, and return fresh context."""
-    try:
-        result = _refresh_manifest_impl(project_root, project_name)
-        _log_mcp_health("ok", "refresh_manifest")
-        return result
-    except Exception as e:
-        _log_mcp_health("fail", "refresh_manifest", str(e))
         return {"status": "error", "error": str(e)}
 
 
