@@ -4,6 +4,41 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.25.0] — 2026-04-26 — Evolve Intake Context
+
+Phase 23 of the multi-host SAMVIL architecture. This release turns a blocked
+QA recovery route into a file-based evolve context that `samvil-evolve` can
+consume without relying on conversation history or session database state.
+
+### Added
+- File-based evolve context builder in `mcp/samvil_mcp/evolve_loop.py`.
+- `.samvil/evolve-context.json` materialization with current seed, state,
+  QA synthesis, convergence, route, ground-truth artifact paths, and seed
+  history summary.
+- MCP `build_evolve_context` and `materialize_evolve_context`.
+- Run-report `evolve_context` summary.
+- `samvil-status` human/JSON output for evolve focus and issue count.
+- `scripts/phase23-evolve-intake-context-dogfood.py` proving blocked Pass 2 QA
+  routed to evolve becomes a focused evolve context.
+- Phase 23 dogfood as the first default release runner check.
+- Phase 23 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.25-phase23.md`.
+
+### Changed
+- `skills/samvil-evolve/SKILL.md` now prefers `.samvil/evolve-context.json`
+  and can materialize it from project artifacts when missing.
+
+### Verified
+- Phase 23 dogfood: PASS.
+- Evolve context, status, telemetry, release, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 897 passed.
+- MCP server import smoke: 160 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.24.0] — 2026-04-26 — QA Recovery Routing
 
 Phase 22 of the multi-host SAMVIL architecture. This release converts blocked

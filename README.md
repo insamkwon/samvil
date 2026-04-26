@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.24.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.25.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.25.0 "Evolve Intake Context"** — QA recovery route가 `samvil-evolve`로 이어질 때 seed, QA issue, route, ground-truth artifact를 하나의 파일 기반 context로 고정하는 릴리스입니다.
+
+> **v3.25.0 주요 추가** (2026-04-26):
+> - **Evolve context artifact** — `materialize_evolve_context`가 `.samvil/evolve-context.json`을 생성.
+> - **File-based evolve intake** — `project.seed.json`, `qa-results.json`, `qa-routing.json`, `seed_history`를 묶어 wonder/reflect 입력으로 제공.
+> - **Status/run-report evolve surface** — `samvil-status`와 `build_run_report`가 evolve focus와 issue count를 노출.
+> - **검증**: 897 unit tests · 160 MCP tools · Phase 23 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.24.0 "QA Recovery Routing"** — blocked QA convergence를 다음 실행 경로로 바꿔 `samvil-evolve`, `samvil-build`, `samvil-retro` 중 어디로 이어갈지 고정하는 릴리스입니다.
 
