@@ -62,6 +62,9 @@ from .jurisdiction import (
     check_jurisdiction as _check_jurisdiction_core,
     loop_should_stop as _loop_should_stop,
 )
+from .diagnostic import (
+    diagnose_environment_async as _diagnose_environment_async,
+)
 from .manifest import (
     build_manifest,
     write_manifest,
@@ -3707,6 +3710,27 @@ def promote_council_decision(project_root: str, decision_json: str) -> dict:
     except Exception as e:
         _log_mcp_health("fail", "promote_council_decision", str(e))
         return {"status": "error", "error": str(e)}
+
+
+# ── Diagnostic aggregator (T3.1, samvil-doctor) ───────────────
+
+
+@mcp.tool()
+async def diagnose_environment() -> str:
+    """Aggregate MCP-side facts the samvil-doctor skill needs.
+
+    Returns a JSON string with:
+      - mcp_health: summary of ~/.samvil/mcp-health.jsonl
+      - tool_inventory: registered tool names + v3 expected coverage
+      - model_recommendation: per-stage model recommendation table
+    """
+    try:
+        result = await _diagnose_environment_async(mcp_server=mcp)
+        _log_mcp_health("ok", "diagnose_environment")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "diagnose_environment", str(e))
+        return json.dumps({"error": str(e)})
 
 
 # ── Entry point ───────────────────────────────────────────────
