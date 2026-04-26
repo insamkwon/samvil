@@ -77,6 +77,9 @@ from .evolve_aggregate import (
 from .council_synthesis import (
     synthesize_council_verdicts as _synthesize_council_verdicts,
 )
+from .brownfield_analyzer import (
+    analyze_brownfield_project as _analyze_brownfield_project,
+)
 from .manifest import (
     build_manifest,
     write_manifest,
@@ -3779,6 +3782,44 @@ async def evaluate_deploy_target(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "evaluate_deploy_target", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def analyze_brownfield_project(
+    project_root: str,
+    project_name: str = "",
+) -> str:
+    """Aggregate every fact samvil-analyze needs to reverse-engineer a seed.
+
+    Reads `package.json` (or pyproject.toml), config files, and walks `src/`
+    to detect:
+      - framework / language / runtime / package_manager (with signal source)
+      - UI library, state management, data sources
+      - solution_type (web-app / mobile-app / game / automation / dashboard)
+      - feature modules (each becomes a v3 seed feature with status=existing)
+      - confidence tags (high / medium / low) per inferred field
+      - ADR-EXISTING-NNN entries explaining each heuristic decision
+
+    Returns a JSON string shaped per `BrownfieldReport.to_dict()`:
+      - seed: complete v3.0-shaped reverse-seed dict ready to write
+      - confidence_tags: per-field confidence (skill renders for review)
+      - adrs: ADR-EXISTING-NNN entries the skill appends to decisions.log
+      - summary_lines: pre-formatted Korean lines for the analysis pane
+      - warnings: re-confirm-with-user items (unknown framework, no features)
+
+    `project_name` is optional — falls back to package.json:name then to
+    the directory's basename.
+    """
+    try:
+        result = _analyze_brownfield_project(
+            project_root,
+            project_name=project_name or None,
+        )
+        _log_mcp_health("ok", "analyze_brownfield_project")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "analyze_brownfield_project", str(e))
         return json.dumps({"error": str(e)})
 
 
