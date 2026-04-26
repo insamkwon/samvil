@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.16.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.17.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.17.0 "External CI Mirror"** — v3.16의 release runner와 evidence bundle을 GitHub Actions에서도 실행해, 로컬 세션 밖에서도 같은 release readiness 증거를 남기는 릴리스입니다.
+
+> **v3.17.0 주요 추가** (2026-04-26):
+> - **GitHub Actions mirror** — PR, main push, manual dispatch에서 `scripts/run-release-checks.py --format json`을 실행.
+> - **CI evidence bundle** — CI에서 `scripts/build-release-bundle.py --format json`을 실행해 release report와 summary를 생성.
+> - **Artifact upload** — `samvil-release-evidence` artifact로 report, summary, runner JSON, bundle JSON을 업로드.
+> - **Workflow contract validator** — `scripts/validate-ci-workflow.py`와 pytest가 Actions runtime/commands/artifact 계약을 로컬에서 검증.
+> - **검증**: 851 unit tests · 153 MCP tools · CI workflow validator PASS · default release runner PASS · release evidence bundle 생성 PASS · Phase 12/11/10/8 regressions PASS · pre-commit-check PASS.
 
 **v3.16.0 "Release Evidence Bundle"** — v3.15의 runner-generated release report를 사람이 검토하기 쉬운 `.samvil/release-summary.md`로 묶어, 다음 세션/리뷰어가 파일 하나로 release readiness를 판단할 수 있게 한 릴리스입니다.
 

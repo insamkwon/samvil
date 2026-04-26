@@ -4,6 +4,45 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.17.0] — 2026-04-26 — External CI Mirror
+
+Phase 15 of the multi-host SAMVIL architecture. This release mirrors the local
+release runner in GitHub Actions and publishes the same release evidence bundle
+as CI artifacts for PR/main review.
+
+### Added
+- GitHub Actions workflow at `.github/workflows/release-checks.yml`.
+- CI setup for Python 3.12, Node 20, MCP package install, and Chromium system
+  dependencies for the browser inspection regression.
+- CI execution of `scripts/run-release-checks.py --format json`.
+- CI execution of `scripts/build-release-bundle.py --format json`.
+- `samvil-release-evidence` artifact upload containing release report,
+  markdown summary, runner JSON, and bundle JSON.
+- `scripts/validate-ci-workflow.py` for local workflow contract validation.
+- Pytest coverage for the workflow contract and validator script.
+- Phase 15 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.17-phase15.md`.
+
+### Dogfood
+- Local workflow validator passed against the GitHub Actions YAML.
+- Focused workflow pytest passed.
+- Default release runner executed Phase 12/11/10/8 and full pre-commit with all
+  five checks passing.
+- Release evidence bundle generated from the default runner output.
+
+### Verified
+- CI workflow validator: PASS.
+- Focused workflow pytest: 2 passed.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Phase 12/11/10/8 regressions: PASS.
+- Full test suite: 851 passed.
+- MCP server import smoke: 153 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.16.0] — 2026-04-26 — Release Evidence Bundle
 
 Phase 14 of the multi-host SAMVIL architecture. This release turns the
