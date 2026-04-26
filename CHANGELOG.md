@@ -4,6 +4,44 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.22.0] — 2026-04-26 — QA Materialization
+
+Phase 20 of the multi-host SAMVIL architecture. This release persists the
+central QA synthesis verdict into durable run artifacts and exposes it through
+telemetry and `samvil-status`.
+
+### Added
+- `materialize_qa_synthesis` in `mcp/samvil_mcp/qa_synthesis.py` to write
+  `.samvil/qa-results.json`, `.samvil/qa-report.md`, `.samvil/events.jsonl`,
+  and `project.state.json.qa_history`.
+- MCP `materialize_qa_synthesis` for the QA skill to persist central synthesis
+  output after independent evidence is judged.
+- QA summary integration in `build_run_report`.
+- QA panel and JSON fields in `scripts/samvil-status.py`.
+- `scripts/phase20-qa-materialization-dogfood.py` to prove report, results,
+  events, state, run report, and status stay aligned.
+- Phase 20 dogfood as a default release runner check before Phase 19/18 and
+  full pre-commit.
+- Phase 20 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.22-phase20.md`.
+
+### Changed
+- `skills/samvil-qa/SKILL.md` now calls `materialize_qa_synthesis` after
+  `synthesize_qa_evidence` and continues from the materialized verdict.
+- `samvil-status` prioritizes `REVISE` and `FAIL` QA next actions when no
+  repair or release gate is blocking.
+
+### Verified
+- Phase 20 dogfood: PASS.
+- QA materialization, status, telemetry, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 879 passed.
+- MCP server import smoke: 155 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.21.0] — 2026-04-26 — QA Synthesis Gate
 
 Phase 19 of the multi-host SAMVIL architecture. This release turns independent

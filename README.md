@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.21.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.22.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.22.0 "QA Materialization"** — 중앙 QA synthesis 판정을 실제 `.samvil` 산출물과 status surface에 고정한 릴리스입니다.
+
+> **v3.22.0 주요 추가** (2026-04-26):
+> - **QA artifact materialization** — `materialize_qa_synthesis`가 `.samvil/qa-results.json`, `.samvil/qa-report.md`, `.samvil/events.jsonl`, `project.state.json.qa_history`를 생성/갱신.
+> - **Status QA panel** — `samvil-status`와 `build_run_report`가 QA verdict, Pass 2 counts, Pass 3 verdict, next action을 노출.
+> - **Phase 20 dogfood** — report/results/events/state/run-report/status가 같은 synthesis verdict를 가리키는지 검증.
+> - **검증**: 879 unit tests · 155 MCP tools · Phase 20 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.21.0 "QA Synthesis Gate"** — 독립 QA가 수집한 Pass 2/3 증거를 메인 세션이 하나의 기계적 `PASS / REVISE / FAIL` 판정으로 합성하는 릴리스입니다.
 
