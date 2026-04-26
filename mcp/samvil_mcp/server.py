@@ -128,6 +128,7 @@ from .narrate import (
 from .orchestrator import (
     OrchestratorError,
     StageEvent as _OrchestratorStageEvent,
+    aggregate_orchestrator_state as _aggregate_orchestrator_state,
     complete_stage_plan as _complete_stage_plan,
     get_next_stage as _orchestrator_get_next_stage,
     get_orchestration_state as _orchestrator_get_state,
@@ -3892,6 +3893,52 @@ async def aggregate_evolve_context(project_root: str) -> str:
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "aggregate_evolve_context", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_orchestrator_state(
+    project_root: str = ".",
+    prompt: str = "",
+    cli_tier: str = "",
+    mode_hint: str = "",
+    host_name: str = "",
+) -> str:
+    """Boot-time aggregator for the samvil orchestrator skill (T4.5 ultra-thin).
+
+    Reads (best-effort) from `project_root`:
+      - `project.state.json`, `project.config.json`
+      - filesystem artifacts (`project.seed.json`, `package.json`, `src/`)
+
+    Returns a JSON string with:
+      - tier: resolved samvil_tier with precedence cli > state > config > default
+        (deprecated v3.1 'deep' alias is mapped to 'full' with `aliased_from`).
+      - solution_type: 3-layer keyword/context detection
+        (web-app | automation | game | mobile-app | dashboard).
+        Layer-3 user confirmation still happens in the skill body.
+      - is_pm_mode: true when the prompt contains PM-mode signals.
+      - brownfield: artifact + state-based detection of resume / brownfield mode.
+      - chain: which skill the orchestrator should invoke first
+        (samvil-analyze | samvil-interview | samvil-pm-interview | resume target).
+      - errors: non-fatal warnings (missing files, etc.)
+
+    Companion to `get_orchestration_state` / `stage_can_proceed`. This tool
+    covers the entry-point pre-flight (tier resolution, solution_type
+    detection, brownfield/resume routing) that was inline in the legacy
+    766-LOC orchestrator skill body.
+    """
+    try:
+        result = _aggregate_orchestrator_state(
+            project_root or ".",
+            prompt=prompt or "",
+            cli_tier=cli_tier or "",
+            mode_hint=mode_hint or "",
+            host_name=host_name or "",
+        )
+        _log_mcp_health("ok", "aggregate_orchestrator_state")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_orchestrator_state", str(e))
         return json.dumps({"error": str(e)})
 
 
