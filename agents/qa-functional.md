@@ -24,4 +24,4 @@ QA Pass 2 — verifies each acceptance criterion from seed is actually implement
 
 ## Output
 
-AC table (# | Leaf ID | Criterion | Verdict | Evidence with file:line). Summary (PASS/PARTIAL/UNIMPLEMENTED/FAIL counts at leaf granularity). Verdict: PASS (all PASS/PARTIAL) / REVISE (any UNIMPLEMENTED/PARTIAL) / FAIL (any FAIL). Fix List for REVISE/FAIL. The main session aggregates branch verdicts via `aggregate_status` — do not output branch-level verdicts.
+AC table (# | Leaf ID | Criterion | Verdict | Evidence with file:line). Summary (PASS/PARTIAL/UNIMPLEMENTED/FAIL counts at leaf granularity). Verdict: PASS (all PASS/PARTIAL) / REVISE (any UNIMPLEMENTED) / FAIL (any FAIL). Fix List for REVISE/FAIL. The main session aggregates branch verdicts via `aggregate_status` — do not output branch-level verdicts.

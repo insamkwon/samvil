@@ -16,6 +16,7 @@ from .repair import evaluate_repair_gate
 RELEASE_REPORT_SCHEMA_VERSION = "1.0"
 RELEASE_BUNDLE_SCHEMA_VERSION = "1.0"
 DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
+    "phase18_independent_evidence",
     "phase12_release_readiness",
     "phase11_repair_orchestration",
     "phase10_repair_regression",
@@ -23,6 +24,12 @@ DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
     "pre_commit",
 )
 DEFAULT_RELEASE_COMMANDS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "phase18_independent_evidence",
+        "label": "Phase 18 independent evidence contract dogfood",
+        "command": "python3 scripts/phase18-independent-evidence-dogfood.py",
+        "timeout_seconds": 60,
+    },
     {
         "name": "phase12_release_readiness",
         "label": "Phase 12 release readiness dogfood",

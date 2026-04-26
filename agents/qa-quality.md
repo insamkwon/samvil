@@ -25,6 +25,7 @@ QA Pass 3 — reviews overall quality: responsive design, accessibility basics, 
 3. **Verdict**: PASS (avg ≥3.5, no dimension <2) / REVISE (avg 2.5-3.5 or any dimension at 2) / FAIL (avg <2.5 or any dimension at 1)
 4. **Check first**: empty states + error states (most commonly missing), mobile nav at 375px, focus styles, console.log in production
 5. **Don't re-check build** (Pass 1) or ACs (Pass 2). Don't score everything 5/5. Don't demand perfection (this is v1). Don't reclassify Pass 2 functional states.
+6. If you see a stub or missing core behavior, flag it as a quality concern and let the main session reconcile it with Pass 2 evidence.
 
 ## Output
 
