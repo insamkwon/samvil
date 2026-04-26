@@ -4,6 +4,45 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.28.0] — 2026-04-26 — Evolve Rebuild Handoff
+
+Phase 26 of the multi-host SAMVIL architecture. This release materializes the
+portable continuation marker after an evolved seed is applied so the next host
+can rebuild from the updated seed.
+
+### Added
+- `mcp/samvil_mcp/evolve_rebuild.py` for applied-seed rebuild handoff
+  generation.
+- `.samvil/evolve-rebuild.json` materialization.
+- `.samvil/next-skill.json` rewrite to `samvil-scaffold` after a successful
+  evolve apply.
+- MCP `build_evolve_rebuild_handoff` and
+  `materialize_evolve_rebuild_handoff`.
+- Run-report `evolve_rebuild` summary.
+- `samvil-status` human/JSON output for rebuild handoff status and next skill.
+- `scripts/phase26-evolve-rebuild-dogfood.py` proving the full QA route ->
+  context -> proposal -> apply -> rebuild marker path.
+- Phase 26 dogfood as the first default release runner check.
+- Phase 26 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.28-phase26.md`.
+
+### Changed
+- `skills/samvil-evolve/SKILL.md` now materializes the rebuild handoff after a
+  successful guarded apply.
+- Release readiness defaults now require Phase 26 before Phase 25 and earlier
+  recovery/evolve gates.
+
+### Verified
+- Phase 26 dogfood: PASS.
+- Evolve rebuild, status, telemetry, release, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 917 passed.
+- MCP server import smoke: 167 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.27.0] — 2026-04-26 — Evolve Apply Plan
 
 Phase 25 of the multi-host SAMVIL architecture. This release turns reviewed

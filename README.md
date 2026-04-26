@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.27.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.28.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.28.0 "Evolve Rebuild Handoff"** — evolved seed 적용 후 다음 호스트가 바로 재스캐폴드로 이어갈 수 있도록 portable rebuild marker를 남기는 릴리스입니다.
+
+> **v3.28.0 주요 추가** (2026-04-26):
+> - **Rebuild handoff artifact** — `materialize_evolve_rebuild_handoff`가 `.samvil/evolve-rebuild.json`을 생성.
+> - **Portable continuation marker** — 적용된 seed를 기준으로 `.samvil/next-skill.json`을 `samvil-scaffold`로 갱신.
+> - **Status/run-report rebuild surface** — `samvil-status`와 `build_run_report`가 rebuild handoff readiness와 next skill을 노출.
+> - **검증**: 917 unit tests · 167 MCP tools · Phase 26 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.27.0 "Evolve Apply Plan"** — 검토된 evolve proposal을 seed preview와 hash-guarded apply plan으로 바꿔, 안전하게 `project.seed.json`을 다음 버전으로 적용하는 릴리스입니다.
 
