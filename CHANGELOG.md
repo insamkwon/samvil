@@ -4,6 +4,50 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.16.0] — 2026-04-26 — Release Evidence Bundle
+
+Phase 14 of the multi-host SAMVIL architecture. This release turns the
+runner-generated release report into a one-file markdown evidence bundle for
+review, continuation, and release audit.
+
+### Added
+- Release evidence bundle builder in `mcp/samvil_mcp/release.py`.
+- Release bundle artifact: `.samvil/release-summary.md`.
+- `scripts/build-release-bundle.py` CLI for building the bundle from the
+  latest `.samvil/release-report.json`.
+- MCP tools: `build_release_evidence_bundle`,
+  `read_release_evidence_bundle`, and `render_release_evidence_bundle`.
+- Bundle metadata for release gate verdict, report summary, git branch/head,
+  tags at HEAD, dirty state, and version sync.
+- Check-level bundle rows with command, exit code, duration, message, and
+  stdout/stderr tails for failed checks.
+- `samvil-status.py` bundle path output in both human and JSON modes.
+- `scripts/phase14-release-evidence-bundle-dogfood.py`, covering all-pass and
+  failed-output bundle states.
+- Phase 14 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.16-phase14.md`.
+
+### Dogfood
+- `bundle-all-pass`: runner report pass, release gate pass, bundle path exposed
+  in status.
+- `bundle-failed-output`: runner report blocked, release gate blocked, failed
+  stderr tail appears in the markdown bundle.
+- Default release runner generated a pass report, then
+  `scripts/build-release-bundle.py` generated `.samvil/release-summary.md`.
+
+### Verified
+- Phase 14 release evidence bundle dogfood: PASS.
+- Phase 13 release check runner regression: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Phase 12/11/10/8 regressions: PASS.
+- Full test suite: 849 passed.
+- MCP server import smoke: 153 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.15.0] — 2026-04-26 — Release Check Runner
 
 Phase 13 of the multi-host SAMVIL architecture. This release makes release

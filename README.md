@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.15.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.16.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.16.0 "Release Evidence Bundle"** — v3.15의 runner-generated release report를 사람이 검토하기 쉬운 `.samvil/release-summary.md`로 묶어, 다음 세션/리뷰어가 파일 하나로 release readiness를 판단할 수 있게 한 릴리스입니다.
+
+> **v3.16.0 주요 추가** (2026-04-26):
+> - **Evidence bundle** — release gate verdict, release report summary, git branch/head/tags, dirty state, version sync를 하나의 markdown으로 렌더링.
+> - **Check evidence view** — check별 command, exit code, duration, message와 실패 시 stdout/stderr tail을 bundle에 포함.
+> - **Bundle CLI/MCP** — `scripts/build-release-bundle.py`와 build/read/render release evidence bundle MCP 도구 추가.
+> - **Status surface** — `samvil-status.py` human/JSON 출력에서 최신 `.samvil/release-summary.md` 경로 표시.
+> - **검증**: 849 unit tests · 153 MCP tools · default release runner PASS · release evidence bundle 생성 PASS · Phase 14/13/12/11/10/8 regressions PASS · pre-commit-check PASS.
 
 **v3.15.0 "Release Check Runner"** — v3.14의 release readiness gate 위에 실제 명령 실행 runner를 얹어 Phase 12/11/10/8과 pre-commit 결과를 직접 실행 증거로 `.samvil/release-report.json`에 기록하는 릴리스입니다.
 
