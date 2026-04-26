@@ -4,6 +4,31 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.17.1] — 2026-04-26 — External CI Mirror Patch
+
+Patch release for Phase 15. The first remote run proved that artifact evidence
+could report `blocked` while the Actions job stayed green because the runner
+command was piped through `tee`.
+
+### Fixed
+- Install the exact Playwright browser runtime used by Phase 8 fixtures:
+  `playwright@1.52.0 install --with-deps chromium`.
+- Add `set -o pipefail` to release runner and bundle builder workflow steps so
+  command failures propagate to the GitHub Actions job.
+- Extend workflow validator and pytest contract coverage for the Playwright
+  runtime install and pipefail guard.
+
+### Verified
+- CI workflow validator: PASS.
+- Focused workflow pytest: 2 passed.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 851 passed.
+- MCP server import smoke: 153 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.17.0] — 2026-04-26 — External CI Mirror
 
 Phase 15 of the multi-host SAMVIL architecture. This release mirrors the local

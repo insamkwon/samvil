@@ -21,7 +21,8 @@ REQUIRED_FRAGMENTS = (
     'python-version: "3.12"',
     "actions/setup-node@v4",
     'node-version: "20"',
-    "npx --yes playwright install-deps chromium",
+    "npx --yes playwright@1.52.0 install --with-deps chromium",
+    "set -o pipefail",
     "python3 scripts/run-release-checks.py --format json",
     "python3 scripts/build-release-bundle.py --format json",
     "actions/upload-artifact@v4",
@@ -71,6 +72,7 @@ def validate_workflow() -> list[str]:
             "scripts/run-release-checks.py",
             "scripts/build-release-bundle.py",
             "actions/upload-artifact@v4",
+            "set -o pipefail",
         ):
             if expected not in step_text:
                 raise AssertionError(f"missing parsed workflow step: {expected}")

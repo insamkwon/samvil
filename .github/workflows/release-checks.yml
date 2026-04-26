@@ -33,14 +33,18 @@ jobs:
           mcp/.venv/bin/python -m pip install --upgrade pip wheel
           mcp/.venv/bin/python -m pip install -e mcp
 
-      - name: Install browser system dependencies
-        run: npx --yes playwright install-deps chromium
+      - name: Install browser runtime
+        run: npx --yes playwright@1.52.0 install --with-deps chromium
 
       - name: Run release check runner
-        run: python3 scripts/run-release-checks.py --format json | tee /tmp/samvil-release-runner.json
+        run: |
+          set -o pipefail
+          python3 scripts/run-release-checks.py --format json | tee /tmp/samvil-release-runner.json
 
       - name: Build release evidence bundle
-        run: python3 scripts/build-release-bundle.py --format json | tee /tmp/samvil-release-bundle.json
+        run: |
+          set -o pipefail
+          python3 scripts/build-release-bundle.py --format json | tee /tmp/samvil-release-bundle.json
 
       - name: Collect release artifacts
         if: always()

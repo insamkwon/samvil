@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.17.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.17.1`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,13 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.17.1 "External CI Mirror Patch"** — v3.17.0의 GitHub Actions mirror를 실제 실패에 닫히도록 보강한 패치입니다. Playwright browser executable 설치를 명시하고, `tee` 파이프가 release runner 실패를 숨기지 못하게 했습니다.
+
+> **v3.17.1 주요 수정** (2026-04-26):
+> - **Playwright runtime install** — CI에서 `playwright@1.52.0 install --with-deps chromium`으로 Phase 8 브라우저 executable을 설치.
+> - **Pipefail enforcement** — release runner와 bundle builder step에 `set -o pipefail`을 적용해 artifact 내부 blocked 상태가 job success로 숨지 않게 수정.
+> - **검증**: 851 unit tests · 153 MCP tools · CI workflow validator PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.17.0 "External CI Mirror"** — v3.16의 release runner와 evidence bundle을 GitHub Actions에서도 실행해, 로컬 세션 밖에서도 같은 release readiness 증거를 남기는 릴리스입니다.
 
