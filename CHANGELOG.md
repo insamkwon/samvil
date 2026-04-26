@@ -4,6 +4,44 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.21.0] — 2026-04-26 — QA Synthesis Gate
+
+Phase 19 of the multi-host SAMVIL architecture. This release turns independent
+QA evidence into a deterministic central `PASS` / `REVISE` / `FAIL` synthesis
+owned by the main session.
+
+### Added
+- `mcp/samvil_mcp/qa_synthesis.py` for central QA synthesis from Pass 1,
+  independent Pass 2, and independent Pass 3 evidence.
+- MCP `synthesize_qa_evidence` for the QA skill to call after independent
+  agents return evidence.
+- `scripts/phase19-qa-synthesis-gate-dogfood.py` with pass, revise, fail,
+  quality-only revise, and protected-write scenarios.
+- `QA_FUNCTIONAL_JSON` and `QA_QUALITY_JSON` output contracts for independent
+  QA agents.
+- Phase 19 dogfood as a default release runner check before Phase 18 and full
+  pre-commit.
+- Phase 19 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.21-phase19.md`.
+
+### Changed
+- `skills/samvil-qa/SKILL.md` now routes standard+ independent QA evidence
+  through `synthesize_qa_evidence` and treats that result as the central source
+  of truth.
+- Default release checks now include Phase 19, Phase 18, Phase 12/11/10/8, and
+  full pre-commit.
+
+### Verified
+- Phase 19 dogfood: PASS.
+- QA synthesis and MCP tool tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 875 passed.
+- MCP server import smoke: 154 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.20.0] — 2026-04-26 — Independent Evidence Contract
 
 Phase 18 of the multi-host SAMVIL architecture. This release locks the

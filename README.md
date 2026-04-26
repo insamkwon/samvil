@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.20.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.21.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.21.0 "QA Synthesis Gate"** — 독립 QA가 수집한 Pass 2/3 증거를 메인 세션이 하나의 기계적 `PASS / REVISE / FAIL` 판정으로 합성하는 릴리스입니다.
+
+> **v3.21.0 주요 추가** (2026-04-26):
+> - **Central QA synthesis** — `mcp/samvil_mcp/qa_synthesis.py`와 MCP `synthesize_qa_evidence`가 Pass 1, 독립 Pass 2, 독립 Pass 3 JSON을 중앙 판정으로 합성.
+> - **Machine-readable QA evidence** — `qa-functional`은 `QA_FUNCTIONAL_JSON`, `qa-quality`는 `QA_QUALITY_JSON`을 반환하도록 계약화.
+> - **Ownership guard** — 독립 agent가 `.samvil/qa-report.md`, `.samvil/events.jsonl`, `project.state.json`, overall verdict를 쓰려 하면 synthesis가 `REVISE`로 차단.
+> - **검증**: 875 unit tests · 154 MCP tools · Phase 19 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.20.0 "Independent Evidence Contract"** — design/build/QA/evolve에 흩어진 Independent Evidence, Central Verdict 원칙을 실행 가능한 dogfood 계약으로 고정한 릴리스입니다.
 
