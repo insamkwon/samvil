@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.26.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.27.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.27.0 "Evolve Apply Plan"** — 검토된 evolve proposal을 seed preview와 hash-guarded apply plan으로 바꿔, 안전하게 `project.seed.json`을 다음 버전으로 적용하는 릴리스입니다.
+
+> **v3.27.0 주요 추가** (2026-04-26):
+> - **Guarded apply plan** — `materialize_evolve_apply_plan`이 `.samvil/evolve-apply-plan.json`, `.samvil/evolved-seed.preview.json`, `.samvil/evolve-apply-report.md`를 생성.
+> - **Seed hash gate** — `apply_evolve_apply_plan`이 원본 seed hash를 검증한 뒤에만 `project.seed.json`을 갱신하고 `seed_history/vN.json` 백업과 diff를 남김.
+> - **Status/run-report apply surface** — `samvil-status`와 `build_run_report`가 apply readiness/applied 상태, version target, mutation count를 노출.
+> - **검증**: 910 unit tests · 165 MCP tools · Phase 25 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.26.0 "Evolve Proposal Materialization"** — evolve context를 바로 seed 수정으로 이어가지 않고, 먼저 검토 가능한 proposal artifact로 고정하는 릴리스입니다.
 

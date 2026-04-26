@@ -4,6 +4,47 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.27.0] — 2026-04-26 — Evolve Apply Plan
+
+Phase 25 of the multi-host SAMVIL architecture. This release turns reviewed
+evolve proposals into guarded seed patch previews and applies them only when
+the current seed still matches the plan hash.
+
+### Added
+- `mcp/samvil_mcp/evolve_apply.py` for deterministic evolve apply plan
+  generation and guarded application.
+- `.samvil/evolve-apply-plan.json`, `.samvil/evolved-seed.preview.json`, and
+  `.samvil/evolve-apply-report.md` materialization.
+- MCP `build_evolve_apply_plan`, `materialize_evolve_apply_plan`, and
+  `apply_evolve_apply_plan`.
+- Hash-gated `project.seed.json` updates with `seed_history/vN.json` backup and
+  `seed_history/vN_vN+1_diff.md` diff output.
+- Run-report `evolve_apply` summary.
+- `samvil-status` human/JSON output for apply status, version target, mutation
+  count, and next action.
+- `scripts/phase25-evolve-apply-dogfood.py` proving a blocked Pass 2 QA route
+  can produce, preview, and apply a safe evolved seed.
+- Phase 25 dogfood as the first default release runner check.
+- Phase 25 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.27-phase25.md`.
+
+### Changed
+- `skills/samvil-evolve/SKILL.md` now prefers guarded apply plans over manual
+  `project.seed.json` edits when a ready proposal exists.
+- Release readiness defaults now require Phase 25 before Phase 24 and earlier
+  recovery/QA gates.
+
+### Verified
+- Phase 25 dogfood: PASS.
+- Evolve apply, status, telemetry, release, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 910 passed.
+- MCP server import smoke: 165 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.26.0] — 2026-04-26 — Evolve Proposal Materialization
 
 Phase 24 of the multi-host SAMVIL architecture. This release turns
