@@ -160,6 +160,45 @@ def test_status_human_includes_inspection_report(tmp_path):
     assert "2 viewports, 0 console errors, 2 screenshots" in text
 
 
+def test_status_prioritizes_failed_inspection_next_action(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "run-report.json", {
+        "state": {"current_stage": "qa", "samvil_tier": "standard"},
+        "claims": {"pending_subjects": []},
+        "timeline": {},
+        "mcp_health": {},
+        "next_action": "continue with samvil-build",
+    })
+    _write_json(root / ".samvil" / "inspection-report.json", {
+        "scenario": "proj",
+        "summary": {
+            "status": "fail",
+            "total_checks": 4,
+            "failed_checks": 1,
+            "console_errors": 1,
+            "screenshots": 1,
+            "failure_types": ["console-error"],
+        },
+        "failures": [
+            {
+                "type": "console-error",
+                "check_id": "viewport.desktop.console",
+                "repair_hint": "Fix browser console/page errors first.",
+            }
+        ],
+        "next_action": "repair inspection failure: console-error (viewport.desktop.console)",
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["next_recommended_action"] == "repair inspection failure: console-error (viewport.desktop.console)"
+    assert data["inspection_report"]["failure_types"] == ["console-error"]
+    assert "Fix browser console/page errors first." in text
+    assert "Next action:       repair inspection failure: console-error" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

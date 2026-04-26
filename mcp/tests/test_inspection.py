@@ -7,6 +7,7 @@ from pathlib import Path
 
 from samvil_mcp.inspection import (
     build_inspection_report,
+    derive_inspection_observations,
     inspection_report_path,
     read_inspection_report,
     render_inspection_report,
@@ -68,6 +69,9 @@ def test_inspection_report_fails_on_console_errors(tmp_path):
 
     assert report["summary"]["status"] == "fail"
     assert report["summary"]["console_errors"] == 1
+    assert report["summary"]["failure_types"] == ["console-error"]
+    assert report["failures"][0]["repair_hint"].startswith("Fix browser console")
+    assert report["next_action"].startswith("repair inspection failure: console-error")
     assert any(check["id"] == "viewport.desktop.console" for check in report["checks"])
 
 
@@ -79,3 +83,61 @@ def test_inspection_report_fails_when_evidence_missing(tmp_path):
 
     assert report["summary"]["status"] == "fail"
     assert report["checks"][0]["id"] == "evidence.present"
+    assert report["failures"][0]["type"] == "evidence-missing"
+
+
+def test_inspection_report_classifies_multiple_failure_types(tmp_path):
+    root = tmp_path / "project"
+    (root / ".samvil").mkdir(parents=True)
+    evidence = {
+        "schema_version": "1.0",
+        "scenario": "broken-app",
+        "viewports": [
+            {
+                "name": "mobile",
+                "loaded": True,
+                "console_errors": [],
+                "overflow_count": 1,
+                "overflow": [{"tag": "button", "text": "long label"}],
+                "screenshot": "missing.png",
+                "canvas_nonblank": False,
+            }
+        ],
+        "interactions": [
+            {"id": "restart", "status": "fail", "message": "restart did not reset score"}
+        ],
+    }
+    (root / ".samvil" / "inspection-evidence.json").write_text(
+        json.dumps(evidence),
+        encoding="utf-8",
+    )
+
+    report = build_inspection_report(root)
+
+    assert report["summary"]["status"] == "fail"
+    assert report["summary"]["failure_types"] == [
+        "canvas-blank",
+        "interaction-failed",
+        "layout-overflow",
+        "screenshot-missing",
+    ]
+    assert {failure["type"] for failure in report["failures"]} == {
+        "layout-overflow",
+        "screenshot-missing",
+        "canvas-blank",
+        "interaction-failed",
+    }
+
+
+def test_derive_inspection_observations_from_failures(tmp_path):
+    root = tmp_path / "project"
+    _write_evidence(root, console_errors=["ReferenceError: broken"])
+    report = build_inspection_report(root)
+
+    observations = derive_inspection_observations(report)
+
+    assert len(observations) == 1
+    assert observations[0]["source"] == "inspection.report"
+    assert observations[0]["severity"] == "high"
+    assert observations[0]["dedupe_key"].startswith("inspection:inspection-app:console-error")
+    assert "console" in observations[0]["suggested_action"]

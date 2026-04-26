@@ -99,6 +99,22 @@ def next_recommended_action(gate_verdicts: dict[str, dict]) -> str:
     return f"{subject}: {meta.get('verdict','?')} → {action}"
 
 
+def inspection_recommended_action(inspection: dict) -> str | None:
+    summary = inspection.get("summary", {}) or {}
+    if summary.get("status") != "fail":
+        return None
+    return inspection.get("next_action") or "repair inspection failure"
+
+
+def status_next_action(report: dict, gate_verdicts: dict[str, dict], inspection: dict) -> str:
+    inspection_action = inspection_recommended_action(inspection)
+    if inspection_action:
+        return inspection_action
+    if report:
+        return report.get("next_action") or next_recommended_action(gate_verdicts)
+    return next_recommended_action(gate_verdicts)
+
+
 def experiment_coverage(experiments: list[dict]) -> tuple[int, int]:
     """Return (with_observations, total) — the 80% target is the §7 exit gate."""
     with_obs = sum(1 for e in experiments if e.get("observations"))
@@ -254,10 +270,17 @@ def render_human(root: Path) -> str:
             f"{inspection_summary.get('console_errors', 0)} console errors, "
             f"{inspection_summary.get('screenshots', 0)} screenshots"
         )
+        failures = inspection.get("failures") or []
+        if failures:
+            lines.append("  Failures:")
+            for failure in failures[:5]:
+                lines.append(
+                    f"    {failure.get('type')}: {failure.get('repair_hint')}"
+                )
     lines.append("")
     lines.append(
         "Next action:       "
-        f"{report.get('next_action') if report else next_recommended_action(gate_verdicts)}"
+        f"{status_next_action(report, gate_verdicts, inspection)}"
     )
     return "\n".join(lines)
 
@@ -312,10 +335,11 @@ def render_json(root: Path) -> str:
                 "failed_checks": (inspection.get("summary", {}) or {}).get("failed_checks", 0),
                 "console_errors": (inspection.get("summary", {}) or {}).get("console_errors", 0),
                 "screenshots": (inspection.get("summary", {}) or {}).get("screenshots", 0),
+                "failure_types": (inspection.get("summary", {}) or {}).get("failure_types", []),
+                "failures": inspection.get("failures") or [],
+                "next_action": inspection.get("next_action"),
             },
-            "next_recommended_action": (
-                report.get("next_action") if report else next_recommended_action(gate_verdicts)
-            ),
+            "next_recommended_action": status_next_action(report, gate_verdicts, inspection),
         },
         ensure_ascii=False,
         indent=2,

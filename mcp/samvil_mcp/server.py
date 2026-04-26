@@ -82,6 +82,7 @@ from .domain_packs import (
 )
 from .inspection import (
     build_inspection_report as _build_inspection_report,
+    derive_inspection_observations as _derive_inspection_observations,
     read_inspection_report as _read_inspection_report_file,
     render_inspection_report as _render_inspection_report,
     write_inspection_report as _write_inspection_report,
@@ -3603,6 +3604,36 @@ def render_inspection_report(project_root: str, refresh: bool = False) -> dict:
         return {"status": "ok", "context": text}
     except Exception as e:
         _log_mcp_health("fail", "render_inspection_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def derive_inspection_observations(
+    project_root: str,
+    refresh: bool = False,
+    persist: bool = False,
+) -> dict:
+    """Derive retro observation candidates from failed inspection checks."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _build_inspection_report(project_root) if refresh else _read_inspection_report_file(project_root)
+        if report is None:
+            return {"status": "missing"}
+        observations = _derive_inspection_observations(report)
+        path = ""
+        if persist:
+            path = str(_append_retro_observations(project_root, observations))
+        _log_mcp_health("ok", "derive_inspection_observations")
+        return {
+            "status": "ok",
+            "count": len(observations),
+            "path": path,
+            "observations": observations,
+        }
+    except Exception as e:
+        _log_mcp_health("fail", "derive_inspection_observations", str(e))
         return {"status": "error", "error": str(e)}
 
 
