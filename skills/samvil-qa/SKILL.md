@@ -661,10 +661,13 @@ JSON blocks:
 5. Call `mcp__samvil_mcp__synthesize_qa_evidence(evidence_json=<json>)`
 6. Use the returned `verdict`, `reason`, `next_action`, and event drafts as the
    central source of truth. Do not let independent agent text override it.
-7. Write `.samvil/qa-report.md`
-8. **MCP (best-effort):** Emit all QA events from the synthesis result via
-   `mcp__samvil_mcp__save_event` (see Event Log section)
-9. Update `project.state.json` (only completed_features, failed, qa_history — NOT current_stage, which MCP manages)
+7. Call `mcp__samvil_mcp__materialize_qa_synthesis(project_root="<project_root>", synthesis_json=<json>)`
+   to write `.samvil/qa-results.json`, `.samvil/qa-report.md`, append QA events,
+   and update `project.state.json.qa_history`.
+8. If MCP materialization is unavailable, perform the same writes in the main
+   session only. Independent agents still never write these files.
+9. Continue from the materialized verdict. Only update completed_features,
+   failed, and qa_history; do NOT update current_stage directly, which MCP manages.
 
 ---
 

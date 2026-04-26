@@ -156,8 +156,9 @@ def check_independent_qa() -> dict[str, object]:
             "<paste agents/qa-functional.md>",
             "<paste agents/qa-quality.md>",
             "mcp__samvil_mcp__synthesize_qa_evidence",
+            "mcp__samvil_mcp__materialize_qa_synthesis",
             "central source of truth",
-            "Emit all QA events",
+            "append QA events",
         ],
         label="independent qa ownership",
     )

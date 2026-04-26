@@ -12,6 +12,7 @@ from typing import Any
 
 from .repair import repair_summary as _repair_summary
 from .release import release_summary as _release_summary
+from .qa_synthesis import qa_summary as _qa_summary
 
 RUN_REPORT_SCHEMA_VERSION = "1.0"
 RETRO_OBSERVATION_SCHEMA_VERSION = "1.0"
@@ -83,8 +84,9 @@ def build_run_report(
     timeline_summary = _timeline_summary(events)
     repair_summary = _repair_summary(root)
     release_summary = _release_summary(root)
+    qa_summary = _qa_summary(root)
 
-    next_action = _next_action(marker, gate_verdicts, health_summary, repair_summary, release_summary)
+    next_action = _next_action(marker, gate_verdicts, health_summary, repair_summary, release_summary, qa_summary)
 
     return {
         "schema_version": RUN_REPORT_SCHEMA_VERSION,
@@ -113,6 +115,7 @@ def build_run_report(
         "mcp_health": health_summary,
         "repair": repair_summary,
         "release": release_summary,
+        "qa": qa_summary,
         "continuation": {
             "present": bool(marker),
             "next_skill": marker.get("next_skill"),
@@ -601,6 +604,7 @@ def _next_action(
     health: dict[str, Any],
     repair: dict[str, Any] | None = None,
     release: dict[str, Any] | None = None,
+    qa: dict[str, Any] | None = None,
 ) -> str:
     repair_gate = (repair or {}).get("gate", {}) or {}
     if repair_gate.get("verdict") == "blocked":
@@ -610,6 +614,9 @@ def _next_action(
         return str(release_gate.get("next_action") or "release gate blocked")
     if release_gate.get("verdict") == "pass":
         return str(release_gate.get("next_action") or "release ready")
+    qa = qa or {}
+    if qa.get("present") and qa.get("verdict") in {"REVISE", "FAIL"}:
+        return str(qa.get("next_action") or "fix QA findings")
     blocking = [
         gate for gate in gate_verdicts
         if gate.get("verdict") not in (None, "pass", "skip", "unknown")

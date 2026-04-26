@@ -303,6 +303,32 @@ def test_status_exposes_run_report_release_gate(tmp_path):
     assert f"Release bundle: {bundle_path}" in text
 
 
+def test_status_exposes_qa_materialization(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "qa-results.json", {
+        "synthesis": {
+            "verdict": "REVISE",
+            "reason": "functional QA found unimplemented ACs",
+            "next_action": "replace stubs or hardcoded paths with real implementation",
+            "pass2": {"counts": {"PASS": 1, "PARTIAL": 0, "UNIMPLEMENTED": 1, "FAIL": 0}},
+            "pass3": {"verdict": "PASS"},
+        }
+    })
+    (root / ".samvil" / "qa-report.md").write_text("# QA Synthesis\n", encoding="utf-8")
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["qa"]["results_present"] is True
+    assert data["qa"]["verdict"] == "REVISE"
+    assert data["qa"]["pass2_counts"]["UNIMPLEMENTED"] == 1
+    assert data["next_recommended_action"] == "replace stubs or hardcoded paths with real implementation"
+    assert "QA:      REVISE (P=1 / Pa=0 / U=1 / F=0)" in text
+    assert "QA:" in text
+    assert "replace stubs or hardcoded paths with real implementation" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

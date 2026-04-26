@@ -1248,6 +1248,25 @@ async def synthesize_qa_evidence(evidence_json: str) -> str:
 
 
 @mcp.tool()
+async def materialize_qa_synthesis(project_root: str, synthesis_json: str) -> str:
+    """Persist QA synthesis into qa-results, qa-report, events, and state.
+
+    Args:
+        project_root: Project root containing .samvil/
+        synthesis_json: JSON object returned by synthesize_qa_evidence
+
+    Returns: materialization result with written paths and event count
+    """
+    try:
+        from .qa_synthesis import materialize_qa_synthesis as _materialize
+        synthesis = json.loads(synthesis_json)
+        return json.dumps(_materialize(project_root, synthesis))
+    except Exception as e:
+        _log_mcp_health("fail", "materialize_qa_synthesis", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def validate_evidence(evidences_json: str, project_root: str) -> str:
     """Validate a list of file:line evidence strings against project files.
 

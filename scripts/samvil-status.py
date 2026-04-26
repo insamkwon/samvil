@@ -12,6 +12,8 @@ against local files only:
   .samvil/inspection-report.json (v3.10 browser inspection rollup, if present)
   .samvil/repair-plan.json    (v3.12 repair plan, if present)
   .samvil/repair-report.json  (v3.12 repair report, if present)
+  .samvil/qa-results.json     (v3.22 QA synthesis materialization, if present)
+  .samvil/qa-report.md        (v3.22 QA synthesis markdown, if present)
   .samvil/release-report.json (v3.14 release readiness report, if present)
   .samvil/release-summary.md  (v3.16 release evidence bundle, if present)
 
@@ -82,12 +84,20 @@ def _load_repair_report(root: Path) -> dict:
     return _load_json(root / ".samvil" / "repair-report.json")
 
 
+def _load_qa_results(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "qa-results.json")
+
+
 def _load_release_report(root: Path) -> dict:
     return _load_json(root / ".samvil" / "release-report.json")
 
 
 def _release_bundle_path(root: Path) -> Path:
     return root / ".samvil" / "release-summary.md"
+
+
+def _qa_report_path(root: Path) -> Path:
+    return root / ".samvil" / "qa-report.md"
 
 
 def latest_gate_verdicts(claims: list[dict]) -> dict[str, dict]:
@@ -146,6 +156,15 @@ def release_recommended_action(report: dict, release_report: dict) -> str | None
     return None
 
 
+def qa_recommended_action(report: dict, qa_results: dict) -> str | None:
+    report_qa = (report.get("qa", {}) or {})
+    synthesis = qa_results.get("synthesis", {}) or {}
+    verdict = report_qa.get("verdict") or synthesis.get("verdict")
+    if verdict in {"REVISE", "FAIL"}:
+        return report_qa.get("next_action") or synthesis.get("next_action") or "fix QA findings"
+    return None
+
+
 def status_next_action(
     report: dict,
     gate_verdicts: dict[str, dict],
@@ -153,6 +172,7 @@ def status_next_action(
     repair_plan: dict,
     repair_report: dict,
     release_report: dict | None = None,
+    qa_results: dict | None = None,
 ) -> str:
     repair_action = repair_recommended_action(repair_plan, repair_report)
     if repair_action:
@@ -161,6 +181,9 @@ def status_next_action(
     release_action = release_recommended_action(report, release_report or {})
     if release_action:
         return release_action
+    qa_action = qa_recommended_action(report, qa_results or {})
+    if qa_action:
+        return qa_action
     if repair_verified and not report and not release_report:
         return repair_report.get("next_action") or "repair verified: re-run release checks"
     if not repair_verified:
@@ -203,8 +226,10 @@ def render_human(root: Path) -> str:
     inspection = _load_inspection_report(root)
     repair_plan = _load_repair_plan(root)
     repair_report = _load_repair_report(root)
+    qa_results = _load_qa_results(root)
     release_report = _load_release_report(root)
     release_bundle = _release_bundle_path(root)
+    qa_report = _qa_report_path(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
     report_state = report.get("state", {}) or {}
@@ -214,11 +239,14 @@ def render_human(root: Path) -> str:
     continuation = report.get("continuation", {}) or {}
     report_repair = report.get("repair", {}) or {}
     repair_gate = report_repair.get("gate", {}) or {}
+    report_qa = report.get("qa", {}) or {}
     report_release = report.get("release", {}) or {}
     release_gate = report_release.get("gate", {}) or {}
     inspection_summary = inspection.get("summary", {}) or {}
     repair_plan_summary = repair_plan.get("summary", {}) or {}
     repair_report_summary = repair_report.get("summary", {}) or {}
+    qa_synthesis = qa_results.get("synthesis", {}) or {}
+    qa_counts = ((report_qa.get("pass2_counts") or qa_synthesis.get("pass2", {}).get("counts")) or {})
     release_report_summary = release_report.get("summary", {}) or {}
 
     # v3.1 stored the field under the legacy name. Read both, preferring
@@ -276,6 +304,17 @@ def render_human(root: Path) -> str:
             f"{repair_plan_summary.get('status', '?')} "
             f"({repair_plan_summary.get('total_actions', 0)} actions)"
         )
+    if qa_results:
+        lines.append(
+            "QA:      "
+            f"{qa_synthesis.get('verdict', '?')} "
+            f"(P={qa_counts.get('PASS', 0)} / "
+            f"Pa={qa_counts.get('PARTIAL', 0)} / "
+            f"U={qa_counts.get('UNIMPLEMENTED', 0)} / "
+            f"F={qa_counts.get('FAIL', 0)})"
+        )
+    if qa_report.exists():
+        lines.append(f"QA report: {qa_report}")
     if release_report:
         lines.append(
             "Release: "
@@ -354,6 +393,11 @@ def render_human(root: Path) -> str:
                 "  Release gate:    "
                 f"{release_gate.get('verdict', '?')} - {release_gate.get('reason', '')}"
             )
+        if report_qa.get("present"):
+            lines.append(
+                "  QA:              "
+                f"{report_qa.get('verdict', '?')} - {report_qa.get('reason', '')}"
+            )
         stages = timeline.get("stages") or []
         if stages:
             lines.append("  Stage timeline:")
@@ -406,6 +450,26 @@ def render_human(root: Path) -> str:
                 f"{repair_report_summary.get('resolved_failures', 0)} resolved / "
                 f"{repair_report_summary.get('remaining_failures', 0)} remaining"
             )
+    if qa_results:
+        lines.append("")
+        lines.append("QA:")
+        lines.append(
+            "  Synthesis:       "
+            f"{qa_synthesis.get('verdict', '?')} - {qa_synthesis.get('reason', '')}"
+        )
+        lines.append(
+            "  Pass 2:          "
+            f"{qa_counts.get('PASS', 0)} pass / "
+            f"{qa_counts.get('PARTIAL', 0)} partial / "
+            f"{qa_counts.get('UNIMPLEMENTED', 0)} unimplemented / "
+            f"{qa_counts.get('FAIL', 0)} fail"
+        )
+        lines.append(
+            "  Pass 3:          "
+            f"{((qa_synthesis.get('pass3') or {}).get('verdict') or '?')}"
+        )
+        if qa_report.exists():
+            lines.append(f"  Report:          {qa_report}")
     if release_report:
         lines.append("")
         lines.append("Release:")
@@ -423,7 +487,7 @@ def render_human(root: Path) -> str:
     lines.append("")
     lines.append(
         "Next action:       "
-        f"{status_next_action(report, gate_verdicts, inspection, repair_plan, repair_report, release_report)}"
+        f"{status_next_action(report, gate_verdicts, inspection, repair_plan, repair_report, release_report, qa_results)}"
     )
     return "\n".join(lines)
 
@@ -434,8 +498,10 @@ def render_json(root: Path) -> str:
     inspection = _load_inspection_report(root)
     repair_plan = _load_repair_plan(root)
     repair_report = _load_repair_report(root)
+    qa_results = _load_qa_results(root)
     release_report = _load_release_report(root)
     release_bundle = _release_bundle_path(root)
+    qa_report = _qa_report_path(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
     report_state = report.get("state", {}) or {}
@@ -444,6 +510,7 @@ def render_json(root: Path) -> str:
     health = report.get("mcp_health", {}) or {}
     continuation = report.get("continuation", {}) or {}
     report_repair = report.get("repair", {}) or {}
+    report_qa = report.get("qa", {}) or {}
     report_release = report.get("release", {}) or {}
     samvil_tier = report_state.get("samvil_tier") or state.get("samvil_tier") or "standard"
     gate_verdicts = latest_gate_verdicts(claims)
@@ -500,6 +567,18 @@ def render_json(root: Path) -> str:
                 "remaining_failures": (repair_report.get("summary", {}) or {}).get("remaining_failures", 0),
                 "next_action": repair_report.get("next_action") or repair_plan.get("next_action"),
             },
+            "qa": {
+                "results_present": bool(qa_results),
+                "report_present": qa_report.exists(),
+                "verdict": ((qa_results.get("synthesis", {}) or {}).get("verdict")),
+                "reason": ((qa_results.get("synthesis", {}) or {}).get("reason")),
+                "next_action": ((qa_results.get("synthesis", {}) or {}).get("next_action")),
+                "pass2_counts": (((qa_results.get("synthesis", {}) or {}).get("pass2", {}) or {}).get("counts") or {}),
+                "pass3_verdict": (((qa_results.get("synthesis", {}) or {}).get("pass3", {}) or {}).get("verdict")),
+                "qa_results_path": str(root / ".samvil" / "qa-results.json") if qa_results else "",
+                "qa_report_path": str(qa_report) if qa_report.exists() else "",
+                "run_report": report_qa,
+            },
             "release": {
                 "report_present": bool(release_report),
                 "report_status": (release_report.get("summary", {}) or {}).get("status"),
@@ -518,6 +597,7 @@ def render_json(root: Path) -> str:
                 repair_plan,
                 repair_report,
                 release_report,
+                qa_results,
             ),
         },
         ensure_ascii=False,

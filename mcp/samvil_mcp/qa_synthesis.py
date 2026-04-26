@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import os
 from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 QA_SYNTHESIS_SCHEMA_VERSION = "1.0"
+QA_RESULTS_SCHEMA_VERSION = "1.0"
 FUNCTIONAL_VERDICTS = {"PASS", "PARTIAL", "UNIMPLEMENTED", "FAIL"}
 QUALITY_VERDICTS = {"PASS", "REVISE", "FAIL"}
 PROTECTED_WRITES = {
@@ -14,6 +19,22 @@ PROTECTED_WRITES = {
     "project.state.json",
     "overall_verdict",
 }
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def qa_results_path(project_root: Path | str) -> Path:
+    return Path(project_root) / ".samvil" / "qa-results.json"
+
+
+def qa_report_path(project_root: Path | str) -> Path:
+    return Path(project_root) / ".samvil" / "qa-report.md"
+
+
+def qa_events_path(project_root: Path | str) -> Path:
+    return Path(project_root) / ".samvil" / "events.jsonl"
 
 
 def synthesize_qa_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
@@ -108,6 +129,53 @@ def render_qa_synthesis(synthesis: dict[str, Any]) -> str:
     else:
         lines.append("- No protected write violations.")
     return "\n".join(lines) + "\n"
+
+
+def materialize_qa_synthesis(project_root: Path | str, synthesis: dict[str, Any]) -> dict[str, Any]:
+    """Persist QA synthesis into report, structured results, events, and state."""
+    root = Path(project_root)
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True, exist_ok=True)
+
+    normalized = _qa_results_payload(root, synthesis)
+    results_path = _atomic_write_json(qa_results_path(root), normalized)
+    report_path = _atomic_write_text(qa_report_path(root), render_qa_synthesis(synthesis))
+    event_count = _append_event_drafts(root, synthesis.get("events") or [])
+    state_path = _update_project_state(root, synthesis)
+    return {
+        "schema_version": QA_RESULTS_SCHEMA_VERSION,
+        "status": "ok",
+        "project_root": str(root),
+        "qa_results_path": str(results_path),
+        "qa_report_path": str(report_path),
+        "events_path": str(qa_events_path(root)),
+        "events_appended": event_count,
+        "state_path": str(state_path) if state_path else "",
+        "verdict": synthesis.get("verdict"),
+        "next_action": synthesis.get("next_action"),
+    }
+
+
+def read_qa_results(project_root: Path | str) -> dict[str, Any] | None:
+    data = _load_json(qa_results_path(project_root))
+    return data or None
+
+
+def qa_summary(project_root: Path | str) -> dict[str, Any]:
+    results = read_qa_results(project_root) or {}
+    synthesis = results.get("synthesis") or {}
+    return {
+        "present": bool(results),
+        "verdict": synthesis.get("verdict"),
+        "reason": synthesis.get("reason"),
+        "next_action": synthesis.get("next_action"),
+        "iteration": synthesis.get("iteration"),
+        "max_iterations": synthesis.get("max_iterations"),
+        "pass2_counts": ((synthesis.get("pass2") or {}).get("counts") or {}),
+        "pass3_verdict": ((synthesis.get("pass3") or {}).get("verdict")),
+        "qa_results_path": str(qa_results_path(project_root)) if results else "",
+        "qa_report_path": str(qa_report_path(project_root)) if qa_report_path(project_root).exists() else "",
+    }
 
 
 def _normalize_pass1(data: dict[str, Any]) -> dict[str, Any]:
@@ -214,3 +282,87 @@ def _events_for(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 },
             })
     return events
+
+
+def _qa_results_payload(root: Path, synthesis: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema_version": QA_RESULTS_SCHEMA_VERSION,
+        "project_root": str(root),
+        "generated_at": _now_iso(),
+        "source": "qa_synthesis",
+        "synthesis": synthesis,
+    }
+
+
+def _append_event_drafts(root: Path, events: list[dict[str, Any]]) -> int:
+    if not events:
+        return 0
+    path = qa_events_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state = _load_project_state(root)
+    session_id = state.get("session_id")
+    now = _now_iso()
+    with path.open("a", encoding="utf-8") as handle:
+        for event in events:
+            row = {
+                "ts": now,
+                "session_id": session_id,
+                "event_type": event.get("event_type"),
+                "stage": event.get("stage") or "qa",
+                "data": event.get("data") or {},
+                "source": "qa_synthesis",
+            }
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return len(events)
+
+
+def _update_project_state(root: Path, synthesis: dict[str, Any]) -> Path | None:
+    path = root / "project.state.json"
+    if not path.exists():
+        path = root / ".samvil" / "state.json"
+    state = _load_json(path) if path.exists() else {}
+    if not isinstance(state, dict):
+        state = {}
+    history = state.get("qa_history")
+    if not isinstance(history, list):
+        history = []
+    history.append({
+        "iteration": synthesis.get("iteration"),
+        "verdict": synthesis.get("verdict"),
+        "reason": synthesis.get("reason"),
+        "next_action": synthesis.get("next_action"),
+        "pass2_counts": ((synthesis.get("pass2") or {}).get("counts") or {}),
+        "pass3": ((synthesis.get("pass3") or {}).get("verdict")),
+    })
+    state["qa_history"] = history
+    state["last_qa_verdict"] = synthesis.get("verdict")
+    state["last_qa_next_action"] = synthesis.get("next_action")
+    state["last_qa_at"] = _now_iso()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return _atomic_write_json(path, state)
+
+
+def _load_project_state(root: Path) -> dict[str, Any]:
+    return _load_json(root / "project.state.json") or _load_json(root / ".samvil" / "state.json")
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> Path:
+    return _atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
+def _atomic_write_text(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+    return path

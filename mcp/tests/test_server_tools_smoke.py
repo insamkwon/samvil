@@ -19,6 +19,7 @@ from samvil_mcp.server import (
     heartbeat_state,
     increment_stall_recovery_count,
     is_state_stalled,
+    materialize_qa_synthesis,
     suggest_ac_split,
     synthesize_qa_evidence,
 )
@@ -58,6 +59,24 @@ def test_synthesize_qa_evidence_tool_returns_central_verdict() -> None:
     assert data["gate"] == "qa_synthesis"
     assert data["verdict"] == "REVISE"
     assert data["next_action"] == "replace stubs or hardcoded paths with real implementation"
+
+
+def test_materialize_qa_synthesis_tool_writes_results(tmp_path: Path) -> None:
+    synthesis = json.loads(_run(synthesize_qa_evidence(evidence_json=json.dumps({
+        "pass1": {"status": "PASS"},
+        "pass2": {"items": [
+            {"id": "AC-1", "criterion": "Create task", "verdict": "PASS", "evidence": ["app/page.tsx:10"]}
+        ]},
+        "pass3": {"verdict": "PASS"},
+    }))))
+
+    out = _run(materialize_qa_synthesis(project_root=str(tmp_path), synthesis_json=json.dumps(synthesis)))
+    data = json.loads(out)
+
+    assert data["status"] == "ok"
+    assert data["verdict"] == "PASS"
+    assert (tmp_path / ".samvil" / "qa-results.json").exists()
+    assert (tmp_path / ".samvil" / "qa-report.md").exists()
 
 
 # ── AC split (v3-011) ──────────────────────────────────────────
