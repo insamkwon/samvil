@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.10.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.11.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,15 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.11.0 "Inspection Feedback Loop"** — v3.10의 inspection gate 위에 실패 분류, repair hint, retro observation, status next action을 얹은 릴리스입니다.
+
+> **v3.11.0 주요 추가** (2026-04-26):
+> - **Failure taxonomy** — console error, layout overflow, screenshot missing, interaction failed, canvas blank, viewport load/evidence failure를 deterministic하게 분류.
+> - **Repair hints** — failed inspection check마다 severity와 구체적인 repair hint를 report에 포함.
+> - **Retro bridge** — `derive_inspection_observations`로 inspection failure를 `.samvil/retro-observations.jsonl` 후보로 변환.
+> - **Status next action** — inspection fail이면 `samvil-status.py`가 일반 run action보다 inspection repair를 우선 추천.
+> - **검증**: 814 unit tests · 137 MCP tools · broken-fixture feedback dogfood PASS · Phase 8 browser inspection regression PASS · pre-commit-check PASS.
 
 **v3.10.0 "Real App Inspection Gate"** — v3.9의 browser runtime dogfood 위에 사용자 눈높이의 inspection report, desktop/mobile viewport evidence, console/overflow/interaction gate를 얹은 릴리스입니다.
 

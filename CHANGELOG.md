@@ -4,6 +4,48 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.11.0] — 2026-04-26 — Inspection Feedback Loop
+
+Phase 9 of the multi-host SAMVIL architecture. This release turns failed
+inspection reports into actionable repair loops through failure taxonomy,
+repair hints, retro observations, and status next-action priority.
+
+### Added
+- Inspection failure taxonomy for console errors, layout overflow, screenshot
+  missing, interaction failures, blank canvas, viewport load failures, and
+  missing/invalid evidence.
+- Failure records in `.samvil/inspection-report.json` with severity,
+  `repair_hint`, and `next_action`.
+- `derive_inspection_observations`, converting failed inspection checks into
+  retro observation candidates.
+- MCP wrapper for `derive_inspection_observations`, including optional
+  persistence to `.samvil/retro-observations.jsonl`.
+- `samvil-status.py` priority for failed inspection reports so the next action
+  points at inspection repair before generic run continuation.
+- `scripts/phase9-inspection-feedback-dogfood.py`, a broken-fixture dogfood
+  covering console, overflow, screenshot, interaction, and canvas failures.
+- Phase 9 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.11-phase9.md`.
+
+### Dogfood
+- `broken-dashboard-feedback`: status=fail, failures=4, observations=4,
+  types=`console-error,interaction-failed,layout-overflow,screenshot-missing`,
+  next_action=`repair inspection failure: console-error (...)`.
+- `broken-game-feedback`: status=fail, failures=3, observations=3,
+  types=`canvas-blank,interaction-failed,screenshot-missing`,
+  next_action=`repair inspection failure: canvas-blank (...)`.
+
+### Verified
+- Phase 9 broken-fixture feedback dogfood: PASS.
+- Phase 8 real browser inspection regression: PASS.
+- Targeted inspection/status/MCP tests: 15 passed.
+- Full test suite: 814 passed.
+- MCP server import smoke: 137 tools.
+- Cross-host replay: PASS.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.10.0] — 2026-04-26 — Real App Inspection Gate
 
 Phase 8 of the multi-host SAMVIL architecture. This release promotes browser
