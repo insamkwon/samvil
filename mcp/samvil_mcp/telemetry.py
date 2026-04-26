@@ -615,6 +615,9 @@ def _next_action(
     if release_gate.get("verdict") == "pass":
         return str(release_gate.get("next_action") or "release ready")
     qa = qa or {}
+    qa_convergence = qa.get("convergence") or {}
+    if qa.get("present") and qa_convergence.get("verdict") in {"blocked", "failed"}:
+        return str(qa_convergence.get("next_action") or "resolve QA convergence gate")
     if qa.get("present") and qa.get("verdict") in {"REVISE", "FAIL"}:
         return str(qa.get("next_action") or "fix QA findings")
     blocking = [

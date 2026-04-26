@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from samvil_mcp.qa_synthesis import (
+    evaluate_qa_convergence,
     materialize_qa_synthesis,
     qa_summary,
     read_qa_results,
@@ -41,7 +42,55 @@ def test_synthesis_revises_on_unimplemented_non_core_ac():
 
     assert result["verdict"] == "REVISE"
     assert result["next_action"] == "replace stubs or hardcoded paths with real implementation"
+    assert result["issue_ids"] == ["pass2:AC-1:UNIMPLEMENTED"]
     assert any(event["event_type"] == "qa_unimplemented" for event in result["events"])
+
+
+def test_qa_convergence_blocks_identical_consecutive_issues():
+    previous = [{
+        "iteration": 1,
+        "verdict": "REVISE",
+        "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"],
+    }]
+    synthesis = synthesize_qa_evidence({
+        "iteration": 2,
+        "max_iterations": 3,
+        "pass1": {"status": "PASS"},
+        "pass2": {"items": [
+            {"id": "AC-1", "criterion": "AI summary", "verdict": "UNIMPLEMENTED", "reason": "stub"}
+        ]},
+        "pass3": {"verdict": "PASS"},
+    })
+
+    gate = evaluate_qa_convergence(synthesis, previous)
+
+    assert gate["gate"] == "qa_convergence"
+    assert gate["verdict"] == "blocked"
+    assert gate["reason"] == "identical QA issues persisted across two consecutive iterations"
+    assert gate["issue_count"] == 1
+    assert gate["previous_issue_count"] == 1
+
+
+def test_qa_convergence_allows_decreasing_revise_cycle():
+    previous = [{
+        "iteration": 1,
+        "verdict": "REVISE",
+        "issue_ids": ["pass2:AC-1:UNIMPLEMENTED", "pass3:missing-focus-state"],
+    }]
+    synthesis = synthesize_qa_evidence({
+        "iteration": 2,
+        "max_iterations": 3,
+        "pass1": {"status": "PASS"},
+        "pass2": {"items": [
+            {"id": "AC-1", "criterion": "AI summary", "verdict": "UNIMPLEMENTED", "reason": "stub"}
+        ]},
+        "pass3": {"verdict": "PASS"},
+    })
+
+    gate = evaluate_qa_convergence(synthesis, previous)
+
+    assert gate["verdict"] == "continue"
+    assert gate["resolved_issue_ids"] == ["pass3:missing-focus-state"]
 
 
 def test_synthesis_fails_on_core_unimplemented():
@@ -108,6 +157,7 @@ def test_materialize_qa_synthesis_writes_report_results_events_and_state(tmp_pat
     assert result["events_appended"] == 2
     persisted = read_qa_results(tmp_path)
     assert persisted["synthesis"]["verdict"] == "REVISE"
+    assert persisted["convergence"]["verdict"] == "continue"
     assert (tmp_path / ".samvil" / "qa-report.md").read_text(encoding="utf-8").startswith("# QA Synthesis")
     events = [
         json.loads(line)
@@ -117,8 +167,46 @@ def test_materialize_qa_synthesis_writes_report_results_events_and_state(tmp_pat
     assert events[0]["session_id"] == "s1"
     state = json.loads((tmp_path / "project.state.json").read_text(encoding="utf-8"))
     assert state["last_qa_verdict"] == "REVISE"
+    assert state["last_qa_convergence"]["verdict"] == "continue"
+    assert state["qa_history"][0]["issue_ids"] == ["pass2:AC-1:UNIMPLEMENTED"]
     assert state["qa_history"][0]["pass2_counts"]["UNIMPLEMENTED"] == 1
     summary = qa_summary(tmp_path)
     assert summary["present"] is True
     assert summary["verdict"] == "REVISE"
+    assert summary["convergence"]["verdict"] == "continue"
     assert summary["pass2_counts"]["UNIMPLEMENTED"] == 1
+
+
+def test_materialize_qa_synthesis_marks_blocked_on_repeated_issues(tmp_path):
+    (tmp_path / "project.state.json").write_text(
+        json.dumps({
+            "session_id": "s1",
+            "current_stage": "qa",
+            "qa_history": [{
+                "iteration": 1,
+                "verdict": "REVISE",
+                "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"],
+            }],
+        }),
+        encoding="utf-8",
+    )
+    synthesis = synthesize_qa_evidence({
+        "iteration": 2,
+        "max_iterations": 3,
+        "pass1": {"status": "PASS"},
+        "pass2": {"items": [
+            {"id": "AC-1", "criterion": "Create task", "verdict": "UNIMPLEMENTED", "reason": "stub"},
+        ]},
+        "pass3": {"verdict": "PASS"},
+    })
+
+    result = materialize_qa_synthesis(tmp_path, synthesis)
+
+    assert result["convergence"]["verdict"] == "blocked"
+    persisted = read_qa_results(tmp_path)
+    assert persisted["convergence"]["next_action"] == "manual intervention: evolve seed, skip to retro, or fix manually"
+    events = [
+        json.loads(line)
+        for line in (tmp_path / ".samvil" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["event_type"] for event in events] == ["qa_unimplemented", "qa_verdict", "qa_blocked"]

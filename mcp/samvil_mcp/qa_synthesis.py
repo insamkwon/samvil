@@ -11,6 +11,7 @@ from typing import Any
 
 QA_SYNTHESIS_SCHEMA_VERSION = "1.0"
 QA_RESULTS_SCHEMA_VERSION = "1.0"
+QA_CONVERGENCE_SCHEMA_VERSION = "1.0"
 FUNCTIONAL_VERDICTS = {"PASS", "PARTIAL", "UNIMPLEMENTED", "FAIL"}
 QUALITY_VERDICTS = {"PASS", "REVISE", "FAIL"}
 PROTECTED_WRITES = {
@@ -78,6 +79,7 @@ def synthesize_qa_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
         "verdict": verdict,
         "reason": reason,
         "next_action": next_action,
+        "issue_ids": _issue_ids(pass1=pass1, pass2_items=pass2_items, pass3=pass3, ownership=ownership),
         "iteration": iteration,
         "max_iterations": max_iterations,
         "pass1": pass1,
@@ -128,6 +130,16 @@ def render_qa_synthesis(synthesis: dict[str, Any]) -> str:
             lines.append(f"- {violation.get('agent')}: {violation.get('path')}")
     else:
         lines.append("- No protected write violations.")
+    convergence = synthesis.get("convergence") or {}
+    if convergence:
+        lines.extend([
+            "",
+            "## Convergence",
+            f"- Gate: {convergence.get('verdict') or '?'}",
+            f"- Reason: {convergence.get('reason') or '?'}",
+            f"- Next action: {convergence.get('next_action') or '?'}",
+            f"- Issue count: {convergence.get('issue_count', 0)}",
+        ])
     return "\n".join(lines) + "\n"
 
 
@@ -137,11 +149,14 @@ def materialize_qa_synthesis(project_root: Path | str, synthesis: dict[str, Any]
     samvil = root / ".samvil"
     samvil.mkdir(parents=True, exist_ok=True)
 
-    normalized = _qa_results_payload(root, synthesis)
+    state = _load_project_state(root)
+    convergence = evaluate_qa_convergence(synthesis, state.get("qa_history") or [])
+    enriched = {**synthesis, "convergence": convergence}
+    normalized = _qa_results_payload(root, enriched, convergence)
     results_path = _atomic_write_json(qa_results_path(root), normalized)
-    report_path = _atomic_write_text(qa_report_path(root), render_qa_synthesis(synthesis))
-    event_count = _append_event_drafts(root, synthesis.get("events") or [])
-    state_path = _update_project_state(root, synthesis)
+    report_path = _atomic_write_text(qa_report_path(root), render_qa_synthesis(enriched))
+    event_count = _append_event_drafts(root, list(synthesis.get("events") or []) + _convergence_events(convergence))
+    state_path = _update_project_state(root, enriched, convergence)
     return {
         "schema_version": QA_RESULTS_SCHEMA_VERSION,
         "status": "ok",
@@ -153,6 +168,7 @@ def materialize_qa_synthesis(project_root: Path | str, synthesis: dict[str, Any]
         "state_path": str(state_path) if state_path else "",
         "verdict": synthesis.get("verdict"),
         "next_action": synthesis.get("next_action"),
+        "convergence": convergence,
     }
 
 
@@ -169,12 +185,68 @@ def qa_summary(project_root: Path | str) -> dict[str, Any]:
         "verdict": synthesis.get("verdict"),
         "reason": synthesis.get("reason"),
         "next_action": synthesis.get("next_action"),
+        "convergence": results.get("convergence") or synthesis.get("convergence") or {},
         "iteration": synthesis.get("iteration"),
         "max_iterations": synthesis.get("max_iterations"),
         "pass2_counts": ((synthesis.get("pass2") or {}).get("counts") or {}),
         "pass3_verdict": ((synthesis.get("pass3") or {}).get("verdict")),
         "qa_results_path": str(qa_results_path(project_root)) if results else "",
         "qa_report_path": str(qa_report_path(project_root)) if qa_report_path(project_root).exists() else "",
+    }
+
+
+def evaluate_qa_convergence(synthesis: dict[str, Any], qa_history: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Evaluate whether repeated QA revise cycles are converging."""
+    history = [row for row in (qa_history or []) if isinstance(row, dict)]
+    issue_ids = _extract_issue_ids(synthesis)
+    previous_issue_ids = _previous_issue_ids(history)
+    previous_count = len(previous_issue_ids) if previous_issue_ids is not None else None
+    issue_count = len(issue_ids)
+    verdict = str(synthesis.get("verdict") or "").upper()
+    iteration = int(synthesis.get("iteration") or len(history) + 1 or 1)
+    max_iterations = int(synthesis.get("max_iterations") or 3)
+
+    if verdict == "PASS":
+        gate_verdict = "pass"
+        reason = "qa passed"
+        next_action = "proceed to deploy or evolve offer"
+    elif iteration >= max_iterations:
+        gate_verdict = "failed"
+        reason = f"qa did not converge before max_iterations={max_iterations}"
+        next_action = "report persistent QA failure to user"
+    elif previous_issue_ids is not None and issue_ids and issue_ids == previous_issue_ids:
+        gate_verdict = "blocked"
+        reason = "identical QA issues persisted across two consecutive iterations"
+        next_action = "manual intervention: evolve seed, skip to retro, or fix manually"
+    elif previous_count is not None and issue_count >= previous_count and issue_count > 0:
+        gate_verdict = "blocked"
+        reason = "QA issue count did not decrease from previous iteration"
+        next_action = "inspect persistent QA issues before another auto-fix"
+    elif verdict == "FAIL":
+        gate_verdict = "failed"
+        reason = str(synthesis.get("reason") or "qa failed")
+        next_action = str(synthesis.get("next_action") or "report QA failure to user")
+    else:
+        gate_verdict = "continue"
+        reason = "qa revise cycle may continue"
+        next_action = str(synthesis.get("next_action") or "fix QA findings")
+
+    resolved = sorted(previous_issue_ids - issue_ids) if previous_issue_ids is not None else []
+    introduced = sorted(issue_ids - previous_issue_ids) if previous_issue_ids is not None else []
+    return {
+        "schema_version": QA_CONVERGENCE_SCHEMA_VERSION,
+        "gate": "qa_convergence",
+        "verdict": gate_verdict,
+        "reason": reason,
+        "next_action": next_action,
+        "iteration": iteration,
+        "max_iterations": max_iterations,
+        "issue_count": issue_count,
+        "previous_issue_count": previous_count,
+        "issue_ids": sorted(issue_ids),
+        "previous_issue_ids": sorted(previous_issue_ids) if previous_issue_ids is not None else [],
+        "resolved_issue_ids": resolved,
+        "introduced_issue_ids": introduced,
     }
 
 
@@ -254,6 +326,55 @@ def _central_verdict(
     return "PASS", "all central QA gates passed", "proceed to deploy or evolve offer"
 
 
+def _issue_ids(
+    *,
+    pass1: dict[str, Any],
+    pass2_items: list[dict[str, Any]],
+    pass3: dict[str, Any],
+    ownership: list[dict[str, str]],
+) -> list[str]:
+    ids: set[str] = set()
+    for issue in pass1.get("issues") or []:
+        ids.add("pass1:" + _slug(str(issue)))
+    for item in pass2_items:
+        if item.get("verdict") in {"FAIL", "UNIMPLEMENTED"}:
+            ids.add(f"pass2:{item.get('id') or '?'}:{item.get('verdict')}")
+    for issue in pass3.get("issues") or []:
+        ids.add("pass3:" + _slug(str(issue)))
+    for violation in ownership:
+        ids.add(f"ownership:{violation.get('agent') or '?'}:{violation.get('path') or '?'}")
+    return sorted(ids)
+
+
+def _extract_issue_ids(synthesis: dict[str, Any]) -> set[str]:
+    explicit = synthesis.get("issue_ids")
+    if isinstance(explicit, list):
+        return {str(item) for item in explicit if str(item)}
+    pass1 = synthesis.get("pass1") or {}
+    pass2_items = ((synthesis.get("pass2") or {}).get("items") or [])
+    pass3 = synthesis.get("pass3") or {}
+    ownership = synthesis.get("ownership_violations") or []
+    return set(_issue_ids(
+        pass1=pass1,
+        pass2_items=[item for item in pass2_items if isinstance(item, dict)],
+        pass3=pass3,
+        ownership=[item for item in ownership if isinstance(item, dict)],
+    ))
+
+
+def _previous_issue_ids(history: list[dict[str, Any]]) -> set[str] | None:
+    for row in reversed(history):
+        issue_ids = row.get("issue_ids")
+        if isinstance(issue_ids, list):
+            return {str(item) for item in issue_ids if str(item)}
+    return None
+
+
+def _slug(value: str) -> str:
+    normalized = "".join(ch.lower() if ch.isalnum() else "-" for ch in value.strip())
+    return "-".join(part for part in normalized.split("-") if part)[:80] or "unknown"
+
+
 def _pass2_status(counts: Counter[str]) -> str:
     if counts.get("FAIL", 0):
         return "FAIL"
@@ -284,14 +405,30 @@ def _events_for(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return events
 
 
-def _qa_results_payload(root: Path, synthesis: dict[str, Any]) -> dict[str, Any]:
+def _qa_results_payload(root: Path, synthesis: dict[str, Any], convergence: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": QA_RESULTS_SCHEMA_VERSION,
         "project_root": str(root),
         "generated_at": _now_iso(),
         "source": "qa_synthesis",
         "synthesis": synthesis,
+        "convergence": convergence,
     }
+
+
+def _convergence_events(convergence: dict[str, Any]) -> list[dict[str, Any]]:
+    if convergence.get("verdict") not in {"blocked", "failed"}:
+        return []
+    return [{
+        "event_type": "qa_blocked" if convergence.get("verdict") == "blocked" else "qa_failed",
+        "stage": "qa",
+        "data": {
+            "reason": convergence.get("reason"),
+            "next_action": convergence.get("next_action"),
+            "iteration": convergence.get("iteration"),
+            "issue_ids": convergence.get("issue_ids") or [],
+        },
+    }]
 
 
 def _append_event_drafts(root: Path, events: list[dict[str, Any]]) -> int:
@@ -316,7 +453,7 @@ def _append_event_drafts(root: Path, events: list[dict[str, Any]]) -> int:
     return len(events)
 
 
-def _update_project_state(root: Path, synthesis: dict[str, Any]) -> Path | None:
+def _update_project_state(root: Path, synthesis: dict[str, Any], convergence: dict[str, Any]) -> Path | None:
     path = root / "project.state.json"
     if not path.exists():
         path = root / ".samvil" / "state.json"
@@ -331,12 +468,16 @@ def _update_project_state(root: Path, synthesis: dict[str, Any]) -> Path | None:
         "verdict": synthesis.get("verdict"),
         "reason": synthesis.get("reason"),
         "next_action": synthesis.get("next_action"),
+        "issue_ids": synthesis.get("issue_ids") or convergence.get("issue_ids") or [],
+        "convergence_verdict": convergence.get("verdict"),
+        "convergence_reason": convergence.get("reason"),
         "pass2_counts": ((synthesis.get("pass2") or {}).get("counts") or {}),
         "pass3": ((synthesis.get("pass3") or {}).get("verdict")),
     })
     state["qa_history"] = history
     state["last_qa_verdict"] = synthesis.get("verdict")
     state["last_qa_next_action"] = synthesis.get("next_action")
+    state["last_qa_convergence"] = convergence
     state["last_qa_at"] = _now_iso()
     path.parent.mkdir(parents=True, exist_ok=True)
     return _atomic_write_json(path, state)

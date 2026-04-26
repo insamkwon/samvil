@@ -159,6 +159,9 @@ def release_recommended_action(report: dict, release_report: dict) -> str | None
 def qa_recommended_action(report: dict, qa_results: dict) -> str | None:
     report_qa = (report.get("qa", {}) or {})
     synthesis = qa_results.get("synthesis", {}) or {}
+    convergence = report_qa.get("convergence") or qa_results.get("convergence") or synthesis.get("convergence") or {}
+    if convergence.get("verdict") in {"blocked", "failed"}:
+        return convergence.get("next_action") or "resolve QA convergence gate"
     verdict = report_qa.get("verdict") or synthesis.get("verdict")
     if verdict in {"REVISE", "FAIL"}:
         return report_qa.get("next_action") or synthesis.get("next_action") or "fix QA findings"
@@ -246,6 +249,7 @@ def render_human(root: Path) -> str:
     repair_plan_summary = repair_plan.get("summary", {}) or {}
     repair_report_summary = repair_report.get("summary", {}) or {}
     qa_synthesis = qa_results.get("synthesis", {}) or {}
+    qa_convergence = report_qa.get("convergence") or qa_results.get("convergence") or qa_synthesis.get("convergence") or {}
     qa_counts = ((report_qa.get("pass2_counts") or qa_synthesis.get("pass2", {}).get("counts")) or {})
     release_report_summary = release_report.get("summary", {}) or {}
 
@@ -313,6 +317,12 @@ def render_human(root: Path) -> str:
             f"U={qa_counts.get('UNIMPLEMENTED', 0)} / "
             f"F={qa_counts.get('FAIL', 0)})"
         )
+        if qa_convergence:
+            lines.append(
+                "QA gate: "
+                f"{qa_convergence.get('verdict', '?')} "
+                f"({qa_convergence.get('issue_count', 0)} issues)"
+            )
     if qa_report.exists():
         lines.append(f"QA report: {qa_report}")
     if release_report:
@@ -398,6 +408,12 @@ def render_human(root: Path) -> str:
                 "  QA:              "
                 f"{report_qa.get('verdict', '?')} - {report_qa.get('reason', '')}"
             )
+            convergence = report_qa.get("convergence") or {}
+            if convergence:
+                lines.append(
+                    "  QA convergence: "
+                    f"{convergence.get('verdict', '?')} - {convergence.get('reason', '')}"
+                )
         stages = timeline.get("stages") or []
         if stages:
             lines.append("  Stage timeline:")
@@ -468,6 +484,11 @@ def render_human(root: Path) -> str:
             "  Pass 3:          "
             f"{((qa_synthesis.get('pass3') or {}).get('verdict') or '?')}"
         )
+        if qa_convergence:
+            lines.append(
+                "  Convergence:     "
+                f"{qa_convergence.get('verdict', '?')} - {qa_convergence.get('reason', '')}"
+            )
         if qa_report.exists():
             lines.append(f"  Report:          {qa_report}")
     if release_report:
@@ -573,6 +594,11 @@ def render_json(root: Path) -> str:
                 "verdict": ((qa_results.get("synthesis", {}) or {}).get("verdict")),
                 "reason": ((qa_results.get("synthesis", {}) or {}).get("reason")),
                 "next_action": ((qa_results.get("synthesis", {}) or {}).get("next_action")),
+                "convergence": (
+                    qa_results.get("convergence")
+                    or ((qa_results.get("synthesis", {}) or {}).get("convergence"))
+                    or {}
+                ),
                 "pass2_counts": (((qa_results.get("synthesis", {}) or {}).get("pass2", {}) or {}).get("counts") or {}),
                 "pass3_verdict": (((qa_results.get("synthesis", {}) or {}).get("pass3", {}) or {}).get("verdict")),
                 "qa_results_path": str(root / ".samvil" / "qa-results.json") if qa_results else "",

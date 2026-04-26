@@ -659,15 +659,19 @@ JSON blocks:
    }
    ```
 5. Call `mcp__samvil_mcp__synthesize_qa_evidence(evidence_json=<json>)`
-6. Use the returned `verdict`, `reason`, `next_action`, and event drafts as the
-   central source of truth. Do not let independent agent text override it.
+6. Use the returned `verdict`, `reason`, `next_action`, `issue_ids`, and event
+   drafts as the central source of truth. Do not let independent agent text
+   override it.
 7. Call `mcp__samvil_mcp__materialize_qa_synthesis(project_root="<project_root>", synthesis_json=<json>)`
    to write `.samvil/qa-results.json`, `.samvil/qa-report.md`, append QA events,
-   and update `project.state.json.qa_history`.
+   evaluate QA convergence, and update `project.state.json.qa_history`.
 8. If MCP materialization is unavailable, perform the same writes in the main
    session only. Independent agents still never write these files.
-9. Continue from the materialized verdict. Only update completed_features,
-   failed, and qa_history; do NOT update current_stage directly, which MCP manages.
+9. Continue from the materialized verdict and convergence gate. If convergence
+   is `blocked` or `failed`, stop the blind Ralph loop and report the gate's
+   `next_action`.
+10. Only update completed_features, failed, and qa_history; do NOT update
+   current_stage directly, which MCP manages.
 
 ---
 
@@ -1477,6 +1481,9 @@ If verdict is REVISE:
 5. **MAX_ITERATIONS = config.qa_max_iterations || 3**: After MAX_ITERATIONS REVISE cycles → verdict = FAIL
 
 **Convergence check:** Each iteration MUST reduce total issue count compared to previous iteration.
+SAMVIL v3.23 also materializes this as a `qa_convergence` gate in
+`.samvil/qa-results.json`; blocked/failed convergence takes priority over
+another automatic fix attempt.
 
 **BLOCKED detection (PHI-04):** Compare issue lists across iterations:
 - Extract issue identifiers from each iteration's `qa_history` entry

@@ -15,6 +15,7 @@ import pytest
 
 from samvil_mcp.server import (
     build_reawake_message,
+    evaluate_qa_convergence,
     get_tier_phases,
     heartbeat_state,
     increment_stall_recovery_count,
@@ -77,6 +78,31 @@ def test_materialize_qa_synthesis_tool_writes_results(tmp_path: Path) -> None:
     assert data["verdict"] == "PASS"
     assert (tmp_path / ".samvil" / "qa-results.json").exists()
     assert (tmp_path / ".samvil" / "qa-report.md").exists()
+
+
+def test_evaluate_qa_convergence_tool_reads_history(tmp_path: Path) -> None:
+    (tmp_path / "project.state.json").write_text(json.dumps({
+        "qa_history": [{
+            "iteration": 1,
+            "verdict": "REVISE",
+            "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"],
+        }]
+    }), encoding="utf-8")
+    synthesis = json.loads(_run(synthesize_qa_evidence(evidence_json=json.dumps({
+        "iteration": 2,
+        "max_iterations": 3,
+        "pass1": {"status": "PASS"},
+        "pass2": {"items": [
+            {"id": "AC-1", "criterion": "Create task", "verdict": "UNIMPLEMENTED", "reason": "stub"}
+        ]},
+        "pass3": {"verdict": "PASS"},
+    }))))
+
+    out = _run(evaluate_qa_convergence(project_root=str(tmp_path), synthesis_json=json.dumps(synthesis)))
+    data = json.loads(out)
+
+    assert data["gate"] == "qa_convergence"
+    assert data["verdict"] == "blocked"
 
 
 # ── AC split (v3-011) ──────────────────────────────────────────

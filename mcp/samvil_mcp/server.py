@@ -1267,6 +1267,26 @@ async def materialize_qa_synthesis(project_root: str, synthesis_json: str) -> st
 
 
 @mcp.tool()
+async def evaluate_qa_convergence(project_root: str, synthesis_json: str) -> str:
+    """Evaluate whether QA revise iterations are converging or blocked.
+
+    Args:
+        project_root: Project root containing project.state.json or .samvil/state.json
+        synthesis_json: JSON object returned by synthesize_qa_evidence
+
+    Returns: qa_convergence gate dict with verdict, reason, next_action, and issue deltas
+    """
+    try:
+        from .qa_synthesis import evaluate_qa_convergence as _evaluate, _load_project_state
+        synthesis = json.loads(synthesis_json)
+        state = _load_project_state(Path(project_root))
+        return json.dumps(_evaluate(synthesis, state.get("qa_history") or []))
+    except Exception as e:
+        _log_mcp_health("fail", "evaluate_qa_convergence", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def validate_evidence(evidences_json: str, project_root: str) -> str:
     """Validate a list of file:line evidence strings against project files.
 

@@ -329,6 +329,36 @@ def test_status_exposes_qa_materialization(tmp_path):
     assert "replace stubs or hardcoded paths with real implementation" in text
 
 
+def test_status_prioritizes_blocked_qa_convergence(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "qa-results.json", {
+        "synthesis": {
+            "verdict": "REVISE",
+            "reason": "functional QA found unimplemented ACs",
+            "next_action": "replace stubs or hardcoded paths with real implementation",
+            "pass2": {"counts": {"PASS": 1, "PARTIAL": 0, "UNIMPLEMENTED": 1, "FAIL": 0}},
+            "pass3": {"verdict": "PASS"},
+        },
+        "convergence": {
+            "gate": "qa_convergence",
+            "verdict": "blocked",
+            "reason": "identical QA issues persisted across two consecutive iterations",
+            "next_action": "manual intervention: evolve seed, skip to retro, or fix manually",
+            "issue_count": 1,
+        },
+    })
+    (root / ".samvil" / "qa-report.md").write_text("# QA Synthesis\n", encoding="utf-8")
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["qa"]["convergence"]["verdict"] == "blocked"
+    assert data["next_recommended_action"] == "manual intervention: evolve seed, skip to retro, or fix manually"
+    assert "QA gate: blocked (1 issues)" in text
+    assert "Convergence:     blocked - identical QA issues persisted" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"
