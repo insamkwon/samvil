@@ -10,6 +10,8 @@ against local files only:
   .samvil/events.jsonl        (last activity)
   .samvil/run-report.json     (v3.5 telemetry rollup, if present)
   .samvil/inspection-report.json (v3.10 browser inspection rollup, if present)
+  .samvil/repair-plan.json    (v3.12 repair plan, if present)
+  .samvil/repair-report.json  (v3.12 repair report, if present)
 
 Panes in MVP (other panes deferred to later sprints per §6.1):
   - Sprint + stage
@@ -70,6 +72,14 @@ def _load_inspection_report(root: Path) -> dict:
     return _load_json(root / ".samvil" / "inspection-report.json")
 
 
+def _load_repair_plan(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "repair-plan.json")
+
+
+def _load_repair_report(root: Path) -> dict:
+    return _load_json(root / ".samvil" / "repair-report.json")
+
+
 def latest_gate_verdicts(claims: list[dict]) -> dict[str, dict]:
     latest: dict[str, dict] = {}
     for r in claims:
@@ -106,7 +116,25 @@ def inspection_recommended_action(inspection: dict) -> str | None:
     return inspection.get("next_action") or "repair inspection failure"
 
 
-def status_next_action(report: dict, gate_verdicts: dict[str, dict], inspection: dict) -> str:
+def repair_recommended_action(repair_plan: dict, repair_report: dict) -> str | None:
+    if repair_report:
+        return repair_report.get("next_action") or "review repair report"
+    actions = repair_plan.get("actions") or []
+    if actions:
+        return f"execute repair plan: {actions[0].get('instruction')}"
+    return None
+
+
+def status_next_action(
+    report: dict,
+    gate_verdicts: dict[str, dict],
+    inspection: dict,
+    repair_plan: dict,
+    repair_report: dict,
+) -> str:
+    repair_action = repair_recommended_action(repair_plan, repair_report)
+    if repair_action:
+        return repair_action
     inspection_action = inspection_recommended_action(inspection)
     if inspection_action:
         return inspection_action
@@ -144,6 +172,8 @@ def render_human(root: Path) -> str:
     state = _load_state(root)
     report = _load_run_report(root)
     inspection = _load_inspection_report(root)
+    repair_plan = _load_repair_plan(root)
+    repair_report = _load_repair_report(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
     report_state = report.get("state", {}) or {}
@@ -152,6 +182,8 @@ def render_human(root: Path) -> str:
     health = report.get("mcp_health", {}) or {}
     continuation = report.get("continuation", {}) or {}
     inspection_summary = inspection.get("summary", {}) or {}
+    repair_plan_summary = repair_plan.get("summary", {}) or {}
+    repair_report_summary = repair_report.get("summary", {}) or {}
 
     # v3.1 stored the field under the legacy name. Read both, preferring
     # the new one. After v3.3 the legacy branch is removed.
@@ -184,6 +216,19 @@ def render_human(root: Path) -> str:
             f"{inspection_summary.get('status', '?')} "
             f"({inspection_summary.get('passed_checks', 0)} pass / "
             f"{inspection_summary.get('failed_checks', 0)} fail)"
+        )
+    if repair_report:
+        lines.append(
+            "Repair:  "
+            f"{repair_report_summary.get('status', '?')} "
+            f"({repair_report_summary.get('resolved_failures', 0)} resolved / "
+            f"{repair_report_summary.get('remaining_failures', 0)} remaining)"
+        )
+    elif repair_plan:
+        lines.append(
+            "Repair:  "
+            f"{repair_plan_summary.get('status', '?')} "
+            f"({repair_plan_summary.get('total_actions', 0)} actions)"
         )
     lines.append("")
     lines.append("Gate verdicts (latest):")
@@ -277,10 +322,26 @@ def render_human(root: Path) -> str:
                 lines.append(
                     f"    {failure.get('type')}: {failure.get('repair_hint')}"
                 )
+    if repair_plan or repair_report:
+        lines.append("")
+        lines.append("Repair:")
+        if repair_plan:
+            lines.append(
+                "  Plan:            "
+                f"{repair_plan_summary.get('status', '?')} / "
+                f"{repair_plan_summary.get('total_actions', 0)} actions"
+            )
+        if repair_report:
+            lines.append(
+                "  Report:          "
+                f"{repair_report_summary.get('status', '?')} / "
+                f"{repair_report_summary.get('resolved_failures', 0)} resolved / "
+                f"{repair_report_summary.get('remaining_failures', 0)} remaining"
+            )
     lines.append("")
     lines.append(
         "Next action:       "
-        f"{status_next_action(report, gate_verdicts, inspection)}"
+        f"{status_next_action(report, gate_verdicts, inspection, repair_plan, repair_report)}"
     )
     return "\n".join(lines)
 
@@ -289,6 +350,8 @@ def render_json(root: Path) -> str:
     state = _load_state(root)
     report = _load_run_report(root)
     inspection = _load_inspection_report(root)
+    repair_plan = _load_repair_plan(root)
+    repair_report = _load_repair_report(root)
     claims = _load_jsonl(root / ".samvil" / "claims.jsonl")
     experiments = _load_jsonl(root / ".samvil" / "experiments.jsonl")
     report_state = report.get("state", {}) or {}
@@ -339,7 +402,23 @@ def render_json(root: Path) -> str:
                 "failures": inspection.get("failures") or [],
                 "next_action": inspection.get("next_action"),
             },
-            "next_recommended_action": status_next_action(report, gate_verdicts, inspection),
+            "repair": {
+                "plan_present": bool(repair_plan),
+                "report_present": bool(repair_report),
+                "plan_status": (repair_plan.get("summary", {}) or {}).get("status"),
+                "plan_actions": (repair_plan.get("summary", {}) or {}).get("total_actions", 0),
+                "report_status": (repair_report.get("summary", {}) or {}).get("status"),
+                "resolved_failures": (repair_report.get("summary", {}) or {}).get("resolved_failures", 0),
+                "remaining_failures": (repair_report.get("summary", {}) or {}).get("remaining_failures", 0),
+                "next_action": repair_report.get("next_action") or repair_plan.get("next_action"),
+            },
+            "next_recommended_action": status_next_action(
+                report,
+                gate_verdicts,
+                inspection,
+                repair_plan,
+                repair_report,
+            ),
         },
         ensure_ascii=False,
         indent=2,

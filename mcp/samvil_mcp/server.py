@@ -161,6 +161,16 @@ from .telemetry import (
     render_run_report as _render_run_report,
     write_run_report as _write_run_report,
 )
+from .repair import (
+    build_repair_plan as _build_repair_plan,
+    build_repair_report as _build_repair_report,
+    read_repair_plan as _read_repair_plan_file,
+    read_repair_report as _read_repair_report_file,
+    render_repair_plan as _render_repair_plan,
+    render_repair_report as _render_repair_report,
+    write_repair_plan as _write_repair_plan,
+    write_repair_report as _write_repair_report,
+)
 
 mcp = FastMCP("samvil-mcp")
 
@@ -3634,6 +3644,110 @@ def derive_inspection_observations(
         }
     except Exception as e:
         _log_mcp_health("fail", "derive_inspection_observations", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def build_repair_plan(project_root: str, persist: bool = True) -> dict:
+    """Build a repair plan from a failed inspection report."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        plan = _build_repair_plan(project_root)
+        path = ""
+        if persist:
+            path = str(_write_repair_plan(plan, project_root))
+        _log_mcp_health("ok", "build_repair_plan")
+        return {"status": "ok", "path": path, "plan": plan}
+    except Exception as e:
+        _log_mcp_health("fail", "build_repair_plan", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def read_repair_plan(project_root: str) -> dict:
+    """Read .samvil/repair-plan.json if present."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        plan = _read_repair_plan_file(project_root)
+        _log_mcp_health("ok", "read_repair_plan")
+        if plan is None:
+            return {"status": "missing"}
+        return {"status": "ok", "plan": plan}
+    except Exception as e:
+        _log_mcp_health("fail", "read_repair_plan", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def render_repair_plan(project_root: str, refresh: bool = False) -> dict:
+    """Render a repair plan as markdown; optionally refresh it first."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        plan = _build_repair_plan(project_root) if refresh else _read_repair_plan_file(project_root)
+        if plan is None:
+            return {"status": "missing"}
+        _log_mcp_health("ok", "render_repair_plan")
+        return {"status": "ok", "context": _render_repair_plan(plan)}
+    except Exception as e:
+        _log_mcp_health("fail", "render_repair_plan", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def build_repair_report(project_root: str, persist: bool = True) -> dict:
+    """Build a repair report comparing before and after inspection reports."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _build_repair_report(project_root)
+        path = ""
+        if persist:
+            path = str(_write_repair_report(report, project_root))
+        _log_mcp_health("ok", "build_repair_report")
+        return {"status": "ok", "path": path, "report": report}
+    except Exception as e:
+        _log_mcp_health("fail", "build_repair_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def read_repair_report(project_root: str) -> dict:
+    """Read .samvil/repair-report.json if present."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _read_repair_report_file(project_root)
+        _log_mcp_health("ok", "read_repair_report")
+        if report is None:
+            return {"status": "missing"}
+        return {"status": "ok", "report": report}
+    except Exception as e:
+        _log_mcp_health("fail", "read_repair_report", str(e))
+        return {"status": "error", "error": str(e)}
+
+
+@mcp.tool()
+def render_repair_report(project_root: str, refresh: bool = False) -> dict:
+    """Render a repair report as markdown; optionally refresh it first."""
+    err = _validate_project_root(project_root)
+    if err is not None:
+        return err
+    try:
+        report = _build_repair_report(project_root) if refresh else _read_repair_report_file(project_root)
+        if report is None:
+            return {"status": "missing"}
+        _log_mcp_health("ok", "render_repair_report")
+        return {"status": "ok", "context": _render_repair_report(report)}
+    except Exception as e:
+        _log_mcp_health("fail", "render_repair_report", str(e))
         return {"status": "error", "error": str(e)}
 
 

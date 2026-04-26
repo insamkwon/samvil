@@ -199,6 +199,40 @@ def test_status_prioritizes_failed_inspection_next_action(tmp_path):
     assert "Next action:       repair inspection failure: console-error" in text
 
 
+def test_status_includes_verified_repair_report(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / "project.state.json", {
+        "project_name": "proj",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+    })
+    _write_json(root / ".samvil" / "repair-plan.json", {
+        "summary": {"status": "ready", "total_actions": 1},
+        "actions": [
+            {"instruction": "Fix browser console/page errors first."}
+        ],
+        "next_action": "Fix browser console/page errors first.",
+    })
+    _write_json(root / ".samvil" / "repair-report.json", {
+        "summary": {
+            "status": "verified",
+            "resolved_failures": 1,
+            "remaining_failures": 0,
+        },
+        "next_action": "repair verified: re-run release checks",
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["repair"]["plan_present"] is True
+    assert data["repair"]["report_status"] == "verified"
+    assert data["repair"]["resolved_failures"] == 1
+    assert data["next_recommended_action"] == "repair verified: re-run release checks"
+    assert "Repair:  verified (1 resolved / 0 remaining)" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"
