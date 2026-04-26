@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.28.0`
+# SAMVIL — AI 바이브코딩 하네스 `v3.29.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,14 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.29.0 "Rebuild Reentry Contract"** — rebuild handoff 이후 다음 호스트가 seed 경로/버전/hash를 추론하지 않고 바로 scaffold에 재진입할 수 있도록 명시적 scaffold input을 남기는 릴리스입니다.
+
+> **v3.29.0 주요 추가** (2026-04-26):
+> - **Rebuild reentry artifact** — `materialize_rebuild_reentry`가 `.samvil/rebuild-reentry.json`을 생성.
+> - **Scaffold input contract** — reentry가 ready일 때 `.samvil/scaffold-input.json`에 seed path, version, sha256, next skill을 고정.
+> - **Status/run-report reentry surface** — `samvil-status`와 `build_run_report`가 rebuild reentry readiness와 scaffold 재진입 경로를 노출.
+> - **검증**: 924 unit tests · 169 MCP tools · Phase 27 dogfood PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.28.0 "Evolve Rebuild Handoff"** — evolved seed 적용 후 다음 호스트가 바로 재스캐폴드로 이어갈 수 있도록 portable rebuild marker를 남기는 릴리스입니다.
 

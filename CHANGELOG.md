@@ -4,6 +4,43 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.29.0] — 2026-04-26 — Rebuild Reentry Contract
+
+Phase 27 of the multi-host SAMVIL architecture. This release turns the rebuild
+handoff into an explicit scaffold reentry input so the next host can continue
+from the evolved seed without reconstructing path, version, or hash from chat
+history.
+
+### Added
+- `mcp/samvil_mcp/evolve_reentry.py` for deterministic rebuild reentry
+  generation.
+- `.samvil/rebuild-reentry.json` materialization.
+- `.samvil/scaffold-input.json` scaffold input when reentry is ready.
+- MCP `build_rebuild_reentry` and `materialize_rebuild_reentry`.
+- Run-report `rebuild_reentry` summary.
+- `samvil-status` human/JSON output for rebuild reentry readiness and scaffold
+  input path.
+- `scripts/phase27-rebuild-reentry-dogfood.py` proving QA blocked -> evolve
+  context -> proposal -> apply -> rebuild -> scaffold reentry.
+- Phase 27 dogfood as the first default release runner check.
+- Phase 27 planning document under
+  `docs/superpowers/plans/2026-04-26-samvil-v3.29-phase27.md`.
+
+### Changed
+- Release readiness defaults now require Phase 27 before Phase 26 and earlier
+  recovery/evolve gates.
+
+### Verified
+- Phase 27 dogfood: PASS.
+- Rebuild reentry, status, telemetry, release, and MCP smoke tests: PASS.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 924 passed.
+- MCP server import smoke: 169 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.28.0] — 2026-04-26 — Evolve Rebuild Handoff
 
 Phase 26 of the multi-host SAMVIL architecture. This release materializes the
