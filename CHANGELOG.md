@@ -4,6 +4,27 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.17.3] — 2026-04-26 — External CI Mirror Fixture Patch
+
+Patch release for Phase 15. The v3.17.2 remote run exposed that retro schema
+tests depended on ignored machine-local `harness-feedback.log` state.
+
+### Fixed
+- Add committed fixture `mcp/tests/fixtures/harness-feedback.json`.
+- Point retro schema tests at the fixture instead of ignored local
+  `harness-feedback.log`.
+
+### Verified
+- CI workflow validator: PASS.
+- Focused workflow pytest: 2 passed.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 851 passed.
+- MCP server import smoke: 153 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.17.2] — 2026-04-26 — External CI Mirror Test Runtime
 
 Patch release for Phase 15. The v3.17.1 remote run correctly failed on blocked

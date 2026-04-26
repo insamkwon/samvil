@@ -1,0 +1,24 @@
+[
+  {
+    "run_id": "samvil-fixture-001",
+    "seed_name": "schema-fixture",
+    "timestamp": "2026-04-26T00:00:00+09:00",
+    "stages": {
+      "retro": {
+        "verdict": "PASS"
+      }
+    },
+    "suggestions": [],
+    "suggestions_v2": [
+      {
+        "id": "v3-001",
+        "priority": "HIGH",
+        "component": "retro",
+        "name": "Pin schema fixture",
+        "problem": "Schema tests must not depend on ignored local feedback logs.",
+        "fix": "Read a committed fixture that represents the suggestions_v2 contract.",
+        "expected_impact": "CI can validate the schema without machine-local state."
+      }
+    ]
+  }
+]

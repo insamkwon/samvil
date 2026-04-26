@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.17.2`
+# SAMVIL — AI 바이브코딩 하네스 `v3.17.3`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,12 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.17.3 "External CI Mirror Fixture Patch"** — ignored local `harness-feedback.log`에 의존하던 retro schema 테스트를 committed fixture 기반으로 바꿔, GitHub Actions release runner가 로컬 상태 없이 통과하도록 한 패치입니다.
+
+> **v3.17.3 주요 수정** (2026-04-26):
+> - **Committed retro fixture** — `mcp/tests/fixtures/harness-feedback.json`을 추가하고 schema 테스트가 이 fixture를 읽게 수정.
+> - **검증**: 851 unit tests · 153 MCP tools · CI workflow validator PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.17.2 "External CI Mirror Test Runtime"** — CI venv에도 local pre-commit과 같은 pytest runtime을 설치해, GitHub Actions release runner가 full pre-commit까지 재현되도록 한 패치입니다.
 

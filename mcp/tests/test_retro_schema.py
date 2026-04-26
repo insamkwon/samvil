@@ -24,7 +24,7 @@ OPTIONAL_FIELDS = {"source", "sprint", "risk_of_worse"}
 
 PRIORITY_VALUES = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "BENEFIT"}
 
-FEEDBACK_LOG = Path(__file__).parents[2] / "harness-feedback.log"
+FEEDBACK_LOG = Path(__file__).parent / "fixtures" / "harness-feedback.json"
 
 
 def _load_log() -> list[dict]:
