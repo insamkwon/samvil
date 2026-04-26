@@ -78,6 +78,7 @@ def _evidence(scenario: str, *, fixed: bool) -> dict[str, Any]:
 
 def _checks(*, failed: str = "") -> list[dict[str, Any]]:
     rows = [
+        ("phase28_post_rebuild_qa", "python3 scripts/phase28-post-rebuild-qa-dogfood.py"),
         ("phase27_rebuild_reentry", "python3 scripts/phase27-rebuild-reentry-dogfood.py"),
         ("phase26_evolve_rebuild", "python3 scripts/phase26-evolve-rebuild-dogfood.py"),
         ("phase25_evolve_apply", "python3 scripts/phase25-evolve-apply-dogfood.py"),

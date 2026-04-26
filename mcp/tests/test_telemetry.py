@@ -378,6 +378,36 @@ def test_run_report_includes_rebuild_reentry_summary(tmp_path):
     assert report["rebuild_reentry"]["issue_count"] == 0
 
 
+def test_run_report_includes_post_rebuild_qa_summary(tmp_path):
+    root = tmp_path / "post-rebuild-qa"
+    samvil = root / ".samvil"
+    samvil.mkdir(parents=True)
+    (root / "project.state.json").write_text(json.dumps({
+        "project_name": "post-rebuild-qa",
+        "current_stage": "qa",
+        "samvil_tier": "standard",
+    }), encoding="utf-8")
+    (samvil / "post-rebuild-qa.json").write_text(json.dumps({
+        "status": "ready",
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "next_skill": "samvil-qa",
+        "from_stage": "scaffold",
+        "previous_qa": {
+            "verdict": "REVISE",
+            "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"],
+        },
+        "issues": [],
+        "next_action": "run samvil-qa against rebuilt output",
+    }), encoding="utf-8")
+
+    report = build_run_report(root)
+
+    assert report["post_rebuild_qa"]["present"] is True
+    assert report["post_rebuild_qa"]["next_skill"] == "samvil-qa"
+    assert report["post_rebuild_qa"]["previous_issue_count"] == 1
+
+
 def test_run_report_categorizes_events_and_stage_durations(tmp_path):
     root = tmp_path / "retry-app"
     samvil = root / ".samvil"

@@ -19,6 +19,7 @@ from .evolve_proposal import evolve_proposal_summary as _evolve_proposal_summary
 from .evolve_apply import evolve_apply_summary as _evolve_apply_summary
 from .evolve_rebuild import evolve_rebuild_summary as _evolve_rebuild_summary
 from .evolve_reentry import rebuild_reentry_summary as _rebuild_reentry_summary
+from .post_rebuild_qa import post_rebuild_qa_summary as _post_rebuild_qa_summary
 
 RUN_REPORT_SCHEMA_VERSION = "1.0"
 RETRO_OBSERVATION_SCHEMA_VERSION = "1.0"
@@ -97,6 +98,7 @@ def build_run_report(
     evolve_apply_summary = _evolve_apply_summary(root)
     evolve_rebuild_summary = _evolve_rebuild_summary(root)
     rebuild_reentry_summary = _rebuild_reentry_summary(root)
+    post_rebuild_qa_summary = _post_rebuild_qa_summary(root)
 
     next_action = _next_action(
         marker,
@@ -142,6 +144,7 @@ def build_run_report(
         "evolve_apply": evolve_apply_summary,
         "evolve_rebuild": evolve_rebuild_summary,
         "rebuild_reentry": rebuild_reentry_summary,
+        "post_rebuild_qa": post_rebuild_qa_summary,
         "continuation": {
             "present": bool(marker),
             "next_skill": marker.get("next_skill"),

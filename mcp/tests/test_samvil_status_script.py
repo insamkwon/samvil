@@ -500,6 +500,34 @@ def test_status_exposes_rebuild_reentry(tmp_path):
     assert "Rebuild reentry:" in text
 
 
+def test_status_exposes_post_rebuild_qa(tmp_path):
+    status = _load_status_module()
+    root = tmp_path / "proj"
+    _write_json(root / ".samvil" / "post-rebuild-qa.json", {
+        "status": "ready",
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "next_skill": "samvil-qa",
+        "from_stage": "scaffold",
+        "previous_qa": {
+            "verdict": "REVISE",
+            "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"],
+        },
+        "issues": [],
+        "next_action": "run samvil-qa against rebuilt output",
+    })
+
+    data = json.loads(status.render_json(root))
+    text = status.render_human(root)
+
+    assert data["post_rebuild_qa"]["present"] is True
+    assert data["post_rebuild_qa"]["status"] == "ready"
+    assert data["post_rebuild_qa"]["next_skill"] == "samvil-qa"
+    assert data["post_rebuild_qa"]["previous_issue_count"] == 1
+    assert "Post-rebuild QA: ready -> samvil-qa" in text
+    assert "Post-rebuild QA:" in text
+
+
 def test_status_json_uses_unknown_stage_fallback(tmp_path):
     status = _load_status_module()
     root = tmp_path / "proj"

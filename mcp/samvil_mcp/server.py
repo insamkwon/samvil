@@ -1430,6 +1430,28 @@ async def materialize_rebuild_reentry(project_root: str) -> str:
 
 
 @mcp.tool()
+async def build_post_rebuild_qa(project_root: str) -> str:
+    """Build QA rejudge input from rebuilt evolved seed output."""
+    try:
+        from .post_rebuild_qa import build_post_rebuild_qa as _build
+        return json.dumps(_build(project_root))
+    except Exception as e:
+        _log_mcp_health("fail", "build_post_rebuild_qa", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def materialize_post_rebuild_qa(project_root: str, persist_next_skill: bool = True) -> str:
+    """Persist post-rebuild QA request and optional .samvil/next-skill.json marker."""
+    try:
+        from .post_rebuild_qa import materialize_post_rebuild_qa as _materialize
+        return json.dumps(_materialize(project_root, persist_next_skill=persist_next_skill))
+    except Exception as e:
+        _log_mcp_health("fail", "materialize_post_rebuild_qa", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def validate_evidence(evidences_json: str, project_root: str) -> str:
     """Validate a list of file:line evidence strings against project files.
 

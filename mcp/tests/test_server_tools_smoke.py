@@ -21,6 +21,7 @@ from samvil_mcp.server import (
     build_evolve_apply_plan,
     build_evolve_rebuild_handoff,
     build_rebuild_reentry,
+    build_post_rebuild_qa,
     evaluate_qa_convergence,
     get_tier_phases,
     heartbeat_state,
@@ -34,6 +35,7 @@ from samvil_mcp.server import (
     apply_evolve_apply_plan,
     materialize_evolve_rebuild_handoff,
     materialize_rebuild_reentry,
+    materialize_post_rebuild_qa,
     suggest_ac_split,
     synthesize_qa_evidence,
 )
@@ -258,6 +260,48 @@ def test_rebuild_reentry_tools_write_scaffold_input(tmp_path: Path) -> None:
     assert built["status"] == "ready"
     assert materialized["status"] == "ready"
     assert (tmp_path / ".samvil" / "scaffold-input.json").exists()
+
+
+def test_post_rebuild_qa_tools_write_next_skill_marker(tmp_path: Path) -> None:
+    import hashlib
+
+    seed = {"name": "task-app", "version": 2}
+    digest = hashlib.sha256(
+        json.dumps(seed, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / "project.seed.json").write_text(json.dumps(seed), encoding="utf-8")
+    (tmp_path / ".samvil" / "rebuild-reentry.json").write_text(json.dumps({
+        "status": "ready",
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "seed_sha256": digest,
+        "next_skill": "samvil-scaffold",
+    }), encoding="utf-8")
+    (tmp_path / ".samvil" / "scaffold-input.json").write_text(json.dumps({
+        "seed_name": "task-app",
+        "seed_version": 2,
+        "seed_sha256": digest,
+        "next_skill": "samvil-scaffold",
+    }), encoding="utf-8")
+    (tmp_path / ".samvil" / "scaffold-output.json").write_text(json.dumps({
+        "status": "built",
+        "seed_version": 2,
+        "seed_sha256": digest,
+        "artifacts": ["package.json"],
+    }), encoding="utf-8")
+    (tmp_path / ".samvil" / "qa-results.json").write_text(json.dumps({
+        "synthesis": {"verdict": "REVISE", "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"]},
+        "convergence": {"verdict": "blocked", "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"]},
+    }), encoding="utf-8")
+
+    built = json.loads(_run(build_post_rebuild_qa(project_root=str(tmp_path))))
+    materialized = json.loads(_run(materialize_post_rebuild_qa(project_root=str(tmp_path))))
+    marker = json.loads((tmp_path / ".samvil" / "next-skill.json").read_text(encoding="utf-8"))
+
+    assert built["status"] == "ready"
+    assert materialized["next_skill"] == "samvil-qa"
+    assert marker["from_stage"] == "scaffold"
 
 
 # ── AC split (v3-011) ──────────────────────────────────────────
