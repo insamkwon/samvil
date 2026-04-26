@@ -32,6 +32,7 @@ jobs:
           python3 -m venv mcp/.venv
           mcp/.venv/bin/python -m pip install --upgrade pip wheel
           mcp/.venv/bin/python -m pip install -e mcp
+          mcp/.venv/bin/python -m pip install pytest pytest-asyncio
 
       - name: Install browser runtime
         run: npx --yes playwright@1.52.0 install --with-deps chromium

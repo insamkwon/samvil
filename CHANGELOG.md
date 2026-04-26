@@ -4,6 +4,29 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [3.17.2] — 2026-04-26 — External CI Mirror Test Runtime
+
+Patch release for Phase 15. The v3.17.1 remote run correctly failed on blocked
+release evidence, then exposed that the CI venv did not install pytest for the
+pre-commit full-suite step.
+
+### Fixed
+- Install `pytest` and `pytest-asyncio` into `mcp/.venv` during GitHub Actions
+  setup so `bash scripts/pre-commit-check.sh` can run the full suite remotely.
+- Extend workflow validator and pytest contract coverage for the CI pytest
+  runtime install.
+
+### Verified
+- CI workflow validator: PASS.
+- Focused workflow pytest: 2 passed.
+- Default release check runner: PASS.
+- Release evidence bundle generation from default runner output: PASS.
+- Full test suite: 851 passed.
+- MCP server import smoke: 153 tools.
+- `bash scripts/pre-commit-check.sh`: PASS.
+
+---
+
 ## [3.17.1] — 2026-04-26 — External CI Mirror Patch
 
 Patch release for Phase 15. The first remote run proved that artifact evidence

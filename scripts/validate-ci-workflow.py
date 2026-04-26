@@ -21,6 +21,7 @@ REQUIRED_FRAGMENTS = (
     'python-version: "3.12"',
     "actions/setup-node@v4",
     'node-version: "20"',
+    "mcp/.venv/bin/python -m pip install pytest pytest-asyncio",
     "npx --yes playwright@1.52.0 install --with-deps chromium",
     "set -o pipefail",
     "python3 scripts/run-release-checks.py --format json",

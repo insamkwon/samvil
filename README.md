@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v3.17.1`
+# SAMVIL — AI 바이브코딩 하네스 `v3.17.2`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -13,6 +13,12 @@
 /samvil "습관 트래커 모바일"  → Expo 모바일 앱
 /samvil "매출 대시보드"       → Recharts 대시보드
 ```
+
+**v3.17.2 "External CI Mirror Test Runtime"** — CI venv에도 local pre-commit과 같은 pytest runtime을 설치해, GitHub Actions release runner가 full pre-commit까지 재현되도록 한 패치입니다.
+
+> **v3.17.2 주요 수정** (2026-04-26):
+> - **CI pytest runtime** — `mcp/.venv`에 `pytest`와 `pytest-asyncio`를 명시 설치해 pre-commit full suite가 원격에서도 실행되게 수정.
+> - **검증**: 851 unit tests · 153 MCP tools · CI workflow validator PASS · default release runner PASS · release evidence bundle 생성 PASS · pre-commit-check PASS.
 
 **v3.17.1 "External CI Mirror Patch"** — v3.17.0의 GitHub Actions mirror를 실제 실패에 닫히도록 보강한 패치입니다. Playwright browser executable 설치를 명시하고, `tee` 파이프가 release runner 실패를 숨기지 못하게 했습니다.
 
