@@ -1,8 +1,8 @@
-# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.9.0`
+# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.9.1`
 
 > **코딩 몰라도 괜찮아요. AI가 대신 만들어드려요.**
 
-[![버전](https://img.shields.io/badge/버전-v4.9.0-blue)](CHANGELOG.md)
+[![버전](https://img.shields.io/badge/버전-v4.9.1-blue)](CHANGELOG.md)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-지원-green)](https://claude.ai/code)
 [![Codex CLI](https://img.shields.io/badge/Codex_CLI-지원-blueviolet)](https://github.com/openai/codex)
 [![라이선스](https://img.shields.io/badge/라이선스-UNLICENSED-lightgrey)]()

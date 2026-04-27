@@ -4,6 +4,16 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.9.1 — 2026-04-28
+
+**README update for deep interview engine (PATCH)**
+
+- Comparison table: "최대 20개" → "깊이에 따라 10~40개+ (수렴 전까지 무제한)"
+- Tier table: added "인터뷰 질문" column + "극한" (deep, 40개+) tier
+- FAQ time estimate updated to 5~25분
+
+---
+
 ## v4.9.0 — 2026-04-28
 
 **Deep Interview Engine — 10-dimension scoring + min questions enforcement (MINOR)**
