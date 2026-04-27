@@ -159,4 +159,4 @@ def test_webapp_enterprise_build_guidance_has_monorepo_structure():
 def test_webapp_enterprise_build_guidance_has_sso_providers():
     pack = get_domain_pack("webapp-enterprise")
     guidance_text = " ".join(pack.build_guidance)
-    assert "Clerk" in guidance_text or "enterprise SSO" in guidance_text
+    assert "Clerk" in guidance_text
