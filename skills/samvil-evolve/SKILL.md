@@ -19,6 +19,7 @@ just wires them. Full Korean prose in `SKILL.legacy.md`.
 2. Files are SSOT — read `project.seed.json`, `project.state.json`, `.samvil/qa-results.json`, `.samvil/qa-routing.json`, `decisions.log` (if present).
 3. `mcp__samvil_mcp__materialize_evolve_context(project_root=".")` → writes `.samvil/evolve-context.json` (focus + routing + ground truth + seed_history).
 4. `mcp__samvil_mcp__aggregate_evolve_context(project_root=".")` → returns `auto_trigger.{should_offer,triggers}`, `mode.{evolve_mode,evolve_max_cycles,max_total_builds,build_quota_reached}`, `cycle.{current_cycle,max_cycles,cap_reached,cycles_remaining}`, `four_dim_baseline.{core_problem_excerpt,seed_description,qa_verdict,ac_*_count}`, `errors[]`. On error: fall back to manual reads from `SKILL.legacy.md` (P8).
+4b. `mcp__samvil_mcp__snapshot_generation(project_root=".")` — best-effort. Captures current passing ACs before Wonder phase. If cycle > 1, also call `mcp__samvil_mcp__validate_against_snapshot(project_root=".", snapshot_id="gen-<cycle-1>")` and warn if status is "regression".
 
 ## Step 1 — Stop Conditions
 
@@ -76,6 +77,8 @@ mcp__samvil_mcp__record_qa_failure(project_path=".", ac_id=<id>, ac_description=
 ## Step 7 — Chain (terminal or loop)
 
 `save_event(event_type="evolve_converge", stage="evolve", data='{"final_version":<N+1>,"total_generations":<N>}')` if converged, else `event_type="stage_change"` with reason. Append Evolve section to `.samvil/handoff.md` via Bash `cat >>` or Edit (never Write tool).
+
+After QA pass: `mcp__samvil_mcp__snapshot_generation(project_root=".", generation_id="gen-<cycle>")` — best-effort. Records passing ACs for future regression checks.
 
 - **Converged + spec-only** → `materialize_evolve_rebuild_handoff`, set `state.current_stage="build"`, invoke `samvil-build`.
 - **Converged + full** → invoke `samvil-retro`.
