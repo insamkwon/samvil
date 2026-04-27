@@ -1,4 +1,4 @@
-# SAMVIL — AI 바이브코딩 하네스 `v4.7.0`
+# SAMVIL — AI 바이브코딩 하네스 `v4.8.0`
 
 > **한 줄 입력 → 자가 진화하는 견고한 시스템**
 >
@@ -18,6 +18,7 @@
 
 | 버전 | 주요 변경 |
 |---|---|
+| **v4.8.0** | **멀티호스트 온보딩** — `AGENTS.md` (Codex/OpenCode 자동 인식) + `scripts/setup-codex.sh` (한 줄 MCP 설치). README Codex 섹션 추가. |
 | **v4.7.0** | **Regression Suite** — evolve 사이클 간 AC 회귀 자동 감지. `snapshot_generation` / `validate_against_snapshot` 등 4개 MCP 도구 추가. `.samvil/generations/gen-N/snapshot.json` 저장. |
 | **v4.6.1** | **E2E Chain Marker** — Codex/OpenCode/Gemini 호스트용 체인 마커 스키마 검증 + cross-host smoke 테스트 27개 추가. |
 | **v4.5.0** | **Gemini 어댑터 + Codex 커맨드 15종** — 멀티호스트 체인 연결. |

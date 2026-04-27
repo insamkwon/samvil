@@ -4,6 +4,23 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.8.0 — 2026-04-28
+
+**Multi-host Onboarding (MINOR)**
+
+- Add `AGENTS.md` — project-level instructions auto-read by Codex CLI and
+  OpenCode. Covers chain marker flow, skill file table, key MCP tools,
+  pipeline order, and critical rules (P1/P5/P8 citations).
+- Add `scripts/setup-codex.sh` — one-command MCP setup for Codex CLI,
+  OpenCode, and Gemini CLI. Installs Python venv, runs import smoke,
+  prints host-specific MCP config snippets, and auto-applies to
+  `~/.codex/config.toml` when Codex CLI config exists.
+- Update `README.md` — new "Codex CLI / OpenCode / Gemini CLI" quick-start
+  section with 4-step guide, per-host MCP config examples, and verification
+  commands. Version badge updated to v4.8.0.
+
+---
+
 ## v4.7.0 — 2026-04-27
 
 **Option B: Regression Suite (MINOR)**
