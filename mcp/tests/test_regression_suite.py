@@ -127,3 +127,59 @@ class TestLoadPassingAcs:
         result = _load_passing_acs(str(tmp_path), qa_results_path=str(custom))
         assert len(result) == 1
         assert result[0]["id"] == "X-1"
+
+
+class TestSnapshotGeneration:
+    def test_creates_snapshot_file(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1"), _ac("AC-2")])
+        snap = snapshot_generation(str(tmp_path))
+        snap_path = tmp_path / ".samvil" / "generations" / snap.generation_id / "snapshot.json"
+        assert snap_path.exists()
+
+    def test_first_snapshot_is_gen_1(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snap = snapshot_generation(str(tmp_path))
+        assert snap.generation_id == "gen-1"
+
+    def test_second_snapshot_is_gen_2(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snapshot_generation(str(tmp_path))
+        snap2 = snapshot_generation(str(tmp_path))
+        assert snap2.generation_id == "gen-2"
+
+    def test_explicit_generation_id(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snap = snapshot_generation(str(tmp_path), generation_id="gen-5")
+        assert snap.generation_id == "gen-5"
+        assert (tmp_path / ".samvil" / "generations" / "gen-5" / "snapshot.json").exists()
+
+    def test_only_passing_acs_in_snapshot(self, tmp_path):
+        _write_qa_results(tmp_path, [
+            _ac("AC-1", verdict="PASS"),
+            _ac("AC-2", verdict="FAIL"),
+            _ac("AC-3", verdict="PASS"),
+        ])
+        snap = snapshot_generation(str(tmp_path))
+        assert snap.passing_ac_count == 2
+        assert snap.total_ac_count == 3
+        assert all(a.verdict == "PASS" for a in snap.acs)
+
+    def test_snapshot_json_is_valid(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snap = snapshot_generation(str(tmp_path))
+        snap_path = tmp_path / ".samvil" / "generations" / snap.generation_id / "snapshot.json"
+        loaded = json.loads(snap_path.read_text())
+        assert loaded["schema_version"] == "1.0"
+        assert loaded["generation_id"] == snap.generation_id
+        assert isinstance(loaded["acs"], list)
+
+    def test_empty_qa_results_yields_zero_passing(self, tmp_path):
+        _write_qa_results(tmp_path, [])
+        snap = snapshot_generation(str(tmp_path))
+        assert snap.passing_ac_count == 0
+        assert snap.acs == []
+
+    def test_missing_qa_results_yields_empty_snapshot(self, tmp_path):
+        snap = snapshot_generation(str(tmp_path))
+        assert snap.passing_ac_count == 0
+        assert snap.total_ac_count == 0
