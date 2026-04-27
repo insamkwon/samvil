@@ -4,6 +4,28 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.9.0 — 2026-04-28
+
+**Deep Interview Engine — 10-dimension scoring + min questions enforcement (MINOR)**
+
+- `interview_engine.py` v2.5.0: scoring expanded from 3 → 10 dimensions
+  - Core (60%): goal clarity, constraint clarity, criteria testability
+  - Enriched (40%): technical specificity, failure modes depth, non-functional coverage,
+    stakeholder specificity, scope boundary sharpness, success metrics quality, lifecycle awareness
+- `MIN_QUESTIONS` per tier: minimal 5 / standard 10 / thorough 20 / full 30 / deep 40
+  Convergence now requires threshold + floors + min questions — all three
+- `score_ambiguity` MCP tool gains `questions_asked` parameter; returns `min_questions_met`,
+  `min_questions_required`, and `dimension_scores` in result
+- `skills/samvil-interview/SKILL.md`: removed "Cap 2 reprompts per phase" rule;
+  convergence loop now runs until genuine convergence (no artificial stop)
+- `references/codex-commands/samvil-interview.md`: full rewrite with 6 phases,
+  min questions enforcement, and `dimension_scores`-guided loop — Codex CLI now
+  matches Claude Code interview depth
+- `references/interview-frameworks.md`: tier table updated with MIN_QUESTIONS values
+- 28 new tests for 10-dimension engine + min questions logic
+
+---
+
 ## v4.8.5 — 2026-04-28
 
 **README "wow" factor: real conversation snippets + numbers (PATCH)**

@@ -1,18 +1,28 @@
-"""Ambiguity scoring engine for SAMVIL interviews (v2.4.0).
+"""Ambiguity scoring engine for SAMVIL interviews (v2.5.0).
 
-Scores interview state across 3 dimensions:
-  - Goal clarity (40%) — Can we write a 1-sentence problem statement?
-  - Constraint clarity (30%) — Are limits explicit and non-contradictory?
-  - Criteria testability (30%) — Are acceptance criteria verifiable?
+Scores interview state across 10 dimensions:
+  Core (60%):
+    - Goal clarity (22%) — Can we write a 1-sentence problem statement?
+    - Constraint clarity (18%) — Are limits explicit and non-contradictory?
+    - Criteria testability (15%) — Are acceptance criteria verifiable?
+  Enriched (40%):
+    - Technical specificity (10%) — Are tech choices named?
+    - Failure modes depth (8%) — Are edge cases / exclusions specific?
+    - Non-functional coverage (8%) — Are perf/security/a11y addressed?
+    - Stakeholder specificity (7%) — Is the primary user role+context specific?
+    - Scope boundary sharpness (5%) — Are exclusions concrete?
+    - Success metrics quality (4%) — Do ACs contain measurable numbers?
+    - Lifecycle awareness (3%) — Is onboarding/retention considered?
 
 Each dimension: 0.0 (clear) → 1.0 (ambiguous)
-Overall: weighted average. Target: ≤ tier threshold.
+Overall: weighted average. Converged when:
+  overall ≤ tier threshold AND floors_passed AND questions_asked ≥ MIN_QUESTIONS[tier]
 
-v2.4.0 (Phase 2):
-  - Adds Milestones (INITIAL/PROGRESS/REFINED/READY) — Ouroboros #05
-  - Adds Component Floors — prevents average-trap convergence
-  - Adds missing_items extraction for UI feedback
-  - Keeps backward compatibility with v2.3.x score_ambiguity return.
+v2.5.0 changes:
+  - 10-dimension scoring (was 3)
+  - MIN_QUESTIONS enforcement per tier: 5/10/20/30/40
+  - questions_asked added to score_ambiguity signature
+  - min_questions_met and min_questions_required added to result
 """
 
 from __future__ import annotations
@@ -21,17 +31,16 @@ import json
 import re
 from typing import Any
 
-# ── Milestone definitions (v2.4.0, Ouroboros #05) ─────────────
+# ── Milestone definitions ───────────────────────────────────────
 
 MILESTONES = [
-    # (name, max_ambiguity, description)
-    ("READY", 0.20, "모든 기준 구체화. Seed 생성 준비."),
-    ("REFINED", 0.30, "AC 부분 정의. 엣지 케이스/non-goals 일부 남음."),
+    ("READY",    0.20, "모든 기준 구체화. Seed 생성 준비."),
+    ("REFINED",  0.30, "AC 부분 정의. 엣지 케이스/non-goals 일부 남음."),
     ("PROGRESS", 0.40, "요구사항 대부분 포착. 세부사항 일부 미흡."),
-    ("INITIAL", 1.00, "핵심 요구 식별. 제약/성공기준 상당 미정."),
+    ("INITIAL",  1.00, "핵심 요구 식별. 제약/성공기준 상당 미정."),
 ]
 
-# Component floors — one dimension below floor blocks seed-ready
+# Component floors — one dimension below floor blocks seed-ready (v2.4.0)
 FLOORS = {
     "goal_clarity": 0.75,
     "constraint_clarity": 0.65,
@@ -39,23 +48,29 @@ FLOORS = {
 }
 
 TIER_TARGETS = {
-    "minimal": 0.10,
+    "minimal":  0.10,
     "standard": 0.05,
     "thorough": 0.02,
-    "full": 0.01,
-    # v3.1.0 (Sprint 1, v3-022): Deep Mode for production-grade seeds
-    "deep": 0.005,
+    "full":     0.01,
+    "deep":     0.005,
 }
 
+# Minimum questions that must be asked before convergence is possible (v2.5.0)
+MIN_QUESTIONS = {
+    "minimal":  5,
+    "standard": 10,
+    "thorough": 20,
+    "full":     30,
+    "deep":     40,
+}
 
 # Required interview phases per tier (v3.1.0, Sprint 1)
-# Used by SKILL to decide which Phase 2.x blocks are mandatory.
 TIER_REQUIRED_PHASES = {
-    "minimal": {"core", "scope"},
+    "minimal":  {"core", "scope"},
     "standard": {"core", "scope", "lifecycle"},
     "thorough": {"core", "scope", "lifecycle", "unknown", "nonfunc", "inversion"},
-    "full": {"core", "scope", "lifecycle", "unknown", "nonfunc", "inversion", "stakeholder", "research"},
-    "deep": {"core", "scope", "lifecycle", "unknown", "nonfunc", "inversion", "stakeholder", "research", "domain_deep"},
+    "full":     {"core", "scope", "lifecycle", "unknown", "nonfunc", "inversion", "stakeholder", "research"},
+    "deep":     {"core", "scope", "lifecycle", "unknown", "nonfunc", "inversion", "stakeholder", "research", "domain_deep"},
 }
 
 
@@ -64,68 +79,107 @@ def tier_phases(tier: str) -> set[str]:
     return TIER_REQUIRED_PHASES.get(tier, TIER_REQUIRED_PHASES["standard"])
 
 
-def score_ambiguity(interview_state: dict, tier: str = "standard") -> dict:
-    """Score ambiguity of an interview state.
+def score_ambiguity(
+    interview_state: dict,
+    tier: str = "standard",
+    questions_asked: int = 0,
+) -> dict:
+    """Score ambiguity of an interview state across 10 dimensions.
 
     Args:
-        interview_state: Dict with keys:
-            - target_user: str (who uses this)
-            - core_problem: str (what problem)
-            - core_experience: str (30-second action)
-            - features: list[str] (must-have features)
-            - exclusions: list[str] (out of scope)
-            - constraints: list[str] (technical limits)
-            - acceptance_criteria: list[str] (testable criteria)
-        tier: Agent tier determining the target threshold.
-            minimal=0.10, standard=0.05, thorough=0.02, full=0.01
+        interview_state: Dict with keys: target_user, core_problem,
+            core_experience, features, exclusions, constraints,
+            acceptance_criteria.
+        tier: Agent tier determining threshold and minimum questions.
+        questions_asked: Number of questions asked so far. Convergence
+            requires this to meet MIN_QUESTIONS[tier].
 
     Returns:
         Dict with per-dimension scores, overall ambiguity, milestone,
-        floors_passed, and missing_items.
+        floors_passed, missing_items, min_questions_met, and converged.
     """
     target = TIER_TARGETS.get(tier, 0.05)
+    min_q = MIN_QUESTIONS.get(tier, 10)
 
-    goal_score = _score_goal(interview_state)
-    constraint_score = _score_constraints(interview_state)
-    criteria_score = _score_criteria(interview_state)
+    # ── Core dimensions (v2.4.0) ──────────────────────────────────
+    goal_score        = _score_goal(interview_state)
+    constraint_score  = _score_constraints(interview_state)
+    criteria_score    = _score_criteria(interview_state)
 
-    overall = goal_score * 0.4 + constraint_score * 0.3 + criteria_score * 0.3
+    # ── Enriched dimensions (v2.5.0) ─────────────────────────────
+    technical_score    = _score_technical(interview_state)
+    failure_score      = _score_failure_modes(interview_state)
+    nonfunctional_score = _score_nonfunctional(interview_state)
+    stakeholder_score  = _score_stakeholder(interview_state)
+    scope_score        = _score_scope_boundary(interview_state)
+    metrics_score      = _score_success_metrics(interview_state)
+    lifecycle_score    = _score_lifecycle(interview_state)
 
-    # v2.4.0 additions ───────────────────────────────────────
-    goal_clarity = round(1.0 - goal_score, 3)
-    constraint_clarity = round(1.0 - constraint_score, 3)
+    overall = (
+        goal_score          * 0.22
+        + constraint_score  * 0.18
+        + criteria_score    * 0.15
+        + technical_score   * 0.10
+        + failure_score     * 0.08
+        + nonfunctional_score * 0.08
+        + stakeholder_score * 0.07
+        + scope_score       * 0.05
+        + metrics_score     * 0.04
+        + lifecycle_score   * 0.03
+    )
+
+    # ── Clarities (inverse of raw scores) ────────────────────────
+    goal_clarity         = round(1.0 - goal_score, 3)
+    constraint_clarity   = round(1.0 - constraint_score, 3)
     criteria_testability = round(1.0 - criteria_score, 3)
 
     milestone = _match_milestone(overall)
     floors_passed, floor_violations = _check_floors({
-        "goal_clarity": goal_clarity,
-        "constraint_clarity": constraint_clarity,
+        "goal_clarity":         goal_clarity,
+        "constraint_clarity":   constraint_clarity,
         "criteria_testability": criteria_testability,
     })
     missing_items = _extract_missing_items(interview_state)
 
-    # converged = below tier target AND all floors passed
-    converged = overall <= target and floors_passed
+    min_questions_met = questions_asked >= min_q
+    converged = overall <= target and floors_passed and min_questions_met
 
     return {
-        # Backward-compatible fields ───────────────────────────
-        "goal_clarity": goal_clarity,
-        "constraint_clarity": constraint_clarity,
+        # Core dimension clarities (backward-compatible) ──────────
+        "goal_clarity":         goal_clarity,
+        "constraint_clarity":   constraint_clarity,
         "criteria_testability": criteria_testability,
-        "ambiguity": round(overall, 3),
-        "converged": converged,
-        "target": target,
-        "tier": tier,
-        # v2.4.0 additions ──────────────────────────────────────
-        "milestone": milestone,
-        "floors_passed": floors_passed,
-        "floor_violations": floor_violations,
-        "missing_items": missing_items,
+        "ambiguity":            round(overall, 3),
+        "converged":            converged,
+        "target":               target,
+        "tier":                 tier,
+        # v2.4.0 additions ────────────────────────────────────────
+        "milestone":            milestone,
+        "floors_passed":        floors_passed,
+        "floor_violations":     floor_violations,
+        "missing_items":        missing_items,
+        # v2.5.0 additions ────────────────────────────────────────
+        "questions_asked":      questions_asked,
+        "min_questions_required": min_q,
+        "min_questions_met":    min_questions_met,
+        "dimension_scores": {
+            "goal":           round(goal_score, 3),
+            "constraint":     round(constraint_score, 3),
+            "criteria":       round(criteria_score, 3),
+            "technical":      round(technical_score, 3),
+            "failure_modes":  round(failure_score, 3),
+            "nonfunctional":  round(nonfunctional_score, 3),
+            "stakeholder":    round(stakeholder_score, 3),
+            "scope_boundary": round(scope_score, 3),
+            "success_metrics": round(metrics_score, 3),
+            "lifecycle":      round(lifecycle_score, 3),
+        },
     }
 
 
+# ── Milestone + Floors helpers ──────────────────────────────────
+
 def _match_milestone(ambiguity: float) -> dict:
-    """Match ambiguity score to a milestone. Top-down (first match wins)."""
     for name, max_score, description in MILESTONES:
         if ambiguity <= max_score:
             return {"name": name, "max_score": max_score, "description": description}
@@ -133,7 +187,6 @@ def _match_milestone(ambiguity: float) -> dict:
 
 
 def _check_floors(clarities: dict) -> tuple[bool, list[str]]:
-    """Check if all component clarities meet their floor. Returns (all_passed, violations)."""
     violations = []
     for component, floor in FLOORS.items():
         if clarities.get(component, 0) < floor:
@@ -144,9 +197,7 @@ def _check_floors(clarities: dict) -> tuple[bool, list[str]]:
 
 
 def _extract_missing_items(state: dict) -> list[str]:
-    """Extract a human-readable list of missing items from state."""
     missing = []
-
     if not state.get("target_user"):
         missing.append("target_user")
     if not state.get("core_problem"):
@@ -163,31 +214,28 @@ def _extract_missing_items(state: dict) -> list[str]:
         missing.append("acceptance_criteria (testable)")
     elif len(state.get("acceptance_criteria", [])) < 3:
         missing.append("acceptance_criteria (need at least 3)")
-
     return missing
 
+
+# ── Core dimension scorers (v2.4.0) ────────────────────────────
 
 def _score_goal(state: dict) -> float:
     """Score goal ambiguity (0=clear, 1=ambiguous)."""
     penalties = 0.0
-
-    # Target user defined?
     target_user = state.get("target_user", "")
     if not target_user:
         penalties += 0.4
-    elif len(target_user) < 10:  # Too vague ("users", "people")
+    elif len(target_user) < 10:
         penalties += 0.2
-    elif any(vague in target_user.lower() for vague in ["everyone", "anyone", "people", "users"]):
+    elif any(v in target_user.lower() for v in ["everyone", "anyone", "people", "users"]):
         penalties += 0.15
 
-    # Core problem defined?
     core_problem = state.get("core_problem", "")
     if not core_problem:
         penalties += 0.3
     elif len(core_problem) < 15:
         penalties += 0.15
 
-    # Core experience defined?
     core_exp = state.get("core_experience", "")
     if not core_exp:
         penalties += 0.3
@@ -200,28 +248,23 @@ def _score_goal(state: dict) -> float:
 def _score_constraints(state: dict) -> float:
     """Score constraint ambiguity (0=clear, 1=ambiguous)."""
     penalties = 0.0
-
-    # Features defined?
     features = state.get("features", [])
     if not features:
         penalties += 0.3
-    elif len(features) > 7:  # Too many = unclear priorities
+    elif len(features) > 7:
         penalties += 0.2
 
-    # Exclusions defined?
     exclusions = state.get("exclusions", [])
     if not exclusions:
         penalties += 0.3
     elif len(exclusions) < 1:
         penalties += 0.15
 
-    # Constraints defined?
     constraints = state.get("constraints", [])
     if not constraints:
         penalties += 0.2
 
-    # Contradiction check: feature in both features and exclusions
-    feature_set = {f.lower() for f in features}
+    feature_set  = {f.lower() for f in features}
     exclusion_set = {e.lower() for e in exclusions}
     if feature_set & exclusion_set:
         penalties += 0.3
@@ -232,62 +275,175 @@ def _score_constraints(state: dict) -> float:
 def _score_criteria(state: dict) -> float:
     """Score criteria testability (0=clear, 1=ambiguous)."""
     penalties = 0.0
-
     criteria = state.get("acceptance_criteria", [])
     if not criteria:
         return 1.0
     if len(criteria) < 3:
         penalties += 0.3
 
-    # Check each criterion for testability
     vague_patterns = [
         r"\bgood\b", r"\bnice\b", r"\bfast\b", r"\bclean\b",
         r"\buser.?friendly\b", r"\bintuitive\b", r"\bsmooth\b",
         r"\bprofessional\b", r"\bmodern\b", r"\bresponsive\b",
     ]
-    vague_count = 0
-    for criterion in criteria:
-        for pattern in vague_patterns:
-            if re.search(pattern, criterion, re.IGNORECASE):
-                vague_count += 1
-                break
-
+    vague_count = sum(
+        1 for c in criteria
+        if any(re.search(p, c, re.IGNORECASE) for p in vague_patterns)
+    )
     if criteria:
-        vague_ratio = vague_count / len(criteria)
-        penalties += vague_ratio * 0.5
+        penalties += (vague_count / len(criteria)) * 0.5
 
-    # Compound criteria penalty ("create, edit, delete" = 3 criteria in 1)
-    compound_count = sum(1 for c in criteria if c.count(",") >= 2 or " and " in c.lower())
+    compound_count = sum(
+        1 for c in criteria if c.count(",") >= 2 or " and " in c.lower()
+    )
     if criteria:
         penalties += (compound_count / len(criteria)) * 0.2
 
     return min(penalties, 1.0)
 
 
-# ── Answer Streak Manager (v2.4.0, Ouroboros #02) ──────────────
+# ── Enriched dimension scorers (v2.5.0) ────────────────────────
+
+def _score_technical(state: dict) -> float:
+    """Score technical specificity: are tech choices named? (0=yes, 1=no)"""
+    constraints = state.get("constraints", [])
+    tech_keywords = [
+        "supabase", "postgresql", "mysql", "sqlite", "mongodb", "firebase",
+        "localstorage", "indexeddb",
+        "oauth", "jwt", "magic link", "kakao", "google auth",
+        "vercel", "railway", "docker",
+        "next.js", "nextjs", "react", "vue", "node", "python", "fastapi",
+        "rest", "graphql", "websocket", "sse",
+        "no backend", "serverless",
+    ]
+    text = " ".join(constraints).lower()
+    matches = sum(1 for kw in tech_keywords if kw in text)
+    if matches >= 2:
+        return 0.0
+    if matches >= 1:
+        return 0.3
+    return 0.8
+
+
+def _score_failure_modes(state: dict) -> float:
+    """Score failure/edge case coverage: specific exclusions + constraints? (0=good, 1=missing)"""
+    exclusions = state.get("exclusions", [])
+    constraints = state.get("constraints", [])
+    vague = {"nothing", "none", "n/a", "na", "tbd", "unknown"}
+    real_excl = [e for e in exclusions if e.strip().lower() not in vague and len(e) > 3]
+    if len(real_excl) >= 3 and len(constraints) >= 2:
+        return 0.0
+    if len(real_excl) >= 2 or len(constraints) >= 2:
+        return 0.3
+    if len(real_excl) >= 1:
+        return 0.6
+    return 1.0
+
+
+def _score_nonfunctional(state: dict) -> float:
+    """Score non-functional coverage: perf/security/a11y addressed? (0=yes, 1=no)"""
+    constraints = state.get("constraints", [])
+    criteria = state.get("acceptance_criteria", [])
+    text = " ".join(constraints + criteria).lower()
+    nonfunc_groups = [
+        ["second", "ms", "millisecond", "performance", "load time", "ttfb", "lcp"],
+        ["secure", "https", "encrypt", "auth", "xss", "csrf", "pii", "no login"],
+        ["wcag", "accessible", "a11y", "keyboard", "screen reader"],
+        ["offline", "cache", "service worker", "pwa"],
+        ["mobile", "responsive", "320px", "touch"],
+    ]
+    covered = sum(1 for group in nonfunc_groups if any(kw in text for kw in group))
+    if covered >= 3:
+        return 0.0
+    if covered >= 2:
+        return 0.3
+    if covered >= 1:
+        return 0.6
+    return 1.0
+
+
+def _score_stakeholder(state: dict) -> float:
+    """Score stakeholder specificity: role + context? (0=specific, 1=vague)"""
+    target_user = state.get("target_user", "")
+    if not target_user or len(target_user) < 10:
+        return 1.0
+    vague_only = target_user.strip().lower() in {"users", "people", "everyone", "anyone", "customers"}
+    if vague_only:
+        return 0.9
+    has_number = bool(re.search(r'\d+', target_user))
+    has_context = any(kw in target_user.lower() for kw in [
+        "who", "that", "with", "at", "managing", "working", "using",
+        "freelance", "startup", "enterprise", "solo", "team", "small",
+    ])
+    if has_number and has_context:
+        return 0.0
+    if has_number or has_context:
+        return 0.2
+    return 0.5
+
+
+def _score_scope_boundary(state: dict) -> float:
+    """Score scope sharpness: exclusions concrete and ≥3? (0=sharp, 1=vague)"""
+    exclusions = state.get("exclusions", [])
+    vague = {"nothing", "none", "n/a", "na", "tbd", "unknown", "all"}
+    real = [e for e in exclusions if e.strip().lower() not in vague and len(e) > 3]
+    if len(real) >= 3:
+        return 0.0
+    if len(real) >= 2:
+        return 0.2
+    if len(real) >= 1:
+        return 0.5
+    return 0.9
+
+
+def _score_success_metrics(state: dict) -> float:
+    """Score measurability: do ACs have numbers/time targets? (0=measurable, 1=vague)"""
+    criteria = state.get("acceptance_criteria", [])
+    if not criteria:
+        return 1.0
+    measurable = sum(
+        1 for c in criteria
+        if (re.search(r'\d+\s*(ms|s\b|sec|%|items?|px|mb|kb)', c, re.I)
+            or re.search(r'[<>≤≥]\s*\d|\d+\s*[-–]\s*\d+', c))
+    )
+    ratio = measurable / len(criteria)
+    if ratio >= 0.3:
+        return 0.0
+    return round(1.0 - ratio, 3)
+
+
+def _score_lifecycle(state: dict) -> float:
+    """Score lifecycle awareness: onboarding/retention mentioned? (0=yes, 1=no)"""
+    all_text = " ".join([
+        state.get("core_experience", ""),
+        str(state.get("features", [])),
+        str(state.get("acceptance_criteria", [])),
+    ]).lower()
+    lifecycle_keywords = [
+        "onboard", "first time", "first-time", "sign up", "register", "new user",
+        "return", "notification", "remind", "email", "push",
+        "empty state", "tutorial", "welcome", "churn", "inactive",
+    ]
+    hits = sum(1 for kw in lifecycle_keywords if kw in all_text)
+    if hits >= 3:
+        return 0.0
+    if hits >= 1:
+        return 0.4
+    return 1.0
+
+
+# ── Answer Streak Manager (v2.4.0, Ouroboros #02) ───────────────
 
 MAX_AI_STREAK = 3
 
 
 def update_streak(current_streak: int, answer_source: str) -> dict:
-    """Update AI answer streak counter based on answer source.
-
-    Args:
-        current_streak: Current streak value (from state)
-        answer_source: One of 'from-code', 'from-code-auto', 'from-user',
-                       'from-user-correction', 'from-research'
-
-    Returns:
-        Dict with new_streak and force_user_next flag.
-    """
-    # User answers reset streak
+    """Update AI answer streak counter based on answer source."""
     if answer_source in ("from-user", "from-user-correction"):
         new_streak = 0
-    # AI auto-answers increment streak
     elif answer_source in ("from-code", "from-code-auto", "from-research"):
         new_streak = current_streak + 1
     else:
-        # Unknown source — treat conservatively
         new_streak = current_streak
 
     return {
@@ -301,18 +457,9 @@ def update_streak(current_streak: int, answer_source: str) -> dict:
     }
 
 
-# ── Tracks Manager (v2.4.0, Ouroboros #P4 simplified) ──────────
-
+# ── Tracks Manager (v2.4.0, Ouroboros #P4 simplified) ───────────
 
 def initialize_tracks(features_or_scope: list[str]) -> list[dict]:
-    """Initialize interview tracks from features or scope items.
-
-    Args:
-        features_or_scope: List of feature names or scope areas.
-
-    Returns:
-        List of Track dicts with rounds_focused=0, is_resolved=False.
-    """
     return [
         {
             "name": item,
@@ -325,61 +472,37 @@ def initialize_tracks(features_or_scope: list[str]) -> list[dict]:
 
 
 def update_track(tracks: list[dict], active_track_name: str) -> list[dict]:
-    """Increment rounds_focused for the active track. Returns updated list."""
-    updated = []
-    for t in tracks:
-        new_t = dict(t)
-        if t["name"] == active_track_name:
-            new_t["rounds_focused"] = t.get("rounds_focused", 0) + 1
-        updated.append(new_t)
-    return updated
+    return [
+        {**t, "rounds_focused": t.get("rounds_focused", 0) + 1}
+        if t["name"] == active_track_name else dict(t)
+        for t in tracks
+    ]
 
 
 MAX_ROUNDS_ON_SAME_TRACK = 3
 
 
 def should_force_breadth(tracks: list[dict]) -> dict:
-    """Check if Breadth-Keeper should intervene.
-
-    Returns:
-        Dict with force_breadth, current_track, unresolved_tracks, reason.
-    """
     if not tracks:
-        return {
-            "force_breadth": False,
-            "current_track": None,
-            "unresolved_tracks": [],
-            "reason": None,
-        }
+        return {"force_breadth": False, "current_track": None, "unresolved_tracks": [], "reason": None}
 
-    # Find track with max rounds_focused
     active = max(tracks, key=lambda t: t.get("rounds_focused", 0))
     unresolved = [t["name"] for t in tracks if not t.get("is_resolved", False) and t["name"] != active["name"]]
-
-    force = (
-        active.get("rounds_focused", 0) >= MAX_ROUNDS_ON_SAME_TRACK
-        and len(unresolved) > 0
-    )
+    force = active.get("rounds_focused", 0) >= MAX_ROUNDS_ON_SAME_TRACK and len(unresolved) > 0
 
     return {
         "force_breadth": force,
         "current_track": active["name"] if force else None,
         "unresolved_tracks": unresolved if force else [],
         "reason": (
-            f"{active['name']}에 {active['rounds_focused']}라운드 집중. "
-            f"미해결: {', '.join(unresolved)}"
-            if force
-            else None
+            f"{active['name']}에 {active['rounds_focused']}라운드 집중. 미해결: {', '.join(unresolved)}"
+            if force else None
         ),
     }
 
 
 def mark_track_resolved(tracks: list[dict], track_name: str) -> list[dict]:
-    """Mark a track as resolved. Returns updated list."""
-    updated = []
-    for t in tracks:
-        new_t = dict(t)
-        if t["name"] == track_name:
-            new_t["is_resolved"] = True
-        updated.append(new_t)
-    return updated
+    return [
+        {**t, "is_resolved": True} if t["name"] == track_name else dict(t)
+        for t in tracks
+    ]

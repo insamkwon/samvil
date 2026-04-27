@@ -65,11 +65,12 @@ Per-`solution_type` question bodies in `SKILL.legacy.md`:
 
 ## Step 3 — Convergence Check
 
-Re-score after each Phase: `mcp__samvil_mcp__score_ambiguity(interview_state='<json>', tier="<aggregate.tier.samvil_tier>")`.
-Render milestone (`INITIAL/PROGRESS/REFINED/READY`) + `floor_violations`
-+ `missing_items`. Loop back to weakest Phase until **all 4 gates Y**
-(Goal / Scope / AC / Constraints) **AND** `ambiguity ≤ aggregate.ambiguity_target`.
-Cap 2 reprompts per phase, then force-progress with a recorded gap.
+Track `questions_asked` (increment per user question). Re-score after each Phase:
+`mcp__samvil_mcp__score_ambiguity(interview_state='<json>', tier="<tier>", questions_asked=<N>)`.
+Render milestone + `floor_violations` + `missing_items` + `min_questions_met` + `dimension_scores`.
+
+**Convergence** = `ambiguity ≤ target` + `floors_passed` + `min_questions_met` (minimal 5 / standard 10 / thorough 20 / full 30 / deep 40).
+No phase reprompt cap — loop until all 3 hold. Check `dimension_scores`: highest-scoring dimension's Phase is the next loop target.
 
 **AC Testability Gate (PHI-06)**: vague AC ("좋은", "빠른", "직관적인", "smooth"…) → AskUserQuestion to rewrite. Never accept vague AC silently.
 

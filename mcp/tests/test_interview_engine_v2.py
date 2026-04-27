@@ -26,19 +26,24 @@ from samvil_mcp.interview_engine import (
 
 
 def test_milestone_ready_on_clear_interview():
-    """Well-defined interview should reach READY milestone."""
+    """Well-defined interview satisfying all 10 dimensions should reach READY milestone."""
     state = {
-        "target_user": "Freelance designers managing multiple client projects",
-        "core_problem": "They lose track of deadlines across projects",
-        "core_experience": "See all deadlines on a kanban board",
+        "target_user": "Freelance designers managing 5+ client projects simultaneously",
+        "core_problem": "They lose track of deadlines across different client projects",
+        "core_experience": "See all deadlines on a kanban board with onboarding guide for new users",
         "features": ["task-crud", "kanban-view", "deadline-alerts"],
-        "exclusions": ["real-time collab", "file attachments"],
-        "constraints": ["localStorage only", "mobile responsive"],
+        "exclusions": ["real-time collaboration", "file attachments", "invoicing"],
+        "constraints": [
+            "localStorage only — no backend",
+            "Mobile responsive down to 320px",
+            "First paint under 2 seconds",
+            "No PII stored",
+        ],
         "acceptance_criteria": [
-            "User creates task with title and deadline",
-            "User drags tasks between columns",
-            "Tasks persist after refresh",
-            "Overdue tasks show red indicator",
+            "User can create a task in under 10 seconds",
+            "Overdue tasks show a red indicator within 1 second",
+            "Tasks persist after page refresh via localStorage",
+            "First-time user sees onboarding hint on empty state",
         ],
     }
     result = score_ambiguity(state)
