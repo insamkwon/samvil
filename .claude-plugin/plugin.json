@@ -1,7 +1,7 @@
 {
   "name": "samvil",
   "description": "AI vibe-coding harness for solo developers: one-line input, self-correcting convergence to robust apps.",
-  "version": "4.8.1",
+  "version": "4.8.2",
   "author": {
     "name": "insam"
   },
