@@ -188,6 +188,10 @@ from .chain_markers import (
     read_chain_marker as _read_chain_marker,
     write_chain_marker as _write_chain_marker,
 )
+from .health_tiers import (
+    get_health_tier as _get_health_tier,
+    get_health_tier_summary as _get_health_tier_summary,
+)
 from .model_role import (
     ModelRole,
     agents_by_role as _agents_by_role,
@@ -4612,6 +4616,46 @@ async def get_pipeline_status(project_root: str) -> str:
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "get_pipeline_status", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── Health Tiers (M4) ─────────────────────────────────────────
+
+
+@mcp.tool()
+async def get_health_tier(
+    project_root: str,
+    mcp_health_path: str | None = None,
+) -> str:
+    """Get 3-tier health classification (healthy/degraded/critical).
+
+    Reads MCP health log and classifies system health based on
+    fail rate and critical tool status.
+    """
+    try:
+        result = _get_health_tier(project_root, mcp_health_path)
+        _log_mcp_health("ok", "get_health_tier")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "get_health_tier", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def get_health_tier_summary(
+    project_root: str,
+    mcp_health_path: str | None = None,
+) -> str:
+    """Get human-readable 3-tier health summary with icon.
+
+    Returns markdown-formatted health status with recommendations.
+    """
+    try:
+        result = _get_health_tier_summary(project_root, mcp_health_path)
+        _log_mcp_health("ok", "get_health_tier_summary")
+        return result
+    except Exception as e:
+        _log_mcp_health("fail", "get_health_tier_summary", str(e))
         return json.dumps({"error": str(e)})
 
 
