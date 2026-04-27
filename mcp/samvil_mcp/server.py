@@ -71,6 +71,15 @@ from .deploy_targets import (
 from .scaffold_targets import (
     evaluate_scaffold_target as _evaluate_scaffold_target,
 )
+from .build_phase_a import (
+    aggregate_build_phase_a as _aggregate_build_phase_a,
+)
+from .build_phase_b import (
+    dispatch_build_batch as _dispatch_build_batch,
+)
+from .build_phase_z import (
+    finalize_build_phase_z as _finalize_build_phase_z,
+)
 from .retro_aggregate import (
     aggregate_retro_metrics as _aggregate_retro_metrics,
 )
@@ -4106,6 +4115,156 @@ async def synthesize_council_verdicts(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "synthesize_council_verdicts", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_build_phase_a(
+    project_path: str = ".",
+    run_sanity_checks: bool = True,
+) -> str:
+    """Boot-time aggregator for the samvil-build skill (T4.8 ultra-thin).
+
+    Reads (best-effort) from `project_path`:
+      - `project.seed.json` (solution_type, framework, features, name)
+      - `project.state.json` (session_id, current_stage, completed_features)
+      - `project.config.json` (samvil_tier, max_total_builds)
+      - `project.blueprint.json` (architecture, key_libraries)
+
+    Returns a JSON string with:
+      - solution_type / framework: resolved from seed.
+      - build_verify: per-stack {command, log_path, language} tuple.
+      - recipe_path: per-`solution_type` recipe markdown reference.
+      - paths: every file path the skill touches (handoff, fix-log,
+        events, rate-budget, sanity log).
+      - sanity: Phase A.6 result {passed, failures[], warnings[]}.
+      - resume_hint: completed_features + last current_model_build for
+        Worker dispatch.
+      - errors / notes: non-fatal warnings.
+
+    Companion to existing `route_task`, `render_pattern_context`,
+    `render_domain_context`, `save_event`. This tool covers the boot
+    pre-flight (stack identification, recipe lookup, sanity scan,
+    resume detection) that was inline in the legacy 1432-LOC build
+    skill body.
+    """
+    try:
+        result = _aggregate_build_phase_a(
+            project_path or ".",
+            run_sanity_checks=bool(run_sanity_checks),
+        )
+        _log_mcp_health("ok", "aggregate_build_phase_a")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_build_phase_a", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def dispatch_build_batch(
+    seed_json: str,
+    feature_json: str,
+    feature_num: int,
+    tree_json: str,
+    completed_ids_json: str = "[]",
+    blueprint_json: str = "",
+    config_json: str = "",
+    consecutive_fail_batches: int = 0,
+) -> str:
+    """Per-batch dispatch aggregator for samvil-build Phase B (T4.8).
+
+    Composes the next build batch for one feature: resolves
+    MAX_PARALLEL (CPU + memory heuristic), picks the next leaves via
+    `next_buildable_leaves`, and renders ≤2000-token Worker context
+    bundles for each leaf so the skill body can spawn N agents in one
+    parallel message.
+
+    Args:
+        seed_json: Loaded seed JSON string.
+        feature_json: Single feature dict JSON string.
+        feature_num: 1-based feature index.
+        tree_json: Current AC tree JSON.
+        completed_ids_json: JSON array of leaf IDs already done.
+        blueprint_json: Optional blueprint JSON ("" → none).
+        config_json: Optional config JSON ("" → none).
+        consecutive_fail_batches: Carried from checkpoint or last
+            iteration. ≥2 trips the circuit breaker.
+
+    Returns: JSON string with `max_parallel`, `parallel_meta`, `batch`,
+    `worker_bundles[]`, `independence` (when multiple features),
+    `circuit_breaker {consecutive_fail_batches, max_retries, halt}`,
+    `notes`, `errors`.
+    """
+    try:
+        seed = json.loads(seed_json) if seed_json else {}
+        feature = json.loads(feature_json) if feature_json else {}
+        blueprint = json.loads(blueprint_json) if blueprint_json else None
+        config = json.loads(config_json) if config_json else None
+        completed_ids = json.loads(completed_ids_json) if completed_ids_json else []
+        result = _dispatch_build_batch(
+            seed=seed,
+            blueprint=blueprint,
+            config=config,
+            feature=feature,
+            feature_num=int(feature_num),
+            tree_json=tree_json,
+            completed_ids=completed_ids,
+            consecutive_fail_batches=int(consecutive_fail_batches),
+        )
+        _log_mcp_health("ok", "dispatch_build_batch")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "dispatch_build_batch", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def finalize_build_phase_z(
+    project_path: str = ".",
+    rate_budget_stats_json: str = "",
+    failed_features_json: str = "",
+    retries: int = 0,
+) -> str:
+    """Post-stage finalize aggregator for samvil-build (T4.8).
+
+    Runs ONCE at the end of the build stage. Owns the v3.2 Contract
+    Layer post_stage prep: per-leaf `ac_verdict` claim payloads,
+    `gate_check` input (implementation_rate), stagnation-evaluate
+    hint, pre-rendered handoff.md block.
+
+    Args:
+        project_path: Project root.
+        rate_budget_stats_json: Optional pre-fetched
+            `rate_budget_stats(...)` result. Skill body passes it in
+            to avoid a second roundtrip.
+        failed_features_json: JSON array of feature names that hit
+            the circuit breaker. Empty string → derive from leaf
+            statuses.
+        retries: Total retries in this build stage (for handoff).
+
+    Returns: JSON string with `samvil_tier`, `metrics
+    {features_total/passed/failed, implementation_rate,
+    total/passed/failed/pending leaves}`, `ac_verdict_claims[]`,
+    `stage_claim_id`, `gate_input`, `stagnation_hint`,
+    `handoff_block`, `notes`, `errors`.
+    """
+    try:
+        rate_budget_stats = (
+            json.loads(rate_budget_stats_json) if rate_budget_stats_json else None
+        )
+        failed_features = (
+            json.loads(failed_features_json) if failed_features_json else None
+        )
+        result = _finalize_build_phase_z(
+            project_path or ".",
+            rate_budget_stats=rate_budget_stats,
+            failed_features=failed_features,
+            retries=int(retries),
+        )
+        _log_mcp_health("ok", "finalize_build_phase_z")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "finalize_build_phase_z", str(e))
         return json.dumps({"error": str(e)})
 
 

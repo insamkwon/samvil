@@ -46,13 +46,13 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
         "samvil-build",
         "skills/samvil-build/SKILL.md",
         (
-            "contract-layer-protocol",
-            "route_task",
+            "SKILL.legacy.md",
+            "aggregate_build_phase_a",
+            "dispatch_build_batch",
+            "finalize_build_phase_z",
             "claim_post",
             "gate_check",
             "build_to_qa",
-            "render_pattern_context",
-            "render_domain_context",
         ),
     ),
     (
