@@ -176,6 +176,11 @@ from .host import (
     chain_strategy as _host_chain_strategy,
     resolve_host_capability as _resolve_host_capability,
 )
+from .host_adapters import (
+    get_adapter as _get_adapter,
+    get_chain_continuation as _get_chain_continuation,
+    list_adapters as _list_adapters,
+)
 from .model_role import (
     ModelRole,
     agents_by_role as _agents_by_role,
@@ -4464,6 +4469,60 @@ async def aggregate_module_state(project_root: str) -> str:
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "aggregate_module_state", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── Host Adapters (M2) ────────────────────────────────────────
+
+
+@mcp.tool()
+async def get_host_adapter(host_name: str | None = None) -> str:
+    """Get the full adapter configuration for a host environment.
+
+    Returns HostAdapter dict with capability, skill_mappings,
+    tool_aliases, chain_format, and setup_instructions.
+    """
+    try:
+        result = _get_adapter(host_name)
+        _log_mcp_health("ok", "get_host_adapter")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "get_host_adapter", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def get_chain_continuation(
+    host_name: str | None,
+    current_skill: str,
+) -> str:
+    """Determine how to continue the skill chain after current_skill.
+
+    Returns dict with: next_skill, chain_via, marker_path, command,
+    host_name.
+    """
+    try:
+        result = _get_chain_continuation(host_name, current_skill)
+        _log_mcp_health("ok", "get_chain_continuation")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "get_chain_continuation", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def list_host_adapters() -> str:
+    """List all available host adapters with summary info.
+
+    Returns list of {host_name, chain_format, skill_count,
+    mcp_tools, parallel_agents}.
+    """
+    try:
+        result = _list_adapters()
+        _log_mcp_health("ok", "list_host_adapters")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "list_host_adapters", str(e))
         return json.dumps({"error": str(e)})
 
 
