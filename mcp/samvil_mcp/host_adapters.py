@@ -92,6 +92,15 @@ _OPENCODE_ALIASES: dict[str, str] = {
     "Skill": "N/A (use AGENTS.md sections)",
 }
 
+_GEMINI_ALIASES: dict[str, str] = {
+    "Read": "read_file / read_many_files",
+    "Edit": "replace_in_file",
+    "Write": "write_file",
+    "Bash": "run_shell_command",
+    "Agent": "subagent (via @google/gemini-cli-sdk)",
+    "Skill": "N/A (use .gemini/commands/*.toml)",
+}
+
 _GENERIC_ALIASES: dict[str, str] = {
     "Read": "file read",
     "Edit": "file edit",
@@ -202,6 +211,21 @@ _OPENCODE_ADAPTER = HostAdapter(
     ],
 )
 
+_GEMINI_ADAPTER = HostAdapter(
+    host_name="gemini_cli",
+    capability=resolve_host_capability("gemini_cli"),
+    skill_mappings=_build_skill_mappings("gemini_cli", "/samvil "),
+    tool_aliases=_GEMINI_ALIASES,
+    chain_format="file_marker",
+    setup_instructions=[
+        "Copy .gemini/commands/*.toml to project .gemini/commands/.",
+        "Add MCP server to settings.json mcpServers section.",
+        "Context loaded from GEMINI.md or AGENTS.md.",
+        "Chain uses .samvil/next-skill.json file markers.",
+        "Each command reads the marker and continues the pipeline.",
+    ],
+)
+
 _GENERIC_ADAPTER = HostAdapter(
     host_name="generic",
     capability=resolve_host_capability("generic"),
@@ -221,6 +245,7 @@ _ADAPTERS: dict[str, HostAdapter] = {
     "claude_code": _CLAUDE_CODE_ADAPTER,
     "codex_cli": _CODEX_ADAPTER,
     "opencode": _OPENCODE_ADAPTER,
+    "gemini_cli": _GEMINI_ADAPTER,
     "generic": _GENERIC_ADAPTER,
 }
 

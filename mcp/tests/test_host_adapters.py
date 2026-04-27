@@ -17,6 +17,8 @@ from samvil_mcp.host_adapters import (
     _CLAUDE_CODE_ALIASES,
     _CODEX_ALIASES,
     _OPENCODE_ALIASES,
+    _GEMINI_ALIASES,
+    _GEMINI_ADAPTER,
     _GENERIC_ALIASES,
 )
 
@@ -134,14 +136,14 @@ class TestGetChainContinuation:
 
 
 class TestListAdapters:
-    def test_returns_four(self):
+    def test_returns_five(self):
         result = list_adapters()
-        assert len(result) == 4
+        assert len(result) == 5
 
     def test_adapter_summaries(self):
         result = list_adapters()
         names = {a["host_name"] for a in result}
-        assert names == {"claude_code", "codex_cli", "opencode", "generic"}
+        assert names == {"claude_code", "codex_cli", "opencode", "gemini_cli", "generic"}
 
     def test_each_has_required_fields(self):
         for a in list_adapters():
@@ -192,6 +194,13 @@ class TestToolAliases:
     def test_opencode_agent_conditional(self):
         assert "subagent" in _OPENCODE_ALIASES["Agent"]
 
+    def test_gemini_has_core_tools(self):
+        for tool in ["Read", "Edit", "Write", "Bash"]:
+            assert tool in _GEMINI_ALIASES
+
+    def test_gemini_read_alias(self):
+        assert "read_file" in _GEMINI_ALIASES["Read"]
+
 
 class TestAdapterInstances:
     def test_claude_code_skill_command_prefix(self):
@@ -211,6 +220,15 @@ class TestAdapterInstances:
 
     def test_all_adapters_have_capability(self):
         for adapter in [_CLAUDE_CODE_ADAPTER, _CODEX_ADAPTER,
-                        _OPENCODE_ADAPTER, _GENERIC_ADAPTER]:
+                        _OPENCODE_ADAPTER, _GEMINI_ADAPTER, _GENERIC_ADAPTER]:
             assert adapter.capability is not None
             assert adapter.capability.name == adapter.host_name
+
+    def test_gemini_adapter_chain_format(self):
+        assert _GEMINI_ADAPTER.chain_format == "file_marker"
+
+    def test_gemini_adapter_parallel_agents(self):
+        assert _GEMINI_ADAPTER.capability.parallel_agents is True
+
+    def test_gemini_adapter_mcp_tools(self):
+        assert _GEMINI_ADAPTER.capability.mcp_tools is True

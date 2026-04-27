@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
-HOST_NAMES: tuple[str, ...] = ("claude_code", "codex_cli", "opencode", "generic")
+HOST_NAMES: tuple[str, ...] = ("claude_code", "codex_cli", "opencode", "gemini_cli", "generic")
 
 
 @dataclass(frozen=True)
@@ -67,6 +67,22 @@ _CAPABILITIES: dict[str, HostCapability] = {
         notes=[
             "Do not assume Claude-style Skill tool availability.",
             "Use .samvil/next-skill.json for portable chaining.",
+        ],
+    ),
+    "gemini_cli": HostCapability(
+        name="gemini_cli",
+        skill_invocation="manual",
+        parallel_agents=True,
+        mcp_tools=True,
+        file_marker_handoff=True,
+        browser_preview=False,
+        native_task_update=False,
+        notes=[
+            "Gemini CLI supports MCP servers via settings.json mcpServers.",
+            "Commands live in .gemini/commands/*.toml with prompt templates.",
+            "Context files: GEMINI.md or AGENTS.md (configurable).",
+            "Use .samvil/next-skill.json for portable chaining.",
+            "Supports subagents via @google/gemini-cli-sdk.",
         ],
     ),
     "generic": HostCapability(

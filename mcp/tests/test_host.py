@@ -11,7 +11,7 @@ from samvil_mcp.host import (
 
 
 def test_host_names_are_explicit() -> None:
-    assert HOST_NAMES == ("claude_code", "codex_cli", "opencode", "generic")
+    assert HOST_NAMES == ("claude_code", "codex_cli", "opencode", "gemini_cli", "generic")
 
 
 def test_claude_code_supports_skill_tool_chaining() -> None:
@@ -34,6 +34,15 @@ def test_opencode_uses_file_marker_chain() -> None:
     cap = resolve_host_capability("opencode")
     assert cap.name == "opencode"
     assert cap.skill_invocation == "manual"
+    assert chain_strategy(cap) == "file_marker"
+
+
+def test_gemini_cli_uses_file_marker_chain() -> None:
+    cap = resolve_host_capability("gemini_cli")
+    assert cap.name == "gemini_cli"
+    assert cap.skill_invocation == "manual"
+    assert cap.parallel_agents is True
+    assert cap.mcp_tools is True
     assert chain_strategy(cap) == "file_marker"
 
 

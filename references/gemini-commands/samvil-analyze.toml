@@ -1,0 +1,20 @@
+prompt = """
+SAMVIL pipeline stage: samvil-analyze.
+
+## Prerequisites
+
+Read `.samvil/next-skill.json` to check current pipeline position.
+If `next_skill` is not `samvil-analyze`, skip and report the expected stage.
+
+## Execution
+
+1. Use MCP tool `read_chain_marker` with project_root to confirm stage.
+2. Read `.samvil/project.seed.json` for seed context.
+3. Execute the samvil-analyze stage logic (see Codex command reference for details).
+4. On completion, use MCP tool `write_chain_marker` to advance pipeline.
+
+## Chain
+
+Read `.samvil/next-skill.json` for the next stage.
+Report to the user what the next command should be.
+"""

@@ -28,6 +28,8 @@ Returns `solution_type`, `framework`, `build_verify {command, log_path, language
 
 Read `recipe_path`. Build core_experience per legacy `### solution_type: "<type>"` (web-app/game/automation/mobile-app/dashboard). **Build verify (INV-2)**: `cd ~/dev/<seed.name> && <build_verify.command> > <build_verify.log_path> 2>&1; echo "Exit code: $?"`.
 
+**Module Boundary pre-check (M1)**: if `.samvil/modules/` exists, run `enforce_boundary(project_root="~/dev/<seed.name>", module_name="<feature>")` for the feature's module. If `violation_count > 0`, surface violations in worker prompt so it avoids cross-module imports.
+
 **Circuit Breaker (MAX_RETRIES=2)**:
 - PASS → `save_event(event_type="build_pass", data='{"attempt":N,"scope":"core"}')`. Per-feature passes use `"scope":"feature:<name>"`; Step 4 integration build uses `"scope":"integration"`.
 - FAIL → `tail -30 <log_path>` → fix → retry. Append `[core] <error> → <fix>` to `<paths.fix_log>`. Emit `event_type="build_fail"` with `"error_signature"`, `"error_category"` (one of `` `import_error` ``, `` `type_error` ``, `` `config_error` ``, `` `runtime_error` ``, `` `dependency_error` ``, `` `unknown` ``), and `"touched_files"` (legacy §"Structured Build Event Schema"); emit `event_type="fix_applied"` per fix.

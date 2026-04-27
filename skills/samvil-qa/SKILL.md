@@ -50,8 +50,9 @@ For each Pass 2 leaf (legacy `### Pass 2 Tree Setup (v3.0.0+)`):
 3. **Pass 2.5 Reward Hacking detection** per leaf evidence:
    - `validate_evidence(evidences_json=<["src/file:line",...]>, project_root=".")` — `all_valid=false` or `valid_count<1` → downgrade to FAIL (P1, E1).
    - `semantic_check(code=<snippet ±3 lines>, context_hint=<AC>)` — `risk_level=HIGH` → downgrade PASS/PARTIAL → FAIL; MEDIUM → PASS → PARTIAL with Socratic Questions surfaced.
-4. `update_leaf_status(ac_tree_json=<tree>, leaf_id=<id>, status=<s>, evidence_json=<files+screenshots>)` → use returned `tree`.
-5. `save_event(event_type="ac_verdict", data='{"feature":"...", "leaf_id":"...","status":"..."}')`.
+4. **Module Boundary validation (M1)**: if `.samvil/modules/` exists, run `validate_contract(project_root=".", module_name="<module>")` per relevant module. `valid=false` → surface contract errors as FAIL evidence.
+5. `update_leaf_status(ac_tree_json=<tree>, leaf_id=<id>, status=<s>, evidence_json=<files+screenshots>)` → use returned `tree`.
+6. `save_event(event_type="ac_verdict", data='{"feature":"...", "leaf_id":"...","status":"..."}')`.
 
 After all leaves: `print(json.loads(render_ac_tree_hud(ac_tree_json=tree_json))["ascii"])`; append to `qa-report.md`.
 
