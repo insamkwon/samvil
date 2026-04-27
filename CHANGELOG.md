@@ -4,6 +4,17 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.8.3 — 2026-04-28
+
+**README pipeline diagram improvement (PATCH)**
+
+- Highlight interview depth and council review as core differentiators
+  in the pipeline diagram with inline annotations
+- Add "다른 AI 도구와 뭐가 달라요?" comparison table showing interview,
+  council, auto-recovery, and convergence criteria vs generic AI tools
+
+---
+
 ## v4.8.0 — 2026-04-28
 
 **Multi-host Onboarding (MINOR)**
