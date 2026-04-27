@@ -41,6 +41,7 @@ class TestSmokeScriptIntegration:
             text=True,
         )
         assert result.returncode == 0, f"smoke failed:\n{result.stderr}"
+        assert "OK" in result.stdout
 
     def test_smoke_passes_for_valid_gemini_marker(self, project_dir):
         write_chain_marker(str(project_dir), "gemini_cli", "samvil-design")
@@ -50,6 +51,7 @@ class TestSmokeScriptIntegration:
             text=True,
         )
         assert result.returncode == 0, f"smoke failed:\n{result.stderr}"
+        assert "OK" in result.stdout
 
     def test_smoke_expect_next_flag(self, project_dir):
         write_chain_marker(str(project_dir), "codex_cli", "samvil")
@@ -197,7 +199,8 @@ class TestCodexLayerConnectivity:
         m1 = read_chain_marker(project_root)
         advance_chain(project_root, "codex_cli")
         m2 = read_chain_marker(project_root)
-        assert m2["next_skill"] != m1["next_skill"]
+        # samvil → samvil-interview → samvil-seed
+        assert m2["next_skill"] == "samvil-seed"
 
     def test_pipeline_status_after_advance(self, project_dir):
         """get_pipeline_status() returns correct progress after writes."""

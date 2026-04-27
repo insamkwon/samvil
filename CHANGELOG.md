@@ -4,6 +4,25 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.6.1 — 2026-04-27
+
+**Option A: E2E chain-marker dogfood (PATCH)**
+
+- Add `mcp/tests/test_chain_marker_e2e.py` — 27 tests covering smoke script subprocess
+  execution, marker schema compliance (schema_version/reason/from_stage), command file
+  correctness for all 15 Codex + Gemini command files, phase2 cross-host smoke, and
+  codex layer connectivity
+- Add `scripts/check-host-command-files.py` — standalone validator for codex+gemini
+  command reference files
+- Fix `chain_markers.py`: `write_chain_marker()` now includes all required fields:
+  `schema_version: "1.0"`, `reason`, `from_stage`
+- Fix `references/codex-commands/`: added chain marker MCP tool references to
+  `samvil-analyze.md`, `samvil-doctor.md`, `samvil-update.md`, `samvil-retro.md`
+
+Pre-commit: 9/9 PASS — 1491 tests total
+
+---
+
 ## v4.6.0 — Option D: 3-tier health UI + Enterprise BFF (2026-04-27)
 
 ### New
