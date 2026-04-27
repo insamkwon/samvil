@@ -48,7 +48,9 @@
 
 ## 빠른 시작 (5분)
 
-1. **설치**: Claude Code에서 `/install-plugin insamkwon/samvil` 실행
+### Claude Code
+
+1. **설치**: `/install-plugin insamkwon/samvil` 실행
 2. **새 세션 열기**: SAMVIL이 자동으로 로드됩니다
 3. **실행**: `/samvil "할일 관리 앱"` 입력
 4. **인터뷰에 답변**: AI가 객관식으로 물어봐요
@@ -57,6 +59,84 @@
 ```bash
 cd ~/dev/<app-name>
 npm run dev    # → localhost:3000
+```
+
+### Codex CLI / OpenCode / Gemini CLI
+
+SAMVIL은 Claude Code 외에도 MCP를 지원하는 **모든 AI 코딩 에이전트**에서 사용할 수 있습니다.
+
+#### 1단계 — 저장소 클론 (또는 릴리즈 다운로드)
+
+```bash
+git clone https://github.com/insamkwon/samvil.git
+cd samvil
+```
+
+#### 2단계 — MCP 서버 자동 설치
+
+```bash
+bash scripts/setup-codex.sh
+```
+
+설치 스크립트가 하는 일:
+- Python venv 생성 + `samvil-mcp` 패키지 설치
+- 호스트별 MCP config 스니펫 출력 (Codex CLI / OpenCode / Gemini)
+- Codex CLI는 `~/.codex/config.toml`에 자동으로 서버 추가
+
+#### 3단계 — 호스트별 MCP 등록 (setup 스크립트 출력 보고 추가)
+
+**Codex CLI** (`~/.codex/config.toml`):
+```toml
+[mcp_servers.samvil-mcp]
+command = "/path/to/samvil/mcp/.venv/bin/python"
+args    = ["-m", "samvil_mcp.server"]
+env     = {}
+```
+
+**OpenCode** (`.opencode/config.json` 또는 `~/.opencode/config.json`):
+```json
+{
+  "mcp": {
+    "samvil-mcp": {
+      "command": "/path/to/samvil/mcp/.venv/bin/python",
+      "args": ["-m", "samvil_mcp.server"]
+    }
+  }
+}
+```
+
+**Gemini CLI** (`~/.gemini/settings.json`):
+```json
+{
+  "mcpServers": {
+    "samvil-mcp": {
+      "command": "/path/to/samvil/mcp/.venv/bin/python",
+      "args": ["-m", "samvil_mcp.server"]
+    }
+  }
+}
+```
+
+> `setup-codex.sh`가 실제 Python 경로를 출력해줍니다. 위 `/path/to/samvil` 부분을 그걸로 교체하세요.
+
+#### 4단계 — 사용
+
+호스트를 재시작하고, 프로젝트를 만들 빈 폴더로 이동 후 SAMVIL 실행:
+
+```
+# Codex CLI 예시
+cd ~/dev/my-new-app
+codex "SAMVIL로 할일 관리 앱 만들어줘"
+```
+
+`AGENTS.md`가 프로젝트 루트에 있어서 Codex/OpenCode가 자동으로 읽습니다.
+파이프라인 상태는 `.samvil/next-skill.json` 체인 마커로 세션 간에도 유지됩니다.
+
+#### 연결 확인
+
+```bash
+python3 scripts/host-continuation-smoke.py <프로젝트 폴더>
+python3 scripts/phase2-cross-host-smoke.py
 ```
 
 ---
