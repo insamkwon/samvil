@@ -183,3 +183,58 @@ class TestSnapshotGeneration:
         snap = snapshot_generation(str(tmp_path))
         assert snap.passing_ac_count == 0
         assert snap.total_ac_count == 0
+
+
+class TestValidateAgainstSnapshot:
+    def test_clean_when_no_regressions(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1"), _ac("AC-2")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        result = validate_against_snapshot(str(tmp_path), "gen-1")
+        assert result.status == "clean"
+        assert result.regressed == 0
+        assert result.regressed_ids == []
+
+    def test_detects_regression(self, tmp_path):
+        # gen-1: AC-1 PASS, AC-2 PASS
+        _write_qa_results(tmp_path, [_ac("AC-1"), _ac("AC-2")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        # Now AC-2 regresses to FAIL
+        _write_qa_results(tmp_path, [_ac("AC-1", "PASS"), _ac("AC-2", "FAIL")])
+        result = validate_against_snapshot(str(tmp_path), "gen-1")
+        assert result.status == "regression"
+        assert result.regressed == 1
+        assert "AC-2" in result.regressed_ids
+
+    def test_new_passes_counted(self, tmp_path):
+        # gen-1: only AC-1 PASS
+        _write_qa_results(tmp_path, [_ac("AC-1"), _ac("AC-2", "FAIL")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        # Now AC-2 also PASS
+        _write_qa_results(tmp_path, [_ac("AC-1"), _ac("AC-2")])
+        result = validate_against_snapshot(str(tmp_path), "gen-1")
+        assert result.new_passes == 1
+        assert result.status == "clean"
+
+    def test_missing_snapshot_returns_zero_result(self, tmp_path):
+        result = validate_against_snapshot(str(tmp_path), "gen-99")
+        assert result.total_checked == 0
+        assert result.status == "clean"
+
+    def test_result_to_dict_has_status(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        result = validate_against_snapshot(str(tmp_path), "gen-1")
+        d = result.to_dict()
+        assert "status" in d
+        assert "snapshot_id" in d
+        assert d["snapshot_id"] == "gen-1"
+
+    def test_multiple_regressions(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1"), _ac("AC-2"), _ac("AC-3")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        _write_qa_results(tmp_path, [
+            _ac("AC-1", "FAIL"), _ac("AC-2", "FAIL"), _ac("AC-3", "PASS"),
+        ])
+        result = validate_against_snapshot(str(tmp_path), "gen-1")
+        assert result.regressed == 2
+        assert set(result.regressed_ids) == {"AC-1", "AC-2"}
