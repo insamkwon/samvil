@@ -238,3 +238,77 @@ class TestValidateAgainstSnapshot:
         result = validate_against_snapshot(str(tmp_path), "gen-1")
         assert result.regressed == 2
         assert set(result.regressed_ids) == {"AC-1", "AC-2"}
+
+
+class TestAggregateRegressionState:
+    def test_empty_state_when_no_generations(self, tmp_path):
+        state = aggregate_regression_state(str(tmp_path))
+        assert state["generation_count"] == 0
+        assert state["generations"] == []
+        assert state["latest_generation_id"] is None
+        assert state["has_regression_history"] is False
+
+    def test_counts_one_generation(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        state = aggregate_regression_state(str(tmp_path))
+        assert state["generation_count"] == 1
+        assert state["latest_generation_id"] == "gen-1"
+        assert state["has_regression_history"] is False
+
+    def test_has_regression_history_after_two_gens(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        snapshot_generation(str(tmp_path), generation_id="gen-2")
+        state = aggregate_regression_state(str(tmp_path))
+        assert state["has_regression_history"] is True
+        assert state["generation_count"] == 2
+
+    def test_generation_summaries_include_counts(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1"), _ac("AC-2")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        state = aggregate_regression_state(str(tmp_path))
+        gen = state["generations"][0]
+        assert gen["passing_ac_count"] == 2
+        assert gen["total_ac_count"] == 2
+
+
+class TestCompareGenerations:
+    def test_no_changes_when_same_acs(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1"), _ac("AC-2")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        snapshot_generation(str(tmp_path), generation_id="gen-2")
+        cr = compare_generations(str(tmp_path), "gen-1", "gen-2")
+        assert cr.added == []
+        assert cr.removed == []
+        assert cr.changed == []
+
+    def test_detects_added_ac(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        _write_qa_results(tmp_path, [_ac("AC-1"), _ac("AC-2")])
+        snapshot_generation(str(tmp_path), generation_id="gen-2")
+        cr = compare_generations(str(tmp_path), "gen-1", "gen-2")
+        assert "AC-2" in cr.added
+
+    def test_detects_removed_ac(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1"), _ac("AC-2")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snapshot_generation(str(tmp_path), generation_id="gen-2")
+        cr = compare_generations(str(tmp_path), "gen-1", "gen-2")
+        assert "AC-2" in cr.removed
+
+    def test_missing_gen_a_returns_empty_result(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snapshot_generation(str(tmp_path), generation_id="gen-2")
+        cr = compare_generations(str(tmp_path), "gen-1", "gen-2")
+        assert cr.gen_a == "gen-1"
+
+    def test_to_dict_contains_all_fields(self, tmp_path):
+        _write_qa_results(tmp_path, [_ac("AC-1")])
+        snapshot_generation(str(tmp_path), generation_id="gen-1")
+        snapshot_generation(str(tmp_path), generation_id="gen-2")
+        d = compare_generations(str(tmp_path), "gen-1", "gen-2").to_dict()
+        assert "gen_a" in d and "gen_b" in d
+        assert "added" in d and "removed" in d and "changed" in d
