@@ -19,7 +19,7 @@ prose, Health Check details, project init schema, and Gate A protocol in
 
 ## Boot Sequence (INV-1)
 
-1. `mcp__samvil_mcp__health_check()` — best-effort. Also call `mcp__samvil_mcp__get_health_tier_summary(project_root="<cwd>")` — best-effort. Render both as one health line: `[health summary] | Health Tier: ✅/⚠️/🔴 TIER`. Degraded/critical MCP is non-fatal (P8).
+1. `mcp__samvil_mcp__health_check()` — best-effort. Also call `mcp__samvil_mcp__get_health_tier_summary(project_root="<cwd>")` — best-effort. Render both as one health line: `[health_check one-liner] | Health Tier: ✅/⚠️/🔴 TIER`. Degraded/critical MCP is non-fatal (P8).
 2. Files are SSOT — never trust conversation history for tier or stage. Inputs come from the aggregator, not memory.
 3. `mcp__samvil_mcp__check_jurisdiction(action_description="SAMVIL pipeline start: <prompt> at tier=<tier>", command="", filenames_json='["project.seed.json","project.state.json","project.config.json"]', diff_text="")` — once at boot. `user` jurisdiction → confirm explicitly (`ㄱ`/`고`/`yes`); `external` → resolve dependency then `claim_post(type="evidence_posted")`; `ai` → continue silently.
 4. `mcp__samvil_mcp__aggregate_orchestrator_state(project_root="<cwd or ~/dev/<slug>>", prompt="<one-line>", cli_tier="<--tier flag or empty>", mode_hint="<brownfield|greenfield|empty>", host_name="<claude_code|codex_cli|opencode|generic>")` → returns `tier.{samvil_tier,source,aliased_from}`, `solution_type.{solution_type,layer,matched,confidence}`, `is_pm_mode`, `brownfield.{is_brownfield,can_resume,artifacts,state_present,current_stage,completed_stages}`, `chain.{next_skill,reason,resume_point}`, `errors[]`. On error: fall back to manual reads from `SKILL.legacy.md` (P8).
