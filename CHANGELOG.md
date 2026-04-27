@@ -4,6 +4,17 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.8.4 — 2026-04-28
+
+**Claude Code + Codex CLI 동등 지원 명시 (PATCH)**
+
+- README "시작하기" 섹션을 Claude Code / Codex CLI 두 섹션으로 분리
+- Codex CLI를 `<details>` 밖으로 꺼내 첫 화면에 동등하게 노출
+- 배지에 Codex CLI 추가
+- FAQ 업데이트 / 비용 / 업데이트 항목에 Codex CLI 방법 병기
+
+---
+
 ## v4.8.3 — 2026-04-28
 
 **README pipeline diagram improvement (PATCH)**

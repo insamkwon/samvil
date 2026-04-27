@@ -1,16 +1,17 @@
-# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.8.3`
+# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.8.4`
 
 > **코딩 몰라도 괜찮아요. AI가 대신 만들어드려요.**
 
-[![버전](https://img.shields.io/badge/버전-v4.8.3-blue)](CHANGELOG.md)
-[![Claude Code](https://img.shields.io/badge/Claude_Code-플러그인-green)](https://claude.ai/code)
+[![버전](https://img.shields.io/badge/버전-v4.8.4-blue)](CHANGELOG.md)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-지원-green)](https://claude.ai/code)
+[![Codex CLI](https://img.shields.io/badge/Codex_CLI-지원-blueviolet)](https://github.com/openai/codex)
 [![라이선스](https://img.shields.io/badge/라이선스-UNLICENSED-lightgrey)]()
 
 ---
 
 ## 이게 뭐예요?
 
-SAMVIL은 **Claude Code에서 쓰는 AI 앱 개발 도우미**예요.
+SAMVIL은 **Claude Code와 Codex CLI에서 쓰는 AI 앱 개발 도우미**예요.
 
 "할일 관리 앱 만들어줘" 한 마디면, AI가 알아서 물어보고, 설계하고, 코드를 짜고, 테스트까지 해요.
 당신은 질문에 답하고 기다리기만 하면 돼요.
@@ -35,9 +36,16 @@ SAMVIL은 **Claude Code에서 쓰는 AI 앱 개발 도우미**예요.
 
 ## 시작하기
 
-### Claude Code (권장)
+두 가지 방법 중 쓰는 AI 도구에 맞게 고르세요.
 
-가장 쉽고 기능이 풍부한 방법이에요.
+| 방법 | 대상 | 설치 |
+|---|---|---|
+| **Claude Code** | Anthropic Claude 사용자 | 명령어 1줄 |
+| **Codex CLI** | OpenAI Codex 사용자 | 스크립트 1개 |
+
+---
+
+### Claude Code로 시작하기
 
 **1단계 — 설치**
 
@@ -66,10 +74,7 @@ npm run dev    # → 브라우저에서 localhost:3000
 
 ---
 
-<details>
-<summary>⚙️ Codex CLI / OpenCode / Gemini CLI에서 사용하기</summary>
-
-Claude Code 외에도 MCP를 지원하는 다른 AI 도구에서 쓸 수 있어요.
+### Codex CLI로 시작하기
 
 **1단계 — 저장소 받기**
 
@@ -81,18 +86,15 @@ cd samvil
 **2단계 — 자동 설치 스크립트 실행**
 
 ```bash
-bash scripts/setup-codex.sh          # Codex CLI
-# bash scripts/setup-codex.sh opencode  # OpenCode
-# bash scripts/setup-codex.sh gemini    # Gemini CLI
-# bash scripts/setup-codex.sh all       # 전부 한번에
+bash scripts/setup-codex.sh
 ```
 
 스크립트가 모두 자동으로 처리해요:
 - MCP 서버 설치 (Python venv + samvil-mcp)
 - AGENTS.md 전역 등록 (`~/.codex/AGENTS.md`) → 어느 프로젝트에서든 자동 인식
-- MCP 서버를 호스트 설정 파일에 자동 등록
+- MCP 서버를 Codex 설정 파일에 자동 등록
 
-**3단계 — 호스트 재시작 후 사용**
+**3단계 — 호스트 재시작 후 시작!**
 
 ```bash
 cd ~/dev/내-새-앱
@@ -100,6 +102,17 @@ codex "SAMVIL로 할일 관리 앱 만들어줘"
 ```
 
 문제 생기면: `bash scripts/setup-codex.sh` 다시 실행하면 돼요 (중복 없이 안전).
+
+<details>
+<summary>⚙️ OpenCode / Gemini CLI에서도 쓸 수 있어요</summary>
+
+동일한 스크립트로 설치해요:
+
+```bash
+bash scripts/setup-codex.sh opencode  # OpenCode
+bash scripts/setup-codex.sh gemini    # Gemini CLI
+bash scripts/setup-codex.sh all       # 전부 한번에
+```
 
 </details>
 
@@ -175,7 +188,7 @@ codex "SAMVIL로 할일 관리 앱 만들어줘"
 
 AI가 코드를 분석하고, 뭘 개선할지 알려줘요.
 
-### 특정 단계만 실행하기
+### 특정 단계만 실행하기 (Claude Code)
 
 전체 파이프라인이 아니라 원하는 부분만:
 
@@ -221,7 +234,10 @@ AI가 코드를 분석하고, 뭘 개선할지 알려줘요.
 <summary>비용이 드나요?</summary>
 
 SAMVIL 자체는 완전 무료예요.
-Claude Code 구독(월 $20)이 있어야 써요.
+
+- **Claude Code** 구독(월 $20)이 있어야 Claude Code에서 쓸 수 있어요.
+- **Codex CLI**는 OpenAI API 키가 필요해요.
+
 앱 하나 만들 때 API 비용은 보통 $0.10~$1 수준이에요.
 
 </details>
@@ -229,10 +245,16 @@ Claude Code 구독(월 $20)이 있어야 써요.
 <details>
 <summary>업데이트는 어떻게 해요?</summary>
 
-Claude Code에서 이것만 입력하면 돼요:
-
+**Claude Code:**
 ```
 /samvil:update
+```
+
+**Codex CLI:**
+```bash
+cd ~/samvil   # 설치한 폴더
+git pull
+bash scripts/setup-codex.sh
 ```
 
 새 버전이 있으면 자동으로 알려주고, 업데이트할지 물어봐요.
@@ -250,8 +272,14 @@ Claude Code에서 이것만 입력하면 돼요:
 <details>
 <summary>뭔가 잘못 됐어요. 어떻게 진단하나요?</summary>
 
+**Claude Code:**
 ```
 /samvil:doctor
+```
+
+**Codex CLI:**
+```bash
+python3 scripts/phase2-cross-host-smoke.py
 ```
 
 환경 설정, MCP 서버, 버전 등을 자동으로 진단해줘요.
@@ -298,6 +326,8 @@ bash scripts/pre-commit-check.sh   # 모두 PASS 떠야 정상
 
 | 버전 | 주요 변경 |
 |---|---|
+| **v4.8.4** | Claude Code + Codex CLI 동등 지원 명시. README 시작하기 섹션 양분. |
+| **v4.8.3** | README 파이프라인 다이어그램에 인터뷰 깊이·팀 회의 차별점 강조. |
 | **v4.8.1** | setup-codex.sh 완전 자동화 (config 없어도 자동 생성, AGENTS.md 전역 등록) |
 | **v4.8.0** | **멀티호스트 온보딩** — `AGENTS.md` + `scripts/setup-codex.sh` 추가. Codex/OpenCode/Gemini 딱 2단계로 설치 완료. |
 | **v4.7.0** | **Regression Suite** — evolve 사이클 간 AC 회귀 자동 감지. 4개 MCP 도구 추가. |
