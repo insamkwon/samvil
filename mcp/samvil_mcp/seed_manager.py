@@ -280,3 +280,89 @@ def check_convergence(seed_history: list[dict]) -> dict:
         "max_generations": 30,
         "changes_in_last": comparison["changes"],
     }
+
+
+# ── Brownfield Merge (v2.6.0) ──────────────────────────────────────
+
+def merge_brownfield_seed(
+    existing_seed: dict,
+    interview_state: dict,
+    new_features: list[dict] | None = None,
+) -> dict:
+    """Merge a brownfield analysis seed with interview findings.
+
+    Rules:
+    - Tech stack, framework, schema_version: from existing_seed (source of truth).
+    - Metadata (target_user, core_problem, core_experience): prefer interview_state
+      values when longer/more specific than what the analyzer inferred.
+    - Features: existing features (status:existing) preserved intact; new features
+      from new_features or interview_state.features added with status:new.
+    - Constraints: union of existing + interview-derived.
+    - out_of_scope / exclusions: prefer interview_state if non-empty.
+
+    Args:
+        existing_seed: Seed produced by analyze_brownfield_project (features have
+            status "existing" or no status).
+        interview_state: Interview answers dict (target_user, core_problem,
+            core_experience, features, exclusions, constraints,
+            acceptance_criteria).
+        new_features: Optional explicit list of feature dicts to add as status:new.
+            If omitted, features from interview_state are used.
+
+    Returns:
+        Merged v3.0 seed dict ready for validation.
+    """
+    import copy
+
+    merged = copy.deepcopy(existing_seed)
+
+    # ── 1. Metadata: prefer interview if more specific ──────────
+    for field in ("target_user", "core_problem", "core_experience", "description"):
+        iv_val = interview_state.get(field, "")
+        ex_val = merged.get(field, "")
+        if iv_val and len(iv_val) > len(str(ex_val)):
+            merged[field] = iv_val
+
+    # ── 2. Keep existing features tagged, add new ones ──────────
+    existing_features = []
+    for f in merged.get("features", []):
+        fc = dict(f)
+        if fc.get("status") not in ("existing", "new"):
+            fc["status"] = "existing"
+        existing_features.append(fc)
+
+    # Determine new features to add
+    raw_new = new_features if new_features is not None else interview_state.get("features", [])
+    new_feature_entries = []
+    existing_names = {f.get("name", "").lower() for f in existing_features}
+    for feat in raw_new:
+        if isinstance(feat, str):
+            feat_name = feat
+            feat_dict = {"name": feat_name, "description": feat_name}
+        else:
+            feat_dict = dict(feat)
+            feat_name = feat_dict.get("name", "")
+        if feat_name.lower() not in existing_names:
+            feat_dict["status"] = "new"
+            if "acceptance_criteria" not in feat_dict:
+                feat_dict["acceptance_criteria"] = []
+            new_feature_entries.append(feat_dict)
+
+    merged["features"] = existing_features + new_feature_entries
+
+    # ── 3. Constraints: union ────────────────────────────────────
+    existing_constraints = set(merged.get("constraints", []))
+    iv_constraints = set(interview_state.get("constraints", []))
+    merged["constraints"] = sorted(existing_constraints | iv_constraints)
+
+    # ── 4. out_of_scope / exclusions: prefer interview ──────────
+    iv_excl = interview_state.get("exclusions", [])
+    if iv_excl:
+        merged["out_of_scope"] = iv_excl
+
+    # ── 5. Ensure required schema fields ────────────────────────
+    merged.setdefault("schema_version", "3.0")
+    merged.setdefault("version", 1)
+    merged.setdefault("_analysis_source", "brownfield")
+
+    return merged

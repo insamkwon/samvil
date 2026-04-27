@@ -4,6 +4,32 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.10.0 — 2026-04-28
+
+**Brownfield Interview Mode — code analysis + interview + seed merge (MINOR)**
+
+- `interview_engine.py` v2.6.0: `pre_filled_dimensions` parameter added to
+  `score_ambiguity`. Each pre-filled dimension is forced to 0.0 and reduces
+  `MIN_QUESTIONS` by 1 (floor 2). Brownfield analysis pre-fills `technical` and
+  `nonfunctional` dims so only improvement-goal questions are asked.
+- `seed_manager.py`: `merge_brownfield_seed(existing_seed, interview_state, new_features)`
+  merges analysis seed (status:existing) + interview findings (status:new), unions
+  constraints, prefers interview metadata when more specific, preserves tech_stack.
+- `server.py`: `score_ambiguity` tool gains `pre_filled_dimensions` (comma-separated),
+  `merge_brownfield_seed` MCP tool added (172 tools total).
+- `skills/samvil-analyze/SKILL.md`: Step 5 "기능 추가/개선" now routes through
+  samvil-interview (Brownfield Mode) instead of directly to samvil-build. Full chain:
+  analyze → interview → merge_brownfield_seed → samvil-build.
+- `skills/samvil-interview/SKILL.md`: Brownfield Mode section — auto-detects
+  `state._analysis_source == "brownfield"`, skips tech-stack phases, focuses on
+  improvement goals, calls merge_brownfield_seed at the end instead of samvil-seed.
+- `references/codex-commands/samvil-analyze.md`: updated with chain to samvil-interview.
+- `references/codex-commands/samvil-interview.md`: full Brownfield Mode documentation
+  — Phase 1B (brownfield goal), convergence with pre_filled_dimensions, merge chain.
+- 17 new tests: 6 pre_filled_dimensions tests + 11 merge_brownfield_seed tests.
+
+---
+
 ## v4.9.1 — 2026-04-28
 
 **README update for deep interview engine (PATCH)**

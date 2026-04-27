@@ -23,6 +23,10 @@ v2.5.0 changes:
   - MIN_QUESTIONS enforcement per tier: 5/10/20/30/40
   - questions_asked added to score_ambiguity signature
   - min_questions_met and min_questions_required added to result
+
+v2.6.0 changes (brownfield):
+  - pre_filled_dimensions: force named dimensions to 0.0 (already answered by
+    code analysis). Reduces effective MIN_QUESTIONS by one per pre-filled dim.
 """
 
 from __future__ import annotations
@@ -83,6 +87,7 @@ def score_ambiguity(
     interview_state: dict,
     tier: str = "standard",
     questions_asked: int = 0,
+    pre_filled_dimensions: list[str] | None = None,
 ) -> dict:
     """Score ambiguity of an interview state across 10 dimensions.
 
@@ -92,28 +97,39 @@ def score_ambiguity(
             acceptance_criteria.
         tier: Agent tier determining threshold and minimum questions.
         questions_asked: Number of questions asked so far. Convergence
-            requires this to meet MIN_QUESTIONS[tier].
+            requires this to meet the adjusted MIN_QUESTIONS.
+        pre_filled_dimensions: Dimension names already answered by code analysis
+            (e.g. ["technical", "stakeholder"]). Each pre-filled dim is forced
+            to 0.0 and reduces MIN_QUESTIONS by 1 (floor 2). Used in brownfield
+            mode where the existing codebase answers tech/nonfunctional dims.
 
     Returns:
         Dict with per-dimension scores, overall ambiguity, milestone,
         floors_passed, missing_items, min_questions_met, and converged.
     """
     target = TIER_TARGETS.get(tier, 0.05)
-    min_q = MIN_QUESTIONS.get(tier, 10)
+    base_min_q = MIN_QUESTIONS.get(tier, 10)
+    pre_filled = set(pre_filled_dimensions or [])
+
+    # Reduce MIN_QUESTIONS by one per pre-filled dimension (floor 2)
+    min_q = max(2, base_min_q - len(pre_filled))
+
+    def _maybe_prefill(name: str, raw_score: float) -> float:
+        return 0.0 if name in pre_filled else raw_score
 
     # ── Core dimensions (v2.4.0) ──────────────────────────────────
-    goal_score        = _score_goal(interview_state)
-    constraint_score  = _score_constraints(interview_state)
-    criteria_score    = _score_criteria(interview_state)
+    goal_score        = _maybe_prefill("goal",        _score_goal(interview_state))
+    constraint_score  = _maybe_prefill("constraint",  _score_constraints(interview_state))
+    criteria_score    = _maybe_prefill("criteria",    _score_criteria(interview_state))
 
     # ── Enriched dimensions (v2.5.0) ─────────────────────────────
-    technical_score    = _score_technical(interview_state)
-    failure_score      = _score_failure_modes(interview_state)
-    nonfunctional_score = _score_nonfunctional(interview_state)
-    stakeholder_score  = _score_stakeholder(interview_state)
-    scope_score        = _score_scope_boundary(interview_state)
-    metrics_score      = _score_success_metrics(interview_state)
-    lifecycle_score    = _score_lifecycle(interview_state)
+    technical_score    = _maybe_prefill("technical",      _score_technical(interview_state))
+    failure_score      = _maybe_prefill("failure_modes",  _score_failure_modes(interview_state))
+    nonfunctional_score = _maybe_prefill("nonfunctional", _score_nonfunctional(interview_state))
+    stakeholder_score  = _maybe_prefill("stakeholder",    _score_stakeholder(interview_state))
+    scope_score        = _maybe_prefill("scope_boundary", _score_scope_boundary(interview_state))
+    metrics_score      = _maybe_prefill("success_metrics", _score_success_metrics(interview_state))
+    lifecycle_score    = _maybe_prefill("lifecycle",      _score_lifecycle(interview_state))
 
     overall = (
         goal_score          * 0.22
@@ -162,6 +178,7 @@ def score_ambiguity(
         "questions_asked":      questions_asked,
         "min_questions_required": min_q,
         "min_questions_met":    min_questions_met,
+        "pre_filled_dimensions": sorted(pre_filled),
         "dimension_scores": {
             "goal":           round(goal_score, 3),
             "constraint":     round(constraint_score, 3),

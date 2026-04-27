@@ -999,18 +999,53 @@ async def score_ambiguity(
     interview_state: str,
     tier: str = "standard",
     questions_asked: int = 0,
+    pre_filled_dimensions: str = "",
 ) -> str:
-    """Score interview ambiguity across 10 dimensions (v2.5.0).
+    """Score interview ambiguity across 10 dimensions (v2.6.0).
     interview_state: JSON with keys target_user, core_problem, core_experience,
     features, exclusions, constraints, acceptance_criteria.
     tier: minimal(0.10/5Q) standard(0.05/10Q) thorough(0.02/20Q) full(0.01/30Q) deep(0.005/40Q).
     questions_asked: number of questions asked so far — convergence requires this
-    to meet the tier minimum (MIN_QUESTIONS). Returns ambiguity score, 10 dimension
-    scores, milestone, floors, missing_items, min_questions_met (v2.5.0)."""
+    to meet the tier minimum (MIN_QUESTIONS, reduced by pre-filled count).
+    pre_filled_dimensions: comma-separated dimension names already answered by code
+    analysis (brownfield). Each reduces MIN_QUESTIONS by 1. Valid names:
+    goal, constraint, criteria, technical, failure_modes, nonfunctional,
+    stakeholder, scope_boundary, success_metrics, lifecycle.
+    Returns ambiguity score, 10 dimension scores, milestone, floors,
+    missing_items, min_questions_met, pre_filled_dimensions (v2.6.0)."""
     from .interview_engine import score_ambiguity as _score
     state = json.loads(interview_state)
-    result = _score(state, tier=tier, questions_asked=questions_asked)
+    pre_filled = [d.strip() for d in pre_filled_dimensions.split(",") if d.strip()] if pre_filled_dimensions else []
+    result = _score(state, tier=tier, questions_asked=questions_asked, pre_filled_dimensions=pre_filled)
     return json.dumps(result)
+
+
+@mcp.tool()
+async def merge_brownfield_seed(
+    existing_seed_json: str,
+    interview_state_json: str,
+    new_features_json: str = "[]",
+) -> str:
+    """Merge a brownfield analysis seed with interview findings (v2.6.0).
+    existing_seed_json: JSON of seed from analyze_brownfield_project.
+    interview_state_json: JSON of interview answers
+      (target_user, core_problem, core_experience, features, exclusions, constraints).
+    new_features_json: optional JSON array of explicit new feature dicts to add
+      (status:new). If empty, features from interview_state are used.
+    Returns merged seed JSON: existing features (status:existing) + new ones
+    (status:new), metadata updated from interview, constraints unioned,
+    tech_stack preserved from existing seed."""
+    try:
+        from .seed_manager import merge_brownfield_seed as _merge
+        existing = json.loads(existing_seed_json)
+        iv_state = json.loads(interview_state_json)
+        new_feats = json.loads(new_features_json) if new_features_json else []
+        merged = _merge(existing, iv_state, new_features=new_feats or None)
+        _log_mcp_health("ok", "merge_brownfield_seed")
+        return json.dumps(merged)
+    except Exception as e:
+        _log_mcp_health("fail", "merge_brownfield_seed", str(e))
+        return json.dumps({"error": str(e)})
 
 
 # ── PATH Routing tools (v2.4.0, Ouroboros #01) ──────────────────

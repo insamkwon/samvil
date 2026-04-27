@@ -97,10 +97,14 @@ AskUserQuestion → preset 저장 여부. On 저장 → write
 5. `mcp__samvil_mcp__save_event(event_type="interview_complete", stage="seed", data='{"questions_asked":<N>,"preset_matched":"<preset.name>"}')`.
 6. Append the Interview block to `.samvil/handoff.md` via Bash `cat >>` or Edit (never the Write tool).
 
+## Brownfield Mode (auto-detected from `state._analysis_source == "brownfield"`)
+
+Load `state._analysis_context`; announce `[SAMVIL] Brownfield Mode`. Pass `pre_filled_dimensions="technical,nonfunctional"` to all `score_ambiguity` calls. Focus phases: `core` (improvement goals), `scope` (gaps/new features), `inversion` (why existing app underperforms). After Step 5 approval: `mcp__samvil_mcp__merge_brownfield_seed(existing_seed_json='<project.seed.json>', interview_state_json='<answers JSON>', new_features_json='[]')` → write merged seed → skip Step 6 chain to `samvil-seed`, invoke `samvil-build` directly.
+
 ## Step 6 — Chain
 
-Invoke the Skill tool with `samvil-seed`. **NO COMPACT** — interview
-context is needed verbatim. Codex CLI fallback: read `skills/samvil-seed/SKILL.md`.
+**Greenfield**: Invoke Skill tool with `samvil-seed`. **NO COMPACT**. Codex CLI fallback: read `skills/samvil-seed/SKILL.md`.
+**Brownfield**: Invoke Skill tool with `samvil-build` (seed already merged above).
 
 ## Anti-Patterns
 

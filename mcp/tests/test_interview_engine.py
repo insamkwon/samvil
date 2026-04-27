@@ -274,3 +274,58 @@ class TestEnrichedDimensions:
         }
         result = score_ambiguity(state)
         assert result["dimension_scores"]["lifecycle"] == 0.0
+
+
+# ── Pre-filled dimensions (v2.6.0 brownfield) ──────────────────
+
+class TestPreFilledDimensions:
+    def test_pre_filled_technical_forces_zero(self):
+        """Pre-filling 'technical' forces that dimension to 0 regardless of state."""
+        empty = {}
+        base = score_ambiguity(empty)
+        pre = score_ambiguity(empty, pre_filled_dimensions=["technical"])
+        assert pre["dimension_scores"]["technical"] == 0.0
+        assert base["dimension_scores"]["technical"] > 0.0
+
+    def test_pre_filled_reduces_min_questions(self):
+        """Each pre-filled dimension reduces min_questions_required by 1."""
+        r0 = score_ambiguity({}, tier="standard")                          # 10
+        r1 = score_ambiguity({}, tier="standard", pre_filled_dimensions=["technical"])  # 9
+        r3 = score_ambiguity({}, tier="standard",
+                             pre_filled_dimensions=["technical", "stakeholder", "lifecycle"])  # 7
+        assert r0["min_questions_required"] == 10
+        assert r1["min_questions_required"] == 9
+        assert r3["min_questions_required"] == 7
+
+    def test_pre_filled_floor_is_2(self):
+        """MIN_QUESTIONS never drops below 2 even with many pre-filled dims."""
+        all_dims = [
+            "goal", "constraint", "criteria", "technical", "failure_modes",
+            "nonfunctional", "stakeholder", "scope_boundary", "success_metrics", "lifecycle",
+        ]
+        result = score_ambiguity({}, tier="minimal", pre_filled_dimensions=all_dims)
+        assert result["min_questions_required"] == 2
+
+    def test_pre_filled_reduces_overall_ambiguity(self):
+        """Pre-filling dimensions lowers overall ambiguity for an empty state."""
+        empty_base = score_ambiguity({})
+        empty_pre = score_ambiguity({}, pre_filled_dimensions=["technical", "nonfunctional"])
+        assert empty_pre["ambiguity"] < empty_base["ambiguity"]
+
+    def test_pre_filled_echoed_in_result(self):
+        """pre_filled_dimensions should be echoed back in result."""
+        result = score_ambiguity({}, pre_filled_dimensions=["technical", "goal"])
+        assert set(result["pre_filled_dimensions"]) == {"technical", "goal"}
+
+    def test_brownfield_convergence_with_pre_filled(self):
+        """Comprehensive state + pre-filled technical/nonfunctional converges at fewer questions."""
+        state = _comprehensive_state()
+        # Without pre-fill: standard needs 10 questions
+        r_green = score_ambiguity(state, tier="standard", questions_asked=8)
+        # With 2 pre-filled: needs 8 questions (10 - 2)
+        r_brown = score_ambiguity(
+            state, tier="standard", questions_asked=8,
+            pre_filled_dimensions=["technical", "nonfunctional"],
+        )
+        assert r_green["converged"] is False    # 8 < 10
+        assert r_brown["converged"] is True     # 8 >= 8
