@@ -133,7 +133,7 @@ def validate_contract(
 
     Returns ContractValidationResult as dict.
     """
-    root = Path(project_root)
+    root = Path(project_root).resolve()
     contract_path = root / ".samvil" / "modules" / module_name / "contract.json"
 
     result = ContractValidationResult(module_name=module_name)
@@ -243,7 +243,7 @@ def enforce_boundary(
 
     Returns BoundaryEnforcementResult as dict.
     """
-    root = Path(project_root)
+    root = Path(project_root).resolve()
     modules_dir = root / ".samvil" / "modules"
 
     # Load target contract
@@ -276,7 +276,14 @@ def enforce_boundary(
         files_to_scan = [root / fp for fp in file_paths]
     else:
         for pat in target_patterns:
-            files_to_scan.extend(root.glob(pat))
+            if pat.endswith("/**"):
+                # ** matches dirs only; use rglob for recursive file discovery
+                base = pat[:-3]  # strip /**
+                base_dir = root / base if base else root
+                if base_dir.is_dir():
+                    files_to_scan.extend(base_dir.rglob("*"))
+            else:
+                files_to_scan.extend(root.glob(pat))
 
     result = BoundaryEnforcementResult(modules_checked=len(module_patterns))
 
@@ -363,7 +370,7 @@ def aggregate_module_state(project_root: str | Path) -> dict[str, Any]:
     Single-source-of-truth aggregate: this is the one call the
     skill needs to render the full module overview.
     """
-    root = Path(project_root)
+    root = Path(project_root).resolve()
     modules_dir = root / ".samvil" / "modules"
 
     state = ModuleState()
