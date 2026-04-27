@@ -22,7 +22,7 @@ def test_list_domain_packs_tool_filters_stage():
     result = list_domain_packs(stage="interview")
 
     assert result["status"] == "ok"
-    assert result["count"] == 3
+    assert result["count"] == 5
 
 
 def test_read_domain_pack_tool_returns_missing():
@@ -35,7 +35,7 @@ def test_render_domain_context_tool_returns_stage_scoped_markdown():
     result = render_domain_context(solution_type="game", stage="qa")
 
     assert result["status"] == "ok"
-    assert result["count"] == 1
+    assert result["count"] == 2
     assert "browser-game" in result["context"]
     assert "QA focus" in result["context"]
     assert "Interview probes" not in result["context"]
