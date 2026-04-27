@@ -1,5 +1,6 @@
 """Tests for health_tiers module (M4 3-tier health)."""
 
+import json
 import pytest
 
 from samvil_mcp.health_tiers import (
@@ -136,7 +137,6 @@ class TestGetHealthTierSummary:
         assert "HEALTHY" in summary
 
     def test_summary_contains_critical_badge(self, tmp_path):
-        import json
         health_log = tmp_path / ".samvil" / "mcp-health.jsonl"
         health_log.parent.mkdir(parents=True)
         # 30 fails of a critical tool → critical tier
