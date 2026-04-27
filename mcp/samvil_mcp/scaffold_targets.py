@@ -29,9 +29,8 @@ What stays in the skill body:
   process can't reliably proxy `node` execution.
 - Re-writing `app/layout.tsx`, `tailwind.config.ts`, `app/globals.css`
   to the HSL v3 form after `shadcn init` overwrites them with v4
-  oklch syntax. The literal file bodies remain in `SKILL.legacy.md`
-  because they're long and rendering them through MCP would just
-  pass them through verbatim.
+  oklch syntax. The literal file bodies are embedded below as
+  `TAILWIND_V3_OVERWRITE` so the skill can use them directly.
 - AskUserQuestion prompts when sanity checks fail.
 - Writing `.samvil/build.log`, `.samvil/handoff.md`, and updating
   `project.state.json`.
@@ -387,6 +386,134 @@ SCAFFOLD_CATALOG: dict[str, dict[str, Any]] = {
 }
 
 
+# ── Tailwind v3 overwrite bodies ─────────────────────────────────────
+# shadcn init overwrites globals.css and tailwind.config.ts with v4
+# oklch syntax. Next.js 14 needs v3 HSL. These bodies are returned
+# by evaluate_scaffold_target so the skill can write them directly
+# without reading SKILL.legacy.md.
+
+TAILWIND_V3_OVERWRITE = {
+    "globals_css": """\
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+""",
+    "tailwind_config_ts": """\
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  darkMode: ["class"],
+  content: [
+    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
+    },
+  },
+  plugins: [require("tailwindcss-animate")],
+};
+export default config;
+""",
+}
+
+
 # Default framework when seed.tech_stack.framework is missing or empty.
 DEFAULT_FRAMEWORK = "nextjs"
 
@@ -529,6 +656,7 @@ class ScaffoldTargetReport:
     sanity_result: dict[str, Any] | None = None
     notes: list[str] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
+    tailwind_v3_overwrite: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -551,6 +679,7 @@ class ScaffoldTargetReport:
             "sanity_result": self.sanity_result,
             "notes": self.notes,
             "blockers": self.blockers,
+            "tailwind_v3_overwrite": self.tailwind_v3_overwrite,
         }
 
 
@@ -755,5 +884,8 @@ def evaluate_scaffold_target(
         sanity_result=sanity_result,
         notes=notes,
         blockers=blockers,
+        tailwind_v3_overwrite=(
+            TAILWIND_V3_OVERWRITE if framework_used == "nextjs" else None
+        ),
     )
     return report.to_dict()

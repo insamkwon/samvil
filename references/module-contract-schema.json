@@ -1,0 +1,123 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "module-contract-schema",
+  "title": "Module Contract",
+  "description": "Defines the public API, dependencies, and file boundaries of a SAMVIL project module. Stored at .samvil/modules/<name>/contract.json.",
+  "type": "object",
+  "required": ["schema_version", "module_name", "version", "file_patterns"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Contract schema version."
+    },
+    "module_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "description": "Machine-readable module identifier. Lowercase, starts with letter, dashes/underscores allowed."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semantic version of this module contract."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "Human-readable one-line description of what this module does."
+    },
+    "file_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "description": "Glob patterns matching files owned by this module. Used for boundary enforcement. Example: ['src/auth/**', 'lib/auth/**']"
+    },
+    "public_api": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/api_entry"
+      },
+      "description": "Functions, components, types, or endpoints this module exposes to other modules."
+    },
+    "depends_on": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Module names this module depends on. Circular dependencies are invalid."
+    },
+    "owners": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Owner identifiers (person or team). For solo developers, typically ['default']."
+    },
+    "breaking_changes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/breaking_change"
+      },
+      "description": "History of breaking changes for this module."
+    }
+  },
+  "$defs": {
+    "api_entry": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Fully qualified name (e.g., 'auth.login', 'UserSession')."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["function", "component", "type", "hook", "endpoint", "constant", "class"],
+          "description": "What kind of API surface this is."
+        },
+        "exported_from": {
+          "type": "string",
+          "description": "File path where this API is exported (e.g., 'src/auth/index.ts')."
+        },
+        "description": {
+          "type": "string",
+          "description": "One-line description of what this API does."
+        }
+      }
+    },
+    "breaking_change": {
+      "type": "object",
+      "required": ["version", "date", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Module version where this breaking change was introduced."
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "When this change was made."
+        },
+        "description": {
+          "type": "string",
+          "description": "What changed and migration path."
+        },
+        "affected_apis": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "API names affected by this change."
+        }
+      }
+    }
+  }
+}
