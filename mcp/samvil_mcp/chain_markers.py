@@ -45,6 +45,9 @@ def write_chain_marker(
     continuation = _get_chain_continuation(host_name, current_skill)
     marker = {
         **continuation,
+        "schema_version": "1.0",
+        "reason": f"{current_skill} completed",
+        "from_stage": current_skill,
         "written_at": datetime.now(timezone.utc).isoformat(),
     }
 
