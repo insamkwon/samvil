@@ -11,7 +11,7 @@ from samvil_mcp.domain_packs import (
 def test_list_domain_packs_filters_solution_type():
     packs = list_domain_packs(solution_type="game")
 
-    assert [pack.pack_id for pack in packs] == ["browser-game"]
+    assert [pack.pack_id for pack in packs] == ["browser-game", "game-phaser"]
 
 
 def test_list_domain_packs_filters_domain_and_stage():
@@ -53,3 +53,88 @@ def test_match_domain_packs_ranks_by_solution_type_and_signals():
 
 def test_match_domain_packs_returns_empty_for_unknown_seed():
     assert match_domain_packs({"solution_type": "automation", "app_idea": "file renamer"}) == []
+
+
+# ── M3: game-phaser domain pack ──────────────────────────────
+
+
+def test_game_phaser_pack_exists():
+    pack = get_domain_pack("game-phaser")
+    assert pack is not None
+    assert pack.domain == "game"
+    assert "game" in pack.solution_types
+    assert "phaser" in pack.signals
+    assert "Scene" in pack.core_entities
+    assert len(pack.interview_probes) >= 5
+    assert len(pack.build_guidance) >= 5
+    assert len(pack.qa_focus) >= 5
+
+
+def test_game_phaser_matches_phaser_seed():
+    matches = match_domain_packs({
+        "solution_type": "game",
+        "app_idea": "Phaser platformer with tilemap and sprite animation",
+        "features": ["physics collision", "scene transitions"],
+    })
+    phaser_match = [m for m in matches if m["pack_id"] == "game-phaser"]
+    assert len(phaser_match) == 1
+    assert phaser_match[0]["score"] >= 5
+
+
+def test_game_phaser_render_scoped():
+    pack = get_domain_pack("game-phaser")
+    text = render_domain_packs([pack], stage="build")
+    assert "Build guidance" in text
+    assert "Phaser.Scene" in text
+    assert "Interview probes" not in text
+
+
+def test_game_phaser_not_in_dashboard_filter():
+    packs = list_domain_packs(solution_type="dashboard")
+    ids = [p.pack_id for p in packs]
+    assert "game-phaser" not in ids
+
+
+# ── M3: webapp-enterprise domain pack ────────────────────────
+
+
+def test_webapp_enterprise_pack_exists():
+    pack = get_domain_pack("webapp-enterprise")
+    assert pack is not None
+    assert pack.domain == "enterprise"
+    assert "web-app" in pack.solution_types
+    assert "auth" in pack.signals
+    assert "Organization" in pack.core_entities
+    assert len(pack.key_workflows) >= 5
+    assert len(pack.interview_probes) >= 5
+    assert len(pack.qa_focus) >= 5
+
+
+def test_webapp_enterprise_matches_enterprise_seed():
+    matches = match_domain_packs({
+        "solution_type": "web-app",
+        "app_idea": "Team management with auth roles and organization settings",
+        "features": ["role-based permissions", "team workspace", "audit log"],
+    })
+    ent_match = [m for m in matches if m["pack_id"] == "webapp-enterprise"]
+    assert len(ent_match) == 1
+    assert ent_match[0]["score"] >= 5
+
+
+def test_webapp_enterprise_render_scoped():
+    pack = get_domain_pack("webapp-enterprise")
+    text = render_domain_packs([pack], stage="interview")
+    assert "Interview probes" in text
+    assert "RBAC" in text or "permission" in text.lower()
+    assert "Build guidance" not in text
+
+
+def test_webapp_enterprise_not_in_game_filter():
+    packs = list_domain_packs(solution_type="game")
+    ids = [p.pack_id for p in packs]
+    assert "webapp-enterprise" not in ids
+
+
+def test_total_pack_count():
+    packs = list_domain_packs()
+    assert len(packs) == 5
