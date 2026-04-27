@@ -4,6 +4,17 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.8.5 — 2026-04-28
+
+**README "wow" factor: real conversation snippets + numbers (PATCH)**
+
+- Add actual interview dialogue showing SAMVIL asking unexpected questions
+- Add council debate snippet showing 5 AI agents reviewing design pre-code
+- Upgrade comparison table with concrete numbers (20 questions, 5 reviewers,
+  stub detection, 5 convergence criteria)
+
+---
+
 ## v4.8.4 — 2026-04-28
 
 **Claude Code + Codex CLI 동등 지원 명시 (PATCH)**
