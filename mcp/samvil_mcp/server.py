@@ -192,6 +192,12 @@ from .health_tiers import (
     get_health_tier as _get_health_tier,
     get_health_tier_summary as _get_health_tier_summary,
 )
+from .regression_suite import (
+    snapshot_generation as _snapshot_generation,
+    validate_against_snapshot as _validate_against_snapshot,
+    aggregate_regression_state as _aggregate_regression_state,
+    compare_generations as _compare_generations,
+)
 from .model_role import (
     ModelRole,
     agents_by_role as _agents_by_role,
@@ -4656,6 +4662,86 @@ async def get_health_tier_summary(
         return result
     except Exception as e:
         _log_mcp_health("fail", "get_health_tier_summary", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── Regression Suite (Option B) ───────────────────────────────
+
+
+@mcp.tool()
+async def snapshot_generation(
+    project_root: str,
+    generation_id: str | None = None,
+    qa_results_path: str | None = None,
+) -> str:
+    """Capture current passing ACs into a generation snapshot.
+
+    Writes .samvil/generations/<generation_id>/snapshot.json.
+    Auto-generates gen-N id if not provided.
+    Returns JSON with generation_id, passing_ac_count, total_ac_count.
+    """
+    try:
+        result = _snapshot_generation(project_root, generation_id, qa_results_path)
+        _log_mcp_health("ok", "snapshot_generation")
+        return json.dumps(result.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "snapshot_generation", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def validate_against_snapshot(
+    project_root: str,
+    snapshot_id: str,
+    qa_results_path: str | None = None,
+) -> str:
+    """Validate current QA results against a previously saved generation snapshot.
+
+    Returns JSON with status ("clean"|"regression"), regressed count,
+    and regressed_ids list.
+    """
+    try:
+        result = _validate_against_snapshot(project_root, snapshot_id, qa_results_path)
+        _log_mcp_health("ok", "validate_against_snapshot")
+        return json.dumps(result.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "validate_against_snapshot", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_regression_state(project_root: str) -> str:
+    """Return a summary of all generation snapshots for a project.
+
+    Returns JSON with generation_count, generations list,
+    latest_generation_id, has_regression_history.
+    """
+    try:
+        result = _aggregate_regression_state(project_root)
+        _log_mcp_health("ok", "aggregate_regression_state")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_regression_state", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def compare_generations(
+    project_root: str,
+    gen_a: str,
+    gen_b: str,
+) -> str:
+    """Compare two generation snapshots — added/removed/changed AC ids.
+
+    gen_a and gen_b are generation ids (e.g., "gen-1", "gen-2").
+    Returns JSON with added, removed, changed lists.
+    """
+    try:
+        result = _compare_generations(project_root, gen_a, gen_b)
+        _log_mcp_health("ok", "compare_generations")
+        return json.dumps(result.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "compare_generations", str(e))
         return json.dumps({"error": str(e)})
 
 
