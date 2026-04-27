@@ -1,178 +1,222 @@
 #!/usr/bin/env bash
-# SAMVIL — Codex / OpenCode / Gemini CLI Setup
+# SAMVIL — Codex / OpenCode / Gemini CLI 완전 자동 설치
 #
-# Installs the SAMVIL MCP server and writes a host-specific config snippet.
+# 한 번 실행으로 모든 설정 완료. 수동 작업 없음.
 #
 # Usage:
-#   bash scripts/setup-codex.sh              # auto-detect host
-#   bash scripts/setup-codex.sh codex        # Codex CLI
+#   bash scripts/setup-codex.sh              # Codex CLI (기본)
 #   bash scripts/setup-codex.sh opencode     # OpenCode
 #   bash scripts/setup-codex.sh gemini       # Gemini CLI
+#   bash scripts/setup-codex.sh all          # 전부
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SAMVIL_ROOT="$(dirname "$SCRIPT_DIR")"
 MCP_DIR="$SAMVIL_ROOT/mcp"
-HOST="${1:-auto}"
+HOST="${1:-codex}"
 
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " SAMVIL MCP Setup"
-echo " SAMVIL root : $SAMVIL_ROOT"
-echo " Host target : $HOST"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " SAMVIL 자동 설치 (v$(grep -o '"version": "[^"]*"' "$SAMVIL_ROOT/.claude-plugin/plugin.json" | grep -o '[0-9][^"]*'))"
+echo " 대상 호스트: $HOST"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# ── 1. Ensure uv ────────────────────────────────────────────────────────────
+# ── Step 1. uv ──────────────────────────────────────────────────────────────
+echo ""
+echo "[1/5] Python 패키지 매니저(uv) 확인..."
 if ! command -v uv &>/dev/null; then
-  echo "[1/4] uv 설치 중..."
+  echo "      설치 중..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
   if ! command -v uv &>/dev/null; then
-    echo "❌ uv 자동 설치 실패. https://docs.astral.sh/uv/ 에서 수동으로 설치 후 재실행하세요."
+    echo "❌ uv 자동 설치 실패."
+    echo "   https://docs.astral.sh/uv/getting-started/installation/ 에서 수동 설치 후 재실행하세요."
     exit 1
   fi
-  echo "   ✓ uv 설치 완료"
-else
-  echo "[1/4] uv 이미 설치됨 ($(uv --version))"
 fi
+echo "      ✓ $(uv --version)"
 
-# ── 2. Install MCP venv ─────────────────────────────────────────────────────
-echo "[2/4] SAMVIL MCP 서버 설치 중..."
+# ── Step 2. MCP venv + package ──────────────────────────────────────────────
+echo ""
+echo "[2/5] SAMVIL MCP 서버 설치..."
 cd "$MCP_DIR"
-
-if [ ! -d ".venv" ]; then
-  uv venv .venv
-fi
-
+[ ! -d ".venv" ] && uv venv .venv --quiet
 source .venv/bin/activate
 uv pip install -e . --quiet
 
 PYTHON_BIN="$MCP_DIR/.venv/bin/python"
 if ! "$PYTHON_BIN" -c "import samvil_mcp" 2>/dev/null; then
-  echo "❌ MCP 설치 실패. $MCP_DIR 에서 수동으로 'uv pip install -e .' 실행해주세요."
+  echo "❌ MCP 패키지 설치 실패."
+  echo "   수동: cd $MCP_DIR && uv pip install -e ."
   exit 1
 fi
-echo "   ✓ samvil-mcp 설치 완료"
+echo "      ✓ samvil-mcp 패키지 설치 완료"
+echo "      ✓ Python: $PYTHON_BIN"
 
-# ── 3. Verify smoke test ────────────────────────────────────────────────────
-echo "[3/4] MCP 임포트 테스트 중..."
-cd "$SAMVIL_ROOT"
+# ── Step 3. Smoke test ───────────────────────────────────────────────────────
+echo ""
+echo "[3/5] MCP 동작 테스트..."
 if "$PYTHON_BIN" -c "
 from samvil_mcp.chain_markers import write_chain_marker, read_chain_marker
 from samvil_mcp.health_tiers import classify_health
-print('OK')
+from samvil_mcp.regression_suite import snapshot_generation
 " 2>/dev/null; then
-  echo "   ✓ MCP 임포트 테스트 PASS"
+  echo "      ✓ 핵심 도구 임포트 PASS"
 else
-  echo "   ⚠️  임포트 테스트 실패 — MCP 설치를 다시 확인하세요"
+  echo "      ⚠️  임포트 실패 — 설치 후 'samvil-doctor'로 진단하세요"
 fi
 
-# ── 4. Print host-specific config ───────────────────────────────────────────
+# ── Step 4. AGENTS.md 전역 설치 ────────────────────────────────────────────
 echo ""
-echo "[4/4] 호스트별 설정 안내"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "[4/5] AGENTS.md 전역 등록..."
 
-# Codex CLI ──────────────────────────────────────────────────────────────────
-if [[ "$HOST" == "auto" || "$HOST" == "codex" ]]; then
-  CODEX_CFG="$HOME/.codex/config.toml"
-  echo ""
-  echo "【Codex CLI】"
-  echo ""
-  echo "  ~/.codex/config.toml 에 아래 블록을 추가하세요:"
-  echo ""
-  cat <<TOML
-  ┌─────────────────────────────────────────────────────────
-  │ [mcp_servers.samvil-mcp]
-  │ command = "$PYTHON_BIN"
-  │ args    = ["-m", "samvil_mcp.server"]
-  │ env     = {}
-  └─────────────────────────────────────────────────────────
-TOML
+_install_agents() {
+  local dest_dir="$1"
+  local dest="$dest_dir/AGENTS.md"
+  mkdir -p "$dest_dir"
+  cp "$SAMVIL_ROOT/AGENTS.md" "$dest"
+  echo "      ✓ $dest"
+}
 
-  # Auto-apply if config exists and doesn't have samvil-mcp yet
-  if [ -f "$CODEX_CFG" ] && ! grep -q "samvil-mcp" "$CODEX_CFG" 2>/dev/null; then
-    cat >> "$CODEX_CFG" <<TOML
+if [[ "$HOST" == "codex" || "$HOST" == "all" ]]; then
+  _install_agents "$HOME/.codex"
+fi
+if [[ "$HOST" == "opencode" || "$HOST" == "all" ]]; then
+  _install_agents "$HOME/.opencode"
+fi
+if [[ "$HOST" == "gemini" || "$HOST" == "all" ]]; then
+  _install_agents "$HOME/.gemini"
+fi
+
+# ── Step 5. MCP config 자동 등록 ────────────────────────────────────────────
+echo ""
+echo "[5/5] 호스트 MCP 설정 자동 등록..."
+
+# ── Codex CLI ────────────────────────────────────────────────────────────────
+_setup_codex() {
+  local cfg="$HOME/.codex/config.toml"
+  mkdir -p "$HOME/.codex"
+
+  if [ -f "$cfg" ] && grep -q "samvil-mcp" "$cfg" 2>/dev/null; then
+    echo "      ✓ Codex CLI: 이미 등록됨 ($cfg)"
+    return
+  fi
+
+  # Append block (file may or may not exist)
+  cat >> "$cfg" <<TOML
 
 [mcp_servers.samvil-mcp]
 command = "$PYTHON_BIN"
 args    = ["-m", "samvil_mcp.server"]
 env     = {}
 TOML
-    echo "   ✓ $CODEX_CFG 에 자동 추가됨"
-  elif [ -f "$CODEX_CFG" ] && grep -q "samvil-mcp" "$CODEX_CFG" 2>/dev/null; then
-    echo "   ✓ 이미 설정되어 있음"
-  else
-    echo "   ℹ️  $CODEX_CFG 없음 — 위 내용으로 직접 파일을 만드세요."
-    echo "      mkdir -p ~/.codex && cat >> ~/.codex/config.toml << 'EOF'"
-    echo "      [mcp_servers.samvil-mcp]"
-    echo "      command = \"$PYTHON_BIN\""
-    echo "      args    = [\"-m\", \"samvil_mcp.server\"]"
-    echo "      env     = {}"
-    echo "      EOF"
+  echo "      ✓ Codex CLI: $cfg 에 등록 완료"
+}
+
+# ── OpenCode ─────────────────────────────────────────────────────────────────
+_setup_opencode() {
+  local cfg="$HOME/.opencode/config.json"
+  mkdir -p "$HOME/.opencode"
+
+  if [ -f "$cfg" ] && grep -q "samvil-mcp" "$cfg" 2>/dev/null; then
+    echo "      ✓ OpenCode: 이미 등록됨 ($cfg)"
+    return
   fi
 
-  echo ""
-  echo "  사용 방법:"
-  echo "    cd <프로젝트 폴더>"
-  echo "    codex \"SAMVIL로 할일 관리 앱 만들어줘\""
-  echo "    (AGENTS.md 가 있으면 Codex가 자동으로 파이프라인을 시작합니다)"
-fi
-
-# OpenCode ───────────────────────────────────────────────────────────────────
-if [[ "$HOST" == "auto" || "$HOST" == "opencode" ]]; then
-  echo ""
-  echo "【OpenCode】"
-  echo ""
-  echo "  .opencode/config.json (프로젝트 루트 또는 ~/) 에 추가:"
-  echo ""
-  cat <<JSON
-  ┌─────────────────────────────────────────────────────────
-  │ {
-  │   "mcp": {
-  │     "samvil-mcp": {
-  │       "command": "$PYTHON_BIN",
-  │       "args": ["-m", "samvil_mcp.server"]
-  │     }
-  │   }
-  │ }
-  └─────────────────────────────────────────────────────────
+  # Write minimal config if file doesn't exist; otherwise use python to merge
+  if [ ! -f "$cfg" ]; then
+    cat > "$cfg" <<JSON
+{
+  "mcp": {
+    "samvil-mcp": {
+      "command": "$PYTHON_BIN",
+      "args": ["-m", "samvil_mcp.server"]
+    }
+  }
+}
 JSON
-fi
+  else
+    # Merge into existing JSON
+    "$PYTHON_BIN" - "$cfg" "$PYTHON_BIN" <<'PY'
+import sys, json
+cfg_path, python_bin = sys.argv[1], sys.argv[2]
+with open(cfg_path) as f:
+    d = json.load(f)
+d.setdefault("mcp", {})["samvil-mcp"] = {
+    "command": python_bin,
+    "args": ["-m", "samvil_mcp.server"]
+}
+with open(cfg_path, "w") as f:
+    json.dump(d, f, indent=2)
+PY
+  fi
+  echo "      ✓ OpenCode: $cfg 에 등록 완료"
+}
 
-# Gemini CLI ─────────────────────────────────────────────────────────────────
-if [[ "$HOST" == "auto" || "$HOST" == "gemini" ]]; then
-  echo ""
-  echo "【Gemini CLI】"
-  echo ""
-  echo "  ~/.gemini/settings.json 에 추가:"
-  echo ""
-  cat <<JSON
-  ┌─────────────────────────────────────────────────────────
-  │ {
-  │   "mcpServers": {
-  │     "samvil-mcp": {
-  │       "command": "$PYTHON_BIN",
-  │       "args": ["-m", "samvil_mcp.server"]
-  │     }
-  │   }
-  │ }
-  └─────────────────────────────────────────────────────────
+# ── Gemini CLI ───────────────────────────────────────────────────────────────
+_setup_gemini() {
+  local cfg="$HOME/.gemini/settings.json"
+  mkdir -p "$HOME/.gemini"
+
+  if [ -f "$cfg" ] && grep -q "samvil-mcp" "$cfg" 2>/dev/null; then
+    echo "      ✓ Gemini CLI: 이미 등록됨 ($cfg)"
+    return
+  fi
+
+  if [ ! -f "$cfg" ]; then
+    cat > "$cfg" <<JSON
+{
+  "mcpServers": {
+    "samvil-mcp": {
+      "command": "$PYTHON_BIN",
+      "args": ["-m", "samvil_mcp.server"]
+    }
+  }
+}
 JSON
-  echo ""
-  echo "  TOML 커맨드 파일 위치: references/gemini-commands/*.toml"
-fi
+  else
+    "$PYTHON_BIN" - "$cfg" "$PYTHON_BIN" <<'PY'
+import sys, json
+cfg_path, python_bin = sys.argv[1], sys.argv[2]
+with open(cfg_path) as f:
+    d = json.load(f)
+d.setdefault("mcpServers", {})["samvil-mcp"] = {
+    "command": python_bin,
+    "args": ["-m", "samvil_mcp.server"]
+}
+with open(cfg_path, "w") as f:
+    json.dump(d, f, indent=2)
+PY
+  fi
+  echo "      ✓ Gemini CLI: $cfg 에 등록 완료"
+}
+
+if [[ "$HOST" == "codex"    || "$HOST" == "all" ]]; then _setup_codex;    fi
+if [[ "$HOST" == "opencode" || "$HOST" == "all" ]]; then _setup_opencode; fi
+if [[ "$HOST" == "gemini"   || "$HOST" == "all" ]]; then _setup_gemini;   fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " 설치 완료!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " ✅ 설치 완료! 수동 설정 필요 없음"
 echo ""
-echo " 다음 단계:"
-echo "  1. 위 MCP 설정을 호스트 config에 추가 (이미 완료된 경우 스킵)"
-echo "  2. 호스트를 재시작하거나 새 세션 열기"
-echo "  3. 프로젝트 폴더에서 SAMVIL 파이프라인 시작"
+echo " 사용 방법:"
+echo "  1. 호스트를 재시작 (또는 새 세션)"
+case "$HOST" in
+  codex)
+    echo "  2. cd ~/dev/my-app && codex \"SAMVIL로 할일 앱 만들어줘\""
+    ;;
+  opencode)
+    echo "  2. cd ~/dev/my-app && opencode \"SAMVIL로 할일 앱 만들어줘\""
+    ;;
+  gemini)
+    echo "  2. cd ~/dev/my-app && gemini \"SAMVIL로 할일 앱 만들어줘\""
+    ;;
+  all)
+    echo "  2. 원하는 호스트에서 'SAMVIL로 할일 앱 만들어줘'"
+    ;;
+esac
 echo ""
-echo " 확인:"
-echo "  python3 scripts/host-continuation-smoke.py <프로젝트 폴더>"
-echo "  python3 scripts/phase2-cross-host-smoke.py"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " 문제 발생 시:"
+echo "  python3 $SAMVIL_ROOT/scripts/phase2-cross-host-smoke.py"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
