@@ -67,6 +67,10 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "qa_to_deploy",
             "render_pattern_context",
             "render_domain_context",
+            "aggregate_qa_boot_context",
+            "dispatch_qa_pass1_batch",
+            "finalize_qa_verdict",
+            "SKILL.legacy.md",
         ),
     ),
     (

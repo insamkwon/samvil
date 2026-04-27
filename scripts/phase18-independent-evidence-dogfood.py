@@ -101,9 +101,11 @@ def check_build_events() -> dict[str, object]:
 
 
 def check_qa_taxonomy() -> dict[str, object]:
+    # T4.9: thin SKILL.md no longer carries the per-`solution_type`
+    # verdict-taxonomy table — that lives verbatim in SKILL.legacy.md.
     paths = [
         "references/qa-checklist.md",
-        "skills/samvil-qa/SKILL.md",
+        "skills/samvil-qa/SKILL.legacy.md",
         "agents/qa-functional.md",
     ]
     verdicts = ["PASS", "PARTIAL", "UNIMPLEMENTED", "FAIL"]
@@ -136,9 +138,13 @@ def check_qa_taxonomy() -> dict[str, object]:
 
 
 def check_independent_qa() -> dict[str, object]:
-    text = _read("skills/samvil-qa/SKILL.md")
+    # T4.9: detailed tier-flow / independent-evidence prose lives in
+    # SKILL.legacy.md. The thin SKILL.md cross-references the legacy
+    # for per-solution_type bodies and only exposes the aggregator
+    # wiring (which is what we now check on the thin side).
+    legacy = _read("skills/samvil-qa/SKILL.legacy.md")
     order = _require_order(
-        text,
+        legacy,
         [
             "### `minimal` — Inline QA",
             "### `standard` / `thorough` / `full` — Independent Evidence",
@@ -149,7 +155,7 @@ def check_independent_qa() -> dict[str, object]:
         label="qa tier flow",
     )
     _require(
-        text,
+        legacy,
         [
             "The main session is the ONLY writer",
             "Independent agents gather evidence only. They do not write files.",
@@ -161,6 +167,25 @@ def check_independent_qa() -> dict[str, object]:
             "append QA events",
         ],
         label="independent qa ownership",
+    )
+    # Thin SKILL must keep wiring to the new aggregators + legacy ref +
+    # explicit "main session is sole writer" rule (anti-pattern §7).
+    # Note: `synthesize_qa_evidence` is wrapped inside `finalize_qa_verdict`
+    # at the MCP layer (see qa_finalize.py); the thin skill no longer
+    # calls it directly. `materialize_qa_synthesis` stays a separate call
+    # so the skill body controls preview-vs-persist timing.
+    thin = _read("skills/samvil-qa/SKILL.md")
+    _require(
+        thin,
+        [
+            "aggregate_qa_boot_context",
+            "dispatch_qa_pass1_batch",
+            "finalize_qa_verdict",
+            "materialize_qa_synthesis",
+            "main session is sole writer",
+            "SKILL.legacy.md",
+        ],
+        label="qa thin aggregator wiring",
     )
     return {"status": "pass", "ordered_lines": order}
 

@@ -80,6 +80,15 @@ from .build_phase_b import (
 from .build_phase_z import (
     finalize_build_phase_z as _finalize_build_phase_z,
 )
+from .qa_boot import (
+    aggregate_qa_boot_context as _aggregate_qa_boot_context,
+)
+from .qa_pass1 import (
+    dispatch_qa_pass1_batch as _dispatch_qa_pass1_batch,
+)
+from .qa_finalize import (
+    finalize_qa_verdict as _finalize_qa_verdict,
+)
 from .retro_aggregate import (
     aggregate_retro_metrics as _aggregate_retro_metrics,
 )
@@ -4265,6 +4274,129 @@ async def finalize_build_phase_z(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "finalize_build_phase_z", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_qa_boot_context(
+    project_path: str = ".",
+) -> str:
+    """Boot-time aggregator for samvil-qa (T4.9 ultra-thin migration).
+
+    Single best-effort call collecting everything the now-thin samvil-qa
+    SKILL needs at the **start** of QA: solution_type/framework, Pass 1
+    mechanical command per stack, paths (seed/state/build_log/qa_results
+    /qa_evidence/handoff/events), role-separation pre-check payload,
+    incremental QA hint (prior qa-results.json summary), resume hint
+    (selected_tier, qa_max_iterations, current_model_qa, qa_history
+    length).
+
+    Args:
+        project_path: Project root (default cwd).
+
+    Returns: JSON string with `solution_type`, `framework`, `pass1
+    {command, log_path, language, smoke}`, `qa_checklist_path`, `paths`,
+    `role_separation_check`, `incremental_hint`, `resume_hint`,
+    `brownfield`, `notes[]`, `errors[]`.
+    """
+    try:
+        result = _aggregate_qa_boot_context(project_path or ".")
+        _log_mcp_health("ok", "aggregate_qa_boot_context")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_qa_boot_context", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def dispatch_qa_pass1_batch(
+    project_path: str = ".",
+    pass1_exit_code: int = 0,
+    smoke_result_json: str = "",
+    solution_type: str = "web-app",
+    log_path_override: str = "",
+) -> str:
+    """Pass 1 (mechanical) + Pass 1b (smoke) digest for samvil-qa.
+
+    Skill body shells out npm run build / npx tsc / py_compile and
+    drives Playwright MCP probes; this tool **interprets** the
+    artifacts: extracts real error lines from `.samvil/build.log`,
+    reduces the smoke probe payload to PASS/FAIL/SKIPPED, decides
+    whether Pass 2 should run, returns event drafts ready for
+    `save_event`.
+
+    Args:
+        project_path: Repo root.
+        pass1_exit_code: Exit code from the mechanical command.
+        smoke_result_json: JSON `{method, console_errors, empty_routes,
+            screenshots, fallback_reason}` or empty for skipped.
+        solution_type: Selects smoke verdict shape.
+        log_path_override: Custom build log path (default
+            `<project_path>/.samvil/build.log`).
+
+    Returns: JSON with `pass1 {status, exit_code, errors, reason,
+    log_path}`, `pass1b {status, method, console_errors, empty_routes,
+    screenshots, fallback_reason, reason}`, `should_proceed_to_pass2`,
+    `verdict_reason`, `events[]`, `notes[]`, `errors[]`.
+    """
+    try:
+        smoke_result = json.loads(smoke_result_json) if smoke_result_json else None
+        result = _dispatch_qa_pass1_batch(
+            project_path or ".",
+            pass1_exit_code=int(pass1_exit_code),
+            smoke_result=smoke_result,
+            solution_type=solution_type or "web-app",
+            log_path_override=log_path_override or None,
+        )
+        _log_mcp_health("ok", "dispatch_qa_pass1_batch")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "dispatch_qa_pass1_batch", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def finalize_qa_verdict(
+    project_path: str = ".",
+    evidence_json: str = "",
+    pending_ac_claims_json: str = "",
+) -> str:
+    """QA Phase Z (post-stage) finalizer for samvil-qa.
+
+    Aggregates: synthesize_qa_evidence + per-AC claim_verify/reject
+    payloads + consensus_trigger payloads (Generator≠Judge dispute) +
+    qa_to_deploy gate input + Ralph-loop BLOCKED detection from
+    qa_history + next-skill decision (PASS→deploy/evolve, FAIL→retro)
+    + Korean handoff block.
+
+    The actual `materialize_qa_synthesis` (which writes qa-results.json,
+    qa-report.md, events.jsonl, project.state.json) stays a separate
+    MCP call so the skill body can preview before persisting.
+
+    Args:
+        project_path: Repo root.
+        evidence_json: Same shape `synthesize_qa_evidence` consumes.
+        pending_ac_claims_json: JSON array of pending build-stage
+            ac_verdict claims (e.g., from `claim_query_by_subject`).
+
+    Returns: JSON with `synthesis`, `convergence`, `claim_actions[]`,
+    `consensus_triggers[]`, `gate_input`, `blocked
+    {detected, persistent_issue_ids}`, `next_skill_decision
+    {verdict, suggested, reason, user_options}`, `handoff_block`,
+    `samvil_tier`, `notes[]`, `errors[]`.
+    """
+    try:
+        evidence = json.loads(evidence_json) if evidence_json else {}
+        pending = json.loads(pending_ac_claims_json) if pending_ac_claims_json else []
+        result = _finalize_qa_verdict(
+            project_path or ".",
+            evidence=evidence,
+            pending_ac_claims=pending,
+        )
+        _log_mcp_health("ok", "finalize_qa_verdict")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "finalize_qa_verdict", str(e))
         return json.dumps({"error": str(e)})
 
 
