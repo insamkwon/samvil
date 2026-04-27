@@ -68,11 +68,35 @@ from .diagnostic import (
 from .deploy_targets import (
     evaluate_deploy_target as _evaluate_deploy_target,
 )
+from .scaffold_targets import (
+    evaluate_scaffold_target as _evaluate_scaffold_target,
+)
+from .build_phase_a import (
+    aggregate_build_phase_a as _aggregate_build_phase_a,
+)
+from .build_phase_b import (
+    dispatch_build_batch as _dispatch_build_batch,
+)
+from .build_phase_z import (
+    finalize_build_phase_z as _finalize_build_phase_z,
+)
+from .qa_boot import (
+    aggregate_qa_boot_context as _aggregate_qa_boot_context,
+)
+from .qa_pass1 import (
+    dispatch_qa_pass1_batch as _dispatch_qa_pass1_batch,
+)
+from .qa_finalize import (
+    finalize_qa_verdict as _finalize_qa_verdict,
+)
 from .retro_aggregate import (
     aggregate_retro_metrics as _aggregate_retro_metrics,
 )
 from .evolve_aggregate import (
     aggregate_evolve_context as _aggregate_evolve_context,
+)
+from .interview_aggregate import (
+    aggregate_interview_state as _aggregate_interview_state,
 )
 from .council_synthesis import (
     synthesize_council_verdicts as _synthesize_council_verdicts,
@@ -128,6 +152,7 @@ from .narrate import (
 from .orchestrator import (
     OrchestratorError,
     StageEvent as _OrchestratorStageEvent,
+    aggregate_orchestrator_state as _aggregate_orchestrator_state,
     complete_stage_plan as _complete_stage_plan,
     get_next_stage as _orchestrator_get_next_stage,
     get_orchestration_state as _orchestrator_get_state,
@@ -3785,6 +3810,61 @@ async def evaluate_deploy_target(
         return json.dumps({"error": str(e)})
 
 
+# ── Scaffold target evaluator (T4.7, samvil-scaffold) ─────────
+
+
+@mcp.tool()
+async def evaluate_scaffold_target(
+    project_path: str,
+    framework: str = "",
+    seed_json: str = "",
+    run_sanity_checks: bool = False,
+) -> str:
+    """Aggregate the scaffold-readiness facts samvil-scaffold needs.
+
+    Reads `project.seed.json` from `project_path` (or accepts a
+    pre-loaded `seed_json` string) and `references/dependency-matrix.json`
+    from the SAMVIL repo, then returns a JSON string with:
+      - framework: resolved framework name (caller arg → seed →
+        solution_type default → `nextjs`).
+      - framework_source: which input determined the framework.
+      - cli_command: ready-to-run scaffold CLI with `<seed.name>`
+        substituted.
+      - post_install_steps: ordered checklist the skill renders.
+      - sanity_checks: Phase A.6 file/contents requirements.
+      - sanity_result: present only when `run_sanity_checks=True` and
+        the project tree exists.
+      - build_command + build_log_path: per-stack INV-2 build line.
+      - version_pins: matrix-derived pins for post-install verification.
+      - env_vars_needed: per-stack `.env.example` keys.
+      - existing_project: incremental-scaffold detection (`package.json`
+        / `requirements.txt` / `SKILL.md` signal).
+      - notes / blockers: human-readable diagnostics.
+
+    `framework` is optional — empty string means "let MCP pick from seed".
+    `seed_json` is optional — empty string means "read project.seed.json".
+    """
+    try:
+        seed_dict: dict | None = None
+        if seed_json:
+            try:
+                seed_dict = json.loads(seed_json)
+            except json.JSONDecodeError as exc:
+                return json.dumps({"error": f"invalid seed_json: {exc}"})
+
+        result = _evaluate_scaffold_target(
+            project_path,
+            framework=framework or None,
+            seed=seed_dict,
+            run_sanity_checks=bool(run_sanity_checks),
+        )
+        _log_mcp_health("ok", "evaluate_scaffold_target")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "evaluate_scaffold_target", str(e))
+        return json.dumps({"error": str(e)})
+
+
 @mcp.tool()
 async def analyze_brownfield_project(
     project_root: str,
@@ -3896,6 +3976,99 @@ async def aggregate_evolve_context(project_root: str) -> str:
 
 
 @mcp.tool()
+async def aggregate_orchestrator_state(
+    project_root: str = ".",
+    prompt: str = "",
+    cli_tier: str = "",
+    mode_hint: str = "",
+    host_name: str = "",
+) -> str:
+    """Boot-time aggregator for the samvil orchestrator skill (T4.5 ultra-thin).
+
+    Reads (best-effort) from `project_root`:
+      - `project.state.json`, `project.config.json`
+      - filesystem artifacts (`project.seed.json`, `package.json`, `src/`)
+
+    Returns a JSON string with:
+      - tier: resolved samvil_tier with precedence cli > state > config > default
+        (deprecated v3.1 'deep' alias is mapped to 'full' with `aliased_from`).
+      - solution_type: 3-layer keyword/context detection
+        (web-app | automation | game | mobile-app | dashboard).
+        Layer-3 user confirmation still happens in the skill body.
+      - is_pm_mode: true when the prompt contains PM-mode signals.
+      - brownfield: artifact + state-based detection of resume / brownfield mode.
+      - chain: which skill the orchestrator should invoke first
+        (samvil-analyze | samvil-interview | samvil-pm-interview | resume target).
+      - errors: non-fatal warnings (missing files, etc.)
+
+    Companion to `get_orchestration_state` / `stage_can_proceed`. This tool
+    covers the entry-point pre-flight (tier resolution, solution_type
+    detection, brownfield/resume routing) that was inline in the legacy
+    766-LOC orchestrator skill body.
+    """
+    try:
+        result = _aggregate_orchestrator_state(
+            project_root or ".",
+            prompt=prompt or "",
+            cli_tier=cli_tier or "",
+            mode_hint=mode_hint or "",
+            host_name=host_name or "",
+        )
+        _log_mcp_health("ok", "aggregate_orchestrator_state")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_orchestrator_state", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_interview_state(
+    project_root: str = ".",
+    prompt: str = "",
+) -> str:
+    """Boot-time aggregator for the samvil-interview skill (T4.6 ultra-thin).
+
+    Reads (best-effort) from `project_root`:
+      - `project.state.json` / `.samvil/state.json` (session_id + tier)
+      - `project.config.json` (tier fallback)
+      - `<project_root>/package.json` etc. via `scan_manifest`
+
+    Reads (best-effort) from `~/.samvil/presets/*.json` (or
+    `$SAMVIL_PRESET_DIR/*.json` when set).
+
+    Returns a JSON string with:
+      - tier: resolved interview tier (`minimal/standard/thorough/full/deep`)
+        with precedence state > config > default.
+      - ambiguity_target: float threshold matching `interview_engine`.
+      - required_phases: list[str] in pipeline order
+        (`core/scope/lifecycle/...`).
+      - mode: `{is_zero_question, matched_signals}` from prompt scan.
+      - preset: best-match preset (custom > built-in).
+      - custom_presets_count: total `*.json` under preset dir.
+      - manifest: `scan_manifest()` output (may be `{}` for greenfield).
+      - paths: target locations for interview-summary.md, state.json,
+        config.json, and the preset directory.
+      - errors: non-fatal warnings.
+
+    Companion to existing `score_ambiguity`, `route_question`,
+    `update_answer_streak`, `manage_tracks`, `get_tier_phases`,
+    `compute_seed_readiness`, `gate_check` — this tool covers the boot
+    pre-flight (tier, mode, preset match, manifest scan) that was
+    inline in the legacy 1259-LOC interview skill body.
+    """
+    try:
+        result = _aggregate_interview_state(
+            project_root or ".",
+            prompt=prompt or "",
+        )
+        _log_mcp_health("ok", "aggregate_interview_state")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_interview_state", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def synthesize_council_verdicts(
     round1_verdicts_json: str = "",
     round2_verdicts_json: str = "",
@@ -3951,6 +4124,279 @@ async def synthesize_council_verdicts(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "synthesize_council_verdicts", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_build_phase_a(
+    project_path: str = ".",
+    run_sanity_checks: bool = True,
+) -> str:
+    """Boot-time aggregator for the samvil-build skill (T4.8 ultra-thin).
+
+    Reads (best-effort) from `project_path`:
+      - `project.seed.json` (solution_type, framework, features, name)
+      - `project.state.json` (session_id, current_stage, completed_features)
+      - `project.config.json` (samvil_tier, max_total_builds)
+      - `project.blueprint.json` (architecture, key_libraries)
+
+    Returns a JSON string with:
+      - solution_type / framework: resolved from seed.
+      - build_verify: per-stack {command, log_path, language} tuple.
+      - recipe_path: per-`solution_type` recipe markdown reference.
+      - paths: every file path the skill touches (handoff, fix-log,
+        events, rate-budget, sanity log).
+      - sanity: Phase A.6 result {passed, failures[], warnings[]}.
+      - resume_hint: completed_features + last current_model_build for
+        Worker dispatch.
+      - errors / notes: non-fatal warnings.
+
+    Companion to existing `route_task`, `render_pattern_context`,
+    `render_domain_context`, `save_event`. This tool covers the boot
+    pre-flight (stack identification, recipe lookup, sanity scan,
+    resume detection) that was inline in the legacy 1432-LOC build
+    skill body.
+    """
+    try:
+        result = _aggregate_build_phase_a(
+            project_path or ".",
+            run_sanity_checks=bool(run_sanity_checks),
+        )
+        _log_mcp_health("ok", "aggregate_build_phase_a")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_build_phase_a", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def dispatch_build_batch(
+    seed_json: str,
+    feature_json: str,
+    feature_num: int,
+    tree_json: str,
+    completed_ids_json: str = "[]",
+    blueprint_json: str = "",
+    config_json: str = "",
+    consecutive_fail_batches: int = 0,
+) -> str:
+    """Per-batch dispatch aggregator for samvil-build Phase B (T4.8).
+
+    Composes the next build batch for one feature: resolves
+    MAX_PARALLEL (CPU + memory heuristic), picks the next leaves via
+    `next_buildable_leaves`, and renders ≤2000-token Worker context
+    bundles for each leaf so the skill body can spawn N agents in one
+    parallel message.
+
+    Args:
+        seed_json: Loaded seed JSON string.
+        feature_json: Single feature dict JSON string.
+        feature_num: 1-based feature index.
+        tree_json: Current AC tree JSON.
+        completed_ids_json: JSON array of leaf IDs already done.
+        blueprint_json: Optional blueprint JSON ("" → none).
+        config_json: Optional config JSON ("" → none).
+        consecutive_fail_batches: Carried from checkpoint or last
+            iteration. ≥2 trips the circuit breaker.
+
+    Returns: JSON string with `max_parallel`, `parallel_meta`, `batch`,
+    `worker_bundles[]`, `independence` (when multiple features),
+    `circuit_breaker {consecutive_fail_batches, max_retries, halt}`,
+    `notes`, `errors`.
+    """
+    try:
+        seed = json.loads(seed_json) if seed_json else {}
+        feature = json.loads(feature_json) if feature_json else {}
+        blueprint = json.loads(blueprint_json) if blueprint_json else None
+        config = json.loads(config_json) if config_json else None
+        completed_ids = json.loads(completed_ids_json) if completed_ids_json else []
+        result = _dispatch_build_batch(
+            seed=seed,
+            blueprint=blueprint,
+            config=config,
+            feature=feature,
+            feature_num=int(feature_num),
+            tree_json=tree_json,
+            completed_ids=completed_ids,
+            consecutive_fail_batches=int(consecutive_fail_batches),
+        )
+        _log_mcp_health("ok", "dispatch_build_batch")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "dispatch_build_batch", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def finalize_build_phase_z(
+    project_path: str = ".",
+    rate_budget_stats_json: str = "",
+    failed_features_json: str = "",
+    retries: int = 0,
+) -> str:
+    """Post-stage finalize aggregator for samvil-build (T4.8).
+
+    Runs ONCE at the end of the build stage. Owns the v3.2 Contract
+    Layer post_stage prep: per-leaf `ac_verdict` claim payloads,
+    `gate_check` input (implementation_rate), stagnation-evaluate
+    hint, pre-rendered handoff.md block.
+
+    Args:
+        project_path: Project root.
+        rate_budget_stats_json: Optional pre-fetched
+            `rate_budget_stats(...)` result. Skill body passes it in
+            to avoid a second roundtrip.
+        failed_features_json: JSON array of feature names that hit
+            the circuit breaker. Empty string → derive from leaf
+            statuses.
+        retries: Total retries in this build stage (for handoff).
+
+    Returns: JSON string with `samvil_tier`, `metrics
+    {features_total/passed/failed, implementation_rate,
+    total/passed/failed/pending leaves}`, `ac_verdict_claims[]`,
+    `stage_claim_id`, `gate_input`, `stagnation_hint`,
+    `handoff_block`, `notes`, `errors`.
+    """
+    try:
+        rate_budget_stats = (
+            json.loads(rate_budget_stats_json) if rate_budget_stats_json else None
+        )
+        failed_features = (
+            json.loads(failed_features_json) if failed_features_json else None
+        )
+        result = _finalize_build_phase_z(
+            project_path or ".",
+            rate_budget_stats=rate_budget_stats,
+            failed_features=failed_features,
+            retries=int(retries),
+        )
+        _log_mcp_health("ok", "finalize_build_phase_z")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "finalize_build_phase_z", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_qa_boot_context(
+    project_path: str = ".",
+) -> str:
+    """Boot-time aggregator for samvil-qa (T4.9 ultra-thin migration).
+
+    Single best-effort call collecting everything the now-thin samvil-qa
+    SKILL needs at the **start** of QA: solution_type/framework, Pass 1
+    mechanical command per stack, paths (seed/state/build_log/qa_results
+    /qa_evidence/handoff/events), role-separation pre-check payload,
+    incremental QA hint (prior qa-results.json summary), resume hint
+    (selected_tier, qa_max_iterations, current_model_qa, qa_history
+    length).
+
+    Args:
+        project_path: Project root (default cwd).
+
+    Returns: JSON string with `solution_type`, `framework`, `pass1
+    {command, log_path, language, smoke}`, `qa_checklist_path`, `paths`,
+    `role_separation_check`, `incremental_hint`, `resume_hint`,
+    `brownfield`, `notes[]`, `errors[]`.
+    """
+    try:
+        result = _aggregate_qa_boot_context(project_path or ".")
+        _log_mcp_health("ok", "aggregate_qa_boot_context")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_qa_boot_context", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def dispatch_qa_pass1_batch(
+    project_path: str = ".",
+    pass1_exit_code: int = 0,
+    smoke_result_json: str = "",
+    solution_type: str = "web-app",
+    log_path_override: str = "",
+) -> str:
+    """Pass 1 (mechanical) + Pass 1b (smoke) digest for samvil-qa.
+
+    Skill body shells out npm run build / npx tsc / py_compile and
+    drives Playwright MCP probes; this tool **interprets** the
+    artifacts: extracts real error lines from `.samvil/build.log`,
+    reduces the smoke probe payload to PASS/FAIL/SKIPPED, decides
+    whether Pass 2 should run, returns event drafts ready for
+    `save_event`.
+
+    Args:
+        project_path: Repo root.
+        pass1_exit_code: Exit code from the mechanical command.
+        smoke_result_json: JSON `{method, console_errors, empty_routes,
+            screenshots, fallback_reason}` or empty for skipped.
+        solution_type: Selects smoke verdict shape.
+        log_path_override: Custom build log path (default
+            `<project_path>/.samvil/build.log`).
+
+    Returns: JSON with `pass1 {status, exit_code, errors, reason,
+    log_path}`, `pass1b {status, method, console_errors, empty_routes,
+    screenshots, fallback_reason, reason}`, `should_proceed_to_pass2`,
+    `verdict_reason`, `events[]`, `notes[]`, `errors[]`.
+    """
+    try:
+        smoke_result = json.loads(smoke_result_json) if smoke_result_json else None
+        result = _dispatch_qa_pass1_batch(
+            project_path or ".",
+            pass1_exit_code=int(pass1_exit_code),
+            smoke_result=smoke_result,
+            solution_type=solution_type or "web-app",
+            log_path_override=log_path_override or None,
+        )
+        _log_mcp_health("ok", "dispatch_qa_pass1_batch")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "dispatch_qa_pass1_batch", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def finalize_qa_verdict(
+    project_path: str = ".",
+    evidence_json: str = "",
+    pending_ac_claims_json: str = "",
+) -> str:
+    """QA Phase Z (post-stage) finalizer for samvil-qa.
+
+    Aggregates: synthesize_qa_evidence + per-AC claim_verify/reject
+    payloads + consensus_trigger payloads (Generator≠Judge dispute) +
+    qa_to_deploy gate input + Ralph-loop BLOCKED detection from
+    qa_history + next-skill decision (PASS→deploy/evolve, FAIL→retro)
+    + Korean handoff block.
+
+    The actual `materialize_qa_synthesis` (which writes qa-results.json,
+    qa-report.md, events.jsonl, project.state.json) stays a separate
+    MCP call so the skill body can preview before persisting.
+
+    Args:
+        project_path: Repo root.
+        evidence_json: Same shape `synthesize_qa_evidence` consumes.
+        pending_ac_claims_json: JSON array of pending build-stage
+            ac_verdict claims (e.g., from `claim_query_by_subject`).
+
+    Returns: JSON with `synthesis`, `convergence`, `claim_actions[]`,
+    `consensus_triggers[]`, `gate_input`, `blocked
+    {detected, persistent_issue_ids}`, `next_skill_decision
+    {verdict, suggested, reason, user_options}`, `handoff_block`,
+    `samvil_tier`, `notes[]`, `errors[]`.
+    """
+    try:
+        evidence = json.loads(evidence_json) if evidence_json else {}
+        pending = json.loads(pending_ac_claims_json) if pending_ac_claims_json else []
+        result = _finalize_qa_verdict(
+            project_path or ".",
+            evidence=evidence,
+            pending_ac_claims=pending,
+        )
+        _log_mcp_health("ok", "finalize_qa_verdict")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "finalize_qa_verdict", str(e))
         return json.dumps({"error": str(e)})
 
 

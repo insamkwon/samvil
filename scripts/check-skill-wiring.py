@@ -46,13 +46,13 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
         "samvil-build",
         "skills/samvil-build/SKILL.md",
         (
-            "contract-layer-protocol",
-            "route_task",
+            "SKILL.legacy.md",
+            "aggregate_build_phase_a",
+            "dispatch_build_batch",
+            "finalize_build_phase_z",
             "claim_post",
             "gate_check",
             "build_to_qa",
-            "render_pattern_context",
-            "render_domain_context",
         ),
     ),
     (
@@ -67,6 +67,10 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "qa_to_deploy",
             "render_pattern_context",
             "render_domain_context",
+            "aggregate_qa_boot_context",
+            "dispatch_qa_pass1_batch",
+            "finalize_qa_verdict",
+            "SKILL.legacy.md",
         ),
     ),
     (
@@ -109,6 +113,18 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
         (
             "narrate_build_prompt",
             "narrate_parse",
+        ),
+    ),
+    (
+        "samvil-scaffold",
+        "skills/samvil-scaffold/SKILL.md",
+        (
+            "SKILL.legacy.md",
+            "evaluate_scaffold_target",
+            "version_pins",
+            "sanity_checks",
+            "scaffold_started",
+            "scaffold_complete",
         ),
     ),
 ]
