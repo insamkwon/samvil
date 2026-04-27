@@ -79,6 +79,15 @@ gates:
       full:     { three_pass_pass: true, zero_stubs: true }
       deep:     { three_pass_pass: true, zero_stubs: true }
 
+  qa_to_evolve:
+    policy: hard
+    thresholds:
+      minimal:  { three_pass_pass: true }
+      standard: { three_pass_pass: true }
+      thorough: { three_pass_pass: true, zero_stubs: true }
+      full:     { three_pass_pass: true, zero_stubs: true }
+      deep:     { three_pass_pass: true, zero_stubs: true }
+
   any_to_retro:
     policy: hard  # cannot skip — feeds ⑧ policy evolution
     thresholds:

@@ -25,7 +25,8 @@ Risk = Literal["LOW", "MEDIUM", "HIGH"]
 # ── Detection patterns ─────────────────────────────────────────
 
 STUB_MARKERS = [
-    re.compile(r"\b(TODO|FIXME|XXX|HACK)\b", re.IGNORECASE),
+    # Comment-only TODO/FIXME — match only inside // or # comments
+    re.compile(r"(?://|#)\s*.*\b(TODO|FIXME|XXX|HACK)\b", re.IGNORECASE),
     # word-start match — catches "mock_123", "MOCK_DATA", "dummyUser" etc.
     re.compile(r"\b(MOCK|DUMMY|FAKE|STUB|PLACEHOLDER)", re.IGNORECASE),
     re.compile(r"//\s*mock", re.IGNORECASE),

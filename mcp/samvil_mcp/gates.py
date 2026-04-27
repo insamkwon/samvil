@@ -40,6 +40,7 @@ class GateName(str, Enum):
     DESIGN_TO_SCAFFOLD = "design_to_scaffold"
     SCAFFOLD_TO_BUILD = "scaffold_to_build"
     BUILD_TO_QA = "build_to_qa"
+    QA_TO_EVOLVE = "qa_to_evolve"
     QA_TO_DEPLOY = "qa_to_deploy"
     ANY_TO_RETRO = "any_to_retro"
 
@@ -165,6 +166,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "thresholds": {
                 "minimal": {"three_pass_pass": True, "zero_stubs": True},
                 "standard": {"three_pass_pass": True, "zero_stubs": True},
+                "thorough": {"three_pass_pass": True, "zero_stubs": True},
+                "full": {"three_pass_pass": True, "zero_stubs": True},
+                "deep": {"three_pass_pass": True, "zero_stubs": True},
+            },
+        },
+        "qa_to_evolve": {
+            "policy": "hard",
+            "thresholds": {
+                "minimal": {"three_pass_pass": True},
+                "standard": {"three_pass_pass": True},
                 "thorough": {"three_pass_pass": True, "zero_stubs": True},
                 "full": {"three_pass_pass": True, "zero_stubs": True},
                 "deep": {"three_pass_pass": True, "zero_stubs": True},
