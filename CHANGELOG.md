@@ -4,6 +4,27 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.7.0 — 2026-04-27
+
+**Option B: Regression Suite (MINOR)**
+
+- Add `mcp/samvil_mcp/regression_suite.py` — 4 dataclasses (ACEntry,
+  GenerationSnapshot, RegressionResult, CompareResult) + 4 functions:
+  `snapshot_generation`, `validate_against_snapshot`,
+  `aggregate_regression_state`, `compare_generations`
+- Add 4 MCP tools: `snapshot_generation`, `validate_against_snapshot`,
+  `aggregate_regression_state`, `compare_generations`
+- Add `mcp/tests/test_regression_suite.py` — 32 tests across 6 classes
+- Add `references/regression-suite.md` — schema doc + operator guide
+- Update `skills/samvil-evolve/SKILL.md` — Boot step 4b: auto-snapshot +
+  regression check; post-apply: snapshot new generation
+- Storage: `.samvil/generations/gen-<N>/snapshot.json`
+- Input: `.samvil/qa-results.json` pass2 list (seed v3 compatible, P8 graceful degradation)
+
+Pre-commit: 9/9 PASS — 1523 tests total
+
+---
+
 ## v4.6.1 — 2026-04-27
 
 **Option A: E2E chain-marker dogfood (PATCH)**
