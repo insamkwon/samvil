@@ -52,7 +52,7 @@ mcp__samvil_mcp__diagnose_environment()
 
 Also call `mcp__samvil_mcp__get_health_tier_summary(project_root="<cwd>")` — best-effort. Returns markdown with tier badge (✅/⚠️/🔴).
 
-Returns JSON with three sections:
+`diagnose_environment` returns JSON with three sections:
 
 - `mcp_health` — counts + recent failures parsed from
   `~/.samvil/mcp-health.jsonl`. Missing log is treated as zero-state.
@@ -67,7 +67,7 @@ falls back to the shell facts only (P8 graceful degradation).
 
 Render one report with three sections (Shell / MCP / Models). Each
 shell fact gets `✓` on success or `⚠` with the error + one-line fix.
-Each MCP datum comes from the `diagnose_environment` JSON:
+Each MCP datum comes from the tool calls above:
 
 - Tier badge from `get_health_tier_summary` — render as the **first line** of the MCP section.
 - `tool_inventory.count` registered tools, v3 coverage
