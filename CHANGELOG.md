@@ -4,6 +4,21 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.6.0 — Option D: 3-tier health UI + Enterprise BFF (2026-04-27)
+
+### New
+- **G4 (3-tier health UI)**: `samvil` Boot Sequence와 `samvil-doctor` 출력에 `✅/⚠️/🔴` health tier badge 추가. `get_health_tier_summary` MCP 툴 호출.
+- **G5 (Enterprise BFF)**: `webapp-enterprise` domain pack `build_guidance`에 BFF 프록시 패턴, turborepo monorepo 구조, SSO 옵션(NextAuth/Clerk/Supabase Auth), OpenAPI client gen 4개 항목 추가.
+
+### Tests
+- `test_domain_packs.py`: BFF/monorepo/Clerk/openapi-typescript 회귀 테스트 4개.
+- `test_health_tiers.py`: `get_health_tier_summary` 포맷(healthy/critical badge) 테스트 2개.
+
+### Version bump reason: MINOR
+사용자가 새 health badge(samvil 첫 화면, samvil-doctor 출력)와 새 build guidance를 보게 됨.
+
+---
+
 ## [4.0.0] — 2026-04-27 — 🏔️ Consolidation Milestone (Tier 4 Phase C complete)
 
 **Theme:** All 15 SAMVIL skills now ultra-thin. Single-source-of-truth aggregate MCP pattern proven across orchestrator, interview, scaffold, build (CRITICAL), and qa (CRITICAL).

@@ -138,3 +138,31 @@ def test_webapp_enterprise_not_in_game_filter():
 def test_total_pack_count():
     packs = list_domain_packs()
     assert len(packs) == 5
+
+
+# ── Option D: Enterprise BFF/monorepo/SSO/OpenAPI ────────────
+
+
+def test_webapp_enterprise_build_guidance_has_bff_pattern():
+    pack = get_domain_pack("webapp-enterprise")
+    guidance_text = " ".join(pack.build_guidance)
+    assert "BFF" in guidance_text or "proxy" in guidance_text.lower()
+
+
+def test_webapp_enterprise_build_guidance_has_monorepo_structure():
+    pack = get_domain_pack("webapp-enterprise")
+    guidance_text = " ".join(pack.build_guidance)
+    assert "turborepo" in guidance_text.lower() or "monorepo" in guidance_text.lower()
+    assert "packages/" in guidance_text
+
+
+def test_webapp_enterprise_build_guidance_has_clerk():
+    pack = get_domain_pack("webapp-enterprise")
+    guidance_text = " ".join(pack.build_guidance)
+    assert "Clerk" in guidance_text
+
+
+def test_webapp_enterprise_build_guidance_has_openapi_gen():
+    pack = get_domain_pack("webapp-enterprise")
+    guidance_text = " ".join(pack.build_guidance)
+    assert "openapi-typescript" in guidance_text

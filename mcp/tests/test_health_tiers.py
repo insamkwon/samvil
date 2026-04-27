@@ -1,5 +1,6 @@
 """Tests for health_tiers module (M4 3-tier health)."""
 
+import json
 import pytest
 
 from samvil_mcp.health_tiers import (
@@ -8,6 +9,7 @@ from samvil_mcp.health_tiers import (
     CRITICAL_TOOLS,
     HEALTHY_THRESHOLD,
     CRITICAL_THRESHOLD,
+    get_health_tier_summary,
 )
 
 
@@ -120,3 +122,31 @@ class TestTierResult:
         # critical
         r = classify_health([{"status": "ok", "tool": "t"}] * 70 + [{"status": "fail", "tool": "t"}] * 30)
         assert "critical" in r.recommendation.lower()
+
+
+class TestGetHealthTierSummary:
+    def test_summary_contains_healthy_badge(self, tmp_path):
+        # No health log → zero-state → healthy
+        # Use a non-existent path to force zero-state (no health data)
+        non_existent = tmp_path / ".samvil" / "nonexistent-health.jsonl"
+        summary = get_health_tier_summary(
+            project_root=str(tmp_path),
+            mcp_health_path=str(non_existent),
+        )
+        assert "✅" in summary
+        assert "HEALTHY" in summary
+
+    def test_summary_contains_critical_badge(self, tmp_path):
+        health_log = tmp_path / ".samvil" / "mcp-health.jsonl"
+        health_log.parent.mkdir(parents=True)
+        # 30 fails of a critical tool → critical tier
+        with health_log.open("w") as f:
+            for _ in range(30):
+                f.write(json.dumps({"status": "fail", "tool": "save_event"}) + "\n")
+        summary = get_health_tier_summary(
+            project_root=str(tmp_path),
+            mcp_health_path=str(health_log),
+        )
+        assert "🔴" in summary
+        assert "CRITICAL" in summary
+        assert "save_event" in summary
