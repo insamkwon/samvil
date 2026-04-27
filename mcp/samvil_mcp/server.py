@@ -122,6 +122,11 @@ from .domain_packs import (
     match_domain_packs as _match_domain_packs,
     render_domain_packs as _render_domain_packs,
 )
+from .module_boundary import (
+    validate_contract as _validate_contract,
+    enforce_boundary as _enforce_boundary,
+    aggregate_module_state as _aggregate_module_state,
+)
 from .retro_v3_2 import (
     ExperimentRun as _ExperimentRun,
     Observation as _Observation,
@@ -4397,6 +4402,68 @@ async def finalize_qa_verdict(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "finalize_qa_verdict", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── Module Boundary (M1, samvil-build / samvil-qa) ─────────────
+
+
+@mcp.tool()
+async def validate_contract(project_root: str, module_name: str) -> str:
+    """Validate a module's contract.json for schema compliance.
+
+    Checks required fields, name consistency, version format,
+    file_patterns validity, and dependency correctness.
+
+    Returns JSON with: module_name, valid (bool), errors[], warnings[].
+    """
+    try:
+        result = _validate_contract(project_root, module_name)
+        _log_mcp_health("ok", "validate_contract")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "validate_contract", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def enforce_boundary(
+    project_root: str,
+    module_name: str,
+    file_paths: list[str] | None = None,
+) -> str:
+    """Detect cross-module boundary violations for a module.
+
+    Scans the module's files (or provided file_paths) and checks
+    each import against other modules' file_patterns. Any import
+    landing in a module not listed in depends_on is flagged.
+
+    Returns JSON with: violations[], modules_checked, files_scanned,
+    violation_count.
+    """
+    try:
+        result = _enforce_boundary(project_root, module_name, file_paths)
+        _log_mcp_health("ok", "enforce_boundary")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "enforce_boundary", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def aggregate_module_state(project_root: str) -> str:
+    """Aggregate full module inventory, dependency graph, and health.
+
+    Single-source-of-truth call for rendering the module overview.
+    Returns JSON with: modules[], dependency_graph, cycles[],
+    total_modules, total_public_apis, contract_errors[].
+    """
+    try:
+        result = _aggregate_module_state(project_root)
+        _log_mcp_health("ok", "aggregate_module_state")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "aggregate_module_state", str(e))
         return json.dumps({"error": str(e)})
 
 
