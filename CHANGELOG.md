@@ -4,6 +4,71 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## [4.0.0] — 2026-04-27 — 🏔️ Consolidation Milestone (Tier 4 Phase C complete)
+
+**Theme:** All 15 SAMVIL skills now ultra-thin. Single-source-of-truth aggregate MCP pattern proven across orchestrator, interview, scaffold, build (CRITICAL), and qa (CRITICAL).
+
+### 🎯 Milestone
+
+**14 actionable skills + samvil-pm-interview = 15 thin skills total, all ≤120 active LOC.**
+
+This release completes the Consolidation phase that started at v3.32.0. The next phase (Mountain — M1-M4) recovers original promises (Module Boundary, multi-host real dogfood, domain packs, telemetry remote dashboard).
+
+### Changed (skill migration — Phase C, the Hard 5)
+- `samvil` (orchestrator): 766 → 93 LOC (-88%)
+- `samvil-interview`: 1259 → 114 LOC (-91%)
+- `samvil-scaffold`: 1653 → 120 LOC (-93%)
+- `samvil-build` (CRITICAL): 1432 → 118 LOC (-92%) — 7 critical behaviors verified
+- `samvil-qa` (CRITICAL): 1713 → 117 LOC (-93%) — 7 critical preservations verified
+- Phase C total: 6,823 → 562 LOC (-92%)
+
+### Added (MCP — 9 new aggregate tools)
+- Orchestrator: `aggregate_orchestrator_state`
+- Interview: `aggregate_interview_state`
+- Scaffold: `evaluate_scaffold_target`
+- Build: `aggregate_build_phase_a` + `dispatch_build_batch` + `finalize_build_phase_z`
+- QA: `aggregate_qa_boot_context` + `dispatch_qa_pass1_batch` + `finalize_qa_verdict`
+
+### Added (tests — 265 new smoke tests in Phase C)
+- 31 samvil orchestrator + 42 interview + 36 scaffold + 109 build + 47 qa
+
+### Counts (vs v3.36.0)
+- MCP tools: 145 → **154** (+9)
+- Tests: 1064 → **1314** (+250)
+- Thin skills: 10 → **15** (+5 — Phase C)
+
+### Cumulative Consolidation (v3.32.0 → v4.0.0)
+
+- MCP tools: 175 → 154 (-21, -12%)
+- Tests: 946 → 1314 (+368, +39%)
+- Thin skills: 2 → 15 (+13)
+- All 15 skills ≤ 120 active LOC
+- 6 Releases: v3.33 (Tier 1) / v3.34 (Tier 2) / v3.35 (Phase A) / v3.36 (Phase B) / v4.0.0 (Phase C — this)
+
+### Patterns proven across all 15 skills
+
+1. **Single-source-of-truth aggregate MCP** — flat branching/policy logic into one MCP module per skill (10 aggregate tools added across Tier 3+4)
+2. **SKILL.legacy.md backup** with frontmatter rename (`<skill>-legacy`) — host loader doesn't see, manual rollback always available
+3. **Smoke tests pin behavior contracts** — not implementation; idempotency, edge cases, INV-5 graceful degradation
+4. **CC-specific stays in skill** — Agent() parallel spawn, Bash, AskUserQuestion, TaskUpdate
+5. **MCP gates for orchestration** — boot context, batch dispatch, finalize, persistence
+
+### Foundation now ready for Mountain Stage
+
+Consolidation phase done. Next is Mountain (M1-M4):
+- **M1 Module Boundary** — `contract.json` system, big-app capability
+- **M2 Multi-host real dogfood** — Codex/OpenCode E2E + Gemini adapter
+- **M3 Domain Pack depth** — game-phaser + webapp-enterprise
+- **M4 Telemetry remote + 3-tier health UI**
+
+Target: v4.6.0 (Mountain complete = original Phase 2-4 promises 100% fulfilled).
+
+### Backlog (deferred to maintenance)
+- GitHub Actions Node.js 20 deprecation (June 2026)
+- Flaky `test_periodic_checkpointer` (timing-sensitive)
+
+---
+
 ## [3.36.0] — 2026-04-26 — Tier 4 Phase B: Medium Skills Ultra-Thin
 
 **Theme:** All 4 Medium skills (retro/evolve/council/analyze) migrated to ultra-thin shells. Single-source-of-truth aggregate MCP tools pattern proven across post-processing, autonomous loops, parallel agents, and brownfield analysis.
