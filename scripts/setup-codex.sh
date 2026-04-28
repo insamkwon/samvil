@@ -74,8 +74,13 @@ _install_agents() {
   local dest_dir="$1"
   local dest="$dest_dir/AGENTS.md"
   mkdir -p "$dest_dir"
-  cp "$SAMVIL_ROOT/AGENTS.md" "$dest"
-  echo "      ✓ $dest"
+  # Inject absolute SAMVIL_ROOT so Codex can resolve instruction files
+  # from any working directory (user's project, not SAMVIL source).
+  sed \
+    -e "s|references/|${SAMVIL_ROOT}/references/|g" \
+    -e "s|scripts/|${SAMVIL_ROOT}/scripts/|g" \
+    "$SAMVIL_ROOT/AGENTS.md" > "$dest"
+  echo "      ✓ $dest (paths → ${SAMVIL_ROOT})"
 }
 
 if [[ "$HOST" == "codex" || "$HOST" == "all" ]]; then
