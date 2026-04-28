@@ -4,6 +4,20 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.10.3 — 2026-04-29
+
+**Health tier rolling window — prevent stale CRITICAL (PATCH)**
+
+- `health_tiers.py`: `_load_health_log` now returns only the last
+  `ROLLING_WINDOW=5000` entries (tail-window). Previously the entire
+  `~/.samvil/mcp-health.jsonl` was scanned; after months of development
+  this file grew to 124k entries with old `save_event`/`gate_check`
+  failures, permanently forcing CRITICAL tier even when current health
+  was fine.
+- 3 new tests in `test_health_tiers.py`.
+
+---
+
 ## v4.10.2 — 2026-04-29
 
 **Codex CLI samvil.md health check parity (PATCH)**
