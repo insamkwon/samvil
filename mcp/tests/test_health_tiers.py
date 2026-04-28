@@ -150,3 +150,40 @@ class TestGetHealthTierSummary:
         assert "🔴" in summary
         assert "CRITICAL" in summary
         assert "save_event" in summary
+
+
+class TestRollingWindow:
+    def test_rolling_window_ignores_old_critical_failures(self, tmp_path):
+        """Old critical failures outside the window should not affect tier."""
+        health_log = tmp_path / "mcp-health.jsonl"
+        with health_log.open("w") as f:
+            # 6000 old critical failures (outside default window of 5000)
+            for _ in range(6000):
+                f.write(json.dumps({"status": "fail", "tool": "save_event"}) + "\n")
+            # 5000 recent healthy calls
+            for _ in range(5000):
+                f.write(json.dumps({"status": "ok", "tool": "save_event"}) + "\n")
+        from samvil_mcp.health_tiers import _load_health_log, classify_health
+        entries = _load_health_log(".", mcp_health_path=str(health_log))
+        assert len(entries) == 5000
+        result = classify_health(entries)
+        assert result.tier == "healthy"
+
+    def test_rolling_window_default_is_5000(self, tmp_path):
+        """Default window is ROLLING_WINDOW entries."""
+        from samvil_mcp.health_tiers import ROLLING_WINDOW, _load_health_log
+        health_log = tmp_path / "mcp-health.jsonl"
+        with health_log.open("w") as f:
+            for i in range(ROLLING_WINDOW + 100):
+                f.write(json.dumps({"status": "ok", "tool": "save_event"}) + "\n")
+        entries = _load_health_log(".", mcp_health_path=str(health_log))
+        assert len(entries) == ROLLING_WINDOW
+
+    def test_fewer_entries_than_window_returns_all(self, tmp_path):
+        health_log = tmp_path / "mcp-health.jsonl"
+        with health_log.open("w") as f:
+            for _ in range(100):
+                f.write(json.dumps({"status": "ok", "tool": "health_check"}) + "\n")
+        from samvil_mcp.health_tiers import _load_health_log
+        entries = _load_health_log(".", mcp_health_path=str(health_log))
+        assert len(entries) == 100

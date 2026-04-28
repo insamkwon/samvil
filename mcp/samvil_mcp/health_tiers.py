@@ -126,6 +126,9 @@ def classify_health(
     )
 
 
+ROLLING_WINDOW = 5000  # only last N entries; prevents old failures from inflating tier
+
+
 def get_health_tier(
     project_root: str,
     mcp_health_path: str | None = None,
@@ -164,6 +167,7 @@ def get_health_tier_summary(
 def _load_health_log(
     project_root: str,
     mcp_health_path: str | None = None,
+    max_entries: int = ROLLING_WINDOW,
 ) -> list[dict[str, Any]]:
     if mcp_health_path:
         path = Path(mcp_health_path).expanduser()
@@ -187,7 +191,8 @@ def _load_health_log(
     except OSError:
         return []
 
-    return entries
+    # Return only the most recent window to avoid stale failures inflating tier.
+    return entries[-max_entries:] if len(entries) > max_entries else entries
 
 
 def _critical_recommendation(failures: list[str], rate: float) -> str:
