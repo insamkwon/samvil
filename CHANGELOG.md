@@ -4,6 +4,18 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.10.1 — 2026-04-28
+
+**Codex CLI AGENTS.md path fix (PATCH)**
+
+- `scripts/setup-codex.sh`: `_install_agents()` now uses `sed` to replace
+  `references/` and `scripts/` prefixes with the absolute `SAMVIL_ROOT` path
+  when installing `~/.codex/AGENTS.md`. Previously Codex CLI could not resolve
+  instruction files (e.g. `references/codex-commands/samvil-interview.md`) when
+  running from a user's project directory instead of the SAMVIL source tree.
+
+---
+
 ## v4.10.0 — 2026-04-28
 
 **Brownfield Interview Mode — code analysis + interview + seed merge (MINOR)**
