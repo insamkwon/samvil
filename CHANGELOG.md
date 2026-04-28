@@ -4,6 +4,19 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.10.2 — 2026-04-29
+
+**Codex CLI samvil.md health check parity (PATCH)**
+
+- `references/codex-commands/samvil.md`: added `health_check()`,
+  `get_health_tier_summary()`, `aggregate_orchestrator_state()`, tier
+  selection prompt, brownfield routing, `.samvil/` initialization, and
+  pipeline start banner — matching the Claude Code SKILL.md boot sequence.
+  Previously Codex skipped all environment/version checks and jumped
+  straight to "무엇을 만들까요?".
+
+---
+
 ## v4.10.1 — 2026-04-28
 
 **Codex CLI AGENTS.md path fix (PATCH)**
