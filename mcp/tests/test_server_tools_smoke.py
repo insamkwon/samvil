@@ -402,3 +402,18 @@ def test_is_state_stalled_missing_file_does_not_raise(tmp_path: Path) -> None:
     data = json.loads(out)
     assert data["stalled"] is False
     assert data["reason"] == "state_missing"
+
+
+def test_health_check_returns_required_fields() -> None:
+    from samvil_mcp.server import health_check
+    out = _run(health_check())
+    data = json.loads(out)
+    assert "samvil_version" in data
+    assert "tool_count" in data
+    assert "db_ok" in data
+    assert "python_version" in data
+    assert "summary" in data
+    assert data["samvil_version"]
+    assert isinstance(data["tool_count"], int)
+    assert isinstance(data["db_ok"], bool)
+    assert "." in data["python_version"]

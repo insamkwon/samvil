@@ -4707,6 +4707,40 @@ async def get_health_tier_summary(
         return json.dumps({"error": str(e)})
 
 
+@mcp.tool()
+async def health_check() -> str:
+    """Return SAMVIL system info for the Health Check table.
+
+    Returns samvil_version, tool_count, db_ok, python_version so the
+    skill can render a complete environment table without shell calls.
+    """
+    import sys as _sys
+    from . import __version__ as _samvil_version
+
+    db_ok = False
+    try:
+        _get_store()
+        db_ok = True
+    except Exception:
+        pass
+
+    # Count registered MCP tools via the FastMCP internal registry
+    try:
+        tool_count = len(mcp._tool_manager._tools)  # type: ignore[attr-defined]
+    except Exception:
+        tool_count = 0
+
+    result = {
+        "samvil_version": _samvil_version,
+        "tool_count": tool_count,
+        "db_ok": db_ok,
+        "python_version": f"{_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro}",
+        "summary": f"SAMVIL v{_samvil_version} | {tool_count} tools | DB {'✅' if db_ok else '❌'} | Python {_sys.version_info.major}.{_sys.version_info.minor}",
+    }
+    _log_mcp_health("ok", "health_check")
+    return json.dumps(result)
+
+
 # ── Regression Suite (Option B) ───────────────────────────────
 
 
