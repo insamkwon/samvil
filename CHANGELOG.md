@@ -4,6 +4,21 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.10.4 — 2026-04-29
+
+**health_check MCP tool + environment table (MINOR)**
+
+- `server.py`: new `health_check()` MCP tool (173rd tool) returns
+  `samvil_version`, `tool_count`, `db_ok`, `python_version`, `summary`.
+  Previously referenced in SKILL.md but did not exist.
+- `skills/samvil/SKILL.md`: boot step 1 now calls `health_check()` +
+  `get_health_tier_summary()` + bash version checks in parallel, then
+  renders a full 8-row environment table (SAMVIL / Node / Python / uv /
+  gh / MCP tools / DB / Health Tier) before asking any question.
+- 1 new smoke test in `test_server_tools_smoke.py`.
+
+---
+
 ## v4.10.3 — 2026-04-29
 
 **Health tier rolling window — prevent stale CRITICAL (PATCH)**
