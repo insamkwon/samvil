@@ -4,6 +4,35 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.14.0 — 2026-04-30
+
+**Auto-recovery for stuck stages (MINOR)**
+
+Phase C.④ of the 5-phase pipeline-improvement plan.
+
+- `mcp/samvil_mcp/auto_recovery.py` (new): composes `is_state_stalled`
+  + `stall_recovery_count` + `build_reawake_message` into a single
+  decision call. Returns one of four actions:
+  - `none`     pipeline healthy
+  - `reentry`  stalled but under retry budget; re-enter current stage
+  - `escalate` retries exhausted; halt automation, ask user (P10)
+  - `block`    state corruption; cannot auto-recover
+- `evaluate_stuck_recovery(project_root, apply, threshold_seconds)` MCP
+  tool (175th tool). Default `apply=False` keeps the call side-effect
+  free; `apply=True` on `reentry` bumps `stall_recovery_count` so the
+  next call (still stalled) escalates correctly.
+- Reuses existing primitives — no new state schema, no new event types.
+  Just a new orchestrator that skill bodies can call without chaining
+  three tools manually.
+- `mcp/tests/test_auto_recovery.py` (new): 8 tests covering each verdict
+  branch, the apply flag, MCP wrapping, and tool registration.
+
+User-facing change: when a stage stalls, the pipeline can either resume
+itself (within the 2-retry budget) or surface a clear AskUserQuestion
+to the user, instead of silently sitting at idle.
+
+---
+
 ## v4.13.0 — 2026-04-30
 
 **Real-time progress panel + ETA (MINOR)**

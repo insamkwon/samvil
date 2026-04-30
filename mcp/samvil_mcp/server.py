@@ -4822,6 +4822,42 @@ async def compare_generations(
 
 
 @mcp.tool()
+async def evaluate_stuck_recovery(
+    project_root: str,
+    apply: bool = False,
+    threshold_seconds: int = 300,
+) -> str:
+    """Recommend an auto-recovery action when the pipeline appears stuck.
+
+    Composes is_state_stalled + stall_recovery_count + reawake message
+    into one decision call so skill bodies don't need to chain three
+    tools manually. Returns one of four actions:
+
+      - none      pipeline is healthy
+      - reentry   stalled but under retry budget; re-enter current stage
+      - escalate  retries exhausted; halt automation, ask user (P10)
+      - block     state corruption; cannot auto-recover
+
+    With apply=True, a `reentry` verdict bumps stall_recovery_count
+    so the next call (still stalled) escalates. Default apply=False
+    keeps the call side-effect-free for inspection/dry-run use.
+    """
+    from .auto_recovery import evaluate_stuck_recovery as _evaluate
+
+    try:
+        result = _evaluate(
+            project_root,
+            apply=bool(apply),
+            threshold_seconds=int(threshold_seconds),
+        )
+        _log_mcp_health("ok", "evaluate_stuck_recovery")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "evaluate_stuck_recovery", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def render_progress_panel(project_root: str) -> str:
     """Return a structured progress view + ASCII panel for the user.
 
