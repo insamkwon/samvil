@@ -4,6 +4,30 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.15.1 — 2026-04-30
+
+**Versioning policy tightened — PATCH-first (PATCH)**
+
+- `CLAUDE.md` Versioning section rewritten:
+  - **PATCH is the default** for nearly all changes (bug fixes, new MCP
+    tools that aren't yet wired into a skill, CI/test/script infra,
+    documentation, refactors, new hooks).
+  - **MINOR** reserved for genuinely big work that changes what the user
+    sees when running `/samvil` (new stage skill, chain reorder, new
+    solution_type, large user-visible feature bundle).
+  - **MAJOR** only when the user explicitly asks — never inferred.
+- New decision heuristic: "when in doubt, PATCH". A new MCP tool that
+  no skill body calls yet → PATCH (must be wired into the user path
+  before MINOR is justified).
+- Self-applying rule: this change is doc-only, hence PATCH (v4.15.0 → v4.15.1).
+- No code change. No new tests. Pre-commit 10/10 still green.
+
+Retrospective on this session's bumps: 5 of the 6 MINOR bumps
+(v4.12.0–v4.15.0) would have been PATCH under the new policy. v4.11.0
+remains a legitimate MINOR (Codex auto-proceed visibly changes user UX).
+
+---
+
 ## v4.15.0 — 2026-04-30
 
 **Nightly dogfood smoke (MINOR)**

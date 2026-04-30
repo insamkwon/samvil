@@ -364,26 +364,40 @@ Supports multiple stacks (CLI-based scaffold, no template folder):
 
 **git push 전에 반드시 버전을 올린다.** SSOT: `.claude-plugin/plugin.json`의 `version` 필드.
 
-### 판정 기준: "사용자가 차이를 느끼는가?"
+### 판정 기준 (v4.15.2+ 정책)
 
-| 레벨 | 기준 | 예시 |
-|------|------|------|
-| **PATCH** (0.0.+1) | 사용자가 차이를 모름 | 프롬프트 문구 개선, 오타, 버그 수정, 내부 리팩토링, 문서 수정 |
-| **MINOR** (0.+1.0) | 사용자가 새로운 걸 보거나 경험함 | 새 스킬/에이전트/프리셋, 새 단계 추가 (Smoke Run 등), 새 스택 지원, 새 설정 옵션, 수동→자동 전환 |
-| **MAJOR** (+1.0.0) | 기존 프로젝트가 깨질 수 있음 | seed 스키마 변경, INV 규칙 변경, config 필수 필드 변경, 체인 순서 변경 |
+**기본값은 항상 PATCH.** MINOR/MAJOR로 올리려면 명시적 사유가 필요하다.
+
+| 레벨 | 위치 | 언제 올리는가 | 예시 |
+|------|------|------|------|
+| **PATCH** (`0.0.+1`) | 끝자리 | **기본값** — 거의 모든 변경 | 버그 수정, 새 MCP 도구 추가(아직 미사용), 새 CI/script/test infra, 문서, 리팩토링, 내부 모듈 추가, pre-commit 체크 추가, 새 hook |
+| **MINOR** (`0.+1.0`) | 가운데 | **정말 큰 작업일 때만** — 사용자가 `/samvil` 돌릴 때 명백히 새 동작/단계/스킬을 본다 | 새 stage skill 추가, 체인 순서 변경, 새 solution_type 지원, 사용자 경로에 wired된 큰 기능 묶음 |
+| **MAJOR** (`+1.0.0`) | 첫자리 | **사용자가 명시할 때만** | breaking change 의도적 릴리스 |
+
+### 결정 휴리스틱
+
+- "사용자가 `/samvil` 명령 한 번 실행했을 때 결과가 다른가?" → 다르면 MINOR 후보, 아니면 PATCH.
+- "새 MCP 도구를 추가했지만 아직 어떤 skill body도 호출하지 않는다" → **PATCH** (사용자 경로에 wiring 되어야 MINOR).
+- "여러 PATCH-급 변경을 한 묶음으로 커밋했지만 각각은 작다" → **PATCH** (묶음이 크다고 MINOR가 되지 않음).
+- "CI/test/script 인프라만 변경" → **PATCH** (사용자 경로에 영향 없음).
+- 애매하면 **PATCH**로 결정. 의심 시 PATCH가 안전.
+
+### MAJOR 정책 (엄격)
+
+MAJOR는 사용자가 **명시적으로** "MAJOR 올려" / "breaking change야" 라고 말할 때만 올린다.
+"이거 큰 변경 아니야?" 같은 추측만으로 MAJOR를 올리지 않는다. 의심 시 MINOR.
 
 ### MINOR-bump cap relaxation (v3.3+)
 
-The MINOR position (second number) is no longer auto-promoted to MAJOR when it
-reaches 10. Versions like 3.10.0, 3.42.0, and 3.99.0 are valid and indicate
-cumulative MINOR work without breaking changes. MAJOR bumps are reserved for
-explicit breaking-change releases per the table above.
+MINOR 위치(두 번째 숫자)는 10 도달 시 MAJOR로 자동 승격되지 않는다.
+3.42.0, 4.99.0 같은 버전은 유효하며, breaking change 없는 누적 MINOR 작업을
+의미한다.
 
 ### 판정 테스트
 
-- PATCH: `/samvil` 실행 시 사용자 경험이 동일.
-- MINOR: `/samvil` 실행 시 새로운 출력/질문/옵션이 보임.
-- MAJOR: 이전 버전으로 만든 프로젝트에 새 버전 실행 시 에러.
+- PATCH: `/samvil` 실행 시 사용자 경험이 동일하거나, 변경이 사용자 경로에 wired되지 않음.
+- MINOR: `/samvil` 실행 시 새로운 출력/질문/옵션/단계를 사용자가 분명히 본다.
+- MAJOR: 사용자가 breaking change임을 명시.
 
 ### 버전업 체크리스트 (push 전 필수)
 
