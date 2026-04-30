@@ -545,3 +545,115 @@ def test_recurring_pattern_walks_legacy_suggestions(tmp_path: Path) -> None:
     )
     keywords = {p["keyword"] for p in out["recurring_patterns"]}
     assert "tailwind" in keywords
+
+
+# ── Behavior 13: v3-003 file-based fallback (sparse events) ────
+
+
+def _write_qa_results(root: Path, verdict: str, ac_statuses: list[str]) -> None:
+    samvil = root / ".samvil"
+    samvil.mkdir(exist_ok=True)
+    ac_results = [{"id": f"AC-{i+1}", "status": s} for i, s in enumerate(ac_statuses)]
+    (samvil / "qa-results.json").write_text(
+        json.dumps({"verdict": verdict, "ac_results": ac_results}),
+        encoding="utf-8",
+    )
+
+
+def test_qa_verdict_from_qa_results_when_events_sparse(tmp_path: Path) -> None:
+    """When events.jsonl has no qa_history, derive verdict from qa-results.json."""
+    # State has no qa_history; events.jsonl is empty
+    state = {"completed_features": ["feat_a"], "config": {"selected_tier": "standard"}}
+    (tmp_path / "project.state.json").write_text(json.dumps(state), encoding="utf-8")
+    _write_seed(tmp_path)
+    _write_qa_results(tmp_path, "PASS", ["PASS", "PASS", "PASS"])
+    # Deliberately sparse events (no ac_leaf_complete entries)
+    _write_events(tmp_path, [{"stage": "qa", "event_type": "stage_start"}])
+
+    out = retro_aggregate.aggregate_retro_metrics(str(tmp_path))
+    assert out["metrics"]["qa_verdict"] == "PASS"
+
+
+def test_leaf_stats_from_qa_results_when_events_empty(tmp_path: Path) -> None:
+    """v3_leaf_stats should read ac_results from qa-results.json when no leaf events."""
+    state = {"config": {"selected_tier": "standard"}}
+    (tmp_path / "project.state.json").write_text(json.dumps(state), encoding="utf-8")
+    _write_seed(tmp_path)
+    _write_qa_results(tmp_path, "PASS", ["PASS", "PASS", "FAIL"])
+    # No ac_leaf_complete events
+    _write_events(tmp_path, [])
+
+    out = retro_aggregate.aggregate_retro_metrics(str(tmp_path))
+    leaf_stats = out["v3_leaf_stats"]
+    assert leaf_stats["total_leaf_events"] == 3
+    assert leaf_stats["by_status"]["PASS"] == 2
+    assert leaf_stats["by_status"]["FAIL"] == 1
+    assert leaf_stats["source"] == "qa_results"
+
+
+def test_leaf_stats_from_seed_when_qa_results_absent(tmp_path: Path) -> None:
+    """v3_leaf_stats should fall back to seed.features AC tree as last resort."""
+    features = [
+        {
+            "name": "f1",
+            "description": "x",
+            "acceptance_criteria": [
+                {"id": "AC-1", "description": "x", "status": "PASS", "children": []},
+                {"id": "AC-2", "description": "y", "status": "FAIL", "children": []},
+            ],
+        }
+    ]
+    seed = {"schema_version": "3.0", "name": "demo", "features": features}
+    (tmp_path / "project.seed.json").write_text(json.dumps(seed), encoding="utf-8")
+    state = {"config": {"selected_tier": "standard"}}
+    (tmp_path / "project.state.json").write_text(json.dumps(state), encoding="utf-8")
+    # No qa-results.json, no events
+    _write_events(tmp_path, [])
+
+    out = retro_aggregate.aggregate_retro_metrics(str(tmp_path))
+    leaf_stats = out["v3_leaf_stats"]
+    assert leaf_stats["total_leaf_events"] == 2
+    assert leaf_stats["by_status"]["PASS"] == 1
+    assert leaf_stats["by_status"]["FAIL"] == 1
+    assert leaf_stats["source"] == "seed"
+
+
+def test_flow_compliance_from_completed_stages_when_events_empty(tmp_path: Path) -> None:
+    """compute_flow_compliance falls back to state.completed_stages when events are empty."""
+    state = {
+        "completed_stages": ["interview", "seed", "scaffold", "build", "qa"],
+        "config": {"selected_tier": "standard"},
+    }
+    (tmp_path / "project.state.json").write_text(json.dumps(state), encoding="utf-8")
+    _write_seed(tmp_path)
+    _write_events(tmp_path, [])  # no stage events
+
+    out = retro_aggregate.aggregate_retro_metrics(str(tmp_path))
+    fc = out["flow_compliance"]
+    assert fc["source"] == "state_file"
+    assert "interview" in fc["actual_sequence"]
+    assert "qa" in fc["actual_sequence"]
+
+
+def test_features_from_seed_when_state_has_no_completed_features(tmp_path: Path) -> None:
+    """extract_metrics derives feature counts from seed AC tree when state is silent."""
+    features = [
+        {
+            "name": "timer",
+            "description": "countdown timer",
+            "acceptance_criteria": [
+                {"id": "AC-1", "description": "starts", "status": "PASS", "children": []},
+                {"id": "AC-2", "description": "stops", "status": "PASS", "children": []},
+            ],
+        }
+    ]
+    seed = {"schema_version": "3.0", "name": "demo", "features": features}
+    (tmp_path / "project.seed.json").write_text(json.dumps(seed), encoding="utf-8")
+    # State has no completed_features
+    state: dict = {"config": {"selected_tier": "standard"}}
+    (tmp_path / "project.state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    out = retro_aggregate.aggregate_retro_metrics(str(tmp_path))
+    m = out["metrics"]
+    assert m["features_passed"] == 2
+    assert m["features_attempted"] == 2

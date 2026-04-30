@@ -4,6 +4,55 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.11.0 — 2026-04-30
+
+**Pomodoro dogfood retro improvements: Vite deploy fix + CLI pin + retro fallback + Codex auto-proceed (MINOR)**
+
+Four improvements from the pomodoro-timer Codex dogfood retro:
+
+### v3-001 — Vite deploy artifact path fix
+
+- `mcp/samvil_mcp/deploy_targets.py`: added `_VITE_LIKE_FRAMEWORKS` frozenset and
+  `_artifact_paths_for_framework()` helper. `evaluate_deploy_target()` now resolves
+  artifact paths from `seed.tech_stack.framework` (Vite/Astro → `dist/`,
+  Next.js → `.next/`) instead of hardcoding per `solution_type`.
+  Previously Vite web-app projects were blocked by Next.js artifact assumptions.
+- 8 new tests in `test_deploy_smoke.py`.
+
+### v3-002 — create-vite CLI version pin separation
+
+- `references/dependency-matrix.json`: `vite-react` and `phaser-game` stacks now use
+  `npm create vite@latest` in `cli_command` with a `scaffold_cli`, `_cli_preflight`,
+  and `_cli_note` field. Previously `npm create vite@5` could be misread as
+  `create-vite@5.4.21` (same as the runtime pin), which doesn't exist on npm.
+- `mcp/tests/test_scaffold.py`: updated `test_cli_commands_are_valid` to allow `@latest`,
+  and `test_version_format_consistency` to skip `_`-prefixed metadata keys and `scaffold_cli`.
+
+### v3-003 — Retro metrics file-based fallback
+
+- `mcp/samvil_mcp/retro_aggregate.py`: when `events.jsonl` is sparse (e.g., Codex
+  runs that don't emit all MCP events), metrics now fall back to:
+  - `qa-results.json` for QA verdict and AC leaf counts.
+  - `project.state.json` `completed_stages` for flow compliance.
+  - `seed.features` AC tree for leaf status counts (last resort).
+  - `project.state.json` `qa_status` for verdict (always-written fallback).
+- New helpers: `_derive_features_from_seed`, `_derive_qa_verdict_from_files`.
+- `compute_v3_leaf_stats` and `compute_flow_compliance` now accept `qa_results`/`seed`/`state`
+  optional params; results include a `source` field (`events|qa_results|seed|state_file`).
+- `aggregate_retro_metrics` also reads `qa-results.json` and passes it through.
+- 5 new tests in `test_retro_smoke.py` (total: 21 tests).
+
+### User FB — Codex chain auto-proceed for evolve/retro
+
+- `references/codex-commands/samvil-evolve.md`: added **Auto-Proceed Policy** section.
+  After evolve completes (when convergence succeeds without regressions), Codex must
+  immediately start `samvil-retro` without asking for user confirmation.
+- `references/codex-commands/samvil-retro.md`: added **Auto-Proceed Policy** section.
+  Retro is always mechanical — executes immediately when chained, no pause for confirmation.
+  The only user-decision point is the optional evolve-cycle prompt at the very end.
+
+---
+
 ## v4.10.4 — 2026-04-29
 
 **health_check MCP tool + environment table (MINOR)**

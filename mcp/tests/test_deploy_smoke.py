@@ -240,6 +240,81 @@ def test_evaluate_missing_seed_does_not_crash(tmp_path: Path) -> None:
     assert result["qa_gate"]["verdict"] == "blocked"
 
 
+# ── _artifact_paths_for_framework (v3-001) ────────────────────
+
+
+def test_artifact_paths_vite_react_returns_dist() -> None:
+    """vite-react framework must resolve to dist/, not .next/."""
+    paths = deploy_targets._artifact_paths_for_framework(
+        "web-app", {"framework": "vite-react"}
+    )
+    assert paths == ["dist"]
+
+
+def test_artifact_paths_nextjs_returns_next() -> None:
+    """nextjs framework must continue to resolve to .next/."""
+    paths = deploy_targets._artifact_paths_for_framework(
+        "web-app", {"framework": "nextjs"}
+    )
+    assert paths == [".next"]
+
+
+def test_artifact_paths_vite_variants_all_return_dist() -> None:
+    """All Vite-family frameworks (vite, astro, sveltekit, remix) → dist/."""
+    vite_like = ["vite", "vite-react", "vite-vue", "vite-svelte", "astro", "sveltekit", "remix"]
+    for fw in vite_like:
+        paths = deploy_targets._artifact_paths_for_framework("web-app", {"framework": fw})
+        assert paths == ["dist"], f"Expected dist for framework={fw}, got {paths}"
+
+
+def test_artifact_paths_version_suffix_stripped() -> None:
+    """Framework pins like 'vite-react@5' must still match as vite-react."""
+    paths = deploy_targets._artifact_paths_for_framework(
+        "web-app", {"framework": "vite-react@5"}
+    )
+    assert paths == ["dist"]
+
+
+def test_artifact_paths_no_tech_stack_falls_back_to_solution_type() -> None:
+    """Missing tech_stack must fall back to ARTIFACT_PATHS per solution_type."""
+    assert deploy_targets._artifact_paths_for_framework("web-app", None) == [".next"]
+    assert deploy_targets._artifact_paths_for_framework("game", None) == ["dist"]
+    assert deploy_targets._artifact_paths_for_framework("mobile-app", None) == []
+
+
+def test_evaluate_vite_react_happy_path(tmp_path: Path) -> None:
+    """vite-react project with dist/ present and QA PASS must be ready=True."""
+    _write_state(tmp_path, "PASS")
+    _write_seed(tmp_path, solution_type="web-app", tech_stack={"framework": "vite-react"})
+    (tmp_path / "dist").mkdir()
+
+    result = deploy_targets.evaluate_deploy_target(str(tmp_path))
+    assert result["build_artifact"]["checked_paths"] == ["dist"]
+    assert result["ready"] is True, result["blockers"]
+
+
+def test_evaluate_vite_react_missing_dist_is_blocker(tmp_path: Path) -> None:
+    """vite-react project without dist/ must surface a build-artifact blocker."""
+    _write_state(tmp_path, "PASS")
+    _write_seed(tmp_path, solution_type="web-app", tech_stack={"framework": "vite-react"})
+    # dist/ does NOT exist
+
+    result = deploy_targets.evaluate_deploy_target(str(tmp_path))
+    assert result["build_artifact"]["checked_paths"] == ["dist"]
+    assert any("build artifact missing" in b for b in result["blockers"])
+
+
+def test_evaluate_nextjs_no_false_positive_with_vite_seed(tmp_path: Path) -> None:
+    """A Next.js project with .next/ present must NOT be blocked as if Vite."""
+    _write_state(tmp_path, "PASS")
+    _write_seed(tmp_path, solution_type="web-app", tech_stack={"framework": "nextjs"})
+    (tmp_path / ".next").mkdir()
+
+    result = deploy_targets.evaluate_deploy_target(str(tmp_path))
+    assert result["build_artifact"]["checked_paths"] == [".next"]
+    assert result["ready"] is True, result["blockers"]
+
+
 # ── Wiring on live MCP server ─────────────────────────────────
 
 

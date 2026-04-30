@@ -80,10 +80,11 @@ def test_cli_commands_are_valid(matrix):
         assert cli.startswith(("npx ", "npm ")), (
             f"Stack '{stack}' cli_command must start with npx or npm: {cli}"
         )
-        # Must contain at least a major-version pin (@X or @X.Y or @X.Y.Z).
-        # Note: some CLI scaffolders (e.g. create-vite) only accept major pins.
-        assert re.search(r"@\d+", cli), (
-            f"Stack '{stack}' cli_command must include a pinned version (at least major): {cli}"
+        # Must contain at least a major-version pin (@X or @X.Y or @X.Y.Z)
+        # OR @latest (v3-002: CLI scaffolders like create-vite use @latest to avoid
+        # version mismatch between the CLI package and the runtime package).
+        assert re.search(r"@\d+", cli) or "@latest" in cli, (
+            f"Stack '{stack}' cli_command must include a pinned version or @latest: {cli}"
         )
 
 
@@ -92,10 +93,13 @@ def test_cli_commands_are_valid(matrix):
 
 def test_version_format_consistency(matrix):
     """버전 번호가 semver 형식(package@major.minor.patch)이어야 함."""
+    # Keys that intentionally use @latest or are free-text metadata (v3-002)
+    _SKIP_KEYS = {"cli_command", "shadcn_components", "notes", "scaffold_cli", "status"}
     for stack in REQUIRED_STACKS:
         stack_data = matrix[stack]
         for key, value in stack_data.items():
-            if key in ("cli_command", "shadcn_components", "notes"):
+            # Skip metadata/note keys (prefixed with _) and explicitly excluded keys
+            if key.startswith("_") or key in _SKIP_KEYS:
                 continue
             if isinstance(value, str) and "@" in value:
                 # Format: "package@X.Y.Z" or "@scope/package@X.Y.Z"

@@ -1,5 +1,18 @@
 # SAMVIL Evolve Stage (Codex CLI)
 
+## Auto-Proceed Policy
+
+This stage is **mechanical** when convergence succeeds on the first attempt.
+Pause and ask the user ONLY when:
+
+- Convergence fails after 2 full cycles (circuit breaker).
+- QA regressions are detected (evolved seed scores lower than current seed).
+- The user has explicitly asked to review the evolved seed before saving.
+
+In all other cases, complete the stage and **immediately proceed** to
+`samvil-retro` without asking for confirmation — the user has already
+approved the pipeline continuation by starting it.
+
 ## Prerequisites
 
 Read `.samvil/next-skill.json`. If `next_skill` is not `samvil-evolve`, skip this stage.
@@ -26,5 +39,7 @@ Ensure `.samvil/project.seed.json` exists and QA/deploy is complete.
 
 ## Chain
 
-After completing: read `.samvil/next-skill.json` for the next stage (samvil-retro).
-Tell the user the next command to run.
+After completing: **immediately proceed to execute the `samvil-retro` stage**
+without waiting for user input (see Auto-Proceed Policy above).
+Do not print "next stage is retro" and stop — continue executing retro
+in the same session unless a circuit-breaker or regression halts the chain.

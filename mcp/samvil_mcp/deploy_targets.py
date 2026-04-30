@@ -194,6 +194,8 @@ DEPLOY_CATALOG: dict[str, list[dict[str, Any]]] = {
 
 
 # Per-solution_type build-artifact paths the skill checks before deploy.
+# web-app and dashboard default to .next (Next.js), but are overridden
+# by _artifact_paths_for_framework() when the seed declares a Vite/Astro stack.
 ARTIFACT_PATHS: dict[str, list[str]] = {
     "web-app": [".next"],
     "dashboard": [".next"],
@@ -201,6 +203,31 @@ ARTIFACT_PATHS: dict[str, list[str]] = {
     "mobile-app": [],  # EAS handles its own build artifacts
     "automation": [],  # No web build artifact
 }
+
+# Frameworks that produce dist/ instead of .next/
+_VITE_LIKE_FRAMEWORKS = frozenset({
+    "vite", "vite-react", "vite-vue", "vite-svelte",
+    "astro", "sveltekit", "remix",
+})
+
+
+def _artifact_paths_for_framework(
+    solution_type: str,
+    tech_stack: dict[str, object] | None,
+) -> list[str]:
+    """Return artifact paths, taking framework into account.
+
+    Vite/Astro-family frameworks produce `dist/` not `.next/`.
+    Falls back to ARTIFACT_PATHS when framework is absent or unknown.
+    """
+    framework = ""
+    if isinstance(tech_stack, dict):
+        fw = tech_stack.get("framework") or ""
+        framework = str(fw).lower().split("@")[0].strip()
+
+    if framework in _VITE_LIKE_FRAMEWORKS:
+        return ["dist"]
+    return ARTIFACT_PATHS.get(solution_type, [])
 
 
 # Placeholder strings that count as "not filled in yet" for env vars.
@@ -413,7 +440,9 @@ def evaluate_deploy_target(
     qa_gate = evaluate_qa_gate(state)
     env_info = parse_env_example(root / ".env.example")
 
-    artifact_paths = ARTIFACT_PATHS.get(solution_type_used, [])
+    artifact_paths = _artifact_paths_for_framework(
+        solution_type_used, seed.get("tech_stack")
+    )
     artifact_present = any((root / p).exists() for p in artifact_paths)
     build_artifact = {
         "checked_paths": artifact_paths,

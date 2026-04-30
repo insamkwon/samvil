@@ -153,11 +153,67 @@ def _normalize_keywords(text: str) -> list[str]:
 # ── Sub-aggregators ────────────────────────────────────────────────────
 
 
+def _derive_features_from_seed(seed: dict[str, Any]) -> tuple[int, int, int]:
+    """Return (attempted, passed, failed) from seed.features when state is silent.
+
+    Uses the leaf-level status fields that samvil-build writes back into
+    the seed's AC tree. Falls back to feature count with unknown status.
+    """
+    features = seed.get("features") or []
+    if not isinstance(features, list):
+        return 0, 0, 0
+    passed = failed = 0
+    for f in features:
+        if not isinstance(f, dict):
+            continue
+        acs = f.get("acceptance_criteria") or []
+        if not isinstance(acs, list):
+            continue
+        for ac in acs:
+            if not isinstance(ac, dict):
+                continue
+            status = str(ac.get("status", "")).upper()
+            if status == "PASS":
+                passed += 1
+            elif status in ("FAIL", "FAILED"):
+                failed += 1
+    total = len(features)
+    if passed == 0 and failed == 0:
+        return total, 0, 0
+    return passed + failed, passed, failed
+
+
+def _derive_qa_verdict_from_files(
+    state: dict[str, Any],
+    qa_results: dict[str, Any],
+) -> tuple[str, int]:
+    """Return (qa_verdict, qa_iterations) from state/qa-results when
+    events.jsonl doesn't carry qa_history.
+    """
+    verdict = ""
+    iterations = 0
+    # 1. Direct qa_status field in state (samvil writes this)
+    raw = str(state.get("qa_status") or "").strip().upper()
+    if raw:
+        verdict = raw
+    # 2. qa_results.json overall verdict
+    if not verdict:
+        raw = str(qa_results.get("verdict") or qa_results.get("overall_verdict") or "").strip().upper()
+        if raw:
+            verdict = raw
+    # 3. Count iterations from qa_results passes array
+    passes = qa_results.get("passes") or []
+    if isinstance(passes, list):
+        iterations = len(passes)
+    return verdict, iterations
+
+
 def extract_metrics(
     state: dict[str, Any],
     metrics: dict[str, Any],
     seed: dict[str, Any],
     interview_summary_path: Path,
+    qa_results: dict[str, Any] | None = None,
 ) -> RunMetrics:
     rm = RunMetrics()
     rm.seed_name = str(seed.get("name", state.get("seed_name", "")))
@@ -169,6 +225,12 @@ def extract_metrics(
     rm.features_failed = len(failed) if isinstance(failed, list) else 0
     rm.features_attempted = rm.features_passed + rm.features_failed
 
+    # File-based fallback when state has no completed_features (sparse events)
+    if rm.features_attempted == 0 and seed:
+        rm.features_attempted, rm.features_passed, rm.features_failed = (
+            _derive_features_from_seed(seed)
+        )
+
     rm.build_retries = int(state.get("build_retries", 0) or 0)
     qa_history = state.get("qa_history") or []
     rm.qa_iterations = len(qa_history) if isinstance(qa_history, list) else 0
@@ -178,6 +240,18 @@ def extract_metrics(
             rm.qa_verdict = str(last.get("verdict", "")).upper()
         elif isinstance(last, str):
             rm.qa_verdict = last.upper()
+
+    # File-based fallback when qa_history is absent (Codex sparse events)
+    if not rm.qa_verdict and qa_results is not None:
+        derived_verdict, derived_iters = _derive_qa_verdict_from_files(state, qa_results)
+        rm.qa_verdict = derived_verdict
+        if rm.qa_iterations == 0 and derived_iters:
+            rm.qa_iterations = derived_iters
+    # Final fallback: qa_status on state (always written by samvil-qa)
+    if not rm.qa_verdict:
+        raw = str(state.get("qa_status") or "").strip().upper()
+        if raw:
+            rm.qa_verdict = raw
 
     rm.interview_questions = _count_questions(interview_summary_path)
 
@@ -279,10 +353,14 @@ def compute_flow_compliance(
     events: list[dict[str, Any]],
     *,
     planned: tuple[str, ...] = PLANNED_STAGES,
+    state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Walk events.jsonl, extract the actual stage sequence (deduped
     consecutive), count per-stage entries, and compare against the
     planned canonical order.
+
+    Falls back to `state.completed_stages` when events.jsonl is sparse
+    (e.g., Codex runs that didn't emit full stage events).
     """
     sequence: list[str] = []
     counts: Counter[str] = Counter()
@@ -293,6 +371,19 @@ def compute_flow_compliance(
         counts[stage] += 1
         if not sequence or sequence[-1] != stage:
             sequence.append(stage)
+
+    source = "events"
+    # File-based fallback: completed_stages in project.state.json
+    if not sequence and state:
+        completed_stages = state.get("completed_stages") or []
+        if isinstance(completed_stages, list):
+            for s in completed_stages:
+                s = str(s)
+                if s and (not sequence or sequence[-1] != s):
+                    sequence.append(s)
+                counts[s] += 1
+            if sequence:
+                source = "state_file"
 
     deviations: list[str] = []
     for stage in planned:
@@ -313,6 +404,7 @@ def compute_flow_compliance(
         "deviations": deviations,
         "skipped_stages": skipped,
         "matched": len(deviations) == 0 and not skipped,
+        "source": source,
     }
 
 
@@ -363,11 +455,15 @@ def compute_agent_utilization(
     }
 
 
-def compute_v3_leaf_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
+def compute_v3_leaf_stats(
+    events: list[dict[str, Any]],
+    qa_results: dict[str, Any] | None = None,
+    seed: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Group `ac_leaf_complete` events by `data.status`.
 
-    Surfaces v3 AC-tree progress metrics. Empty when no leaf events
-    exist (e.g., v2 runs).
+    Falls back to qa-results.json AC counts and seed.features AC tree
+    when events.jsonl is sparse (e.g., Codex runs that skipped MCP writes).
     """
     by_status: Counter[str] = Counter()
     leaves_seen = 0
@@ -396,10 +492,39 @@ def compute_v3_leaf_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
                 }
             )
 
+    # File-based fallback: derive leaf stats from qa-results.json
+    if leaves_seen == 0 and qa_results:
+        ac_results = qa_results.get("ac_results") or qa_results.get("results") or []
+        if isinstance(ac_results, list):
+            for ac in ac_results:
+                if not isinstance(ac, dict):
+                    continue
+                status = str(ac.get("status", "unknown")).upper()
+                by_status[status] += 1
+                leaves_seen += 1
+
+    # Last resort: walk seed.features AC tree for status counts
+    if leaves_seen == 0 and seed:
+        for f in (seed.get("features") or []):
+            if not isinstance(f, dict):
+                continue
+            for ac in (f.get("acceptance_criteria") or []):
+                if not isinstance(ac, dict):
+                    continue
+                status = str(ac.get("status", "unknown")).upper()
+                by_status[status] += 1
+                leaves_seen += 1
+
     return {
         "total_leaf_events": leaves_seen,
         "by_status": dict(by_status),
         "feature_tree_complete": feature_tree_complete,
+        "source": (
+            "events"
+            if any(ev.get("event_type") == "ac_leaf_complete" for ev in events)
+            else ("qa_results" if (qa_results and qa_results.get("ac_results"))
+                  else ("seed" if leaves_seen > 0 else "none"))
+        ),
     }
 
 
@@ -520,8 +645,10 @@ def aggregate_retro_metrics(
     metrics = _read_json(proj / ".samvil" / "metrics.json")
     events = _read_jsonl(proj / ".samvil" / "events.jsonl")
     interview_summary = proj / "interview-summary.md"
+    # v3-003: also load qa-results.json as a file-based fallback source
+    qa_results = _read_json(proj / ".samvil" / "qa-results.json")
 
-    rm = extract_metrics(state, metrics, seed, interview_summary)
+    rm = extract_metrics(state, metrics, seed, interview_summary, qa_results=qa_results or None)
 
     # Resolve harness-feedback.log location:
     # 1. explicit plugin_root arg
@@ -566,9 +693,9 @@ def aggregate_retro_metrics(
         ),
         "metrics": rm.to_dict(),
         "recurring_patterns": detect_recurring_patterns(feedback_entries),
-        "flow_compliance": compute_flow_compliance(events),
+        "flow_compliance": compute_flow_compliance(events, state=state),
         "agent_utilization": compute_agent_utilization(events, state),
-        "v3_leaf_stats": compute_v3_leaf_stats(events),
+        "v3_leaf_stats": compute_v3_leaf_stats(events, qa_results=qa_results or None, seed=seed or None),
         "mcp_health": summarize_mcp_health(
             proj / ".samvil" / "mcp-health.jsonl"
         ),

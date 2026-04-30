@@ -23,7 +23,10 @@
   },
 
   "vite-react": {
-    "cli_command": "npm create vite@5 -- --template react-ts",
+    "cli_command": "npm create vite@latest -- --template react-ts",
+    "_cli_preflight": "npm view create-vite version",
+    "_cli_note": "create-vite and vite are separate packages with independent versioning. Use @latest for the CLI; pin only the installed runtime via framework field. If @latest fails, fall back to: npm create vite -- --template react-ts",
+    "scaffold_cli": "create-vite@latest",
     "framework": "vite@5.4.21",
     "react": "react@18.3.1",
     "react_dom": "react-dom@18.3.1",
@@ -70,7 +73,10 @@
   },
 
   "phaser-game": {
-    "cli_command": "npm create vite@5 -- --template vanilla-ts",
+    "cli_command": "npm create vite@latest -- --template vanilla-ts",
+    "_cli_preflight": "npm view create-vite version",
+    "_cli_note": "create-vite CLI version is independent of the vite runtime version. Use @latest; pin runtime below.",
+    "scaffold_cli": "create-vite@latest",
     "framework": "phaser@3.80",
     "vite": "vite@5.4.21",
     "typescript": "typescript@5.7.3",
