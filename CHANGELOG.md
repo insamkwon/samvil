@@ -4,6 +4,39 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.15.0 — 2026-04-30
+
+**Nightly dogfood smoke (MINOR)**
+
+Phase D.⑤ of the 5-phase pipeline-improvement plan — final phase.
+
+- `scripts/dogfood-smoke.sh` (new): runs a curated fixture seed
+  (`scripts/dogfood-smoke-fixtures/seed.json`, `state.json`) through
+  five deterministic MCP modules — `validate_seed`, `evaluate_deploy_target`,
+  `aggregate_retro_metrics`, `progress_panel`, `auto_recovery` — without
+  burning Anthropic API credits. Reports `N/5 modules consistent`.
+- `.github/workflows/dogfood-nightly.yml` (new): weekly cron (Mon 03:00 UTC)
+  + `workflow_dispatch` so a regression in any of the 5 modules is caught
+  in CI before a real user runs the pipeline.
+- `mcp/tests/test_dogfood_smoke.py` (new): 6 tests verifying fixture
+  schema validity, AC-tree presence, qa_status, script executability,
+  end-to-end script run, and workflow YAML parseability.
+
+User-facing change: regressions in deploy-target detection, retro
+metrics fallback, progress panel rendering, or auto-recovery are now
+caught nightly instead of by the next dogfood user. Combined with
+pre-commit's check #10 (host parity), every layer of SAMVIL is now
+guarded by automation.
+
+5-phase plan complete:
+  ① Plugin auto-sync (v4.11.1)
+  ② Host parity CI (v4.12.0)
+  ③ Progress panel + ETA (v4.13.0)
+  ④ Auto-recovery (v4.14.0)
+  ⑤ Nightly dogfood (v4.15.0) ← this release
+
+---
+
 ## v4.14.0 — 2026-04-30
 
 **Auto-recovery for stuck stages (MINOR)**

@@ -1,0 +1,11 @@
+{
+  "session_id": "dogfood-smoke-fixture",
+  "current_stage": "qa",
+  "completed_stages": ["interview", "seed", "scaffold", "build"],
+  "samvil_tier": "minimal",
+  "qa_status": "PASS",
+  "stall_recovery_count": 0,
+  "config": {
+    "samvil_tier": "minimal"
+  }
+}

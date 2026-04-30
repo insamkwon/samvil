@@ -1,0 +1,75 @@
+{
+  "schema_version": "3.0",
+  "version": 1,
+  "name": "dogfood-todo",
+  "vision": "Minimal todo list for SAMVIL nightly dogfood smoke. Not a real product.",
+  "description": "Tiny todo app used as a stable fixture for the SAMVIL dogfood smoke test. Three features (create / complete / persist) and four ACs.",
+  "solution_type": "web-app",
+  "tech_stack": {
+    "framework": "vite-react",
+    "deploy": "vercel"
+  },
+  "core_experience": {
+    "primary_screen": "TodoListScreen",
+    "key_interactions": [
+      "Type a task name and press Enter to add it.",
+      "Click a task to toggle its done state.",
+      "Reload the page; tasks remain in the list."
+    ]
+  },
+  "constraints": [
+    "Single-user, local only — no auth or backend.",
+    "Must build with vite-react default scaffold."
+  ],
+  "out_of_scope": [
+    "Multi-user collaboration.",
+    "Server-side persistence."
+  ],
+  "features": [
+    {
+      "name": "create-task",
+      "description": "User adds a new todo item.",
+      "priority": 1,
+      "acceptance_criteria": [
+        {
+          "id": "AC-1",
+          "description": "Pressing Enter on a non-empty input adds the item to the list.",
+          "status": "pending",
+          "children": []
+        },
+        {
+          "id": "AC-2",
+          "description": "Empty input is ignored (no item created).",
+          "status": "pending",
+          "children": []
+        }
+      ]
+    },
+    {
+      "name": "complete-task",
+      "description": "User toggles a task as done.",
+      "priority": 2,
+      "acceptance_criteria": [
+        {
+          "id": "AC-3",
+          "description": "Clicking a task toggles its 'done' state and shows strikethrough.",
+          "status": "pending",
+          "children": []
+        }
+      ]
+    },
+    {
+      "name": "persist-tasks",
+      "description": "Tasks persist across page reloads.",
+      "priority": 3,
+      "acceptance_criteria": [
+        {
+          "id": "AC-4",
+          "description": "Tasks are stored in localStorage and restored on next page load.",
+          "status": "pending",
+          "children": []
+        }
+      ]
+    }
+  ]
+}

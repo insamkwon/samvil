@@ -1,0 +1,43 @@
+name: SAMVIL Dogfood Smoke
+
+on:
+  schedule:
+    # Weekly: every Monday at 03:00 UTC (12:00 KST).
+    # Frequency keeps API-cost surface small; the smoke is dry-run by default.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  dogfood-smoke:
+    name: Nightly dogfood smoke (dry-run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python package
+        run: |
+          python3 -m venv mcp/.venv
+          mcp/.venv/bin/python -m pip install --upgrade pip wheel
+          mcp/.venv/bin/python -m pip install -e mcp
+          mcp/.venv/bin/python -m pip install pytest pytest-asyncio
+
+      - name: Run dogfood smoke against fixture
+        run: bash scripts/dogfood-smoke.sh
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dogfood-smoke-output
+          if-no-files-found: ignore
+          path: |
+            scripts/dogfood-smoke-fixtures/seed.json
+            scripts/dogfood-smoke-fixtures/state.json
