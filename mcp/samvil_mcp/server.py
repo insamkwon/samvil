@@ -4821,6 +4821,35 @@ async def compare_generations(
         return json.dumps({"error": str(e)})
 
 
+@mcp.tool()
+async def render_progress_panel(project_root: str) -> str:
+    """Return a structured progress view + ASCII panel for the user.
+
+    Reads project.state.json, project.seed.json, and .samvil/events.jsonl
+    (all best-effort) and emits the data the user needs to answer
+    "where am I, how long until done?":
+
+    - current stage + elapsed time
+    - pipeline strip (✓ done / ● active / blank pending)
+    - AC tree leaf counts (PASS / FAIL / pending)
+    - ETA estimate from per-(stage, samvil_tier) baseline durations
+    - last event age (stall hint)
+
+    Returns JSON: {progress: {...fields...}, panel: "ASCII string"}.
+    Skill bodies typically just print `panel`; programs can use `progress`.
+    """
+    from .progress_panel import compute_progress, render_panel
+
+    try:
+        progress = compute_progress(project_root)
+        panel = render_panel(progress)
+        _log_mcp_health("ok", "render_progress_panel")
+        return json.dumps({"progress": progress, "panel": panel})
+    except Exception as e:
+        _log_mcp_health("fail", "render_progress_panel", str(e))
+        return json.dumps({"error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 

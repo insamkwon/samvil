@@ -4,6 +4,33 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.13.0 — 2026-04-30
+
+**Real-time progress panel + ETA (MINOR)**
+
+Phase B.③ of the 5-phase pipeline-improvement plan.
+
+- `mcp/samvil_mcp/progress_panel.py` (new): `compute_progress()` reads
+  `project.state.json`, `project.seed.json`, `.samvil/events.jsonl` and
+  emits a structured view (current stage, completed stages, leaf counts,
+  elapsed-in-stage, last-event age, ETA). `render_panel()` renders an
+  ASCII frame the user can read at a glance.
+- `mcp/samvil_mcp/server.py`: new `render_progress_panel(project_root)`
+  MCP tool (174th tool) that returns `{progress, panel}` JSON.
+- ETA model: per-(stage, samvil_tier) baseline durations. build/qa
+  scale by AC leaf count and remaining work. Missing data → ETA "unknown"
+  rather than guessing (P3 / P10).
+- `mcp/tests/test_progress_panel.py` (new): 8 tests covering empty
+  state, leaf walking, pipeline marks, ETA scaling, elapsed timing,
+  panel rendering, MCP wrapping, and tool registration.
+
+User-facing change: any skill or script can now call this tool to give
+the user a single-shot answer to "where am I, how long until done?".
+A solo developer no longer needs to grep events.jsonl by hand to know
+whether the pipeline is stuck.
+
+---
+
 ## v4.12.0 — 2026-04-30
 
 **Host parity CI — CC ↔ Codex drift detection (MINOR)**
