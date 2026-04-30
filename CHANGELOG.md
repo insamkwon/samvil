@@ -4,6 +4,32 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.11.1 — 2026-04-30
+
+**Plugin auto-sync — eliminate manual `cp` toil (PATCH)**
+
+Phase A.① of the 5-phase pipeline-improvement plan.
+
+- `scripts/sync-cache.sh` (new): copies the working tree to the
+  installed plugin cache (`~/.claude/plugins/cache/samvil/samvil`)
+  via rsync against a curated whitelist of 12 source dirs/files.
+  Supports `--dry-run` and `--quiet`. Graceful degradation when
+  the cache directory is absent (plugin not installed).
+- `.githooks/post-commit` (new): auto-invokes `sync-cache.sh` after
+  every successful commit so committed changes take effect immediately.
+  Failures are non-fatal (commit already happened).
+- `scripts/install-git-hooks.sh`: now reports the post-commit hook in
+  the install summary.
+- `mcp/tests/test_sync_cache_smoke.py` (new): 8 tests covering script
+  existence, dry-run, real run, idempotency, cache-side file preservation,
+  graceful degradation, quiet mode, and hook wiring.
+
+User-facing change: maintainers no longer need to run 7-8 `cp` commands
+after every code change — the post-commit hook handles it automatically,
+and a manual `bash scripts/sync-cache.sh` is available for explicit re-syncs.
+
+---
+
 ## v4.11.0 — 2026-04-30
 
 **Pomodoro dogfood retro improvements: Vite deploy fix + CLI pin + retro fallback + Codex auto-proceed (MINOR)**

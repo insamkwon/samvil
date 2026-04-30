@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# SAMVIL post-commit — auto-sync the working tree to the installed
+# plugin cache so the just-committed changes take effect immediately.
+#
+# Why: After every commit, the plugin cache must be synced or users
+# (and the developer testing locally) see stale behavior. This hook
+# eliminates the manual `cp` step that was the #1 daily toil.
+#
+# Failures are non-fatal — the commit has already happened. We only
+# log a warning so the developer notices.
+
+set +e
+
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+SYNC_SCRIPT="$HERE/scripts/sync-cache.sh"
+
+if [[ ! -x "$SYNC_SCRIPT" ]]; then
+  exit 0
+fi
+
+# Run quietly; full output via `bash scripts/sync-cache.sh` if needed.
+output="$(bash "$SYNC_SCRIPT" --quiet 2>&1)"
+status=$?
+
+if [[ "$status" -ne 0 ]]; then
+  echo "⚠ post-commit cache sync failed (commit succeeded):"
+  echo "$output" | sed 's/^/    /'
+  echo "   Run manually: bash scripts/sync-cache.sh"
+fi
+
+exit 0

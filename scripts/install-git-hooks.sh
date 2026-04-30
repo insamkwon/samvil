@@ -31,4 +31,5 @@ echo "  installed hooks:"
 ls -1 .githooks/ | sed 's/^/    /'
 echo ""
 echo "pre-commit will now run scripts/pre-commit-check.sh before every commit."
+echo "post-commit will now auto-sync the plugin cache (scripts/sync-cache.sh)."
 echo "Bypass only in emergencies with: git commit --no-verify"
