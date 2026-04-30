@@ -1,0 +1,18 @@
+# SAMVIL host-parity allowlist
+#
+# Purpose: When a skill intentionally references a different MCP tool
+# on CC vs Codex, list the gap here so `scripts/check-host-parity.py`
+# treats it as deliberate (not drift).
+#
+# Each entry has up to two lists:
+#
+#   missing_in_cc:
+#     - <tool_name>      # tool is core but only Codex needs to call it directly
+#   missing_in_codex:
+#     - <tool_name>      # tool is core but only CC handles it via Skill tool
+#
+# Keep entries short and add a `# why:` comment explaining the rationale.
+# Reviewers should challenge any entry that doesn't have a `why` line.
+
+# (Intentionally empty for v4.11.2 baseline — both hosts must reference
+# every core tool listed in CORE_TOOLS_PER_SKILL.)

@@ -193,6 +193,18 @@ else
 fi
 
 
+# ── 10. Host parity (CC ↔ Codex) ────────────────────────────────────
+_section "10. Host parity (CC ↔ Codex)"
+
+if python3 scripts/check-host-parity.py --strict >/tmp/samvil-hostparity.log 2>&1; then
+  summary=$(tail -1 /tmp/samvil-hostparity.log | sed -E 's/^[[:space:]]*✓[[:space:]]*//')
+  _ok "$summary"
+else
+  _fail "host parity drift:"
+  cat /tmp/samvil-hostparity.log | sed 's/^/      /'
+fi
+
+
 # ── Summary ─────────────────────────────────────────────────────────
 echo ""
 if [ "$FAILURES" -eq 0 ]; then

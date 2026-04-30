@@ -4,6 +4,34 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.12.0 — 2026-04-30
+
+**Host parity CI — CC ↔ Codex drift detection (MINOR)**
+
+Phase A.② of the 5-phase pipeline-improvement plan.
+
+- `scripts/check-host-parity.py` (new): pairs every CC `skills/<name>/SKILL.md`
+  with its Codex `references/codex-commands/<name>.md` twin and verifies:
+  - Both files exist (no orphans).
+  - Each side references its host-specific core MCP tool set
+    (`CORE_TOOLS_CC` / `CORE_TOOLS_CODEX`).
+  - Mechanical Codex stages (`samvil-evolve`, `samvil-retro`) declare an
+    explicit `## Auto-Proceed Policy` heading — guards against the v4.11.0
+    retro regression where the chain stopped between evolve and retro.
+  - Non-terminal stages mention chain/next_skill on both sides.
+- `references/host-parity-allowlist.yaml` (new): empty baseline allowlist
+  for intentional gaps; entries require a `# why:` rationale.
+- `scripts/pre-commit-check.sh`: now has check #10 running parity in
+  --strict mode. Total 10 checks, 1592 tests gated on every commit.
+- `mcp/tests/test_host_parity.py` (new): 6 tests including negative tests
+  that delete the Auto-Proceed heading and verify the script catches it.
+
+User-facing change: future SAMVIL changes that update one host's contract
+without the other are blocked at commit time. Codex users will no longer
+silently see a different pipeline behavior than CC users.
+
+---
+
 ## v4.11.1 — 2026-04-30
 
 **Plugin auto-sync — eliminate manual `cp` toil (PATCH)**
