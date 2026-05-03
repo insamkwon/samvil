@@ -53,6 +53,8 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "claim_post",
             "gate_check",
             "build_to_qa",
+            "write_leaf_checkpoint",
+            "trace_write",
         ),
     ),
     (

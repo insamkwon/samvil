@@ -4,6 +4,27 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.17.0 — 2026-05-03
+
+**samvil-build wiring: L1 trace + L2 leaf checkpoint activated (MINOR)**
+
+Wire `trace_write` and `write_leaf_checkpoint` into `samvil-build` skill body
+so the observability tools introduced in v4.16.1 are actually called during
+pipeline execution.
+
+- **Boot Sequence step 4** — `trace_write(stage="build", action="stage_start")`
+  records when the build stage begins.
+- **Phase B step 3** — `write_leaf_checkpoint(feature_id, leaf_id, leaf_description)`
+  written before each Agent spawn so `samvil-resume` can pinpoint the interrupted
+  leaf on next session (L2 precision recovery).
+- **Phase B step 4** — `trace_write(action="leaf_complete", result=<status>)`
+  appended to `.samvil/trace.jsonl` after each leaf completes (L1 audit trail).
+- All three calls are best-effort (INV-5): MCP failure does not halt the build.
+- `scripts/check-skill-wiring.py` — added `write_leaf_checkpoint` and
+  `trace_write` to samvil-build's required token set.
+
+---
+
 ## v4.16.1 — 2026-05-03
 
 **L1 trace + L2 leaf checkpoint + host command generator (PATCH)**

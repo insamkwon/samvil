@@ -17,6 +17,7 @@ Phase A/B/Z bodies live in `SKILL.legacy.md`.
 1. Read `project.seed.json`, `project.state.json`, `project.config.json`, `project.blueprint.json` (if present), `decisions.log` (if present).
 2. **TaskUpdate** "Build" → `in_progress`.
 3. **v3.2 Contract Layer — stage entry**: `mcp__samvil_mcp__save_event(session_id="<sid>", event_type="build_started", stage="build", data="{}")`. Best-effort; auto-claims `evidence_posted subject="stage:build"`.
+4. **L1 trace — stage start** (best-effort, INV-5): `mcp__samvil_mcp__trace_write(project_root=".", stage="build", action="stage_start", skill="samvil-build", result="ok", details_json="{}")`.
 
 ## Phase A — Core Experience
 
@@ -53,12 +54,13 @@ For each feature in `seed.features` not in `resume_hint.completed_features`:
 
 2. If `batch.count == 0` or `circuit_breaker.halt == true`: break.
 
-3. **Agent spawn — single message, parallel chunk** (CC-specific, host-bound). Per `worker_bundles[i]`: Agent tool call `description="SAMVIL Build: AC <leaf.id>"`, `subagent_type="general-purpose"`, `model=<resume_hint.current_model_build or "sonnet">`, `prompt=<bundle text verbatim>`. Emit all calls in ONE assistant message → parallel. Worker contract (in bundle): only edit `components/<feature>/` (or stack-equivalent), run `npx tsc --noEmit | head -20 && npx eslint . --quiet | head -20`, do **NOT** run `npm run build`, reply with parse block (`Leaf:/files_created:/files_modified:/typecheck_ok:/lint_ok:/notes:`).
+3. **L2 checkpoint + Agent spawn**. Per leaf in batch: `mcp__samvil_mcp__write_leaf_checkpoint(project_root=".", feature_id="<feature.id>", leaf_id="<leaf.id>", leaf_description="<leaf.description>")` (best-effort, INV-5). Then **Agent spawn — single message, parallel chunk** (CC-specific, host-bound): Agent tool call `description="SAMVIL Build: AC <leaf.id>"`, `subagent_type="general-purpose"`, `model=<resume_hint.current_model_build or "sonnet">`, `prompt=<bundle text verbatim>`. Emit all calls in ONE assistant message → parallel. Worker contract (in bundle): only edit `components/<feature>/` (or stack-equivalent), run `npx tsc --noEmit | head -20 && npx eslint . --quiet | head -20`, do **NOT** run `npm run build`, reply with parse block (`Leaf:/files_created:/files_modified:/typecheck_ok:/lint_ok:/notes:`).
 
 4. **Parse + persist** per worker reply:
    - `status = "pass" if (typecheck_ok and files_created)` else `"fail"`.
    - `update_leaf_status(ac_tree_json=<tree>, leaf_id=<id>, status=<s>, evidence_json=<files>)` → use returned `tree` field as next `tree_json`.
    - Append id to `completed_ids`; `rate_budget_release(worker_id="build-<id>")`; `save_event(event_type="ac_leaf_complete", data='{"feature":"<n>","leaf_id":"<id>","status":"<s>"}')`.
+   - **L1 trace** (best-effort, INV-5): `mcp__samvil_mcp__trace_write(project_root=".", stage="build", action="leaf_complete", skill="samvil-build", result="<status>", details_json='{"feature":"<n>","leaf_id":"<id>"}')`.
 
 5. **HUD + checkpoint**: `print(json.loads(render_ac_tree_hud(ac_tree_json=tree_json))["ascii"])`; `save_checkpoint(seed_id="<sid>", phase="build", state_json=<{feature, completed_ids, tree_json, consecutive_fail_batches}>)`.
 
@@ -114,7 +116,5 @@ Apply in order (each best-effort, INV-5):
 - Mobile (Expo): legacy §"Code Quality Rules" #17-18 (`View`/`Text`/`TextInput`, `StyleSheet.create()`, 44px touch, Expo Router file-based).
 - Automation: legacy §"### solution_type: \"automation\"" (`_run_dry`/`_run_live`, fixtures, env-based config, py_compile / tsc --noEmit, dry-run verification).
 - Dashboard: legacy §"### solution_type: \"dashboard\"" + §"#### Dashboard Build Patterns".
-
 ## Legacy reference
-
 Full per-`solution_type` Korean prose, Phase A.5 dependency pre-resolution, Phase A.6 sanity details, dependency-planning Step 2.5, MAX_PARALLEL formula, independence checklist, worker bundle template, progress trim format, Output Format blocks: see `SKILL.legacy.md`.
