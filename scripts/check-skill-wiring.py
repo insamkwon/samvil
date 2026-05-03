@@ -139,6 +139,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "save_event",
             "samvil-interview",
             "AskUserQuestion",
+            "in_progress_leaf",
         ),
     ),
 ]

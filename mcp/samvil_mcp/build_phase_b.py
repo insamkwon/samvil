@@ -19,6 +19,9 @@ that previously lived inline in the 1432-LOC SKILL body:
      the Worker Contract block with the parser shape). This makes
      the skill body's "spawn N agents in one message" loop
      mechanical: it just walks `worker_bundles` and shells out.
+     When `.samvil/ac-search.db` exists (indexed by Phase A.5):
+       - `sibling_leaf_context` is enriched via FTS5 by-feature lookup.
+       - `cross_feature_related` adds top-2 BM25 cross-feature leaves.
   4. **independence check** — when there are 2+ features in the
      same chunk (legacy Phase B path for game/automation/mobile),
      run the file-overlap heuristic and downgrade conflicting
