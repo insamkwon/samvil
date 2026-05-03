@@ -35,6 +35,7 @@ Read `recipe_path`. Build core_experience per legacy `### solution_type: "<type>
 - PASS → `save_event(event_type="build_pass", data='{"attempt":N,"scope":"core"}')`. Per-feature passes use `"scope":"feature:<name>"`; Step 4 integration build uses `"scope":"integration"`.
 - FAIL → `tail -30 <log_path>` → fix → retry. Append `[core] <error> → <fix>` to `<paths.fix_log>`. Emit `event_type="build_fail"` with `"error_signature"`, `"error_category"` (one of `` `import_error` ``, `` `type_error` ``, `` `config_error` ``, `` `runtime_error` ``, `` `dependency_error` ``, `` `unknown` ``), and `"touched_files"` (legacy §"Structured Build Event Schema"); emit `event_type="fix_applied"` per fix.
 - 2 fails → AskUserQuestion "Adaptive Tier 제안" (legacy Phase A circuit-breaker block). Approve → upgrade `config.selected_tier`, set `state.current_stage="council"`, re-invoke `samvil-council`. Decline → STOP, report user (P10).
+**Phase A.5 — AC index** (best-effort, INV-5): `mcp__samvil_mcp__index_ac_tree(project_root=".", features_json=<json.dumps(seed.features)>)` — builds `.samvil/ac-search.db`; enables Phase B BM25 leaf fetch without full tree JSON for large seeds.
 
 ## Phase B — AC Tree Execution (per feature)
 
@@ -51,6 +52,7 @@ For each feature in `seed.features` not in `resume_hint.completed_features`:
      config_json=<cfg or "">, consecutive_fail_batches=<int from prior iter or checkpoint>)
    ```
    Returns `max_parallel`, `parallel_meta`, `batch {leaves[], count}`, `worker_bundles[]` (≤2000 tok: persona pointer + ≤400-tok context + leaf + contract), `independence`, `circuit_breaker {consecutive_fail_batches, max_retries, halt}`, `notes`, `errors`.
+   **BM25 leaf fetch** (best-effort, INV-5): `mcp__samvil_mcp__search_ac_tree_by_feature(project_root=".", feature_id="<feature.id>")` — use instead of full tree JSON for large (10+ feature) seeds.
 
 2. If `batch.count == 0` or `circuit_breaker.halt == true`: break.
 
@@ -110,11 +112,9 @@ Apply in order (each best-effort, INV-5):
 6. NO auto-retry past `MAX_RETRIES=2` (Circuit Breaker; P10).
 
 ## Code Quality (pointers to legacy)
-
 - Web (Next.js + shadcn/ui): legacy §"Code Quality Rules" #1-11, 14-16 (`'use client'`, TS strict, PascalCase one-per-file, `@/components/ui/` shadcn-first, `cn()`, `@/` aliases, real content, empty states, hydration `mounted`, localStorage try-catch, Korean UX writing, 첫 30초 가치, premium gate).
 - Game (Phaser + tsc --noEmit): legacy §"### solution_type: \"game\"" + §"Anti-Patterns".
 - Mobile (Expo): legacy §"Code Quality Rules" #17-18 (`View`/`Text`/`TextInput`, `StyleSheet.create()`, 44px touch, Expo Router file-based).
-- Automation: legacy §"### solution_type: \"automation\"" (`_run_dry`/`_run_live`, fixtures, env-based config, py_compile / tsc --noEmit, dry-run verification).
-- Dashboard: legacy §"### solution_type: \"dashboard\"" + §"#### Dashboard Build Patterns".
+- Automation/Dashboard: legacy §"### solution_type: \"automation\"" (`_run_dry`/`_run_live`, fixtures, env-based config, py_compile / tsc --noEmit, dry-run verification) + §"\"dashboard\"" + §"#### Dashboard Build Patterns".
 ## Legacy reference
 Full per-`solution_type` Korean prose, Phase A.5 dependency pre-resolution, Phase A.6 sanity details, dependency-planning Step 2.5, MAX_PARALLEL formula, independence checklist, worker bundle template, progress trim format, Output Format blocks: see `SKILL.legacy.md`.

@@ -4,6 +4,27 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.17.2 — 2026-05-03
+
+**Wire BM25 AC search into samvil-build skill body (PATCH)**
+
+Wire `index_ac_tree` and `search_ac_tree_by_feature` into `samvil-build`
+SKILL.md so the tools added in v4.17.1 are actually called during pipeline
+execution. SKILL.md stays at exactly 120 lines by compressing the Code Quality
+section (blank removed; Automation + Dashboard merged into one bullet).
+
+- **Phase A.5** — `index_ac_tree(project_root=".", features_json=<seed.features>)`
+  called after Phase A core build completes. Builds `.samvil/ac-search.db` once
+  so Phase B can query leaves without full tree JSON.
+- **Phase B step 1 — BM25 leaf fetch** — `search_ac_tree_by_feature(project_root=".",
+  feature_id="<feature.id>")` noted as best-effort alternative to full `tree_json`
+  for large (10+ feature) seeds.
+- Both calls are best-effort (INV-5): MCP failure does not halt the build.
+- `scripts/check-skill-wiring.py` — added `index_ac_tree` and
+  `search_ac_tree_by_feature` to samvil-build required token set.
+
+---
+
 ## v4.17.1 — 2026-05-03
 
 **BM25 AC tree search via SQLite FTS5 (PATCH)**

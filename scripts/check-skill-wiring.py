@@ -55,6 +55,8 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "build_to_qa",
             "write_leaf_checkpoint",
             "trace_write",
+            "index_ac_tree",
+            "search_ac_tree_by_feature",
         ),
     ),
     (
