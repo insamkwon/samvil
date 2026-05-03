@@ -188,6 +188,7 @@ from .chain_markers import (
     read_chain_marker as _read_chain_marker,
     write_chain_marker as _write_chain_marker,
 )
+from .resume import resume_session as _resume_session
 from .health_tiers import (
     get_health_tier as _get_health_tier,
     get_health_tier_summary as _get_health_tier_summary,
@@ -4883,6 +4884,26 @@ async def render_progress_panel(project_root: str) -> str:
         return json.dumps({"progress": progress, "panel": panel})
     except Exception as e:
         _log_mcp_health("fail", "render_progress_panel", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── Resume ───────────────────────────────────────────────────
+
+
+@mcp.tool()
+async def resume_session(project_root: str) -> str:
+    """Read project state and determine resume entry point.
+
+    Returns found, last_stage, stage_progress, next_skill,
+    minutes_since, last_event_at, handoff_excerpt,
+    completed_features, failed_acs, samvil_tier, project_name.
+    """
+    try:
+        result = _resume_session(project_root)
+        _log_mcp_health("ok", "resume_session")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "resume_session", str(e))
         return json.dumps({"error": str(e)})
 
 

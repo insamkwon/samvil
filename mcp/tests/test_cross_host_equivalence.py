@@ -37,10 +37,10 @@ class TestAdapterEquivalence:
         counts = {name: adapters[name]["skill_count"] for name in ALL_HOSTS}
         assert len(set(counts.values())) == 1, f"Skill counts differ: {counts}"
 
-    def test_all_have_15_skills(self):
+    def test_all_have_16_skills(self):
         for host in ALL_HOSTS:
             a = get_adapter(host)
-            assert len(a["skill_mappings"]) == 15, f"{host} has {len(a['skill_mappings'])}"
+            assert len(a["skill_mappings"]) == 16, f"{host} has {len(a['skill_mappings'])}"
 
     def test_all_resolve_same_next_skill(self):
         """For a given current_skill, all hosts must agree on next_skill."""
@@ -90,7 +90,7 @@ class TestChainMarkerEquivalence:
         write_chain_marker(project_dir, host, "samvil-build")
         s = get_pipeline_status(project_dir)
         assert s["has_marker"] is True
-        assert s["total_skills"] == 15
+        assert s["total_skills"] == 16
 
 
 class TestChainFormatConsistency:

@@ -68,7 +68,7 @@ class TestGetAdapter:
         result = get_adapter("claude_code")
         assert result["host_name"] == "claude_code"
         assert result["chain_format"] == "skill_tool"
-        assert len(result["skill_mappings"]) == 15
+        assert len(result["skill_mappings"]) == 16
 
     def test_codex_cli(self):
         result = get_adapter("codex_cli")
@@ -152,18 +152,18 @@ class TestListAdapters:
             assert "skill_count" in a
             assert "mcp_tools" in a
             assert "parallel_agents" in a
-            assert a["skill_count"] == 15
+            assert a["skill_count"] == 16
 
 
 class TestSkillChain:
-    def test_chain_has_15_entries(self):
-        assert len(_SKILL_CHAIN) == 15
+    def test_chain_has_16_entries(self):
+        assert len(_SKILL_CHAIN) == 16
 
     def test_chain_starts_with_samvil(self):
         assert _SKILL_CHAIN[0]["name"] == "samvil"
 
     def test_chain_ends_with_update(self):
-        last_names = {_SKILL_CHAIN[i]["name"] for i in range(11, 15)}
+        last_names = {_SKILL_CHAIN[i]["name"] for i in range(11, 16)}
         assert "samvil-retro" in last_names
         assert "samvil-update" in last_names
 

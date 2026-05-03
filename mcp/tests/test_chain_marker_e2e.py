@@ -210,4 +210,4 @@ class TestCodexLayerConnectivity:
         status = get_pipeline_status(project_root)
         assert status["has_marker"] is True
         assert status["next_skill"] == "samvil-qa"
-        assert status["total_skills"] == 15
+        assert status["total_skills"] == 16

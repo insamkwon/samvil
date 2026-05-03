@@ -4,6 +4,37 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.16.0 — 2026-05-03
+
+**samvil-resume — Session Recovery Entry Point (MINOR)**
+
+New skill `/samvil:samvil-resume` that reads `project.state.json` and
+resumes the pipeline at the last in-progress stage without re-running the
+interview.
+
+- `mcp/samvil_mcp/resume.py` — `resume_session(project_root)` aggregates
+  state.json, handoff.md, and seed.json into a 11-field dict.
+- `mcp/tests/test_resume.py` — 24 unit tests (minutes_since, stage_progress,
+  handoff_excerpt, resume_session branches: no-state, primary path,
+  fallback path, all 10 stage→skill mappings).
+- `mcp/samvil_mcp/server.py` — `resume_session` MCP tool registered with
+  health logging.
+- `mcp/samvil_mcp/host_adapters.py` — `samvil-resume` added to `_SKILL_CHAIN`
+  and descriptions.
+- `skills/samvil-resume/SKILL.md` — 82-line skill: Boot Sequence with
+  `save_event`, `resume_session` call, found/not-found branching, user
+  confirmation, Skill tool dispatch to `next_skill`.
+- `references/codex-commands/samvil-resume.md` — Codex CLI equivalent with
+  file_marker chain.
+- `scripts/check-skill-wiring.py` — `samvil-resume` entry with 4 required
+  tokens.
+- `.claude-plugin/plugin.json` — `"skills": "./skills/"` added so CC
+  discovers skills from the directory source; version bumped.
+- MINOR justification: new stage skill explicitly invocable by user as
+  `/samvil:samvil-resume`.
+
+---
+
 ## v4.15.1 — 2026-04-30
 
 **Versioning policy tightened — PATCH-first (PATCH)**

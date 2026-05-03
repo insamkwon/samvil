@@ -1,11 +1,12 @@
 {
   "name": "samvil",
   "description": "AI vibe-coding harness for solo developers: one-line input, self-correcting convergence to robust apps.",
-  "version": "4.15.1",
+  "version": "4.16.0",
   "author": {
     "name": "insam"
   },
   "license": "UNLICENSED",
+  "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "hooks": {
     "SessionStart": [

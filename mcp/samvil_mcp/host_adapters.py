@@ -130,6 +130,7 @@ _SKILL_CHAIN: list[dict[str, str]] = [
     {"name": "samvil-analyze", "next": ""},
     {"name": "samvil-doctor", "next": ""},
     {"name": "samvil-update", "next": ""},
+    {"name": "samvil-resume", "next": ""},
 ]
 
 
@@ -154,6 +155,7 @@ def _build_skill_mappings(
         "samvil-analyze": "Analyze existing project",
         "samvil-doctor": "Environment diagnostic",
         "samvil-update": "Update SAMVIL",
+        "samvil-resume": "Resume interrupted session",
     }
     mappings = []
     for entry in _SKILL_CHAIN:

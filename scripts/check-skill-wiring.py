@@ -127,6 +127,16 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "scaffold_complete",
         ),
     ),
+    (
+        "samvil-resume",
+        "skills/samvil-resume/SKILL.md",
+        (
+            "resume_session",
+            "save_event",
+            "samvil-interview",
+            "AskUserQuestion",
+        ),
+    ),
 ]
 
 

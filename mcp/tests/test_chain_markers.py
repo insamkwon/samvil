@@ -113,13 +113,13 @@ class TestGetPipelineStatus:
     def test_no_marker(self, project_root):
         result = get_pipeline_status(project_root)
         assert result["has_marker"] is False
-        assert result["total_skills"] == 15
+        assert result["total_skills"] == 16
 
     def test_with_marker(self, project_with_marker):
         result = get_pipeline_status(project_with_marker)
         assert result["has_marker"] is True
         assert "pipeline_progress" in result
-        assert result["total_skills"] == 15
+        assert result["total_skills"] == 16
 
     def test_progress_count(self, project_root):
         write_chain_marker(project_root, "generic", "samvil")
