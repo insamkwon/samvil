@@ -4,6 +4,44 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.17.3 — 2026-05-03
+
+**Deep BM25 integration: resume leaf recovery + dispatch FTS enrichment (PATCH)**
+
+Three improvements that make the BM25 AC search tools (v4.17.1~2) actually
+deliver value during pipeline execution.
+
+### Item 1 — samvil-resume: leaf checkpoint display + recovery option
+- Summary panel now shows `in_progress_leaf` (feature › leaf_id + first 40 chars
+  of description) when a build was interrupted mid-leaf.
+- Option 4 "📍 중단된 leaf부터 재개" added to AskUserQuestion — only shown
+  when `in_progress_leaf` is non-null. Invokes `samvil-build` which resumes
+  from the leaf checkpoint.
+
+### Item 2 — dispatch_build_batch: FTS5 sibling leaf context
+- `dispatch_build_batch` accepts new optional `project_root: str = "."` param.
+- For each leaf in a batch, calls `search_ac_tree_by_feature(feature_id)` to
+  fetch all sibling leaves for the feature from the FTS5 DB.
+- Worker bundle `your_leaf.sibling_leaf_context` now contains
+  `[{id, description}]` for sibling leaves — workers understand what adjacent
+  leaves are implementing without full tree JSON.
+- When FTS DB is missing (index not yet built), falls back gracefully to empty
+  lists (INV-5).
+
+### Item 3 — dispatch_build_batch: BM25 cross-feature context
+- For each leaf, calls `search_ac_tree(leaf_description, limit=5)` to find
+  related leaves across OTHER features via BM25 text relevance.
+- Top 2 cross-feature results included in worker bundle as
+  `your_leaf.cross_feature_related [{feature, description}]`.
+- Helps workers avoid implementing something that conflicts with another
+  feature's AC without having to see the full seed JSON.
+
+### Tests
+- 6 new tests in `test_build_phase_b.py` (total: 32 in file, 1692 overall).
+- `samvil-resume/SKILL.md`: 82 → 91 lines.
+
+---
+
 ## v4.17.2 — 2026-05-03
 
 **Wire BM25 AC search into samvil-build skill body (PATCH)**

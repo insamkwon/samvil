@@ -325,6 +325,149 @@ def test_dispatch_independence_only_when_multiple_features() -> None:
     assert out_single["independence"] is None
 
 
+# ── FTS enrichment (Items 2 + 3) ─────────────────────────────────────
+
+
+def _make_seed_feature(feature_name: str = "Auth") -> tuple[dict, dict]:
+    seed = {
+        "name": "demo",
+        "tech_stack": {"framework": "nextjs"},
+        "features": [{"name": feature_name, "id": feature_name.lower()}],
+    }
+    feature = {"name": feature_name, "id": feature_name.lower(), "description": "Feature desc"}
+    return seed, feature
+
+
+def _make_leaf(lid: str = "l1", desc: str = "User can login") -> dict:
+    return {"id": lid, "description": desc, "children": [], "status": "pending"}
+
+
+def test_render_worker_context_accepts_fts_sibling_leaves() -> None:
+    seed, feature = _make_seed_feature()
+    leaf = _make_leaf("l1", "Login form")
+    fts_siblings = [
+        {"leaf_id": "l2", "feature_id": "auth", "feature_name": "Auth",
+         "description": "Logout flow", "status": "pending"},
+    ]
+    bundle = build_phase_b.render_worker_context(
+        seed, {}, feature, leaf,
+        fts_sibling_leaves=fts_siblings,
+    )
+    sibling_ctx = bundle["your_leaf"]["sibling_leaf_context"]
+    assert len(sibling_ctx) == 1
+    assert sibling_ctx[0]["id"] == "l2"
+    assert sibling_ctx[0]["description"] == "Logout flow"
+
+
+def test_render_worker_context_excludes_self_from_siblings() -> None:
+    seed, feature = _make_seed_feature()
+    leaf = _make_leaf("l1", "Login form")
+    fts_siblings = [
+        {"leaf_id": "l1", "feature_id": "auth", "feature_name": "Auth",
+         "description": "Login form", "status": "pending"},
+        {"leaf_id": "l2", "feature_id": "auth", "feature_name": "Auth",
+         "description": "Logout flow", "status": "pending"},
+    ]
+    bundle = build_phase_b.render_worker_context(
+        seed, {}, feature, leaf,
+        fts_sibling_leaves=fts_siblings,
+    )
+    ids = [s["id"] for s in bundle["your_leaf"]["sibling_leaf_context"]]
+    assert "l1" not in ids
+    assert "l2" in ids
+
+
+def test_render_worker_context_cross_feature_related() -> None:
+    seed, feature = _make_seed_feature()
+    leaf = _make_leaf("l1", "User authentication")
+    cross = [
+        {"leaf_id": "xl1", "feature_id": "dashboard", "feature_name": "Dashboard",
+         "description": "Redirect after login", "status": "pending"},
+    ]
+    bundle = build_phase_b.render_worker_context(
+        seed, {}, feature, leaf,
+        cross_feature_related=cross,
+    )
+    cfr = bundle["your_leaf"]["cross_feature_related"]
+    assert len(cfr) == 1
+    assert cfr[0]["feature"] == "Dashboard"
+    assert "Redirect" in cfr[0]["description"]
+
+
+def test_render_worker_context_empty_fts_returns_empty_lists() -> None:
+    seed, feature = _make_seed_feature()
+    leaf = _make_leaf("l1", "Login")
+    bundle = build_phase_b.render_worker_context(seed, {}, feature, leaf)
+    assert bundle["your_leaf"]["sibling_leaf_context"] == []
+    assert bundle["your_leaf"]["cross_feature_related"] == []
+
+
+def test_dispatch_accepts_project_root_gracefully(tmp_path) -> None:
+    """dispatch_build_batch with project_root pointing to empty dir is non-fatal."""
+    seed, feature = _make_seed_feature()
+    tree = json.dumps({
+        "id": "root", "description": "root", "children": [
+            {"id": "l1", "description": "Login", "children": [], "status": "pending"},
+        ], "status": "pending",
+    })
+    out = build_phase_b.dispatch_build_batch(
+        seed=seed,
+        blueprint=None,
+        config={},
+        feature=feature,
+        feature_num=1,
+        tree_json=tree,
+        completed_ids=[],
+        consecutive_fail_batches=0,
+        project_root=str(tmp_path),  # no FTS index — graceful degradation
+    )
+    assert out["batch"]["count"] == 1
+    assert not out["errors"]
+    # sibling_leaf_context and cross_feature_related should be empty (no DB)
+    bundle = out["worker_bundles"][0]
+    assert bundle["your_leaf"]["sibling_leaf_context"] == []
+    assert bundle["your_leaf"]["cross_feature_related"] == []
+
+
+def test_dispatch_fts_enrichment_when_db_exists(tmp_path) -> None:
+    """When FTS DB exists, sibling_leaf_context is populated."""
+    import json as _json
+    from samvil_mcp.ac_search import index_ac_tree
+
+    seed, feature = _make_seed_feature("Auth")
+    ac_tree = {
+        "id": "root", "description": "Auth root", "children": [
+            {"id": "l1", "description": "Login form", "children": [], "status": "pending"},
+            {"id": "l2", "description": "Logout button", "children": [], "status": "pending"},
+        ], "status": "pending",
+    }
+    features_json = _json.dumps([{
+        "id": "auth", "name": "Auth", "acceptance_criteria": ac_tree,
+    }])
+    index_ac_tree(str(tmp_path), features_json)
+
+    tree_json = _json.dumps(ac_tree)
+    out = build_phase_b.dispatch_build_batch(
+        seed=seed,
+        blueprint=None,
+        config={"max_parallel": 2},
+        feature=feature,
+        feature_num=1,
+        tree_json=tree_json,
+        completed_ids=[],
+        consecutive_fail_batches=0,
+        project_root=str(tmp_path),
+    )
+    assert out["batch"]["count"] == 2
+    # Each worker bundle should have sibling_leaf_context populated
+    for bundle in out["worker_bundles"]:
+        ctx = bundle["your_leaf"]["sibling_leaf_context"]
+        assert isinstance(ctx, list)
+        # Should not include self
+        self_id = bundle["your_leaf"]["leaf_id"]
+        assert all(s["id"] != self_id for s in ctx)
+
+
 def test_dispatch_schema_version_present() -> None:
     seed = {"name": "demo", "tech_stack": {"framework": "nextjs"}, "features": [{"name": "f"}]}
     out = build_phase_b.dispatch_build_batch(

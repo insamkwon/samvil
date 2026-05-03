@@ -39,6 +39,8 @@ If `resume_session.found == true`, render this summary panel:
 ║  티어       : <samvil_tier>                     ║
 ║  마지막 단계: <last_stage>  (<stage_progress>)  ║
 ║  경과 시간  : <minutes_since>분 전 (없으면 "알 수 없음") ║
+║  중단된 leaf: <in_progress_leaf.feature_id> › <in_progress_leaf.leaf_id>   ║
+║               (<in_progress_leaf.leaf_description, 첫 40자>) — non-null 시만 행 표시 ║
 ╚══════════════════════════════════════════════════╝
 ```
 
@@ -59,6 +61,7 @@ Then AskUserQuestion:
 >   1. 네, 이어서 진행 (→ invoke next_skill)
 >   2. 처음부터 새로 시작 (→ invoke samvil-interview)
 >   3. 특정 단계 선택 (→ user specifies, invoke that samvil-<stage>)
+>   4. 📍 중단된 leaf부터 재개 (→ in_progress_leaf non-null일 때만 표시)
 
 ## Step 3 — Resume or Restart
 
@@ -74,6 +77,12 @@ On option 2 (restart):
 On option 3 (custom stage):
 - Validate stage name is one of: interview, seed, council, design, scaffold, build, qa, deploy, evolve, retro.
 - Invoke `samvil-<stage>` via Skill tool.
+
+On option 4 (resume from interrupted leaf):
+- Only available when `in_progress_leaf` is non-null.
+- Print: `📍 <feature_id> › <leaf_id> (<leaf_description[:40]>) 에서 재개합니다.`
+- `mcp__samvil_mcp__save_event(session_id="<sid-or-null>", event_type="stage_change", stage="build", data='{"action":"resumed","leaf_id":"<leaf_id>"}')`
+- Invoke `samvil-build` via Skill tool (build resumes from checkpoint; prior leaf re-runs from the start of that leaf).
 
 ## Graceful Degradation (P8)
 

@@ -4264,6 +4264,7 @@ async def dispatch_build_batch(
     blueprint_json: str = "",
     config_json: str = "",
     consecutive_fail_batches: int = 0,
+    project_root: str = ".",
 ) -> str:
     """Per-batch dispatch aggregator for samvil-build Phase B (T4.8).
 
@@ -4283,6 +4284,7 @@ async def dispatch_build_batch(
         config_json: Optional config JSON ("" → none).
         consecutive_fail_batches: Carried from checkpoint or last
             iteration. ≥2 trips the circuit breaker.
+        project_root: Project root for FTS5 AC index lookup (best-effort).
 
     Returns: JSON string with `max_parallel`, `parallel_meta`, `batch`,
     `worker_bundles[]`, `independence` (when multiple features),
@@ -4304,6 +4306,7 @@ async def dispatch_build_batch(
             tree_json=tree_json,
             completed_ids=completed_ids,
             consecutive_fail_batches=int(consecutive_fail_batches),
+            project_root=project_root,
         )
         _log_mcp_health("ok", "dispatch_build_batch")
         return json.dumps(result)

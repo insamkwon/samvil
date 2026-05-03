@@ -56,6 +56,16 @@ from .ac_tree import (
     tree_progress as _tree_progress,
 )
 
+# ac_search imported lazily inside functions (INV-5: missing index is non-fatal)
+try:
+    from .ac_search import (
+        search_ac_tree as _fts_search,
+        search_ac_tree_by_feature as _fts_by_feature,
+    )
+    _AC_SEARCH_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _AC_SEARCH_AVAILABLE = False
+
 BUILD_PHASE_B_SCHEMA_VERSION = "1.0"
 
 
@@ -229,8 +239,17 @@ def render_worker_context(
     leaf: dict[str, Any],
     *,
     sibling_leaf_ids: list[str] | None = None,
+    fts_sibling_leaves: list[dict[str, Any]] | None = None,
+    cross_feature_related: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Render the ≤2000-token Worker Agent context for one leaf.
+
+    Args:
+        fts_sibling_leaves: FTS5-fetched leaves for this feature (optional).
+            Used to include sibling descriptions so workers understand
+            what adjacent leaves are building.
+        cross_feature_related: BM25 cross-feature leaves related to this
+            leaf's description (optional). Helps workers avoid conflicts.
 
     Returns:
         dict with `persona_pointer`, `context`, `your_leaf`,
@@ -241,6 +260,17 @@ def render_worker_context(
     features = seed.get("features") or []
     feature_name = str(feature.get("name", "unknown"))
     seed_name = str(seed.get("name", "project"))
+    leaf_id = str(leaf.get("id", ""))
+
+    sibling_context = [
+        {"id": l["leaf_id"], "description": l["description"]}
+        for l in (fts_sibling_leaves or [])
+        if l.get("leaf_id") != leaf_id
+    ]
+    cross_context = [
+        {"feature": l["feature_name"], "description": l["description"]}
+        for l in (cross_feature_related or [])
+    ]
 
     return {
         "persona_pointer": "agents/frontend-dev.md (paste content)",
@@ -252,10 +282,12 @@ def render_worker_context(
             "peers": ", ".join(_peers_list(features, feature_name)),
         },
         "your_leaf": {
-            "leaf_id": str(leaf.get("id", "")),
+            "leaf_id": leaf_id,
             "leaf_description": str(leaf.get("description", "")),
             "parent_id": str(leaf.get("parent_id") or "(root)"),
             "sibling_leaf_ids": list(sibling_leaf_ids or []),
+            "sibling_leaf_context": sibling_context,
+            "cross_feature_related": cross_context,
         },
         "contract": {
             "scope": f"Only create/modify files under components/{feature_name}/ (or blueprint equivalent)",
@@ -374,6 +406,7 @@ def dispatch_build_batch(
     consecutive_fail_batches: int = 0,
     cpu_cores: int | None = None,
     memory_pct: float | None = None,
+    project_root: str = ".",
 ) -> dict[str, Any]:
     """Compose the next build batch for one feature.
 
@@ -438,14 +471,40 @@ def dispatch_build_batch(
     # 3. Worker bundles for each leaf.
     leaves = batch.get("leaves") or []
     sibling_ids = [str(leaf.get("id", "")) for leaf in leaves]
+
+    # FTS enrichment — best-effort (INV-5): missing index is non-fatal.
+    feature_id = str(feature.get("id") or feature.get("name") or "")
+    fts_feature_leaves: list[dict[str, Any]] = []
+    if _AC_SEARCH_AVAILABLE:
+        try:
+            fts_feature_leaves = _fts_by_feature(project_root, feature_id)
+        except Exception:  # noqa: BLE001
+            pass
+
     for leaf in leaves:
         peers = [lid for lid in sibling_ids if lid != str(leaf.get("id", ""))]
+
+        # BM25 cross-feature context — top-2 related leaves from other features.
+        cross_feature: list[dict[str, Any]] = []
+        if _AC_SEARCH_AVAILABLE:
+            try:
+                leaf_desc = str(leaf.get("description", ""))
+                if leaf_desc:
+                    raw = _fts_search(project_root, leaf_desc, limit=5)
+                    cross_feature = [
+                        r for r in raw if r.get("feature_id") != feature_id
+                    ][:2]
+            except Exception:  # noqa: BLE001
+                pass
+
         bundle = render_worker_context(
             seed,
             blueprint or {},
             feature,
             leaf,
             sibling_leaf_ids=peers,
+            fts_sibling_leaves=fts_feature_leaves,
+            cross_feature_related=cross_feature,
         )
         bundle["leaf_id"] = str(leaf.get("id", ""))
         report.worker_bundles.append(bundle)
