@@ -188,7 +188,17 @@ from .chain_markers import (
     read_chain_marker as _read_chain_marker,
     write_chain_marker as _write_chain_marker,
 )
-from .resume import resume_session as _resume_session
+from .resume import (
+    resume_session as _resume_session,
+    write_leaf_checkpoint as _write_leaf_checkpoint,
+    read_leaf_checkpoint as _read_leaf_checkpoint,
+    clear_leaf_checkpoint as _clear_leaf_checkpoint,
+)
+from .trace import (
+    write_trace_entry as _write_trace_entry,
+    read_trace as _read_trace,
+    clear_trace as _clear_trace,
+)
 from .health_tiers import (
     get_health_tier as _get_health_tier,
     get_health_tier_summary as _get_health_tier_summary,
@@ -4904,6 +4914,111 @@ async def resume_session(project_root: str) -> str:
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "resume_session", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── Leaf Checkpoint (L2) ─────────────────────────────────────
+
+
+@mcp.tool()
+async def write_leaf_checkpoint(
+    project_root: str,
+    feature_id: str,
+    leaf_id: str,
+    leaf_description: str = "",
+) -> str:
+    """Write an L2 AC-leaf checkpoint to .samvil/leaf-checkpoint.json.
+
+    Call this before starting each leaf in samvil-build so resume can
+    pinpoint the interrupted leaf on next session.
+    Returns the written checkpoint as JSON.
+    """
+    try:
+        result = _write_leaf_checkpoint(project_root, feature_id, leaf_id, leaf_description)
+        _log_mcp_health("ok", "write_leaf_checkpoint")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "write_leaf_checkpoint", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def read_leaf_checkpoint(project_root: str) -> str:
+    """Read the L2 AC-leaf checkpoint from .samvil/leaf-checkpoint.json.
+
+    Returns the checkpoint dict, or {"found": false} if none exists.
+    """
+    try:
+        result = _read_leaf_checkpoint(project_root)
+        _log_mcp_health("ok", "read_leaf_checkpoint")
+        if result is None:
+            return json.dumps({"found": False})
+        return json.dumps({**result, "found": True})
+    except Exception as e:
+        _log_mcp_health("fail", "read_leaf_checkpoint", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def clear_leaf_checkpoint(project_root: str) -> str:
+    """Remove .samvil/leaf-checkpoint.json. Returns {"cleared": true/false}."""
+    try:
+        cleared = _clear_leaf_checkpoint(project_root)
+        _log_mcp_health("ok", "clear_leaf_checkpoint")
+        return json.dumps({"cleared": cleared})
+    except Exception as e:
+        _log_mcp_health("fail", "clear_leaf_checkpoint", str(e))
+        return json.dumps({"error": str(e)})
+
+
+# ── Trace ────────────────────────────────────────────────────
+
+
+@mcp.tool()
+async def trace_write(
+    project_root: str,
+    stage: str,
+    action: str,
+    skill: str,
+    result: str = "ok",
+    details_json: str = "{}",
+) -> str:
+    """Append one L1 trace entry to .samvil/trace.jsonl.
+
+    Returns the written entry as JSON.
+    """
+    try:
+        import json as _json
+        details = _json.loads(details_json) if details_json else {}
+        entry = _write_trace_entry(project_root, stage, action, skill, result, details)
+        _log_mcp_health("ok", "trace_write")
+        return json.dumps(entry)
+    except Exception as e:
+        _log_mcp_health("fail", "trace_write", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def trace_read(project_root: str, limit: int = 20) -> str:
+    """Return the last *limit* trace entries from .samvil/trace.jsonl."""
+    try:
+        entries = _read_trace(project_root, limit)
+        _log_mcp_health("ok", "trace_read")
+        return json.dumps(entries)
+    except Exception as e:
+        _log_mcp_health("fail", "trace_read", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def trace_clear(project_root: str) -> str:
+    """Remove .samvil/trace.jsonl. Returns {"cleared": true/false}."""
+    try:
+        cleared = _clear_trace(project_root)
+        _log_mcp_health("ok", "trace_clear")
+        return json.dumps({"cleared": cleared})
+    except Exception as e:
+        _log_mcp_health("fail", "trace_clear", str(e))
         return json.dumps({"error": str(e)})
 
 

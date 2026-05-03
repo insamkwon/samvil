@@ -13,6 +13,9 @@ from samvil_mcp.resume import (
     _minutes_since,
     _stage_progress,
     resume_session,
+    write_leaf_checkpoint,
+    read_leaf_checkpoint,
+    clear_leaf_checkpoint,
 )
 
 
@@ -203,3 +206,80 @@ def test_resume_session_handoff_included(tmp_path: Path) -> None:
     (tmp_path / "project.state.json").write_text(json.dumps({"current_stage": "evolve"}))
     r = resume_session(str(tmp_path))
     assert r["handoff_excerpt"] == "last note here"
+
+
+def test_resume_session_in_progress_leaf_none_by_default(tmp_path: Path) -> None:
+    (tmp_path / "project.state.json").write_text(json.dumps({"current_stage": "build"}))
+    r = resume_session(str(tmp_path))
+    assert r["in_progress_leaf"] is None
+
+
+def test_resume_session_no_state_has_leaf_none(tmp_path: Path) -> None:
+    r = resume_session(str(tmp_path))
+    assert r["in_progress_leaf"] is None
+
+
+# ── write/read/clear leaf checkpoint ─────────────────────────────
+
+
+def test_write_leaf_checkpoint_returns_dict(tmp_path: Path) -> None:
+    c = write_leaf_checkpoint(str(tmp_path), "feat_auth", "ac_2_3", "JWT validation")
+    assert c["feature_id"] == "feat_auth"
+    assert c["leaf_id"] == "ac_2_3"
+    assert c["leaf_description"] == "JWT validation"
+    assert "written_at" in c
+
+
+def test_write_leaf_checkpoint_creates_file(tmp_path: Path) -> None:
+    write_leaf_checkpoint(str(tmp_path), "feat_auth", "ac_2_3")
+    path = tmp_path / ".samvil" / "leaf-checkpoint.json"
+    assert path.exists()
+
+
+def test_read_leaf_checkpoint_roundtrip(tmp_path: Path) -> None:
+    write_leaf_checkpoint(str(tmp_path), "feat_auth", "ac_2_3", "JWT validation")
+    r = read_leaf_checkpoint(str(tmp_path))
+    assert r is not None
+    assert r["feature_id"] == "feat_auth"
+    assert r["leaf_id"] == "ac_2_3"
+
+
+def test_read_leaf_checkpoint_none_when_missing(tmp_path: Path) -> None:
+    assert read_leaf_checkpoint(str(tmp_path)) is None
+
+
+def test_read_leaf_checkpoint_none_on_corrupt(tmp_path: Path) -> None:
+    d = tmp_path / ".samvil"
+    d.mkdir()
+    (d / "leaf-checkpoint.json").write_text("not json{")
+    assert read_leaf_checkpoint(str(tmp_path)) is None
+
+
+def test_clear_leaf_checkpoint_returns_true(tmp_path: Path) -> None:
+    write_leaf_checkpoint(str(tmp_path), "f", "l")
+    assert clear_leaf_checkpoint(str(tmp_path)) is True
+    assert read_leaf_checkpoint(str(tmp_path)) is None
+
+
+def test_clear_leaf_checkpoint_returns_false_when_missing(tmp_path: Path) -> None:
+    assert clear_leaf_checkpoint(str(tmp_path)) is False
+
+
+# ── _stage_progress with leaf ─────────────────────────────────────
+
+
+def test_stage_progress_build_with_leaf_no_completed(tmp_path: Path) -> None:
+    state = {"current_stage": "build", "completed_features": [], "in_progress": ""}
+    leaf = {"feature_id": "feat_auth", "leaf_id": "ac_2_3", "leaf_description": "JWT"}
+    result = _stage_progress(state, leaf)
+    assert "feat_auth" in result
+    assert "ac_2_3" in result
+    assert "JWT" in result
+
+
+def test_stage_progress_build_with_leaf_and_completed(tmp_path: Path) -> None:
+    state = {"current_stage": "build", "completed_features": ["feat_login"], "in_progress": ""}
+    leaf = {"feature_id": "feat_auth", "leaf_id": "ac_2_3", "leaf_description": ""}
+    result = _stage_progress(state, leaf)
+    assert "1 done" in result
+    assert "feat_auth" in result
