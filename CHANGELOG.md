@@ -4,6 +4,32 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.17.1 — 2026-05-03
+
+**BM25 AC tree search via SQLite FTS5 (PATCH)**
+
+Adds `mcp/samvil_mcp/ac_search.py` — a Context Mode pattern that indexes
+AC leaf descriptions into a local SQLite FTS5 database (`.samvil/ac-search.db`)
+so `dispatch_build_batch` can fetch only the relevant leaves per batch query
+instead of passing the full tree JSON. Reduces context window pressure for
+10+ feature projects.
+
+- **`index_ac_tree(project_root, features_json)`** — clears and rebuilds the
+  FTS5 index from a JSON list of `{id, name, acceptance_criteria}` feature dicts.
+  Returns `{indexed: int, features: int}`.
+- **`search_ac_tree(project_root, query, limit=10)`** — BM25 MATCH search on
+  leaf descriptions; returns leaves ordered by relevance.
+- **`search_ac_tree_by_feature(project_root, feature_id)`** — exact filter on
+  `feature_id`; returns all leaves for one feature.
+- **`_flatten_leaves`** — recursive leaf extractor (only nodes with empty
+  children are indexed; branch nodes are skipped).
+- Three MCP tools registered in `server.py` (total: 185 tools).
+- 20 unit tests in `mcp/tests/test_ac_search.py`; full suite: 1686 passed.
+- SKILL.md wiring deferred (PATCH policy: tools added but not yet called from
+  any skill body).
+
+---
+
 ## v4.17.0 — 2026-05-03
 
 **samvil-build wiring: L1 trace + L2 leaf checkpoint activated (MINOR)**

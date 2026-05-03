@@ -199,6 +199,11 @@ from .trace import (
     read_trace as _read_trace,
     clear_trace as _clear_trace,
 )
+from .ac_search import (
+    index_ac_tree as _index_ac_tree,
+    search_ac_tree as _search_ac_tree,
+    search_ac_tree_by_feature as _search_ac_tree_by_feature,
+)
 from .health_tiers import (
     get_health_tier as _get_health_tier,
     get_health_tier_summary as _get_health_tier_summary,
@@ -5020,6 +5025,55 @@ async def trace_clear(project_root: str) -> str:
     except Exception as e:
         _log_mcp_health("fail", "trace_clear", str(e))
         return json.dumps({"error": str(e)})
+
+
+# ── AC Tree BM25 Search ──────────────────────────────────────
+
+
+@mcp.tool()
+async def index_ac_tree(project_root: str, features_json: str) -> str:
+    """Index AC tree leaves into SQLite FTS5 for BM25 search.
+
+    Args:
+        project_root: project root directory
+        features_json: JSON list of {id, name, acceptance_criteria} dicts
+
+    Returns JSON: {"indexed": int, "features": int} or {"error": str}
+    """
+    try:
+        result = _index_ac_tree(project_root, features_json)
+        _log_mcp_health("ok", "index_ac_tree")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "index_ac_tree", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def search_ac_tree(project_root: str, query: str, limit: int = 10) -> str:
+    """BM25 full-text search on AC leaf descriptions.
+
+    Returns leaves ordered by relevance. Returns [] when DB missing or query empty.
+    """
+    try:
+        results = _search_ac_tree(project_root, query, limit)
+        _log_mcp_health("ok", "search_ac_tree")
+        return json.dumps(results)
+    except Exception as e:
+        _log_mcp_health("fail", "search_ac_tree", str(e))
+        return json.dumps([])
+
+
+@mcp.tool()
+async def search_ac_tree_by_feature(project_root: str, feature_id: str) -> str:
+    """Return all AC leaves for a specific feature (exact match on feature_id)."""
+    try:
+        results = _search_ac_tree_by_feature(project_root, feature_id)
+        _log_mcp_health("ok", "search_ac_tree_by_feature")
+        return json.dumps(results)
+    except Exception as e:
+        _log_mcp_health("fail", "search_ac_tree_by_feature", str(e))
+        return json.dumps([])
 
 
 # ── Entry point ───────────────────────────────────────────────
