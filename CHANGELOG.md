@@ -4,6 +4,45 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.16.1 — 2026-05-03
+
+**L1 trace + L2 leaf checkpoint + host command generator (PATCH)**
+
+Pipeline observability and resume precision improvements, plus a script
+that keeps host command files in sync with `_SKILL_CHAIN`.
+
+### L1 Execution Trace (`mcp/samvil_mcp/trace.py`)
+- `write_trace_entry(project_root, stage, action, skill, result, details)` —
+  appends one structured entry to `.samvil/trace.jsonl`.
+- `read_trace(project_root, limit)` — reads last N entries; corrupt lines
+  are skipped (INV-5 Graceful Degradation).
+- `clear_trace(project_root)` — removes trace file.
+- MCP tools: `trace_write`, `trace_read`, `trace_clear`.
+- `mcp/tests/test_trace.py` — 16 unit tests.
+
+### L2 AC-leaf Checkpoint (`mcp/samvil_mcp/resume.py`)
+- `write_leaf_checkpoint(project_root, feature_id, leaf_id, leaf_description)` —
+  writes `.samvil/leaf-checkpoint.json` before each leaf in samvil-build.
+- `read_leaf_checkpoint(project_root)` — reads checkpoint; returns None on
+  corrupt/missing (INV-5).
+- `clear_leaf_checkpoint(project_root)` — removes checkpoint file.
+- `_stage_progress()` now incorporates leaf info:
+  `"Phase B: 2 done, feat_auth › ac_2_3 (JWT validation) in progress"`.
+- `resume_session()` returns `in_progress_leaf` field (None when not in build).
+- MCP tools: `write_leaf_checkpoint`, `read_leaf_checkpoint`, `clear_leaf_checkpoint`.
+- `mcp/tests/test_resume.py` — extended from 24 → 35 tests (+11 leaf checkpoint cases).
+
+### Host Command Generator (`scripts/generate-host-commands.py`)
+- Reads `_SKILL_CHAIN` from `host_adapters` and generates codex `.md` /
+  gemini `.toml` reference files from templates.
+- `--host codex|gemini|all`, `--force`, `--dry-run` flags.
+- Existing files are skipped by default; `--force` overwrites.
+- Both templates include `read_chain_marker` / `write_chain_marker`
+  references (required by `test_chain_marker_e2e.py`).
+- Generated `references/gemini-commands/samvil-resume.toml` (previously missing).
+
+---
+
 ## v4.16.0 — 2026-05-03
 
 **samvil-resume — Session Recovery Entry Point (MINOR)**
