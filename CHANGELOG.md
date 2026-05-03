@@ -4,6 +4,20 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.17.4 — 2026-05-03
+
+**Consistency fixes: wiring token, codex command, docstring (PATCH)**
+
+- `scripts/check-skill-wiring.py` — add `in_progress_leaf` to samvil-resume
+  required token set; wiring smoke now verifies the leaf recovery display.
+- `references/codex-commands/samvil-resume.md` — add `in_progress_leaf` to
+  `resume_session` return fields; add it to printed summary; add OPTION A/B
+  for interrupted-leaf recovery (parity with CC SKILL.md).
+- `mcp/samvil_mcp/build_phase_b.py` — update module docstring to mention FTS
+  enrichment (`sibling_leaf_context` + `cross_feature_related`) added in v4.17.3.
+
+---
+
 ## v4.17.3 — 2026-05-03
 
 **Deep BM25 integration: resume leaf recovery + dispatch FTS enrichment (PATCH)**
