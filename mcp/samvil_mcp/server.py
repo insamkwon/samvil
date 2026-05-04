@@ -4738,7 +4738,7 @@ async def health_check() -> str:
 
     db_ok = False
     try:
-        _get_store()
+        await get_store()
         db_ok = True
     except Exception:
         pass
