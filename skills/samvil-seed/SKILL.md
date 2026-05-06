@@ -9,12 +9,23 @@ This is the v3.3 ultra-thin PoC. Full rules are preserved in
 `skills/samvil-seed/SKILL.legacy.md`; use it for schema mapping, validation,
 presentation, and defaults.
 
+## Brownfield Presentation-Only Mode
+
+**`state._brownfield_seed_merged == true` AND `project.seed.json` exists** →
+skip "Build Seed" step entirely. Instead:
+
+1. Read `project.seed.json` (already written by `merge_brownfield_seed`).
+2. Present merged seed to user: list `status:existing` features (existing) + `status:new` features (new additions).
+3. AskUserQuestion `이 병합된 seed가 맞나요?` → `맞아, 진행` / `수정 필요`.
+   - 수정 필요 → AskUserQuestion으로 어떤 피처를 수정할지 받아 편집 후 재표시.
+4. After approval: skip write (seed already on disk), call `save_seed_version` + `complete_stage`, append handoff.md, chain to samvil-council.
+
 ## Inputs
 
-1. Read `project.state.json` for `session_id`, `current_stage`, and host name
+1. Read `project.state.json` for `session_id`, `current_stage`, `_brownfield_seed_merged`, and host name
    (`host`, `runtime`, or `agent_host`; default `generic`).
 2. Read `project.config.json` for `selected_tier` / `samvil_tier`.
-3. Read `interview-summary.md` from disk, not from conversation.
+3. If NOT brownfield: Read `interview-summary.md` from disk, not from conversation.
 4. Read `skills/samvil-seed/SKILL.legacy.md` for seed construction rules.
 
 ## MCP Gate

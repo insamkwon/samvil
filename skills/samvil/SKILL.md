@@ -107,6 +107,7 @@ This skill owns chain entry only. Per `references/contract-layer-protocol.md`, e
 3. Hard-coding `chain.next_skill` instead of using the aggregator output (regresses brownfield + resume routing).
 4. Calling Council/Design tools from the orchestrator — those belong to their own thin skills.
 5. Mutating `samvil_tier` after Step 2 confirmation without re-asking the user.
+6. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

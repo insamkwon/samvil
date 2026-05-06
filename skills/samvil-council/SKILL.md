@@ -21,6 +21,8 @@ verbose synthesis examples, decisions.log shapes in `SKILL.legacy.md`.
 2. `mcp__samvil_mcp__save_event(session_id="<sid>", event_type="council_started", stage="council", data="{}")` — best-effort, auto-claim writes `evidence_posted subject="stage:council"`.
 3. Files are SSOT — read `project.seed.json`, `project.state.json`, `project.config.json`, `interview-summary.md`. Synthesis rules: `references/council-protocol.md`, `references/tier-definitions.md`.
 
+**Brownfield Delta Mode** (`state._brownfield_seed_merged == true`): Council reviews only `seed.features[]` where `status == "new"`. Existing features (`status == "existing"`) are already in production — skip. Print `[SAMVIL] Council: Brownfield mode — reviewing <N> new features only (skipping <M> existing).`
+
 ## Step 1 — Tier-Gated Agent Activation
 
 Apply `selected_tier` (full matrix in `SKILL.legacy.md`):
@@ -100,7 +102,7 @@ Append Council section to `.samvil/handoff.md` via Bash `cat >>` or Edit (never 
 
 ## Anti-Patterns
 
-1. Auto-modifying seed without user approval on PROCEED_WITH_CHANGES. 2. Spawning agents the tier doesn't include. 3. Skipping Step 3 (Round 1 synthesis) before Round 2 — R2 must see debate points. 4. Dropping dissenting opinions — `sections[*].dissenting` MUST appear in Devil's Advocate block and decisions.log. 5. Proceeding past `HOLD` without user input (P5 Blind convergence). 6. Using Write tool for handoff.md (Bash `cat >>` or Edit only). 7. Spawning agents serially when MAX_PARALLEL allows — chunk-parallel non-negotiable.
+1. Auto-modifying seed without user approval on PROCEED_WITH_CHANGES. 2. Spawning agents the tier doesn't include. 3. Skipping Step 3 (Round 1 synthesis) before Round 2 — R2 must see debate points. 4. Dropping dissenting opinions — `sections[*].dissenting` MUST appear in Devil's Advocate block and decisions.log. 5. Proceeding past `HOLD` without user input (P5 Blind convergence). 6. Using Write tool for handoff.md (Bash `cat >>` or Edit only). 7. Spawning agents serially when MAX_PARALLEL allows — chunk-parallel non-negotiable. 8. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

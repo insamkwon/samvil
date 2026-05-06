@@ -1522,37 +1522,6 @@ async def semantic_check(code: str, context_hint: str = "") -> str:
         return json.dumps({"risk_level": "LOW", "error": str(e)})
 
 
-@mcp.tool()
-async def semantic_check_llm(code: str, ac_description: str, tier: str = "standard") -> str:
-    """Enhanced semantic check with LLM support for thorough+ tiers.
-
-    Returns heuristic result + llm_prompt (for skill to call LLM) + should_use_llm flag.
-    The actual LLM call is done by the skill, not MCP.
-
-    Args:
-        code: Source code to analyze
-        ac_description: AC description for context
-        tier: Agent tier (minimal/standard/thorough/full)
-
-    Returns: heuristic result + {llm_prompt, should_use_llm}
-    """
-    try:
-        from .semantic_checker import (
-            analyze_code_snippet,
-            build_llm_prompt,
-            should_use_llm,
-        )
-        result = analyze_code_snippet(code, ac_description)
-        use_llm = should_use_llm(tier, result["risk_level"])
-        result["should_use_llm"] = use_llm
-        if use_llm:
-            result["llm_prompt"] = build_llm_prompt(code, ac_description)
-        return json.dumps(result)
-    except Exception as e:
-        _log_mcp_health("fail", "semantic_check_llm", str(e))
-        return json.dumps({"risk_level": "LOW", "error": str(e), "should_use_llm": False})
-
-
 # ── Research WebFetch tools (v2.7.0, PATH 4) ─────────────────
 
 
@@ -1984,26 +1953,6 @@ async def render_ac_tree_hud(ac_tree_json: str) -> str:
     except Exception as e:
         _log_mcp_health("fail", "render_ac_tree_hud", str(e))
         return json.dumps({"error": str(e), "ascii": ""})
-
-
-@mcp.tool()
-async def suggest_ac_decomposition(ac_description: str) -> str:
-    """Heuristic suggestion for AC decomposition (pre-LLM).
-
-    Args:
-        ac_description: The AC text
-
-    Returns: {suggested_children: [str], needs_llm: bool}
-    """
-    try:
-        from .ac_tree import simple_decompose_suggestion
-        suggestions = simple_decompose_suggestion(ac_description)
-        return json.dumps({
-            "suggested_children": suggestions,
-            "needs_llm": len(suggestions) == 0,
-        })
-    except Exception as e:
-        return json.dumps({"suggested_children": [], "needs_llm": True, "error": str(e)})
 
 
 # ── v3.0.0 T1.1: AC Tree traversal tools ──────────────────────
@@ -2677,54 +2626,7 @@ async def validate_role_separation(claimed_by: str, verified_by: str) -> str:
         return json.dumps({"error": str(e)})
 
 
-@mcp.tool()
-async def list_model_roles() -> str:
-    """Return the full role inventory. Used by ROLE-INVENTORY.md render
-    and by retro when auditing drift.
-    """
-    try:
-        _log_mcp_health("ok", "list_model_roles")
-        return json.dumps(
-            {
-                "inventory": _role_inventory(),
-                "rollup": _agents_by_role(),
-            }
-        )
-    except Exception as e:
-        _log_mcp_health("fail", "list_model_roles", str(e))
-        return json.dumps({"error": str(e)})
-
-
 # ── v3.2.0 Sprint 3 — AC leaf schema (③) ──────────────────────
-
-
-@mcp.tool()
-async def validate_ac_leaf(leaf_json: str, stage: str) -> str:
-    """Validate one AC leaf against its required fields for the given
-    pipeline stage (interview / seed / design / build / qa).
-
-    Returns `{"issues": [...]}`. Empty list means valid.
-    """
-    try:
-        d = json.loads(leaf_json)
-        leaf = ACLeaf.from_dict(d)
-        stage_enum = ACStage(stage)
-        issues = _validate_leaf_core(leaf, stage=stage_enum)
-        _log_mcp_health("ok", "validate_ac_leaf")
-        return json.dumps(
-            {
-                "issues": [
-                    {"field": i.field, "code": i.code, "message": i.message}
-                    for i in issues
-                ]
-            }
-        )
-    except ValueError as e:
-        _log_mcp_health("fail", "validate_ac_leaf", str(e))
-        return json.dumps({"error": f"bad input: {e}"})
-    except Exception as e:
-        _log_mcp_health("fail", "validate_ac_leaf", str(e))
-        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -2780,22 +2682,6 @@ async def meta_probe_prompt(phase: str, answers_summary: str) -> str:
         return json.dumps({"prompt": prompt})
     except Exception as e:
         _log_mcp_health("fail", "meta_probe_prompt", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def scenario_simulation(features_json: str) -> str:
-    """Run the T4 scenario simulation. Returns a list of steps with any
-    contradictions found."""
-    try:
-        features = json.loads(features_json)
-        steps = _scenario_simulate(features=features)
-        _log_mcp_health("ok", "scenario_simulation")
-        from dataclasses import asdict
-
-        return json.dumps({"steps": [asdict(s) for s in steps]})
-    except Exception as e:
-        _log_mcp_health("fail", "scenario_simulation", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -2906,32 +2792,6 @@ async def loop_should_stop(
         return json.dumps({"stop": stop, "reason": reason})
     except Exception as e:
         _log_mcp_health("fail", "loop_should_stop", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def retro_load(path: str) -> str:
-    """Load a retro report. Returns the serialized dict form."""
-    try:
-        r = _load_retro(path)
-        _log_mcp_health("ok", "retro_load")
-        return json.dumps(r.to_dict())
-    except Exception as e:
-        _log_mcp_health("fail", "retro_load", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def retro_save(path: str, report_json: str) -> str:
-    """Persist a retro report to disk (YAML preferred, JSON fallback)."""
-    try:
-        data = json.loads(report_json)
-        r = _retro_from_dict(data)
-        _save_retro(r, path)
-        _log_mcp_health("ok", "retro_save")
-        return json.dumps({"ok": True, "path": str(path)})
-    except Exception as e:
-        _log_mcp_health("fail", "retro_save", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -4554,22 +4414,6 @@ async def aggregate_module_state(project_root: str) -> str:
 
 
 @mcp.tool()
-async def get_host_adapter(host_name: str | None = None) -> str:
-    """Get the full adapter configuration for a host environment.
-
-    Returns HostAdapter dict with capability, skill_mappings,
-    tool_aliases, chain_format, and setup_instructions.
-    """
-    try:
-        result = _get_adapter(host_name)
-        _log_mcp_health("ok", "get_host_adapter")
-        return json.dumps(result)
-    except Exception as e:
-        _log_mcp_health("fail", "get_host_adapter", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
 async def get_chain_continuation(
     host_name: str | None,
     current_skill: str,
@@ -4585,22 +4429,6 @@ async def get_chain_continuation(
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "get_chain_continuation", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def list_host_adapters() -> str:
-    """List all available host adapters with summary info.
-
-    Returns list of {host_name, chain_format, skill_count,
-    mcp_tools, parallel_agents}.
-    """
-    try:
-        result = _list_adapters()
-        _log_mcp_health("ok", "list_host_adapters")
-        return json.dumps(result)
-    except Exception as e:
-        _log_mcp_health("fail", "list_host_adapters", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -5003,30 +4831,6 @@ async def trace_write(
         return json.dumps(entry)
     except Exception as e:
         _log_mcp_health("fail", "trace_write", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def trace_read(project_root: str, limit: int = 20) -> str:
-    """Return the last *limit* trace entries from .samvil/trace.jsonl."""
-    try:
-        entries = _read_trace(project_root, limit)
-        _log_mcp_health("ok", "trace_read")
-        return json.dumps(entries)
-    except Exception as e:
-        _log_mcp_health("fail", "trace_read", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def trace_clear(project_root: str) -> str:
-    """Remove .samvil/trace.jsonl. Returns {"cleared": true/false}."""
-    try:
-        cleared = _clear_trace(project_root)
-        _log_mcp_health("ok", "trace_clear")
-        return json.dumps({"cleared": cleared})
-    except Exception as e:
-        _log_mcp_health("fail", "trace_clear", str(e))
         return json.dumps({"error": str(e)})
 
 

@@ -109,7 +109,7 @@ Apply in order (each best-effort, INV-5):
 3. NO dumping build logs into conversation — write to `.samvil/build.log`, only `tail -30` on failure.
 4. NO skipping integration build (Step 4) — per-leaf `tsc --noEmit` does not catch cross-feature regressions.
 5. NO adding features outside `seed.features` (Zero-Refactor Rule, P5). NO `@latest`, NO testing frameworks, NO premature `memo`/lazy, NO new README.md.
-6. NO auto-retry past `MAX_RETRIES=2` (Circuit Breaker; P10).
+6. NO auto-retry past `MAX_RETRIES=2` (Circuit Breaker; P10). 7. **`AskUserQuestion` 호출 포맷**: `questions=["<질문>"]` 배열만 허용; 문자열 직접 전달 시 `InputValidationError`.
 
 ## Code Quality (pointers to legacy)
 - Web (Next.js + shadcn/ui): legacy §"Code Quality Rules" #1-11, 14-16 (`'use client'`, TS strict, PascalCase one-per-file, `@/components/ui/` shadcn-first, `cn()`, `@/` aliases, real content, empty states, hydration `mounted`, localStorage try-catch, Korean UX writing, 첫 30초 가치, premium gate).

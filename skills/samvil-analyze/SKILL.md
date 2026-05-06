@@ -67,6 +67,8 @@ After user approval:
 
 ## Step 5 — Gap analysis + chain (INV-4)
 
+**🛑 USER INPUT REQUIRED** — context에서 답을 추론하지 말 것. 사용자가 이미 "기존 프로젝트 개선"을 선택했더라도, 구체적으로 무엇을 할지는 반드시 아래 AskUserQuestion으로 명시적으로 받아야 함.
+
 AskUserQuestion (multiSelect) `이 프로젝트에서 뭘 하고 싶으세요?`: `기능 추가/개선` (→ samvil-interview Brownfield Mode, see below) / `코드 품질 개선` (→ samvil-qa) / `디자인 개선` (→ samvil-design) / `QA 검증` (→ samvil-qa).
 
 **기능 추가/개선 선택 시 — Brownfield Interview 체인:**
@@ -75,13 +77,13 @@ AskUserQuestion (multiSelect) `이 프로젝트에서 뭘 하고 싶으세요?`:
 3. Invoke `samvil-interview` via Skill tool. Brownfield Mode is auto-detected by the presence of `_analysis_source: "brownfield"` in state. samvil-interview will skip tech-stack phases (framework already known) and focus on improvement goals + new feature requirements.
 4. After samvil-interview completes and the user approves the interview summary, call `mcp__samvil_mcp__merge_brownfield_seed(existing_seed_json='<JSON of current project.seed.json>', interview_state_json='<JSON of interview answers>', new_features_json='[]')`. This merges existing features (status:existing) with new ones from the interview (status:new).
 5. Write the merged seed to `project.seed.json` (AskUserQuestion `병합된 seed를 저장할까요?` yes/cancel). Then `mcp__samvil_mcp__save_seed_version(...)` best-effort.
-6. Invoke `samvil-build` (skipping samvil-seed and samvil-council — seed is already merged).
+6. Set `state._brownfield_seed_merged: true` in `project.state.json`. Invoke `samvil-seed` via Skill tool (seed already written — samvil-seed will enter presentation-only mode, show the merged seed for user approval, then chain to samvil-council → samvil-scaffold → samvil-build).
 
 Append Analyze section to `.samvil/handoff.md` via Bash `cat >>` or Edit (never Write tool): framework · feature_count · warnings count · chosen route. Print `[SAMVIL] Analyze complete. Routing to <skill>...` and invoke Skill tool with the chosen skill name.
 
 ## Anti-Patterns
 
-1. Modifying or deleting existing source files during analyze — read-only phase. Write only to `project.seed.json` / `decisions.log` / `interview-summary.md` / `.samvil/`. 2. Forcing framework conversion (e.g., React→Next.js auto-rewrite) — not analyze's job. 3. Skipping the user-review checkpoint after Step 2 — features inferred from heuristics MUST be confirmed (P2 Description vs Prescription). 4. Proceeding with `solution_type_confidence: low` without re-asking the user. 5. Dropping `warnings` from the render block — every warning must surface. 6. Using Write tool for handoff.md (Bash `cat >>` or Edit only). 7. Persisting seed before user approval (INV-1, irreversibility-aware P10).
+1. Modifying or deleting existing source files during analyze — read-only phase. Write only to `project.seed.json` / `decisions.log` / `interview-summary.md` / `.samvil/`. 2. Forcing framework conversion (e.g., React→Next.js auto-rewrite) — not analyze's job. 3. Skipping the user-review checkpoint after Step 2 — features inferred from heuristics MUST be confirmed (P2 Description vs Prescription). 4. Proceeding with `solution_type_confidence: low` without re-asking the user. 5. Dropping `warnings` from the render block — every warning must surface. 6. Using Write tool for handoff.md (Bash `cat >>` or Edit only). 7. Persisting seed before user approval (INV-1, irreversibility-aware P10). 8. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

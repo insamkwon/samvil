@@ -89,3 +89,7 @@ On option 4 (resume from interrupted leaf):
 - MCP `resume_session` fails → treat as `found: false`, warn once, proceed to `samvil-interview`.
 - `handoff.md` unreadable → skip excerpt silently.
 - `minutes_since` null → show "경과 시간: 알 수 없음".
+
+## Anti-Patterns
+
+1. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.

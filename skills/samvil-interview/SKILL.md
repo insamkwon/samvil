@@ -19,8 +19,9 @@ context. Full Korean prose, per-`solution_type` question banks, Phase
 
 1. `mcp__samvil_mcp__save_event(session_id="<sid>", event_type="interview_start", stage="interview", data="{}")` — best-effort. Auto-claim posts `evidence_posted subject="stage:interview"`.
 2. Files are SSOT — read `project.state.json`, `project.config.json`, `references/app-presets.md`. Read `references/interview-frameworks.md` + `interview-question-bank.md` only when entering a Phase 2.x.
-3. `mcp__samvil_mcp__aggregate_interview_state(project_root="<cwd or ~/dev/<slug>>", prompt="<one-line>")` → `tier.{samvil_tier,source,valid_tiers}` (5-valued: includes `deep`), `ambiguity_target`, `required_phases[]` (`core/scope/lifecycle/unknown/nonfunc/inversion/stakeholder/research/domain_deep`), `mode.{is_zero_question,matched_signals}`, `preset.{name,keywords,source,description?}`, `custom_presets_count`, `manifest`, `paths.{interview_summary,state_file,config_file,preset_dir}`, `errors[]`. On error: fall back to manual reads from `SKILL.legacy.md` (P8).
-4. `mcp__samvil_mcp__render_domain_context(solution_type="<from orchestrator>", stage="interview")` — best-effort. `interview_probes` / `risk_checks` / `core_entities` are question candidates only; never override user input.
+3. **Interview Resume Check**: `test -f .samvil/interview-progress.json`. If exists → load file, extract `completed_phases[]` and `answers[]`, print `[SAMVIL] 인터뷰 진행 중 데이터 발견 — <N>개 답변 복원. 이어서 진행합니다.`, skip already-completed phases in Step 2.
+4. `mcp__samvil_mcp__aggregate_interview_state(project_root="<cwd or ~/dev/<slug>>", prompt="<one-line>")` → `tier.{samvil_tier,source,valid_tiers}` (5-valued: includes `deep`), `ambiguity_target`, `required_phases[]` (`core/scope/lifecycle/unknown/nonfunc/inversion/stakeholder/research/domain_deep`), `mode.{is_zero_question,matched_signals}`, `preset.{name,keywords,source,description?}`, `custom_presets_count`, `manifest`, `paths.{interview_summary,state_file,config_file,preset_dir}`, `errors[]`. On error: fall back to manual reads from `SKILL.legacy.md` (P8).
+5. `mcp__samvil_mcp__render_domain_context(solution_type="<from orchestrator>", stage="interview")` — best-effort. `interview_probes` / `risk_checks` / `core_entities` are question candidates only; never override user input.
 
 ## Step 0 — Mode + Preset
 
@@ -41,6 +42,7 @@ state["ai_answer_streak"] = mcp__samvil_mcp__update_answer_streak(streak, source
 ```
 
 Track breadth: `mcp__samvil_mcp__manage_tracks(action="init"|"update"|"check"|"resolve", ...)`.
+**답변 즉시 저장 (INV-3 강화)**: 답변 수신 직후 `.samvil/interview-progress.json`에 `{"phase":"<id>","q":"<q>","a":"<a>","ts":"<ISO>"}` append (bash `echo ... >>`). Phase 완료 시 `{"phase_complete":"<id>"}` 마커 추가.
 
 ## Step 2 — Phase Loop (Korean, host-bound)
 
@@ -87,7 +89,7 @@ AskUserQuestion → preset 저장 여부. On 저장 → write
 
 ## Step 5 — Persist + Contract Layer (post_stage)
 
-1. Write summary to `aggregate.paths.interview_summary` (Korean, sections per `SKILL.legacy.md` §"Output Format" by `solution_type`). Each section non-empty; constraints ≥1; success criteria ≥3.
+1. Read `.samvil/interview-progress.json` (all Q&A pairs accumulated during Step 2/3) → use as source of truth for summary generation. Do NOT rely on conversation context. Write summary to `aggregate.paths.interview_summary` (Korean, sections per `SKILL.legacy.md` §"Output Format" by `solution_type`). Each section non-empty; constraints ≥1; success criteria ≥3. After successful write, delete `.samvil/interview-progress.json` (no longer needed; summary file is the authoritative record).
 2. `mcp__samvil_mcp__compute_seed_readiness(dimensions_json='{"intent_clarity":<f>,"constraint_clarity":<f>,"ac_testability":<f>,"lifecycle_coverage":<f>,"decision_boundary":<f>}', samvil_tier="<tier>")` — score each dim from recorded answers; flag estimates in summary.
 3. `mcp__samvil_mcp__gate_check(gate_name="interview_to_seed", samvil_tier="<tier>", metrics_json='{"seed_readiness":<total>}', project_root=".")`.
    - `block` → loop back to failing dim's owning Phase (`required_action.type` ∈ `split_ac/run_research/stronger_model/ask_user`). Cap 2 escalations via `gate_should_force_user`.
@@ -99,21 +101,17 @@ AskUserQuestion → preset 저장 여부. On 저장 → write
 
 ## Brownfield Mode (auto-detected from `state._analysis_source == "brownfield"`)
 
-Load `state._analysis_context`; announce `[SAMVIL] Brownfield Mode`. Pass `pre_filled_dimensions="technical,nonfunctional"` to all `score_ambiguity` calls. Focus phases: `core` (improvement goals), `scope` (gaps/new features), `inversion` (why existing app underperforms). After Step 5 approval: `mcp__samvil_mcp__merge_brownfield_seed(existing_seed_json='<project.seed.json>', interview_state_json='<answers JSON>', new_features_json='[]')` → write merged seed → skip Step 6 chain to `samvil-seed`, invoke `samvil-build` directly.
+Load `state._analysis_context`; announce `[SAMVIL] Brownfield Mode`. Pass `pre_filled_dimensions="technical,nonfunctional"` to all `score_ambiguity` calls. Focus phases: `core` (improvement goals), `scope` (gaps/new features), `inversion` (why existing app underperforms). After Step 5 approval: `mcp__samvil_mcp__merge_brownfield_seed(existing_seed_json='<project.seed.json>', interview_state_json='<answers JSON>', new_features_json='[]')` → write merged seed to `project.seed.json` → set `state._brownfield_seed_merged: true` → proceed to Step 6.
 
 ## Step 6 — Chain
 
 **Greenfield**: Invoke Skill tool with `samvil-seed`. **NO COMPACT**. Codex CLI fallback: read `skills/samvil-seed/SKILL.md`.
-**Brownfield**: Invoke Skill tool with `samvil-build` (seed already merged above).
+**Brownfield**: Invoke Skill tool with `samvil-seed` (merged seed already written; samvil-seed enters presentation-only mode → samvil-council → samvil-scaffold → samvil-build). Same full pipeline as greenfield.
 
 ## Anti-Patterns
 
-1. Asking 2+ questions in a single AskUserQuestion. 2. Skipping summary verification (Zero-Question Mode included). 3. Accepting a vague AC without offering a rewrite (PHI-06). 4. Exposing framework names (AARRR/JTBD/HEART) to the user. 5. Self-verifying the `interview_to_seed` gate verdict (Generator ≠ Judge). 6. Hard-coding `chain.next_skill` instead of always invoking `samvil-seed`.
+1. Asking 2+ questions in a single AskUserQuestion. 2. Skipping summary verification (Zero-Question Mode included). 3. Accepting a vague AC without offering a rewrite (PHI-06). 4. Exposing framework names (AARRR/JTBD/HEART) to the user. 5. Self-verifying the `interview_to_seed` gate verdict (Generator ≠ Judge). 6. Hard-coding `chain.next_skill` instead of always invoking `samvil-seed`. 7. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 
-Full Korean Phase 1–4 question bodies per `solution_type`, Phase 2.x
-expansion templates, 5-path routing decision tables, Tier-by-Tier rule
-tables, summary templates, custom-preset JSON schema notes, and the
-adaptive follow-up matrix in `SKILL.legacy.md`. Consult only when the
-interview regresses or is extended.
+Full Korean Phase 1–4 question bodies per `solution_type`, Phase 2.x expansion templates, 5-path routing decision tables, Tier-by-Tier rule tables, summary templates, custom-preset JSON schema notes, and the adaptive follow-up matrix in `SKILL.legacy.md`. Consult only when the interview regresses or is extended.

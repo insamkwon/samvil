@@ -112,6 +112,7 @@ Apply in order (each best-effort, INV-5):
 5. NO Stub/Mock/hardcoded responses passing AC — `semantic_check` HIGH risk → automatic FAIL (Reward Hacking).
 6. NO blind convergence — issue count must decrease per iteration; identical issue id sets across 2 iterations → BLOCKED (PHI-04).
 7. NO independent agent writing files — main session is sole writer of qa-report.md, state.json, events.jsonl, qa-results.json.
+8. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

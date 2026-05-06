@@ -112,6 +112,9 @@ mcp__samvil_mcp__claim_post(project_root=".", claim_type="policy_adoption",
 2. Append Retro section to `.samvil/handoff.md`.
 3. Print final `[SAMVIL] ✓ Pipeline complete!` + run path. **No chain** — retro is terminal.
 
+## Anti-Patterns
+
+1. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 ## Legacy reference
 
 Full Korean prose, dashboard examples, preset auto-accumulation prompt template, and verbose JSON schema in `SKILL.legacy.md`. Consult only when retro regresses or is extended.

@@ -112,7 +112,7 @@ v{X} → v{Y}` + backup path / `[SAMVIL] ✗ 업데이트 실패` + manual recov
 
 Don't: overwrite `mcp/.venv` (rsync excludes it), touch user project
 source, proceed without `gh`, or `rm -rf` cache folders without the
-empty-`$LATEST` guard.
+empty-`$LATEST` guard. · **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

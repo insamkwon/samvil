@@ -153,6 +153,95 @@ def _fail(msg: str) -> None:
     print(f"  ✗ {msg}")
 
 
+# Tools that are referenced in tests but not yet wired to any skill.
+# These are intentional "pending wiring" items — tracked in ISS-TOOL-BLOAT.
+# Adding a new tool here requires a comment explaining why it's deferred.
+# Removing from this list requires either wiring it to a skill OR deleting the tool.
+REVERSE_CHECK_ALLOWLIST: frozenset[str] = frozenset(
+    [
+        # Pipeline orchestration tools — replaced by HostCapability / aggregator pattern
+        "advance_chain",
+        "get_chain_continuation",
+        "get_next_stage",
+        "get_pipeline_status",
+        "should_skip_stage",
+        # Session/checkpoint tools — useful for debugging, no skill wiring yet
+        "get_session",
+        "list_sessions",
+        "list_checkpoints",
+        "load_checkpoint",
+        "session_status",
+        # Build recovery subsystem — Mountain M1-M4, not yet wired to samvil-build
+        "aggregate_module_state",
+        "aggregate_regression_state",
+        "build_final_e2e_bundle",
+        "build_post_rebuild_qa",
+        "build_qa_recovery_routing",
+        "build_rebuild_reentry",
+        "clear_leaf_checkpoint",
+        "evaluate_qa_convergence",
+        "evaluate_stuck_recovery",
+        "materialize_final_e2e_bundle",
+        "materialize_post_rebuild_qa",
+        "materialize_rebuild_reentry",
+        "read_leaf_checkpoint",
+        "render_progress_panel",
+        # Research/format tools — PATH 4 not wired beyond SKILL.legacy.md
+        "extract_query",
+        "format_research",
+        # AC analysis tools — planned for samvil-build but not wired
+        "analyze_ac_dependencies",
+        "compare_generations",
+        "compute_parallel_safety",
+        "load_external_satisfactions",
+        "synthesize_qa_evidence",
+        "update_progress",
+        # Evolve tools — not yet wired in samvil-evolve thin skill
+        "get_evolve_context",
+        "get_tier_phases",
+        # Council tools — consensus prompts not yet wired in ultra-thin council
+        "consensus_judge_prompt",
+        "consensus_reviewer_prompt",
+        # QA/budget tools — referenced in legacy but not in ultra-thin SKILL.md
+        "aggregate_run_feedback",
+        "check_stall",
+        "meta_probe_prompt",
+        "rate_budget_acquire",
+        "validate_profiles",
+        "validate_state",
+        # Adversarial testing — standalone diagnostic, not part of pipeline
+        "adversarial_prompt",
+        # Event/loop tools — utility helpers not yet wired to any skill body
+        "get_events",
+        "loop_should_stop",
+    ]
+)
+
+
+def _collect_all_skill_text() -> str:
+    """Concatenate all skill SKILL.md and codex-commands/*.md files."""
+    parts: list[str] = []
+    for skill_dir in (REPO / "skills").iterdir():
+        skill_md = skill_dir / "SKILL.md"
+        if skill_md.exists():
+            parts.append(skill_md.read_text(errors="ignore"))
+    codex_dir = REPO / "references" / "codex-commands"
+    if codex_dir.exists():
+        for f in codex_dir.glob("*.md"):
+            parts.append(f.read_text(errors="ignore"))
+    return "\n".join(parts)
+
+
+def _collect_mcp_tools() -> list[str]:
+    """Extract all @mcp.tool() function names from server.py."""
+    import re
+    server = REPO / "mcp" / "samvil_mcp" / "server.py"
+    if not server.exists():
+        return []
+    text = server.read_text(errors="ignore")
+    return re.findall(r"@mcp\.tool\(\)\s*\nasync def (\w+)", text)
+
+
 def main() -> int:
     all_green = True
     for skill_name, rel_path, required in CHECKS:
@@ -168,6 +257,20 @@ def main() -> int:
             all_green = False
         else:
             _ok(f"{skill_name}: all {len(required)} tokens present")
+
+    # Reverse check: every @mcp.tool() must be referenced in at least one skill/codex file
+    print()
+    print("Reverse check: all @mcp.tool() referenced in skills or codex-commands ...")
+    skill_text = _collect_all_skill_text()
+    mcp_tools = _collect_mcp_tools()
+    unreferenced = [t for t in mcp_tools if t not in skill_text and t not in REVERSE_CHECK_ALLOWLIST]
+    if unreferenced:
+        _fail(f"{len(unreferenced)} @mcp.tool() functions not referenced in any skill (and not in allowlist): {sorted(unreferenced)}")
+        all_green = False
+    else:
+        allowlisted = [t for t in mcp_tools if t not in skill_text and t in REVERSE_CHECK_ALLOWLIST]
+        _ok(f"all non-allowlisted @mcp.tool() functions referenced ({len(allowlisted)} allowlisted pending-wiring tools skipped)")
+
     print()
     print("Summary:", "PASS" if all_green else "FAIL")
     return 0 if all_green else 1

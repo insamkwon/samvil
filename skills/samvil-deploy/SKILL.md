@@ -90,7 +90,7 @@ Whether deployed or skipped:
 
 QA-blocked deploy (gate refuses) · hardcoded secrets in `.env`
 (AskUserQuestion instead) · auto-retry on failure (report once, stop) ·
-skipping `samvil-retro` chain.
+skipping `samvil-retro` chain. · **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

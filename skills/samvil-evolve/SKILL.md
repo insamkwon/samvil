@@ -87,7 +87,7 @@ After QA pass: `mcp__samvil_mcp__snapshot_generation(project_root=".", generatio
 
 ## Anti-Patterns
 
-1. >2 new features per cycle. 2. Modifying `name`/`mode`/`core_experience`. 3. Skipping checkpoint outside autonomous mode. 4. Collapsing AC tree leaves to flat strings. 5. Force-converging past failed gate without user opt-in.
+1. >2 new features per cycle. 2. Modifying `name`/`mode`/`core_experience`. 3. Skipping checkpoint outside autonomous mode. 4. Collapsing AC tree leaves to flat strings. 5. Force-converging past failed gate without user opt-in. 6. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

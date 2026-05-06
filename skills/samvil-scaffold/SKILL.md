@@ -109,7 +109,7 @@ Cap 2 attempts; second failure → AskUserQuestion (record in retro).
 3. Hardcoding external-API model ID (`game-asset-gen` Gemini-404).
 4. Business logic in scaffold — components/`src/` skeleton only.
 5. Auto-retry past `MAX_RETRIES=2` (Circuit Breaker; P10).
-6. Hard-coding next chain target — always invoke `samvil-build`.
+6. Hard-coding next chain target — always invoke `samvil-build`. 7. **`AskUserQuestion` 호출 포맷**: `questions=["<질문>"]` 배열만 허용; 문자열 직접 전달 시 `InputValidationError`.
 
 ## Legacy reference
 
