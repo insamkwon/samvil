@@ -4883,6 +4883,116 @@ async def search_ac_tree_by_feature(project_root: str, feature_id: str) -> str:
         return json.dumps([])
 
 
+# ── Interview State (v4.19.0 — Progressive AC + structural persistence) ─
+
+
+@mcp.tool()
+async def persist_interview_answer(
+    project_root: str,
+    phase: str,
+    question: str,
+    answer: str,
+    source: str = "from-user",
+    ac_candidates_json: str = "",
+    ts: str = "",
+) -> str:
+    """Persist a single interview Q&A (and optionally AC candidates) to
+    ``<project_root>/.samvil/interview-progress.json`` (JSONL).
+
+    Replaces v4.18.0's bash ``echo >> interview-progress.json`` pattern
+    with a structural guarantee: even if the main session forgets to
+    persist, the MCP wrapper records the entry atomically.
+
+    ``ac_candidates_json`` is an optional JSON-encoded array of strings.
+    Each non-empty entry becomes its own ``ac_candidate`` line under the
+    same phase. Empty/whitespace entries are ignored.
+
+    Returns ``{"ok": bool, "counts": {qa, ac_candidate}, ...}``.
+    Best-effort — file/permission errors return ok=False rather than
+    raising, so the interview is never blocked (INV-5).
+    """
+    try:
+        from .interview_state import persist_answer as _persist
+        ac_candidates: list[str] = []
+        if ac_candidates_json:
+            try:
+                parsed = json.loads(ac_candidates_json)
+                if isinstance(parsed, list):
+                    ac_candidates = [str(x) for x in parsed]
+            except json.JSONDecodeError:
+                ac_candidates = []
+        result = _persist(
+            project_root=project_root,
+            phase=phase,
+            question=question,
+            answer=answer,
+            source=source,
+            ac_candidates=ac_candidates,
+            ts=(ts or None),
+        )
+        _log_mcp_health("ok" if result.get("ok") else "fail", "persist_interview_answer")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "persist_interview_answer", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def mark_interview_phase_complete(
+    project_root: str,
+    phase: str,
+    ts: str = "",
+) -> str:
+    """Append a ``phase_complete`` marker to interview-progress.json.
+
+    Used at the end of each Phase loop iteration so resume-time replay
+    can group AC candidates by completed phase.
+    """
+    try:
+        from .interview_state import mark_phase_complete as _mark
+        result = _mark(project_root=project_root, phase=phase, ts=(ts or None))
+        _log_mcp_health("ok" if result.get("ok") else "fail", "mark_interview_phase_complete")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "mark_interview_phase_complete", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def load_interview_progress(project_root: str) -> str:
+    """Replay interview-progress.json into structured form.
+
+    Returns ``{ok, exists, qa_entries, ac_candidates, completed_phases,
+    ac_by_phase, answers_by_phase, path}``. Used by samvil-interview Boot
+    Sequence (resume) and samvil-seed (consolidate AC candidates into
+    confirmed ACs).
+    """
+    try:
+        from .interview_state import load_progress as _load
+        result = _load(project_root=project_root)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "load_interview_progress")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "load_interview_progress", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def clear_interview_progress(project_root: str) -> str:
+    """Delete interview-progress.json after summary write completes.
+
+    Best-effort. Returns ``{ok, path}``.
+    """
+    try:
+        from .interview_state import clear_progress as _clear
+        result = _clear(project_root=project_root)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "clear_interview_progress")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "clear_interview_progress", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 

@@ -245,6 +245,20 @@ MCP 호출 실패하면:
 실행 시 `project.seed.json`에서 프리셋 포맷(JSON)으로 변환하여 `~/.samvil/presets/<name>.json`에 저장.
 저장 시 `keywords` 필드에 앱 아이디어의 핵심 명사를 자동 추출하여 포함.
 
+## Phase id / Trigger / Body 매핑 표 (v4.19 — moved from SKILL.md for thinness)
+
+| Phase id | Title | Trigger | Body location |
+|---|---|---|---|
+| `core` | Phase 1 Core Understanding | always | §"Phase 1" by `solution_type` |
+| `scope` | Phase 2 Scope Definition | always | §"Phase 2" by `solution_type` |
+| `unknown` | Phase 2.5 Unknown Unknowns | thorough+ or auto-detect | §"Phase 2.5" Pre-mortem + Inversion |
+| `nonfunc` | Phase 2.6 Non-functional | thorough+ | `interview-question-bank.md` Common §1–7 |
+| `inversion` | Phase 2.7 Inversion | thorough+ | §"Phase 2.7" failure paths + anti-req |
+| `stakeholder` | Phase 2.8 Stakeholder/JTBD | full+ | §"Phase 2.8" primary user JTBD + payer |
+| `lifecycle` | Phase 2.9 Customer Lifecycle | standard+ | §"Phase 2.9" 8 stages × 1–2Q |
+| `research` | PATH 4 Research bundle | full+ | flush every TBD via Tavily |
+| `domain_deep` | Domain pack 25–30Q | deep | `render_domain_context` probes |
+
 ## Step 2: Tier 기반 인터뷰 깊이 (v3.1.0 확장, v3-022)
 
 `selected_tier`에 따라 질문 수, 모호도 목표, 필수 Phase 세트를 결정.

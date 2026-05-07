@@ -25,7 +25,10 @@ skip "Build Seed" step entirely. Instead:
 1. Read `project.state.json` for `session_id`, `current_stage`, `_brownfield_seed_merged`, and host name
    (`host`, `runtime`, or `agent_host`; default `generic`).
 2. Read `project.config.json` for `selected_tier` / `samvil_tier`.
-3. If NOT brownfield: Read `interview-summary.md` from disk, not from conversation.
+3. If NOT brownfield: load interview state in this order (v4.19 Progressive AC support):
+   a. `mcp__samvil_mcp__load_interview_progress(project_root=".")` — if `exists==true`, use the returned `ac_by_phase` and `answers_by_phase` as the **primary** source. AC candidates are the consolidation base (do not regenerate from scratch).
+   b. Read `interview-summary.md` from disk regardless — used as supplementary narrative for non-AC fields (description, tech stack, constraints).
+   c. If neither exists → halt with a clear error; samvil-interview must run first.
 4. Read `skills/samvil-seed/SKILL.legacy.md` for seed construction rules.
 
 ## MCP Gate
@@ -43,9 +46,16 @@ If `stage_can_proceed.can_proceed` is false, show blockers and stop.
 
 ## Build Seed
 
-Using `SKILL.legacy.md`: convert `interview-summary.md` into valid v3
-`project.seed.json`, validate, present the legacy summary, and ask approval.
-If edits are requested, revise and re-present.
+**Consolidate (v4.19, when `load_interview_progress.exists == true`)**:
+1. Treat each `ac_by_phase[<phase>]` entry as a **confirmed AC candidate** that the user already saw and approved during the interview.
+2. Group AC candidates into features (use `interview-summary.md` narrative for feature names; LLM judgment for clustering when phase-to-feature is non-obvious).
+3. Deduplicate semantically equivalent ACs across phases (string-similar or LLM judgment). Prefer the user's exact wording when in doubt.
+4. Assign IDs `F<N>.AC<N>` per `references/ac-tree-guide.md` (each AC gets `id`, `description`, `status: pending`, `evidence: []`).
+5. Show the user a **consolidation summary**: "인터뷰에서 확정한 잠정 AC <N>개가 <M>개 feature로 정리되었습니다. 중복 <K>개 제거." then the seed preview.
+
+**Fallback (no progress file or empty)**: convert `interview-summary.md` into valid v3 `project.seed.json` per the legacy regeneration rules.
+
+In both paths: validate against `references/seed-schema.json`, present, and ask approval. If edits are requested, revise and re-present.
 
 ## After Approval
 
@@ -68,6 +78,7 @@ mcp__samvil_mcp__complete_stage(
 ```
 
 3. Append a short `.samvil/handoff.md` entry; never overwrite.
+4. Best-effort `mcp__samvil_mcp__clear_interview_progress(project_root=".")` — interview-progress.json is no longer authoritative once seed.json is approved (interview-summary.md remains the narrative record).
 
 ## Chain
 

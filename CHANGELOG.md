@@ -4,6 +4,80 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.19.0 — 2026-05-07
+
+**Ouroboros-level interview UX absorbed (MINOR)**
+
+Major upgrade to `samvil-interview` driven by side-by-side analysis of
+SAMVIL vs Ouroboros interview quality. Goal: keep SAMVIL's identity
+(systematic phase coverage, Korean localization, tier-based safeguards)
+while absorbing Ouroboros's Progressive Commitment UX. Five concrete
+improvements:
+
+- **A-1 Progressive AC (deep)** — Each Phase now ends with a
+  `✅ Confirmed [Phase]` block listing 잠정 ACs derived from that
+  phase's answers. Users see the seed taking shape in real time
+  instead of waiting until the samvil-seed step. AC candidates are
+  persisted, not regenerated, so what you see during the interview is
+  what reaches `seed.json`.
+- **A-2 Epic Claim** — A new Step 0.5 synthesizes a single-sentence
+  goal (`<주체>가 <대상>의 <문제>를 <방식>으로 해결합니다`) before
+  Phase 1 starts. Frames every subsequent question. AskUserQuestion
+  with `[확인 후 진행 / 한 줄 수정]` — wordsmithing is bounded.
+- **A-3 Auto-confirm announce** — `auto_confirm` route now requires
+  explicit `ℹ️ 자동확인: <fact> (<source-file>)` output to the user.
+  No more invisible AI assumptions; source must be a filename, not
+  "automatic".
+- **B-4 Structural state persistence** — Replaces v4.18's bash
+  `echo >> .samvil/interview-progress.json` (behavioral guarantee)
+  with four new MCP tools (`persist_interview_answer`,
+  `mark_interview_phase_complete`, `load_interview_progress`,
+  `clear_interview_progress`) that write atomically with
+  `fcntl.flock`. Compact-during-interview no longer loses Q&A.
+- **B-5 Brownfield manifest forced read** — Brownfield sessions now
+  must Read `package.json > pyproject.toml > go.mod > Cargo.toml >
+  requirements.txt` (priority order) and route the extracted facts
+  through PATH 1a. Same tech-stack question never asked twice.
+
+samvil-seed now consolidates `ac_by_phase` candidates (instead of
+regenerating ACs from `interview-summary.md`) when the progress file
+exists. Falls back to legacy regeneration if absent. Brownfield
+presentation-only mode unchanged.
+
+**Schema** — `references/interview-progress-schema.md` documents the
+JSONL format (`qa` / `ac_candidate` / `phase_complete` entries).
+
+**Tests** — `mcp/tests/test_interview_state.py` adds 16 tests covering
+happy path, AC candidates, blank-skip, Korean UTF-8 preservation,
+unwritable path graceful fallback, malformed line replay, dedup,
+sequential + threaded concurrent appends. Total suite: 1708 passing.
+
+**MCP tool count** — 174 → 178 (+4 v4.19 tools).
+
+**SKILL thinness** — `skills/samvil-interview/SKILL.md` stays at 117
+lines (under the 120-line cap) thanks to the Phase id/trigger/body
+mapping table being moved to `SKILL.legacy.md`.
+
+**Decisions made and not made**:
+- **Done**: A-1 deep, A-2, A-3, B-4, B-5.
+- **Skipped (data-driven)**: PM/Engineering full split via
+  `samvil-pm-interview` redesign — events.jsonl across 6 active
+  projects shows 0 invocations of the PM interview, so a large
+  redesign would be invested in a dead skill. The Progressive AC +
+  Epic Claim work above already makes the regular interview behave
+  PRD-like for the cases that actually run.
+- **Rejected (identity)**: `min_questions` flexibility (would erode
+  the safety net SAMVIL provides solo developers who don't know what
+  they don't know) and `evaluation_principles` schema fields (would
+  duplicate the existing tier ambiguity_target + floor system).
+
+**Codex parity** — host parity check passes (both hosts still
+reference `score_ambiguity` as the core required tool). Direct Codex
+command rewriting to use the new MCP tools is a follow-up; Codex CLI
+users can already call the tools out-of-band.
+
+---
+
 ## v4.17.4 — 2026-05-03
 
 **Consistency fixes: wiring token, codex command, docstring (PATCH)**
