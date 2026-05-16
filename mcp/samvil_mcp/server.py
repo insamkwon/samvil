@@ -5078,6 +5078,106 @@ async def load_pain_feedback(project_root: str) -> str:
         return json.dumps({"ok": False, "error": str(e)})
 
 
+# ── Seed-level QA (v4.25.0 — backs v4.23 SKILL.md text with real code) ─
+
+
+@mcp.tool()
+async def evaluate_seed_against_interview(
+    project_root: str,
+    seed_json: str,
+) -> str:
+    """Trace every user-claim in the seed back to the interview record.
+
+    Loads `interview-progress.json` via `load_progress` and checks
+    whether each seed.constraints / seed.out_of_scope /
+    seed.features[*].acceptance_criteria / seed.evaluation_principles
+    entry has a plausible trace in the interview material.
+
+    Returns ``{ok, verdict, coverage_score, traced, untraced, details,
+    thresholds, notes}``. Verdict is PASS / PARTIAL / FAIL by coverage
+    score (≥0.85 / ≥0.60 / below). Untraced constraints force at most
+    PARTIAL even with high coverage — drift on a hard constraint is a
+    bigger concern than on aspirational ACs.
+
+    Used by samvil-qa `--target=seed` mode.
+    """
+    try:
+        from .interview_state import load_progress as _load_progress
+        from .seed_qa import evaluate_seed_against_interview as _eval
+        seed = json.loads(seed_json) if seed_json else {}
+        progress = _load_progress(project_root=project_root)
+        result = _eval(seed=seed, interview_progress=progress)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "evaluate_seed_against_interview")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "evaluate_seed_against_interview", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def score_acs_against_principles(
+    ac_verdicts_json: str,
+    evaluation_principles_json: str,
+) -> str:
+    """Match a list of AC verdicts against seed.evaluation_principles.
+
+    Used by samvil-qa Pass 2.5 to anchor PASS/PARTIAL/FAIL verdicts to
+    the seed's own declared quality bar. For each leaf, builds
+    ``principle_hits`` (per principle: weight + relevance + satisfaction)
+    and a weighted_score. Recommends downgrade when:
+        ac_verdict in {PASS, PARTIAL} AND weighted_score < 0.5
+        AND at least one principle of weight ≥ 0.5 is violated.
+
+    Returns ``{ok, per_leaf, weight_violations, overall_weighted_score}``.
+
+    When ``evaluation_principles`` is empty, returns weighted_score=1.0
+    for all leaves and skips scoring (falls back to v4.22 behaviour).
+    """
+    try:
+        from .seed_qa import score_acs_against_principles as _score
+        ac_verdicts = json.loads(ac_verdicts_json) if ac_verdicts_json else []
+        principles = json.loads(evaluation_principles_json) if evaluation_principles_json else []
+        result = _score(ac_verdicts=ac_verdicts, evaluation_principles=principles)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "score_acs_against_principles")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "score_acs_against_principles", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def evaluate_exit_conditions(
+    seed_json: str,
+    qa_state_json: str,
+) -> str:
+    """Check whether ``seed.exit_conditions`` are met given current
+    samvil-qa Phase Z state.
+
+    Returns ``{ok, has_exit_conditions, conditions[], structurally_evaluable,
+    auto_check, verdict_blocked, notes[]}``. The ``verdict_blocked`` flag
+    is the SKILL-level signal: True → samvil-qa Phase Z cannot return
+    PASS this iteration.
+
+    Auto-checks the two common patterns: "all features PASS" and
+    "evaluation_principles satisfied". For prose exit_conditions that
+    don't match these patterns, structurally_evaluable=False — final
+    judgment is left to the SKILL/LLM layer.
+
+    When seed has no exit_conditions, returns has_exit_conditions=False
+    and never blocks (falls back to v4.22 convergence rules).
+    """
+    try:
+        from .seed_qa import evaluate_exit_conditions as _eval
+        seed = json.loads(seed_json) if seed_json else {}
+        qa_state = json.loads(qa_state_json) if qa_state_json else {}
+        result = _eval(seed=seed, qa_state=qa_state)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "evaluate_exit_conditions")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "evaluate_exit_conditions", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 

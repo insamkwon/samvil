@@ -276,3 +276,98 @@ def test_merge_explicit_new_features_override_interview():
     assert "gantt-chart" in names
     # interview features should NOT be added when explicit list given
     assert "deadline-alerts" not in names
+
+
+# ── v4.23 evaluation_principles + exit_conditions ─────────────────
+
+
+def _v423_seed_base():
+    return {
+        "name": "my-app",
+        "description": "A simple task management application",
+        "solution_type": "web-app",
+        "tech_stack": {"framework": "nextjs"},
+        "core_experience": {
+            "description": "User creates and completes a task within 30 seconds",
+            "primary_screen": "TaskList",
+            "key_interactions": ["create-task"],
+        },
+        "features": [{"name": "task-crud", "priority": 1, "independent": True}],
+        "acceptance_criteria": ["User can create a task"],
+        "constraints": ["Must work offline"],
+        "out_of_scope": ["User authentication"],
+        "version": 1,
+    }
+
+
+def test_seed_with_evaluation_principles_valid():
+    """v4.23 schema addition: evaluation_principles optional but must be well-formed when present."""
+    seed = _v423_seed_base()
+    seed["evaluation_principles"] = [
+        {"principle": "응답은 1초 이내", "weight": 0.7, "rationale": "사용자가 빠른 응답을 명시", "source_phase": "scope"},
+        {"principle": "오프라인 우선", "weight": 0.5},
+    ]
+    result = validate_seed(seed)
+    assert result["valid"] is True, f"errors: {result.get('errors')}"
+
+
+def test_seed_with_exit_conditions_valid():
+    """v4.23 schema addition: exit_conditions optional list of strings."""
+    seed = _v423_seed_base()
+    seed["exit_conditions"] = [
+        "모든 features의 acceptance_criteria가 PASS이고 evaluation_principles 중 weight ≥ 0.5인 항목이 모두 PASS",
+    ]
+    result = validate_seed(seed)
+    assert result["valid"] is True, f"errors: {result.get('errors')}"
+
+
+def test_seed_with_both_v423_fields_valid():
+    seed = _v423_seed_base()
+    seed["evaluation_principles"] = [{"principle": "응답 1초"}]
+    seed["exit_conditions"] = ["features 모두 PASS"]
+    result = validate_seed(seed)
+    assert result["valid"] is True
+
+
+def test_seed_without_v423_fields_still_valid():
+    """Backward compat — pre-v4.23 seeds without these fields remain valid."""
+    seed = _v423_seed_base()
+    assert "evaluation_principles" not in seed
+    assert "exit_conditions" not in seed
+    result = validate_seed(seed)
+    assert result["valid"] is True
+
+
+def test_v423_fields_documented_in_schema_json():
+    """Schema-side fields exist in seed-schema.json (canonical spec).
+
+    Note: validate_seed uses *manual* checks not jsonschema, so it
+    does not enforce evaluation_principles internal structure. The
+    schema file is the spec for jsonschema-using consumers (and for
+    documentation). validate_seed treats the v4.23 fields as opaque —
+    presence/absence doesn't affect validation result.
+    """
+    import json
+    from pathlib import Path
+    schema_path = Path(__file__).resolve().parents[2] / "references" / "seed-schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    assert "evaluation_principles" in schema["properties"]
+    assert "exit_conditions" in schema["properties"]
+    ep_item = schema["properties"]["evaluation_principles"]["items"]
+    assert ep_item["properties"]["weight"]["maximum"] == 1.0
+    assert "principle" in ep_item["required"]
+
+
+def test_v423_fields_dont_break_validate_seed_with_garbage():
+    """Even malformed evaluation_principles don't break validate_seed —
+    it's manual and ignores fields it doesn't know.
+
+    This documents current behavior; switching to jsonschema-based
+    validation would change this. The previous test
+    (test_v423_fields_documented_in_schema_json) ensures the schema
+    file itself enforces constraints for downstream consumers.
+    """
+    seed = _v423_seed_base()
+    seed["evaluation_principles"] = [{"weight": 99, "garbage": "x"}]
+    result = validate_seed(seed)
+    assert result["valid"] is True  # validate_seed is lenient by design

@@ -4,6 +4,92 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.25.0 — 2026-05-16
+
+**v4.23 SKILL implementation gap fixed + wire-level + schema verification (PATCH-ish MINOR)**
+
+Self-audit revealed that v4.23.0 shipped *aspirational SKILL text* for
+G3.2 (samvil-qa `--target=seed` + evaluation_principles consumption) —
+the SKILL described tools that didn't actually exist. v4.25 ships the
+real implementations and extends verification coverage that was thin
+in earlier releases.
+
+**Implementation completed**
+
+- New module `mcp/samvil_mcp/seed_qa.py` — pure Python, no MCP/IO
+  side-effects. Three pure functions:
+  - `evaluate_seed_against_interview(seed, interview_progress)` —
+    traces every user-claim in the seed (constraints, out_of_scope,
+    AC leaves, principles) back to interview material. Verdict
+    PASS / PARTIAL / FAIL by coverage score (≥0.85 / ≥0.60 / below),
+    with untraced constraints forcing PARTIAL even at high coverage
+    (drift on a hard constraint is worse than drift on aspirational ACs).
+  - `score_acs_against_principles(ac_verdicts, evaluation_principles)`
+    — per-leaf principle matching with weighted scoring. Recommends
+    PASS→PARTIAL downgrade when weighted_score < 0.5 AND a principle
+    of weight ≥ 0.5 is violated.
+  - `evaluate_exit_conditions(seed, qa_state)` — structural check on
+    common patterns ("all features PASS", "principles satisfied").
+    Returns `verdict_blocked` flag for samvil-qa Phase Z to respect.
+- Three new MCP tool wrappers in `server.py`:
+  `evaluate_seed_against_interview`, `score_acs_against_principles`,
+  `evaluate_exit_conditions`. All best-effort (no raise, INV-5).
+- `samvil-qa` SKILL — replaced aspirational text with real MCP calls:
+  Pass 2.5 now calls `score_acs_against_principles` with the seed's
+  principles; Phase Z calls `evaluate_exit_conditions`;
+  `--target=seed` mode calls `evaluate_seed_against_interview`. SKILL
+  text no longer describes work that no module does.
+
+**Verification breadth extended**
+
+- `mcp/tests/test_seed_qa.py` — 23 tests covering trace exact / token
+  overlap / no-match for short needles / Korean punctuation handling;
+  evaluate_seed PASS / PARTIAL / FAIL / untraced-constraint downgrade
+  / empty seed; score_acs no principles / satisfied / weight thresholds
+  / irrelevant-principle neutrality / weight violation tracking;
+  exit_conditions absent / feature-blocking / principle-blocking.
+- `mcp/tests/test_seed_manager.py` — 6 new tests for v4.23 schema
+  fields: evaluation_principles + exit_conditions valid in seeds,
+  backward compat without them, schema-side spec verification
+  (weight max 1.0, principle required), documents validate_seed
+  leniency (it's manual not jsonschema — schema file enforces only
+  for downstream consumers, validate_seed treats v4.23 fields as
+  opaque).
+- Stdio roundtrip extended: in-session test ran `persist_interview_answer`
+  with refine_payload_json (v4.21), `capture_stage_pain` +
+  `load_pain_feedback` (v4.22), all three v4.25 seed_qa tools — all
+  callable over MCP JSON-RPC wire, Korean payload preserved.
+
+**Why this matters** — v4.23.0 had what CLAUDE.md P1 calls a
+violation: SKILL claimed behavior the code didn't deliver. An LLM
+following the v4.23 SKILL for `--target=seed` would have had to
+invent the implementation inline, with no guarantee of consistency.
+v4.25 closes that gap before any production interview runs the path.
+
+**Compatibility** — purely additive: new MCP tools, new pure-Python
+module, SKILL text *clarified* to point at real tools (no semantic
+change to the SKILL's intent — v4.23 already described this behavior,
+it just had no implementation). No schema change, no migration.
+
+**Verification** — pre-commit 10/10 PASS. `pytest` 1770 passing
+(+29 new: 23 seed_qa + 6 schema-field tests). 183 MCP tools (+3).
+SKILL thinness samvil-qa 110/120 (compressed Pass 2.5 evaluation
+principle block to call real tool instead of describing aspirational
+LLM behavior).
+
+**v2 Roadmap honest status** — Phase 1 + 2A + 2B + 3 + 4 G4.1 ✅,
+**Phase 3 G3.2 implementation gap closed in v4.25 ✅**. Remaining:
+G4.2 mechanical.toml + G4.3 samvil-benchmark (deferred to v4.26+).
+G5.1~G5.4 Future use cases.
+
+**Quality discipline** — this release is the response to the
+"자신있어?" self-audit. The roadmap principle "no documentation
+ahead of implementation" (P1 Evidence-based Assertions) is now
+enforced for the v2 Roadmap arc. Future Goals will land with code +
+tests + SKILL together or not at all.
+
+---
+
 ## v4.24.0 — 2026-05-16
 
 **v2 Roadmap Phase 4 — Infrastructure Hardening (G4.1 MCP-free Recovery) (MINOR)**

@@ -56,7 +56,7 @@ For each Pass 2 leaf (legacy `### Pass 2 Tree Setup (v3.0.0+)`):
 
 After all leaves: `print(json.loads(render_ac_tree_hud(ac_tree_json=tree_json))["ascii"])`; append to `qa-report.md`.
 
-**Evaluation principles (v4.23, when `seed.evaluation_principles` present)**: For each leaf verdict, match the AC text against each principle (LLM judgment, principle.principle as criterion). Build per-leaf `principle_hits: [{principle_id, weight, satisfied: bool}]` and persist into leaf evidence. Synthesis (Phase Z) computes weighted score: `sum(weight × satisfied) / sum(weight)`; if score < 0.5 with at least one weight ≥ 0.5 principle violated, downgrade leaf PASS → PARTIAL. seed.exit_conditions evaluated at Phase Z — if not met, verdict cannot be PASS.
+**Evaluation principles (v4.23/v4.25, when `seed.evaluation_principles` present)**: After Pass 2 verdicts collected, call `mcp__samvil_mcp__score_acs_against_principles(ac_verdicts_json=<JSON list>, evaluation_principles_json=<seed.evaluation_principles JSON>)` — returns per-leaf `principle_hits`, `weighted_score`, `downgrade_recommended`. Apply downgrades verbatim (PASS→PARTIAL where flagged). Phase Z calls `mcp__samvil_mcp__evaluate_exit_conditions(seed_json, qa_state_json)`; `verdict_blocked=true` → verdict cannot be PASS this iteration.
 
 ### 3. Pass 3 — quality
 
@@ -88,15 +88,9 @@ Apply in order (each best-effort, INV-5):
 - `verdict == REVISE` and `iteration < qa_max_iterations` → fix per legacy `## Ralph Loop (if REVISE)` (read error, write fix, `npm run build > <paths.build_log> 2>&1`, append to `<paths.fix_log>`), append to state `qa_history`: `{iteration:<N>,verdict:"REVISE",issue_ids:[...]}`, increment iter. **Convergence rule**: each iter MUST reduce total issue count vs prior.
 - `iteration >= qa_max_iterations` → FAIL → "Chain on FAIL".
 
-## Seed-as-QA-Target Mode (v4.23, `--target=seed` flag)
+## Seed-as-QA-Target Mode (v4.23 SKILL / v4.25 implementation, `--target=seed` flag)
 
-When invoked with `--target=seed`, skip Ralph Loop. Instead evaluate the *seed itself* against its source interview:
-1. Load `seed.json` + `load_interview_progress(project_root=".")`.
-2. For each `seed.constraints` entry: confirm it traces to `constraints_aggregated` (or interview-summary). Untraced → semantic gap.
-3. For each `seed.out_of_scope`: same trace check against `out_of_scope_aggregated`.
-4. For each `seed.features[*].acceptance_criteria` leaf: confirm trace to `ac_by_phase[*]` or interview answer.
-5. For each `seed.evaluation_principles`: confirm `rationale` cites an interview source.
-6. Render verdict `{seed_verdict: PASS/PARTIAL/FAIL, untraced_items[], coverage_score}` + `claim_post(claim_type="seed_verdict", subject="seed:<seed.name>", statement=<verdict>, ...)`. No ralph loop, no deploy/retro chain — pure evaluation output.
+When invoked with `--target=seed`, skip Ralph Loop. Instead evaluate the *seed itself* against its source interview via `mcp__samvil_mcp__evaluate_seed_against_interview(project_root=".", seed_json=<seed JSON>)` — returns `{verdict, coverage_score, traced, untraced, details, notes}`. Render to user + `claim_post(claim_type="seed_verdict", subject="seed:<seed.name>", statement="verdict=<v>, coverage=<score>", evidence_json='["project.seed.json","interview-progress.json"]')`. No ralph loop, no deploy/retro chain — pure evaluation. Verdict thresholds: ≥0.85 + zero untraced constraints → PASS; ≥0.60 → PARTIAL; else FAIL.
 
 ## Chain on PASS / FAIL / BLOCKED (INV-4)
 
