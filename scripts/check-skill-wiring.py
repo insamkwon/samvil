@@ -159,6 +159,15 @@ def _fail(msg: str) -> None:
 # Removing from this list requires either wiring it to a skill OR deleting the tool.
 REVERSE_CHECK_ALLOWLIST: frozenset[str] = frozenset(
     [
+        # v4.26.0 G4.2 — mechanical.toml contract: shipped as opt-in.
+        # Full SKILL wiring (samvil-scaffold writes, samvil-build/qa read)
+        # is deferred to v4.27+ because each SKILL.md is at 120/120 thinness
+        # and absorbing the integration requires compression elsewhere.
+        # Tools are callable now via direct MCP; covered by pytest +
+        # stdio roundtrip.
+        "read_mechanical_toml",
+        "write_default_mechanical_toml",
+        "resolve_mechanical_command",
         # Pipeline orchestration tools — replaced by HostCapability / aggregator pattern
         "advance_chain",
         "get_chain_continuation",

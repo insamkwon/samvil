@@ -14,5 +14,5 @@
 # Keep entries short and add a `# why:` comment explaining the rationale.
 # Reviewers should challenge any entry that doesn't have a `why` line.
 
-# (Intentionally empty for v4.11.2 baseline — both hosts must reference
-# every core tool listed in CORE_TOOLS_PER_SKILL.)
+# (Was intentionally empty for v4.11.2 baseline.)
+

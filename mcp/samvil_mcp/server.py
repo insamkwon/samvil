@@ -5178,6 +5178,81 @@ async def evaluate_exit_conditions(
         return json.dumps({"ok": False, "error": str(e)})
 
 
+# ── mechanical.toml contract (v4.26.0 — G4.2) ──────────────────
+
+
+@mcp.tool()
+async def read_mechanical_toml(project_root: str) -> str:
+    """Parse ``<project_root>/.samvil/mechanical.toml``.
+
+    Returns ``{ok, exists, commands, extra, warnings, path}``. The
+    ``commands`` dict carries the known build/test/lint/typecheck/
+    dev_server/deploy/format/coverage/solution_type/framework fields.
+    Best-effort — parse errors return ok=False.
+    """
+    try:
+        from .mechanical_toml import read_mechanical_toml as _read
+        result = _read(project_root=project_root)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "read_mechanical_toml")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "read_mechanical_toml", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def write_default_mechanical_toml(
+    project_root: str,
+    solution_type: str,
+    framework: str = "",
+    overwrite: bool = False,
+) -> str:
+    """Write a fresh starting-point ``mechanical.toml`` for a project.
+
+    Defaults match each ``solution_type`` (web-app / automation / game /
+    mobile-app / dashboard). Refuses to overwrite an existing file
+    unless ``overwrite=true`` is passed. Used by samvil-scaffold at
+    project creation time.
+    """
+    try:
+        from .mechanical_toml import write_default_toml as _write
+        result = _write(
+            project_root=project_root,
+            solution_type=solution_type,
+            framework=framework,
+            overwrite=overwrite,
+        )
+        _log_mcp_health("ok" if result.get("ok") else "fail", "write_default_mechanical_toml")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "write_default_mechanical_toml", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def resolve_mechanical_command(
+    project_root: str,
+    field: str,
+    fallback: str = "",
+) -> str:
+    """Look up a single command (build / test / lint / typecheck / etc.)
+    in mechanical.toml with fallback.
+
+    Returns ``{ok, command, source, path, note?}`` where ``source`` is
+    ``toml`` / ``fallback`` / ``none``. Used by samvil-build / samvil-qa
+    so the SKILLs read commands from the toml when present, and fall
+    back to solution_type defaults when absent.
+    """
+    try:
+        from .mechanical_toml import resolve_command as _resolve
+        result = _resolve(project_root=project_root, field=field, fallback=fallback)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "resolve_mechanical_command")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "resolve_mechanical_command", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 

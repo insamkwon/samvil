@@ -4,6 +4,90 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.26.0 — 2026-05-16
+
+**v2 Roadmap Phase 4 finish — G4.2 mechanical.toml + G4.3 samvil-benchmark (MINOR)**
+
+Completes Phase 4 of `docs/samvil-v2-roadmap.md`. Two unrelated but
+parallel-shippable infrastructure improvements:
+
+**G4.2 mechanical.toml contract**
+
+- New module `mcp/samvil_mcp/mechanical_toml.py` — pure-Python toml
+  reader (stdlib `tomllib` on Python 3.11+, `tomli` fallback) with
+  three functions:
+  - `read_mechanical_toml(project_root)` — parse
+    `.samvil/mechanical.toml`, normalize known fields, preserve extras
+  - `write_default_toml(project_root, solution_type, framework, overwrite)`
+    — write starting-point toml per solution_type defaults
+  - `resolve_command(project_root, field, fallback)` — single command
+    lookup with fallback; returns `{command, source: toml|fallback|none}`
+- Three new MCP tool wrappers: `read_mechanical_toml`,
+  `write_default_mechanical_toml`, `resolve_mechanical_command`.
+- KNOWN_FIELDS: build / test / lint / typecheck / dev_server / deploy
+  / format / coverage / solution_type / framework. Extra fields are
+  preserved (kept as `extra` dict) so users can attach project notes.
+- `mcp/tests/test_mechanical_toml.py` — 21 tests covering happy path,
+  empty strings (skipped + warned), unknown fields (preserved + warned),
+  malformed toml (parse error reported), Korean in extras, non-string
+  commands, default rendering per solution_type, write refusal on
+  existing, overwrite force, resolve-from-toml / resolve-fallback /
+  resolve-unknown-field.
+- **Status**: shipped as *opt-in*. samvil-scaffold / samvil-build /
+  samvil-qa SKILL wiring (auto-write at scaffold time, auto-read at
+  build/qa time) is deferred to v4.27+ because each SKILL.md is at
+  120/120 thinness and absorbing the integration requires compression
+  elsewhere. Tools are callable now via direct MCP; allowlisted in
+  `scripts/check-skill-wiring.py` with explanation.
+
+**G4.3 samvil-benchmark skill**
+
+- New skill `skills/samvil-benchmark/SKILL.md` + Codex command
+  `references/codex-commands/samvil-benchmark.md`. Meta-skill that
+  compares SAMVIL to external AI coding harnesses (Ouroboros, Devin,
+  OpenDevin) and logs paradigm gaps to `harness-feedback.log` as
+  `priority: BENEFIT` issues for samvil-retro consumption.
+- Default registry: 3 targets. User can extend via
+  `~/.samvil/benchmark-targets.json`.
+- 4-step protocol: fetch latest changelogs → classify each item
+  (already-have / deliberately-rejected / paradigm gap) → append gaps
+  → optional escalation if M >= 3 gaps detected.
+- Strict anti-patterns: never auto-implement, never `CRITICAL`, never
+  re-log rejected items. Each gap is a candidate for the next planning
+  conversation, not an automatic adoption.
+- When to invoke: manually after spotting an interesting competitor
+  pattern, quarterly when stable, or on samvil-retro plateau signal.
+
+**Why this matters together**
+
+W7 (MCP-free recovery, v4.24) + W8 (mechanical contract, v4.26
+G4.2) + W10 (benchmark, v4.26 G4.3) form the "infrastructure
+hardening" axis. SAMVIL is now:
+- recoverable without MCP (G4.1)
+- machine-readable by external tools (G4.2 contract file)
+- systematically aware of external paradigm shifts (G4.3 benchmark)
+
+These were the three closed-loop weaknesses in `samvil-v2-roadmap.md`.
+After this release, SAMVIL's "self-improvement loop" is structurally
+open at multiple seams — pain capture (v4.22) + benchmark (v4.26)
++ retro (existing) form the loop that should keep paradigm
+plateauing from happening again.
+
+**Compatibility** — additive only. Three new MCP tools (callable but
+not yet referenced by stage SKILLs). New samvil-benchmark skill
+(terminal, no chain). No schema bump, no migration.
+
+**Verification** — pre-commit 10/10 PASS. `pytest` 1791 passing
+(+21 new). 186 MCP tools (+3). Skill thinness all under 120 (no
+existing SKILL touched).
+
+**v2 Roadmap progress** — Phase 1 + 2A + 2B + 3 + 4 (G4.1 + G4.2 +
+G4.3) ✅. **Phase 4 complete**. Remaining: G5.1~G5.4 Future use
+cases (publish / standalone QA / tutorial / multi-repo) — coming in
+v4.27 and v4.28.
+
+---
+
 ## v4.25.0 — 2026-05-16
 
 **v4.23 SKILL implementation gap fixed + wire-level + schema verification (PATCH-ish MINOR)**
