@@ -15,6 +15,15 @@ Existing MCP tools cover ambiguity / seed-readiness / gate / domain
 context. Full Korean prose, per-`solution_type` question banks, Phase
 2.x expansion templates, and tier-by-tier tables in `SKILL.legacy.md`.
 
+## Non-Skippable Gates (v4.20 — 절대 건너뛸 수 없는 6개)
+
+1. **Phase 강제** — tier별 `get_tier_phases` 결과 phase는 모두 실행 (Step 2). LLM 판단으로 스킵 금지.
+2. **AC Testability (PHI-06)** — vague AC ("좋은", "빠른"…) 발견 시 rewrite. 침묵 수용 금지 (Step 3).
+3. **Convergence 3-조건 AND** — `ambiguity ≤ target` + `floors_passed` + `min_questions_met` 동시 충족까지 loop (Step 3).
+4. **`gate_check(interview_to_seed)`** — verdict이 `pass`일 때만 다음 stage chain (Step 5).
+5. **Step 4 사용자 검토** — Zero-Question Mode 포함, 무조건 single review.
+6. **Restate Gate (v4.20)** — 시드 직전 한 줄 합의. 사용자가 "단어 수정" 또는 "빠진 범위" 선택 시 해당 Phase 재방문 (Step 4.5).
+
 ## Boot Sequence (INV-1)
 
 1. `mcp__samvil_mcp__save_event(session_id="<sid>", event_type="interview_start", stage="interview", data="{}")` — best-effort. Auto-claim posts `evidence_posted subject="stage:interview"`.
@@ -43,23 +52,11 @@ Per question: `route_question(question, manifest_facts, force_user=(streak>=3))`
 
 ## Step 2 — Phase Loop (Korean, host-bound)
 
-Run **only the phases listed in `aggregate.required_phases`**. **한 번에
-하나씩** AskUserQuestion (객관식 + Other), preset-aware options. Adaptive
-follow-up by answer length (short → expand, long → structure, vague →
-choose). Framework names (AARRR/JTBD/HEART) **never** exposed to user.
+Run **only the phases in `aggregate.required_phases`**. **한 번에 하나씩** AskUserQuestion (객관식 + Other), preset-aware options. Adaptive follow-up (short→expand, long→structure, vague→choose). Framework names (AARRR/JTBD/HEART) never exposed to user.
 
 Per-`solution_type` question bodies + Phase id/trigger/body 매핑 표: `SKILL.legacy.md` §"Phase id / Trigger / Body 매핑 표".
 
-**Progressive Confirmed + 잠정 AC 출력 (v4.19, A-1.deep)**: 각 Phase 완료 직후 사용자에게 출력:
-
-```
-✅ Confirmed [Phase 한국명]
-잠정 AC (seed 단계에서 확정):
-  - <ac_text 1>
-  - <ac_text 2>
-```
-
-AC 추출 규칙: 답변에서 implementable 행위문 ("사용자는 X할 수 있다", "Y가 표시된다")을 1~3개 한국어 1문장씩. 추출한 AC는 Step 1의 `persist_interview_answer`에 `ac_candidates_json`으로 함께 저장. Phase 완료 시 `mark_interview_phase_complete` 호출.
+**Progressive Confirmed + 잠정 AC (v4.19, A-1.deep)**: 각 Phase 완료 직후 사용자에게 `✅ Confirmed [Phase 한국명]` + `잠정 AC (seed 단계에서 확정): - <ac_text>` 형식 출력. AC 추출 규칙: 답변의 implementable 행위문 ("사용자는 X할 수 있다", "Y가 표시된다") 1~3개. 추출한 AC는 Step 1 `persist_interview_answer`의 `ac_candidates_json`으로 함께 저장. Phase 완료 시 `mark_interview_phase_complete`.
 
 ## Step 3 — Convergence Check
 
@@ -74,14 +71,16 @@ No phase reprompt cap — loop until all 3 hold. Check `dimension_scores`: highe
 
 ## Step 4 — Summary + User Verification
 
-Render `solution_type`-specific summary (template in `SKILL.legacy.md`
-§"Phase 4: 요약 & 확인"). AskUserQuestion → `좋아 진행해` / `수정할 부분 있어`.
-**Zero-Question Mode is no exception** — single review is mandatory.
+Render `solution_type`-specific summary (template: `SKILL.legacy.md §"Phase 4: 요약 & 확인"`). AskUserQuestion → `좋아 진행해` / `수정할 부분 있어`. **Zero-Question Mode 포함** single review mandatory.
 
-If `preset.source == "none"` or user changed direction substantially:
-AskUserQuestion → preset 저장 여부. On 저장 → write
-`<aggregate.paths.preset_dir>/<name>.json` (schema in
-`references/app-presets.md` Custom Presets §).
+If `preset.source == "none"` or 큰 방향 변경: AskUserQuestion → preset 저장 여부 → write `<aggregate.paths.preset_dir>/<name>.json` (schema: `references/app-presets.md`).
+
+## Step 4.5 — Restate Gate (v4.20)
+
+Step 5 직전 한 줄 재진술. Epic Claim과 *같은 한 줄에 수렴*이 이상적. 템플릿: `목표: "<주체>가 <대상>의 <문제>를 <방식>으로 해결한다 — <핵심 제약>."`. `AskUserQuestion(["다른 사람이 이 한 줄만 읽어도 같은 결과?"], [좋아, seed / 단어 수정 / 빠진 범위])`.
+- **좋아** → Step 5.
+- **단어 수정** → paraphrase 1회 → `persist_interview_answer(phase="restate", source="from-user-correction")` → Restate 재시도 (최대 2회, 후 user-forced proceed).
+- **빠진 범위** → 입력 받음 → 해당 차원 Phase 추론 (manifest/scope/inversion) → Phase 재방문 + Step 3 재실행.
 
 ## Step 5 — Persist + Contract Layer (post_stage)
 
@@ -114,4 +113,4 @@ After Step 5 approval: `mcp__samvil_mcp__merge_brownfield_seed(existing_seed_jso
 
 ## Legacy reference
 
-Full Korean Phase 1–4 question bodies per `solution_type`, Phase 2.x expansion templates, 5-path routing decision tables, Tier-by-Tier rule tables, summary templates, custom-preset JSON schema notes, and the adaptive follow-up matrix in `SKILL.legacy.md`. Consult only when the interview regresses or is extended.
+Full Korean Phase bodies, 5-path routing tables, Tier rule tables, summary templates, adaptive follow-up matrix: `SKILL.legacy.md`.

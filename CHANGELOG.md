@@ -4,6 +4,58 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.20.0 — 2026-05-16
+
+**v2 Roadmap Phase 1 — Information Loss Blocking (MINOR)**
+
+First release of the v2 roadmap (`docs/samvil-v2-roadmap.md`) — multi-version
+effort to evolve SAMVIL from "working system" into "system where user intent
+is deeply preserved and self-correction is structural". Phase 1 closes the
+two interview-stage holes identified by the SAMVIL-vs-Ouroboros structural
+analysis: gate skipping and end-of-interview misalignment.
+
+- **G1.1 Non-Skippable Gates Section** — Added a top-level
+  `## Non-Skippable Gates` block to `samvil-interview/SKILL.md` that lists the
+  6 gates LLM must never silently skip (Phase enforcement, AC Testability,
+  Convergence 3-condition AND, `gate_check(interview_to_seed)`, Step 4 user
+  review, and the new Restate Gate). Each gate carries a one-line rationale
+  pointing to where it is enforced. The section is the first thing the LLM
+  reads after the role declaration, so previously-scattered guardrails are
+  now surfaced as a single visible checklist.
+- **G1.2 Restate Gate (Step 4.5)** — New gate between Step 4 (Summary
+  Review) and Step 5 (Persist). Restates the agreed goal as a single sentence
+  (`목표: "<주체>가 <대상>의 <문제>를 <방식>으로 해결한다 — <핵심 제약>."`)
+  and asks the user `["다른 사람이 이 한 줄만 읽어도 같은 결과?"]` with
+  three options: `[좋아, seed 생성 / 단어 수정 / 빠진 범위 있음]`. On
+  `단어 수정`, persists the correction via
+  `persist_interview_answer(phase="restate", source="from-user-correction")`
+  and retries (max 2 loops). On `빠진 범위 있음`, infers the missing dimension's
+  Phase (manifest / scope / inversion) and re-enters Step 3 convergence. The
+  Restate Gate pairs with the Step 0.5 Epic Claim — interview start and end
+  both lock on a single sentence, ideally the same one.
+
+**Why this batch matters** — interview-to-seed misalignment used to surface
+only when the user read `seed.json`, costing ~5-30 min of rework. The Restate
+Gate moves the discovery point ~30 minutes earlier (it lands at the end of
+the interview, not after seed generation). The Non-Skippable Gates section
+keeps the `thorough`/`full` tier promises honest by surfacing what
+the LLM cannot quietly trim.
+
+**Compatibility** — no schema, MCP tool, or seed format changes. Pure SKILL
+behaviour additions. No migration needed.
+
+**Verification** — pre-commit 10/10 PASS. `pytest`: 1708 passing (no new
+tests; the gate uses existing `persist_interview_answer` from v4.19). SKILL
+thinness 116/120 (Phase 4 preset save + Step 2 intro + Step 4 summary + Step
+4.5 itself + Progressive AC + Legacy reference were all compressed to make
+room — net additions remained under the cap).
+
+**v2 Roadmap link** — `docs/samvil-v2-roadmap.md` covers v4.20 through
+v4.24+ across 14 Goals (Phase 1-4 + Future). Next release (v4.21.0) ships
+the Refine Gate (5-section answer payload).
+
+---
+
 ## v4.19.0 — 2026-05-07
 
 **Ouroboros-level interview UX absorbed (MINOR)**
