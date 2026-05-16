@@ -4,6 +4,73 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.21.0 — 2026-05-16
+
+**v2 Roadmap Phase 2A — Refine Gate (MINOR)**
+
+Closes the biggest information-loss channel in samvil-interview. Free-text
+answers that mix decisions, constraints, exclusions, and tech preferences
+no longer get partially lost on the way to `seed.json`. The Refine Gate
+adopted from Ouroboros's 5-section payload pattern, adapted to SAMVIL's
+Korean-first and file-SSOT discipline.
+
+**G2.1 Refine Gate**
+
+- `persist_interview_answer` MCP tool extended with `refine_payload_json`
+  parameter (backward-compatible — existing v4.19/v4.20 callers unaffected).
+  When provided, an additional `refined_answer` JSONL entry is appended
+  with the normalized 5-section structure:
+  ```
+  {decision, reasoning, constraints[], out_of_scope[],
+   codebase_context, tech_preferences[]}
+  ```
+- `interview_state.persist_answer` Python function gains
+  `refine_payload: dict | None` parameter. Validation drops unknown keys,
+  normalizes list items, and skips empty payloads (no zero-content lines
+  written).
+- `load_interview_progress` now returns three additional cross-phase
+  aggregations: `constraints_aggregated`, `out_of_scope_aggregated`,
+  `tech_preferences_aggregated` (each deduplicated, preserves user
+  wording) — plus per-phase `refined_by_phase`. These are what
+  samvil-seed harvests verbatim.
+- samvil-interview SKILL — Step 1 PATH Routing gets a new "Refine Gate
+  (v4.21)" block. AskUserQuestion `[그대로 보내 / 제약 추가 /
+  out-of-scope 추가 / 다시 쓰기]`. Skip rules for auto-confirm /
+  pre-built option / short answers. Restate Gate corrections (Step 4.5)
+  always go through Refine — explicit exception.
+- samvil-seed SKILL — new "Refine Gate harvest" section in Build Seed.
+  `constraints_aggregated` → seed.constraints. `out_of_scope_aggregated`
+  → seed.exclusions. `tech_preferences_aggregated` → seed.tech_stack.
+  `refined_by_phase[*].decision` → feature description seed (user's exact
+  wording — LLM paraphrasing in harvest path is forbidden). Missing
+  mappings surface in consolidation summary for user confirm.
+- `references/interview-progress-schema.md` documents the new
+  `refined_answer` entry type with full field reference + skip rules.
+
+**Why this matters** — pre-v4.21, the answer "Excel 받아서 Slack 보내,
+100MB는 거부, d3.js로, 모바일은 안 해도 돼" would surface "Excel→Slack"
+as a Leaf AC and leave the rest in conversation prose. samvil-seed's
+LLM might or might not put 100MB into constraints. After v4.21, those
+four pieces are explicit fields in `refined_answer`, harvested verbatim
+into `seed.{constraints, exclusions, tech_stack}`. Estimated info
+preservation jump: ~65% → ~95%.
+
+**Compatibility** — `persist_interview_answer` adds *optional* parameter;
+JSONL replay tolerates pre-v4.21 files (lines without `type=refined_answer`
+ignored). No migration. No schema bump.
+
+**Verification** — pre-commit 10/10 PASS. `pytest` 1713 passing (+5 new:
+refine payload happy path, validation drops extras, empty payload
+skipped, cross-phase aggregation, Korean UTF-8 preservation). SKILL
+thinness: samvil-interview 118/120, samvil-seed 120/120.
+
+**v2 Roadmap progress** — Phase 1 (v4.20) ✅ + Phase 2A (v4.21) ✅. Next:
+Phase 2B (v4.22) ships Active Pain Capture — `capture_stage_pain` MCP
+tool + 1-line severity prompt at each stage end, accumulated to
+`.samvil/pain-feedback.jsonl` for samvil-retro consumption.
+
+---
+
 ## v4.20.0 — 2026-05-16
 
 **v2 Roadmap Phase 1 — Information Loss Blocking (MINOR)**

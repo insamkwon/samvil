@@ -1,8 +1,11 @@
-"""Tests for interview_state module (v4.19.0).
+"""Tests for interview_state module (v4.19.0 + v4.21.0 Refine Gate).
 
 Covers:
 - persist_answer happy path (Q&A only)
 - persist_answer with AC candidates (unified signature)
+- persist_answer with refine payload (v4.21 — Refine Gate)
+- refine payload validation (5-section schema)
+- load_progress aggregates constraints / out_of_scope / tech_preferences
 - mark_phase_complete marker write
 - load_progress with mixed entries
 - load_progress with missing file
@@ -56,7 +59,7 @@ def test_persist_answer_qa_only(project_root: Path) -> None:
         source="from-user",
     )
     assert result["ok"] is True
-    assert result["counts"] == {"qa": 1, "ac_candidate": 0}
+    assert result["counts"] == {"qa": 1, "ac_candidate": 0, "refined_answer": 0}
 
     entries = _read_lines(project_root)
     assert len(entries) == 1
@@ -81,7 +84,7 @@ def test_persist_answer_with_ac_candidates(project_root: Path) -> None:
         ],
     )
     assert result["ok"] is True
-    assert result["counts"] == {"qa": 1, "ac_candidate": 3}
+    assert result["counts"] == {"qa": 1, "ac_candidate": 3, "refined_answer": 0}
 
     entries = _read_lines(project_root)
     assert len(entries) == 4
@@ -270,6 +273,126 @@ def test_concurrent_appends_no_loss(project_root: Path) -> None:
     assert len(entries) == 50
     qs = sorted(e["q"] for e in entries)
     assert qs == sorted(f"Q{i}" for i in range(50))
+
+
+# ── refine payload (v4.21 — Refine Gate) ────────────────────────────
+
+
+def test_persist_answer_with_refine_payload(project_root: Path) -> None:
+    result = persist_answer(
+        project_root=str(project_root),
+        phase="scope",
+        question="어떤 데이터 처리 방식?",
+        answer="Excel 받아서 정리하고 Slack으로. 100MB 이상 거부.",
+        source="from-user-refined",
+        refine_payload={
+            "decision": "Excel 업로드 → 정리 → Slack 결과 발송",
+            "constraints": ["100MB 이상 파일 거부", "새벽 2-6시 처리 중단"],
+            "out_of_scope": ["모바일 지원"],
+            "tech_preferences": ["차트: d3.js"],
+        },
+    )
+    assert result["ok"] is True
+    assert result["counts"] == {"qa": 1, "ac_candidate": 0, "refined_answer": 1}
+
+    entries = _read_lines(project_root)
+    assert len(entries) == 2
+    assert entries[0]["type"] == "qa"
+    assert entries[1]["type"] == "refined_answer"
+    assert entries[1]["payload"]["decision"] == "Excel 업로드 → 정리 → Slack 결과 발송"
+    assert "100MB 이상 파일 거부" in entries[1]["payload"]["constraints"]
+
+
+def test_refine_payload_validation_drops_extras(project_root: Path) -> None:
+    """Extra keys outside the schema are dropped; non-string list items become strings."""
+    result = persist_answer(
+        project_root=str(project_root),
+        phase="core",
+        question="q",
+        answer="a",
+        refine_payload={
+            "decision": "valid",
+            "constraints": ["one", "two", "", "  "],  # blanks dropped
+            "out_of_scope": [42, "three"],  # 42 → "42"
+            "unknown_field": "ignored",
+        },
+    )
+    assert result["ok"] is True
+    entries = _read_lines(project_root)
+    refined = [e for e in entries if e["type"] == "refined_answer"][0]
+    assert refined["payload"]["constraints"] == ["one", "two"]
+    assert refined["payload"]["out_of_scope"] == ["42", "three"]
+    assert "unknown_field" not in refined["payload"]
+
+
+def test_refine_empty_payload_skipped(project_root: Path) -> None:
+    """Empty refine_payload (after validation) → no refined_answer entry written."""
+    result = persist_answer(
+        project_root=str(project_root),
+        phase="core",
+        question="q",
+        answer="a",
+        refine_payload={"unknown": "value", "constraints": []},
+    )
+    assert result["ok"] is True
+    assert result["counts"]["refined_answer"] == 0
+    entries = _read_lines(project_root)
+    assert all(e["type"] != "refined_answer" for e in entries)
+
+
+def test_load_progress_aggregates_refine_payloads(project_root: Path) -> None:
+    """Cross-phase aggregation — constraints / out_of_scope / tech_preferences merged."""
+    persist_answer(
+        project_root=str(project_root),
+        phase="core",
+        question="Q1",
+        answer="A1",
+        refine_payload={
+            "decision": "D1",
+            "constraints": ["100MB 제한", "한국어 전용"],
+            "tech_preferences": ["Next.js"],
+        },
+    )
+    persist_answer(
+        project_root=str(project_root),
+        phase="scope",
+        question="Q2",
+        answer="A2",
+        refine_payload={
+            "decision": "D2",
+            "constraints": ["100MB 제한", "TLS 필수"],  # dup intentional
+            "out_of_scope": ["모바일"],
+        },
+    )
+
+    result = load_progress(project_root=str(project_root))
+    assert result["ok"] is True
+    assert len(result["refined_answers"]) == 2
+    # Cross-phase dedup
+    assert sorted(result["constraints_aggregated"]) == ["100MB 제한", "TLS 필수", "한국어 전용"]
+    assert result["out_of_scope_aggregated"] == ["모바일"]
+    assert result["tech_preferences_aggregated"] == ["Next.js"]
+    # Per-phase grouping
+    assert "core" in result["refined_by_phase"]
+    assert "scope" in result["refined_by_phase"]
+
+
+def test_refine_payload_korean_utf8_preserved(project_root: Path) -> None:
+    persist_answer(
+        project_root=str(project_root),
+        phase="core",
+        question="앱 핵심 가치?",
+        answer="자유 텍스트 답변",
+        refine_payload={
+            "decision": "사용자가 30초 안에 가치를 느낀다",
+            "reasoning": "첫인상이 재방문을 결정함",
+            "constraints": ["오프라인에서도 동작"],
+        },
+    )
+    raw = (project_root / ".samvil" / PROGRESS_FILENAME).read_text(encoding="utf-8")
+    assert "30초 안에 가치" in raw
+    assert "오프라인에서도 동작" in raw
+    assert "\\u" not in raw  # ensure_ascii=False preserved
 
 
 def test_concurrent_appends_threaded(project_root: Path) -> None:

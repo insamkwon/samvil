@@ -76,6 +76,51 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+REFINE_PAYLOAD_FIELDS = (
+    "decision",
+    "reasoning",
+    "constraints",
+    "out_of_scope",
+    "codebase_context",
+    "tech_preferences",
+)
+
+
+def _validate_refine_payload(payload: dict) -> dict:
+    """Normalize a refine payload, dropping anything outside the schema.
+
+    The 5-section structure (Ouroboros-style, adapted) is the canonical
+    representation of a user's free-text answer after Refine Gate. We
+    accept extra-tolerant input but persist a normalized shape:
+        decision: str
+        reasoning: str
+        constraints: list[str]
+        out_of_scope: list[str]
+        codebase_context: str
+        tech_preferences: list[str]
+    """
+    if not isinstance(payload, dict):
+        return {}
+    out: dict = {}
+    for key in REFINE_PAYLOAD_FIELDS:
+        value = payload.get(key)
+        if value is None:
+            continue
+        if key in ("constraints", "out_of_scope", "tech_preferences"):
+            if isinstance(value, list):
+                cleaned = [str(v).strip() for v in value if str(v).strip()]
+                if cleaned:
+                    out[key] = cleaned
+            elif isinstance(value, str) and value.strip():
+                out[key] = [value.strip()]
+        else:
+            if isinstance(value, (str, int, float)):
+                text = str(value).strip()
+                if text:
+                    out[key] = text
+    return out
+
+
 def persist_answer(
     project_root: str | Path,
     phase: str,
@@ -83,9 +128,16 @@ def persist_answer(
     answer: str,
     source: str = "from-user",
     ac_candidates: list[str] | None = None,
+    refine_payload: dict | None = None,
     ts: str | None = None,
 ) -> dict:
-    """Append a Q&A entry (and optionally AC candidates) atomically.
+    """Append a Q&A entry (and optionally AC candidates + refine payload).
+
+    When ``refine_payload`` is provided AND non-empty after validation,
+    an additional ``refined_answer`` entry is appended carrying the
+    structured 5-section breakdown. ``source`` should typically be
+    ``from-user-refined`` in that case, but the caller decides — we do
+    not overwrite the source string.
 
     Returns a dict with ok/error + counts. Best-effort: any exception
     is captured into the result rather than re-raised, so an interview
@@ -96,7 +148,8 @@ def persist_answer(
 
     timestamp = ts or _now_iso()
     path = _progress_path(project_root)
-    counts = {"qa": 0, "ac_candidate": 0}
+    counts = {"qa": 0, "ac_candidate": 0, "refined_answer": 0}
+    normalized_refine = _validate_refine_payload(refine_payload or {})
 
     try:
         with _locked(path):
@@ -120,6 +173,15 @@ def persist_answer(
                     "ts": timestamp,
                 })
                 counts["ac_candidate"] += 1
+
+            if normalized_refine:
+                _append_entry(path, {
+                    "type": "refined_answer",
+                    "phase": phase,
+                    "payload": normalized_refine,
+                    "ts": timestamp,
+                })
+                counts["refined_answer"] += 1
 
         return {"ok": True, "path": str(path), "counts": counts}
     except (OSError, PermissionError, json.JSONDecodeError) as exc:
@@ -179,6 +241,11 @@ def load_progress(project_root: str | Path) -> dict:
         "completed_phases": [],
         "ac_by_phase": {},
         "answers_by_phase": {},
+        "refined_answers": [],
+        "refined_by_phase": {},
+        "constraints_aggregated": [],
+        "out_of_scope_aggregated": [],
+        "tech_preferences_aggregated": [],
         "path": str(path),
     }
 
@@ -220,6 +287,22 @@ def load_progress(project_root: str | Path) -> dict:
                 ac_text = entry.get("ac_text", "")
                 if ac_text:
                     result["ac_by_phase"].setdefault(phase, []).append(ac_text)
+        elif etype == "refined_answer":
+            payload = entry.get("payload", {})
+            if isinstance(payload, dict):
+                result["refined_answers"].append(entry)
+                if phase:
+                    result["refined_by_phase"].setdefault(phase, []).append(payload)
+                # Cross-phase aggregation — for samvil-seed consolidation
+                for item in payload.get("constraints", []) or []:
+                    if item and item not in result["constraints_aggregated"]:
+                        result["constraints_aggregated"].append(item)
+                for item in payload.get("out_of_scope", []) or []:
+                    if item and item not in result["out_of_scope_aggregated"]:
+                        result["out_of_scope_aggregated"].append(item)
+                for item in payload.get("tech_preferences", []) or []:
+                    if item and item not in result["tech_preferences_aggregated"]:
+                        result["tech_preferences_aggregated"].append(item)
         elif etype == "phase_complete":
             if phase and phase not in result["completed_phases"]:
                 result["completed_phases"].append(phase)

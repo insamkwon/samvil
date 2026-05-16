@@ -48,7 +48,9 @@ Per question: `route_question(question, manifest_facts, force_user=(streak>=3))`
 
 **자동확인 표시 (v4.19, A-3)**: `auto_confirm` path마다 사용자에게 명시 출력 — `ℹ️ 자동확인: <fact> (<source-file>)` 예: `ℹ️ 자동확인: Next.js 14.2 (package.json)`. 출처는 반드시 파일명; "자동" 같은 모호 표현 금지.
 
-**답변 즉시 저장 (v4.19, INV-3 structural)**: 매 답변 직후 `mcp__samvil_mcp__persist_interview_answer(project_root=".", phase=<id>, question=<q>, answer=<a>, source=<from-user|from-code|from-research>, ac_candidates_json=<JSON array>)`. AC 후보가 답변에서 추출되면 함께 전달 (Step 2 Progressive 출력 참고). Phase 완료 시 `mark_interview_phase_complete(project_root=".", phase=<id>)`.
+**답변 즉시 저장 (v4.19, INV-3 structural)**: 매 답변 직후 `mcp__samvil_mcp__persist_interview_answer(project_root=".", phase=<id>, question=<q>, answer=<a>, source=<from-user|from-code|from-research>, ac_candidates_json=<JSON array>, refine_payload_json=<v4.21 JSON dict, 옵션>)`. Phase 완료 시 `mark_interview_phase_complete`.
+
+**Refine Gate (v4.21)**: 사용자 자유 텍스트 답변이 결정/제약/exclusion/기술선호를 *섞어서* 담을 때 (e.g. "Excel 받아서 Slack 보내, 100MB는 거부, d3.js로, 모바일은 안 해도 돼"), 다음 질문 전 5-section 구조로 재구성: `{decision, reasoning, constraints[], out_of_scope[], codebase_context, tech_preferences[]}`. AskUserQuestion `[그대로 보내 / 제약 추가 / out-of-scope 추가 / 다시 쓰기]` 확인 후 위 호출의 `refine_payload_json`으로 전달 + `source="from-user-refined"`. **Skip 조건**: 짧은 답변 (~30자), 객관식 단일 선택, PATH 1a 자동확인. **예외**: Restate Gate (Step 4.5) 의 "단어 수정"/"빠진 범위" 답변은 항상 Refine 통과.
 
 ## Step 2 — Phase Loop (Korean, host-bound)
 

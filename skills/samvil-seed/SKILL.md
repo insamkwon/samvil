@@ -53,6 +53,13 @@ If `stage_can_proceed.can_proceed` is false, show blockers and stop.
 4. Assign IDs `F<N>.AC<N>` per `references/ac-tree-guide.md` (each AC gets `id`, `description`, `status: pending`, `evidence: []`).
 5. Show the user a **consolidation summary**: "인터뷰에서 확정한 잠정 AC <N>개가 <M>개 feature로 정리되었습니다. 중복 <K>개 제거." then the seed preview.
 
+**Refine Gate harvest (v4.21, when `refined_answers` present)**:
+- `constraints_aggregated[]` → seed.constraints (사용자가 인터뷰에서 명시한 제약은 *모두* 보존, 추가 LLM 추론 금지)
+- `out_of_scope_aggregated[]` → seed.exclusions (사용자 명시 제외는 *모두* 빌드/QA에서 차단되도록)
+- `tech_preferences_aggregated[]` → seed.tech_stack (충돌 시 사용자 선호 우선)
+- `refined_by_phase[<phase>][*].decision` → 해당 feature의 description seed로 활용 (LLM이 paraphrase 금지 — 사용자 wording 우선)
+- 누락 검사: 위 4개 중 하나라도 seed에 매핑 안 되면 **consolidation summary에 명시 표시** + 사용자 confirm 1회 받음.
+
 **Fallback (no progress file or empty)**: convert `interview-summary.md` into valid v3 `project.seed.json` per the legacy regeneration rules.
 
 In both paths: validate against `references/seed-schema.json`, present, and ask approval. If edits are requested, revise and re-present.

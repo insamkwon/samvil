@@ -4894,10 +4894,12 @@ async def persist_interview_answer(
     answer: str,
     source: str = "from-user",
     ac_candidates_json: str = "",
+    refine_payload_json: str = "",
     ts: str = "",
 ) -> str:
-    """Persist a single interview Q&A (and optionally AC candidates) to
-    ``<project_root>/.samvil/interview-progress.json`` (JSONL).
+    """Persist a single interview Q&A (and optionally AC candidates and/or
+    a refine payload) to ``<project_root>/.samvil/interview-progress.json``
+    (JSONL).
 
     Replaces v4.18.0's bash ``echo >> interview-progress.json`` pattern
     with a structural guarantee: even if the main session forgets to
@@ -4907,9 +4909,17 @@ async def persist_interview_answer(
     Each non-empty entry becomes its own ``ac_candidate`` line under the
     same phase. Empty/whitespace entries are ignored.
 
-    Returns ``{"ok": bool, "counts": {qa, ac_candidate}, ...}``.
-    Best-effort — file/permission errors return ok=False rather than
-    raising, so the interview is never blocked (INV-5).
+    ``refine_payload_json`` (v4.21) is an optional JSON-encoded dict with
+    the Refine Gate 5-section structure:
+        {decision, reasoning, constraints[], out_of_scope[],
+         codebase_context, tech_preferences[]}
+    When non-empty, a ``refined_answer`` line is appended carrying the
+    normalized payload. ``source`` should be ``from-user-refined`` in
+    that case (but we don't overwrite the caller-supplied value).
+
+    Returns ``{"ok": bool, "counts": {qa, ac_candidate, refined_answer},
+    ...}``. Best-effort — file/permission errors return ok=False rather
+    than raising, so the interview is never blocked (INV-5).
     """
     try:
         from .interview_state import persist_answer as _persist
@@ -4921,6 +4931,14 @@ async def persist_interview_answer(
                     ac_candidates = [str(x) for x in parsed]
             except json.JSONDecodeError:
                 ac_candidates = []
+        refine_payload: dict | None = None
+        if refine_payload_json:
+            try:
+                parsed_refine = json.loads(refine_payload_json)
+                if isinstance(parsed_refine, dict):
+                    refine_payload = parsed_refine
+            except json.JSONDecodeError:
+                refine_payload = None
         result = _persist(
             project_root=project_root,
             phase=phase,
@@ -4928,6 +4946,7 @@ async def persist_interview_answer(
             answer=answer,
             source=source,
             ac_candidates=ac_candidates,
+            refine_payload=refine_payload,
             ts=(ts or None),
         )
         _log_mcp_health("ok" if result.get("ok") else "fail", "persist_interview_answer")

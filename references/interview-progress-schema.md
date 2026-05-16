@@ -78,7 +78,57 @@ Three entry types share the same file. Each is identified by `type`.
 be reworded, deduplicated, or grouped at that point. Users see them
 during the interview with the label "잠정 AC (seed 단계에서 확정)".
 
-### 3. `phase_complete` — a marker that this phase is closed
+### 3. `refined_answer` — Refine Gate 5-section payload (v4.21+)
+
+```json
+{
+  "type": "refined_answer",
+  "phase": "scope",
+  "payload": {
+    "decision": "Excel 업로드 → 정리 → Slack 결과 발송",
+    "reasoning": "사용자가 채널을 직접 못 봄",
+    "constraints": ["100MB 이상 파일 거부", "새벽 2-6시 처리 중단"],
+    "out_of_scope": ["모바일 지원"],
+    "codebase_context": "src/slack/bot.py 봇 호출 핸들러 존재",
+    "tech_preferences": ["차트: d3.js"]
+  },
+  "ts": "2026-05-16T03:14:20.000000+00:00"
+}
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `type` | yes | Always `"refined_answer"`. |
+| `phase` | yes | Phase id under which Refine Gate ran. |
+| `payload.decision` | optional | One-sentence decision the user committed to. |
+| `payload.reasoning` | optional | Why the decision (user's own reasoning, not LLM paraphrase). |
+| `payload.constraints` | optional | List of hard constraints the user *named*. |
+| `payload.out_of_scope` | optional | List of items the user *explicitly excluded*. |
+| `payload.codebase_context` | optional | Facts the main session verified from local files. |
+| `payload.tech_preferences` | optional | Library / framework / pattern user prefers. |
+| `ts` | yes | ISO-8601 timestamp. |
+
+Refine Gate runs during samvil-interview Step 1 when a free-text answer
+carries decisions / constraints / exclusions / tech preferences mixed
+together. The main session structures the answer, asks the user
+`AskUserQuestion([그대로 보내 / 제약 추가 / out-of-scope 추가 / 다시 쓰기])`,
+and on approval forwards the validated payload via
+`persist_interview_answer(..., refine_payload_json=<JSON>, source="from-user-refined")`.
+
+**Skip rules** — Refine Gate is skipped for: PATH 1a auto-confirms,
+PATH 1b / PATH 4 user picked a pre-built option, single-token or short
+(~30 char) PATH 2 answers. **Exception**: Restate Gate (Step 4.5)
+corrections never skip Refine — even a one-line scope correction carries
+boundary information that must reach the seed in structured form.
+
+samvil-seed `load_interview_progress` returns `refined_by_phase` (per-phase
+grouped) + cross-phase aggregations (`constraints_aggregated`,
+`out_of_scope_aggregated`, `tech_preferences_aggregated`, all deduplicated).
+samvil-seed harvests these into `seed.constraints`, `seed.exclusions`,
+`seed.tech_stack` *verbatim* — LLM paraphrasing the user's wording is
+forbidden in the harvest path.
+
+### 4. `phase_complete` — a marker that this phase is closed
 
 ```json
 {
