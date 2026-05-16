@@ -4,6 +4,103 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.29.0 — 2026-05-17
+
+**Closed aspirational SKILL gaps + new Forward Integrity gate (MINOR)**
+
+Self-audit during v4.28 revealed *3 aspirational SKILL gaps* shipped
+across v4.26 / v4.27 / v4.28 — SKILLs described behaviors that had no
+underlying code. Same P1 violation pattern as v4.23 G3.2 (closed in
+v4.25). This time, instead of just closing the gaps, we ship the
+**meta-fix**: a Forward Integrity Check that catches this class of
+defect at commit time. SAMVIL P1 (Evidence-based Assertions) now
+applies to SAMVIL's own documentation, not just to user projects.
+
+**The meta-fix — Forward Integrity Check (pre-commit gate #11)**
+
+- New script `scripts/check-skill-forward-integrity.py`. Parses every
+  `mcp__samvil_mcp__<name>` reference in `skills/*/SKILL.md`,
+  `SKILL.legacy.md`, and `references/codex-commands/*.md`, and
+  verifies each one resolves to an actually-registered `@mcp.tool()`
+  function in `mcp/samvil_mcp/server.py`. Unresolved → exit 1.
+- Wired into `scripts/pre-commit-check.sh` as check #11. Previously,
+  `check-skill-wiring.py` enforced the *reverse* direction (every
+  tool must be cited somewhere). The two scripts together close the
+  SKILL ↔ MCP synchronization loop bidirectionally.
+- Optional `INTENTIONAL_FUTURE_REFS` dict for explicit deferrals
+  (currently empty — every cited tool resolves).
+- Verified: deliberately injecting `mcp__samvil_mcp__nonexistent_fake_tool`
+  into a SKILL produces a FAIL with file:line precision; removing
+  it returns to PASS.
+
+**Three aspirational gaps closed (v4.26/27/28 → real implementations)**
+
+1. **`mcp/samvil_mcp/benchmark.py`** + 4 MCP tools — backs
+   `samvil-benchmark` SKILL (v4.26). Pure Python: external CHANGELOG
+   fetch (no flaky test reliance — urllib + 5s timeout), Keep-a-
+   Changelog format parsing (`## [version] - date`), token-overlap
+   classification into already_have / rejected / gaps, sha1-deduped
+   atomic append to `harness-feedback.log`. Defaults registry +
+   `~/.samvil/benchmark-targets.json` user overrides.
+2. **`mcp/samvil_mcp/qa_artifact.py`** + 1 MCP tool — backs
+   `samvil-qa --target=artifact` (v4.27). Pure Python: 5-dim
+   heuristic rubric (correctness / completeness / quality /
+   intent_alignment / domain_specific) with per-type checks
+   (code → TODO/FIXME/balance; document → TBD markers; api_response
+   → JSON parse; test_output → FAIL detection; etc.). Weighted
+   verdict PASS / REVISE / FAIL.
+3. **`mcp/samvil_mcp/multi_repo.py`** + 3 MCP tools — backs
+   `samvil-analyze` G5.4 multi-repo mode (v4.28). Pure Python:
+   `~/.samvil/brownfield-repos.json` registry loader, path/git/
+   manifest validator, comma-separated inline-path parser. Defaults-
+   first ordering for iteration.
+
+**8 new MCP tools** (186 → 194):
+- `benchmark_fetch_target`, `benchmark_classify_items`,
+  `benchmark_append_gap`, `benchmark_load_targets`
+- `score_artifact_against_quality_bar`
+- `load_brownfield_registry`, `validate_brownfield_repos`,
+  `parse_brownfield_inline_paths`
+
+**56 new pytest** (1791 → 1847): 18 benchmark + 21 qa_artifact + 17 multi_repo.
+
+**SKILL updates** — `samvil-benchmark` Step 1-3, `samvil-qa`
+`--target=artifact` block, `samvil-analyze` multi-repo block —
+each replaced aspirational prose with explicit `mcp__samvil_mcp__*`
+calls. Now P1-compliant: every behavior described maps to a real
+implementation.
+
+**Wire verification** — in-session stdio roundtrip ran all 8 new
+v4.29 tools + 3 v4.26 mechanical_toml tools (which were untested at
+wire level when v4.26 shipped) via JSON-RPC. Korean payload
+preserved through the wire. All 10 wire calls succeeded.
+
+**Why this matters (meta level)** — SAMVIL philosophy says
+"Evidence-based Assertions: every PASS needs file:line evidence;
+no evidence → FAIL." Pre-v4.29 we applied that to *user projects*
+but not to *SAMVIL's own SKILLs*. Shipping aspirational SKILL
+text was a self-blind P1 violation that recurred across v4.23,
+v4.26, v4.27, v4.28. Adding check #11 makes the violation
+structurally impossible — the same discipline SAMVIL imposes on
+user projects now applies to itself.
+
+**Compatibility** — additive only. New module + new MCP tools + new
+pre-commit check. SKILL behavior changes are *clarifications*
+(replacing aspirational prose with the tool that already implements
+it). No schema change, no migration.
+
+**Verification** — pre-commit 11/11 PASS (including the new check
+on itself — no chicken-and-egg). pytest 1847 (+56). 194 MCP tools
+(+8). SKILL thinness: samvil-benchmark 57/120, samvil-qa 115/120,
+samvil-analyze 92/120.
+
+**v2 Roadmap final status** — all 14 Goals shipped + meta-gate
+added. v2 arc complete. Next direction will be data-driven (pain
+capture + benchmark + retro), with the Forward Integrity gate
+ensuring no future aspirational SKILL slips past commit.
+
+---
+
 ## v4.28.0 — 2026-05-16
 
 **v2 Roadmap complete — G5.3 tutorial/welcome + G5.4 multi-repo brownfield (MINOR)**

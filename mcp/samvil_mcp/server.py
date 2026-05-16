@@ -5253,6 +5253,207 @@ async def resolve_mechanical_command(
         return json.dumps({"ok": False, "error": str(e)})
 
 
+# ── External benchmark (v4.29.0 — backs samvil-benchmark SKILL) ──
+
+
+@mcp.tool()
+async def benchmark_fetch_target(url: str, timeout: float = 5.0) -> str:
+    """Fetch a remote CHANGELOG and extract the latest 3 release sections.
+
+    Returns ``{ok, items[], error?, url}``. Best-effort — network
+    errors return ok=False without raising.
+    """
+    try:
+        from .benchmark import fetch_external_changelog as _fetch
+        result = _fetch(url=url, timeout=timeout)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "benchmark_fetch_target")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "benchmark_fetch_target", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def benchmark_classify_items(
+    items_json: str,
+    already_have_json: str = "",
+    rejected_json: str = "",
+) -> str:
+    """Classify changelog items into already_have / rejected / gap.
+
+    Args via JSON strings: ``items`` (output of benchmark_fetch_target),
+    ``already_have`` + ``rejected`` (token/phrase lists). Whitespace-
+    token overlap matching, case-insensitive.
+
+    Returns ``{ok, categorized: {already_have, rejected, gaps}, counts}``.
+    """
+    try:
+        from .benchmark import classify_changelog_items as _classify
+        items = json.loads(items_json) if items_json else []
+        already_have = json.loads(already_have_json) if already_have_json else []
+        rejected = json.loads(rejected_json) if rejected_json else []
+        result = _classify(items=items, samvil_already_have=already_have, samvil_rejected=rejected)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "benchmark_classify_items")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "benchmark_classify_items", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def benchmark_append_gap(
+    gap_json: str,
+    target_name: str,
+    target_url: str,
+    feedback_log_path: str,
+) -> str:
+    """Render a gap as a feedback-log entry and append it.
+
+    ``gap_json`` is a JSON-encoded ``{section, bullet}`` dict (one
+    item from benchmark_classify_items.categorized.gaps). The entry
+    is dedup'd by id (sha1 of bullet text).
+
+    Returns ``{ok, appended, appended_id, path, reason?}``.
+    """
+    try:
+        from .benchmark import append_gap_to_feedback_log as _append, render_gap_entry as _render
+        gap = json.loads(gap_json) if gap_json else {}
+        entry = _render(gap=gap, target_name=target_name, target_url=target_url)
+        result = _append(gap_entry=entry, feedback_log_path=feedback_log_path)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "benchmark_append_gap")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "benchmark_append_gap", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def benchmark_load_targets(config_path: str = "") -> str:
+    """Load benchmark target registry (defaults + user overrides).
+
+    Returns ``{ok, targets[], overrides_applied, overrides_path}``.
+    Defaults to ``~/.samvil/benchmark-targets.json``.
+    """
+    try:
+        from .benchmark import load_benchmark_targets as _load
+        result = _load(config_path=(config_path or None))
+        _log_mcp_health("ok" if result.get("ok") else "fail", "benchmark_load_targets")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "benchmark_load_targets", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+# ── Standalone artifact QA (v4.29.0 — backs samvil-qa --target=artifact) ──
+
+
+@mcp.tool()
+async def score_artifact_against_quality_bar(
+    artifact: str,
+    quality_bar: str = "",
+    artifact_type: str = "custom",
+    dimension_weights_json: str = "",
+    pass_threshold: float = 0.80,
+    revise_threshold: float = 0.40,
+) -> str:
+    """Score an arbitrary artifact across 5 dimensions, return verdict.
+
+    Dimensions: correctness / completeness / quality / intent_alignment
+    / domain_specific (each 0.0-1.0). Weighted average → PASS (≥pass) /
+    REVISE (≥revise) / FAIL.
+
+    ``artifact_type`` ∈ {code, test_output, document, api_response,
+    screenshot, custom}. ``quality_bar`` is a one-line criterion used
+    for intent-alignment scoring. ``dimension_weights_json`` is an
+    optional ``{dim_name: weight}`` JSON (weights normalize to 1).
+
+    Heuristic-only — caller (samvil-qa SKILL) may augment with LLM
+    judgment for semantics the heuristic can't see.
+    """
+    try:
+        from .qa_artifact import score_artifact as _score
+        weights: dict | None = None
+        if dimension_weights_json:
+            try:
+                parsed = json.loads(dimension_weights_json)
+                if isinstance(parsed, dict):
+                    weights = parsed
+            except json.JSONDecodeError:
+                weights = None
+        result = _score(
+            artifact=artifact,
+            quality_bar=quality_bar,
+            artifact_type=artifact_type,
+            dimension_weights=weights,
+            pass_threshold=pass_threshold,
+            revise_threshold=revise_threshold,
+        )
+        _log_mcp_health("ok" if result.get("ok") else "fail", "score_artifact_against_quality_bar")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "score_artifact_against_quality_bar", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+# ── Multi-repo brownfield registry (v4.29.0 — backs samvil-analyze G5.4) ──
+
+
+@mcp.tool()
+async def load_brownfield_registry(config_path: str = "") -> str:
+    """Load ``~/.samvil/brownfield-repos.json`` (or custom path).
+
+    Returns ``{ok, exists, repos[], default_count, warnings, path}``.
+    Each repo: ``{name, path, role, is_default, notes}``.
+    """
+    try:
+        from .multi_repo import load_repo_registry as _load
+        result = _load(config_path=(config_path or None))
+        _log_mcp_health("ok" if result.get("ok") else "fail", "load_brownfield_registry")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "load_brownfield_registry", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def validate_brownfield_repos(repos_json: str) -> str:
+    """Verify each repo path exists + is a git repo + has a manifest.
+
+    ``repos_json`` is a JSON list of repo dicts (output of
+    load_brownfield_registry.repos). Returns ``{ok, checked, passed[],
+    failed[]}`` where each passed entry includes ``has_git`` +
+    ``has_manifest`` flags. Failed entries carry a ``reason``.
+    """
+    try:
+        from .multi_repo import validate_repo_paths as _validate
+        repos = json.loads(repos_json) if repos_json else []
+        result = _validate(repos=repos)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "validate_brownfield_repos")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "validate_brownfield_repos", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def parse_brownfield_inline_paths(paths_csv: str) -> str:
+    """Parse a comma-separated path list into the same repo-dict shape
+    as the registry.
+
+    Used by samvil-analyze when the user invokes multi-repo mode without
+    registering a JSON file — they can paste a CSV path list inline.
+    Returns ``{ok, repos[]}`` (all entries marked ``is_default=True``).
+    """
+    try:
+        from .multi_repo import parse_inline_paths as _parse
+        result = _parse(paths_csv=paths_csv)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "parse_brownfield_inline_paths")
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        _log_mcp_health("fail", "parse_brownfield_inline_paths", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 

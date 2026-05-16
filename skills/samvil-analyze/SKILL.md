@@ -23,7 +23,7 @@ quality-scan patterns, dependency-impact heuristics in `SKILL.legacy.md`.
 
 ## Step 1 — Project path + Git safety net
 
-**Multi-repo 옵션 (v4.28, G5.4)**: AskUserQuestion `["분석 대상이 단일 레포인가요, 여러 레포인가요?"]` with `[단일 레포 / 여러 레포 (마이크로서비스) / 취소]`. "여러 레포" 선택 시 사용자에게 `~/.samvil/brownfield-repos.json` 등록 옵션 또는 콤마 구분 경로 입력 받음 → 각 레포마다 Step 1 이하 반복 (별도 `<project_root>/project.seed.json` 생성) → Step 5에서 통합 seed *옵션* 제공.
+**Multi-repo 옵션 (v4.28 SKILL / v4.29 implementation, G5.4)**: AskUserQuestion `["분석 대상이 단일 레포인가요, 여러 레포인가요?"]` with `[단일 레포 / 여러 레포 (마이크로서비스) / 취소]`. "여러 레포" → `mcp__samvil_mcp__load_brownfield_registry(config_path="")` (defaults to `~/.samvil/brownfield-repos.json`). `exists==false` 시 AskUserQuestion으로 콤마 구분 경로 입력 받아 `mcp__samvil_mcp__parse_brownfield_inline_paths(paths_csv=<input>)`. 양쪽 모두 `mcp__samvil_mcp__validate_brownfield_repos(repos_json=<JSON>)` → passed/failed 보고. passed 각각에 대해 Step 1 이하 반복 (별도 `<project_root>/project.seed.json` 생성). Step 5에서 통합 seed *옵션* 제공.
 
 1. AskUserQuestion: `분석할 프로젝트 경로를 알려주세요` (current dir / 직접 입력). Capture `<project_root>`. Verify `test -d "<project_root>"` and (`package.json` OR `pyproject.toml`); if neither manifest, AskUserQuestion `manifest 파일이 없습니다. 계속할까요?` (yes / 취소).
 2. Git safety — `cd <project_root> && git status --porcelain 2>/dev/null; echo $?`:

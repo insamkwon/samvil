@@ -23,42 +23,21 @@ Adopt the **Comparative Analyst** role. SAMVIL's retro can spot *internal* patte
 
 User can add custom targets via `~/.samvil/benchmark-targets.json` (schema: `[{name, url, why}, ...]`).
 
-## Step 1 — Fetch latest changelogs
+## Step 1 — Load targets + fetch changelogs
 
-For each target in the registry: `WebFetch(url, prompt="Extract the latest 3 release sections — version + date + bullet changes")`. Best-effort; failed fetches surface as `{target, error}` in summary but don't halt.
+`mcp__samvil_mcp__benchmark_load_targets(config_path="")` → `{targets[]}` (defaults + `~/.samvil/benchmark-targets.json` overrides). For each target: `mcp__samvil_mcp__benchmark_fetch_target(url=<target.url>, timeout=5)` → `{ok, items[]}`. Failed fetches surface as `{target, error}` but don't halt — collect what works.
 
-For Ouroboros specifically (which we recently absorbed v4.20~v4.25 from), also fetch their `skills/` directory listing to detect new skills since last benchmark.
+## Step 2 — Classify items
 
-## Step 2 — Identify novel patterns
+Build `already_have` token list from `references/glossary.md` canonical terms + recent CHANGELOG entries (e.g. `["refine gate", "epic claim", "ac tree", "evaluation principles", "pain capture"]`). Build `rejected` list from `docs/samvil-v2-roadmap.md §Non-Goals` and `§Out-of-Scope` (e.g. `["autopilot", "auto-implement", "AgentRegistry"]`).
 
-For each target's latest changes, ask:
+For each target's items: `mcp__samvil_mcp__benchmark_classify_items(items_json=<JSON>, already_have_json=<JSON>, rejected_json=<JSON>)` → `{categorized: {already_have, rejected, gaps}, counts}`. Render the comparison table verbatim to user.
 
-1. **Is this a pattern SAMVIL already has?** (search `references/glossary.md`, recent `CHANGELOG.md` entries, `harness-feedback.log` resolved items)
-2. **Is this a pattern SAMVIL deliberately rejected?** (check `docs/samvil-v2-roadmap.md §10 Out-of-Scope` and Non-Goals sections — if so, no action)
-3. **Is this a paradigm gap?** (new concept that SAMVIL has no equivalent for — e.g. "Refine Gate" was this when we first found it)
+## Step 3 — Append paradigm gaps
 
-Render comparison table:
-```
-Target          New pattern                          SAMVIL status
-─────────────── ──────────────────────────────────── ──────────────────────
-ouroboros 0.39  publish-with-templates              gap (G5.1-extended candidate)
-devin 1.x       browser-test-fleet                  off-scope (Non-Goal: cloud)
-opendevin 0.1   multi-llm-routing                   have it (cost_tier)
-```
+For each item in `categorized.gaps`: `mcp__samvil_mcp__benchmark_append_gap(gap_json=<JSON>, target_name=<name>, target_url=<url>, feedback_log_path=<path>)`. The MCP wrapper renders the entry (priority=BENEFIT, source=samvil-benchmark, id=benchmark-<ts>-<hash>) and appends atomically with dedup-by-id.
 
-## Step 3 — Append to harness-feedback.log
-
-For each *paradigm gap* identified (Step 2 category 3), append an issue with:
-- `id`: `benchmark-<timestamp>-<short_hash>`
-- `priority`: `BENEFIT` (not CRITICAL — these are expansion candidates, not bug fixes)
-- `component`: `external:<target>`
-- `name`: short pattern name
-- `problem`: what SAMVIL is missing (cite target's changelog reference)
-- `fix`: rough adaptation sketch (do not commit to full design — that's for the next planning conversation)
-- `expected_impact`: concrete user benefit
-- `source`: `samvil-benchmark`
-
-The `harness-feedback.log` path resolution follows the standard order: project-local `harness-feedback.log` → `${CLAUDE_PLUGIN_ROOT}/harness-feedback.log` → `~/.claude/plugins/cache/samvil/samvil/*/harness-feedback.log`.
+`feedback_log_path` resolution: project-local `harness-feedback.log` → `${CLAUDE_PLUGIN_ROOT}/harness-feedback.log` → `~/.claude/plugins/cache/samvil/samvil/*/harness-feedback.log`.
 
 ## Step 4 — Summary + (optional) escalation
 

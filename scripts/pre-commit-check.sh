@@ -205,6 +205,19 @@ else
 fi
 
 
+# ── 11. Skill forward integrity (v4.29.0) ──────────────────────────
+_section "11. Skill forward integrity (SKILL → MCP)"
+
+if python3 scripts/check-skill-forward-integrity.py >/tmp/samvil-forward.log 2>&1; then
+  registered=$(grep "Registered @mcp.tool" /tmp/samvil-forward.log | grep -oE "[0-9]+" | head -1)
+  refs=$(grep "Distinct tool refs" /tmp/samvil-forward.log | grep -oE "[0-9]+" | head -1)
+  _ok "all mcp__samvil_mcp__ refs resolve (${registered} registered / ${refs} cited)"
+else
+  _fail "forward integrity: unresolved tool references"
+  cat /tmp/samvil-forward.log | sed 's/^/      /'
+fi
+
+
 # ── Summary ─────────────────────────────────────────────────────────
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
