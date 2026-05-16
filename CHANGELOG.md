@@ -4,6 +4,75 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.27.0 — 2026-05-16
+
+**v2 Roadmap G5.1 publish + G5.2 standalone QA (MINOR)**
+
+Two new use cases that extend SAMVIL beyond the standard
+interview → build → qa pipeline. Both adapted from Ouroboros
+patterns, adapted to SAMVIL's Korean-first / file-SSOT discipline.
+
+**G5.1 samvil-publish**
+
+- New skill `skills/samvil-publish/SKILL.md` + Codex command
+  `references/codex-commands/samvil-publish.md`. Converts
+  `project.seed.json` into structured GitHub Issues (1 Epic +
+  N Tasks) via `gh` CLI.
+- 8-step protocol: prerequisites check → resolve target repo →
+  duplicate check → plan structure → labels → Epic → Tasks → Epic
+  comment with task links → summary.
+- v4.23-aware: when seed has `evaluation_principles` or
+  `exit_conditions`, includes those sections in the Epic body.
+- Strict anti-patterns: never skip duplicate check (avoids spam),
+  never embed secrets in issue bodies, always re-derive `$REPO`
+  flag.
+- Use cases: solo developer personal kanban / team workflow / handoff
+  to non-SAMVIL collaborators.
+
+**G5.2 samvil-qa --target=artifact (standalone QA)**
+
+- `samvil-qa` SKILL extended with `--target=artifact` mode (joins
+  the existing `--target=seed` mode from v4.23/v4.25). Both modes
+  skip the Ralph Loop and deploy/retro chain — pure evaluation
+  output.
+- Artifact mode: lightweight 5-dimension mini-rubric
+  (correctness / completeness / quality / intent-alignment /
+  domain-specific) scored 0.0-1.0; weighted average → PASS (≥0.8) /
+  REVISE (0.4-0.79) / FAIL (<0.4).
+- Inputs: `--artifact=<path or text>`, `--quality-bar=<one-line>`.
+- Use cases: code review / doc review / API response inspection /
+  one-off quality checks that don't need a full pipeline.
+
+**Why this matters together**
+
+G5.1 + G5.2 extend SAMVIL from "pipeline tool" to "multi-purpose
+quality + delivery toolkit". A solo developer can now:
+- finish a SAMVIL interview → `samvil-publish` → track on GitHub
+- review a teammate's PR → `samvil-qa --target=artifact` → get
+  structured verdict
+- audit their own seed → `samvil-qa --target=seed` → check
+  faithfulness to interview
+
+All three use the same evaluation discipline (verdict + suggestions +
+next step) so users see consistent UX across surfaces.
+
+**Compatibility** — additive only. samvil-publish is a new terminal
+skill. samvil-qa adds a new mode without breaking existing modes.
+No schema bump, no MCP tools added (artifact mode uses inline LLM
+rubric, doesn't need new MCP); SKILL thinness preserved (qa
+115/120).
+
+**Verification** — pre-commit 10/10 PASS. `pytest` 1791 passing
+(no new code tests — both features are SKILL-text + existing MCP
+tools). 186 MCP tools (unchanged). Skill thinness: samvil-publish
+113/120, samvil-qa 115/120 (extended without breaking).
+
+**v2 Roadmap progress** — Phase 1 + 2A + 2B + 3 + 4 + G5.1 + G5.2 ✅.
+Remaining: G5.3 tutorial/welcome + G5.4 multi-repo brownfield in
+v4.28.0.
+
+---
+
 ## v4.26.0 — 2026-05-16
 
 **v2 Roadmap Phase 4 finish — G4.2 mechanical.toml + G4.3 samvil-benchmark (MINOR)**

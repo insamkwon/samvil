@@ -88,9 +88,14 @@ Apply in order (each best-effort, INV-5):
 - `verdict == REVISE` and `iteration < qa_max_iterations` → fix per legacy `## Ralph Loop (if REVISE)` (read error, write fix, `npm run build > <paths.build_log> 2>&1`, append to `<paths.fix_log>`), append to state `qa_history`: `{iteration:<N>,verdict:"REVISE",issue_ids:[...]}`, increment iter. **Convergence rule**: each iter MUST reduce total issue count vs prior.
 - `iteration >= qa_max_iterations` → FAIL → "Chain on FAIL".
 
-## Seed-as-QA-Target Mode (v4.23 SKILL / v4.25 implementation, `--target=seed` flag)
+## Standalone QA Modes (v4.23/v4.25/v4.27)
 
-When invoked with `--target=seed`, skip Ralph Loop. Instead evaluate the *seed itself* against its source interview via `mcp__samvil_mcp__evaluate_seed_against_interview(project_root=".", seed_json=<seed JSON>)` — returns `{verdict, coverage_score, traced, untraced, details, notes}`. Render to user + `claim_post(claim_type="seed_verdict", subject="seed:<seed.name>", statement="verdict=<v>, coverage=<score>", evidence_json='["project.seed.json","interview-progress.json"]')`. No ralph loop, no deploy/retro chain — pure evaluation. Verdict thresholds: ≥0.85 + zero untraced constraints → PASS; ≥0.60 → PARTIAL; else FAIL.
+When invoked with `--target=<seed|artifact>`, skip Ralph Loop entirely. Two modes:
+
+- **`--target=seed` (v4.23/v4.25)**: evaluate the *seed* against its source interview via `mcp__samvil_mcp__evaluate_seed_against_interview(project_root=".", seed_json=<seed>)` → `{verdict, coverage_score, traced, untraced, details}`. Verdict thresholds: ≥0.85 + zero untraced constraints → PASS; ≥0.60 → PARTIAL; else FAIL. `claim_post(claim_type="seed_verdict", ...)`.
+- **`--target=artifact` (v4.27)**: lightweight QA verdict for *any* artifact (code/doc/API response/screenshot). Inputs: `--artifact=<path or text>`, `--quality-bar=<one-line criterion>`. Apply 5-dim mini-rubric (correctness/completeness/quality/intent-alignment/domain-specific), each scored 0.0-1.0; weighted average → PASS (≥0.8) / REVISE (0.4-0.79) / FAIL (<0.4). Render verdict + specific suggestions + next-step pointer (PASS→proceed; REVISE→address suggestions then re-run; FAIL→consider re-interview / re-design). No claim_post by default (caller can request).
+
+Both modes skip deploy/retro chain — pure evaluation output. Use cases: seed mode for "is my seed faithful to interview" check; artifact mode for code review / doc review / API response inspection.
 
 ## Chain on PASS / FAIL / BLOCKED (INV-4)
 
