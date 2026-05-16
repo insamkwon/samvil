@@ -4,6 +4,84 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.23.0 — 2026-05-16
+
+**v2 Roadmap Phase 3 — Seed Quality Meta (MINOR)**
+
+Seed graduates from "what to build" into "what to build + what quality
+means". Two new optional schema fields anchor QA verdicts to the
+interview-time agreement, so the same seed scored at different times
+or by different agents produces consistent results. Closes the W2/W5
+gaps from the v2 roadmap analysis ("seed doesn't carry evaluation
+principles" / "QA measures the wrong things").
+
+**G3.1 evaluation_principles + exit_conditions**
+
+- `references/seed-schema.json` adds two optional root-level fields:
+  - `evaluation_principles[]`: weighted quality principles harvested
+    from interview material. Each entry has `{principle, weight,
+    rationale, source_phase}`. Korean prose. Weight 0.0–1.0.
+  - `exit_conditions[]`: workflow termination conditions in Korean
+    prose. e.g. `"모든 features의 acceptance_criteria가 PASS이고
+    evaluation_principles 중 weight ≥ 0.5인 항목이 모두 PASS"`.
+- Both fields are **optional** — pre-v4.23 seeds remain valid and
+  samvil-qa falls back to its v4.22 logic when they are absent.
+- `samvil-seed` SKILL — new "Evaluation principles derivation" step
+  after consolidation. Sources, in priority order:
+    1. `constraints_aggregated` → principles (weight 0.7, source-trace)
+    2. PHI-06 vague-AC rewrites → principles (weight 0.6)
+    3. `refined_by_phase[*].decision` for core/scope phases → principles
+       (weight 0.5)
+  Hard ceiling: 8 principles. User confirms with `[좋아 / 가중치 조정
+  / 항목 추가/삭제]` AskUserQuestion. *Source-trace, not invention* —
+  LLM cannot fabricate principles outside interview material.
+
+**G3.2 samvil-qa evaluation_principles consumption + --target=seed**
+
+- `samvil-qa` SKILL — Pass 2.5 now matches each AC verdict against
+  `seed.evaluation_principles` (when present), builds per-leaf
+  `principle_hits` evidence, and synthesis computes weighted score
+  `sum(weight × satisfied) / sum(weight)`. If score < 0.5 with any
+  weight ≥ 0.5 principle violated, the leaf is downgraded PASS →
+  PARTIAL. `seed.exit_conditions` evaluated at Phase Z — verdict can
+  not be PASS if conditions unmet.
+- `samvil-qa --target=seed` mode (new): skip Ralph Loop and evaluate
+  the *seed itself* against its source interview. Trace
+  `seed.constraints` → `constraints_aggregated`, `seed.out_of_scope` →
+  `out_of_scope_aggregated`, `seed.features[*].acceptance_criteria` →
+  `ac_by_phase`, `seed.evaluation_principles.rationale` → interview
+  source. Output: `{seed_verdict, untraced_items[], coverage_score}` +
+  `claim_post(claim_type="seed_verdict", subject="seed:<name>", ...)`.
+  No deploy/retro chain — pure evaluation output. Use case: spot
+  semantic drift between interview and seed before build commits to it.
+
+**Why this matters** — pre-v4.23, samvil-qa measured "is the AC in the
+code?" but never measured "is the seed even the right seed?". The
+build/QA pipeline could pass with high confidence on a seed that
+already drifted from the user's interview intent. Now the seed's
+evaluation_principles anchor the verdict — same seed scored at
+different times produces same results — and `--target=seed` provides
+an explicit "is the seed faithful to the interview?" check.
+
+**Compatibility** — schema additions are optional (no migration
+required). Existing seeds pass validation unchanged. samvil-qa
+detects absence of `evaluation_principles` and falls back to v4.22
+behavior, so old projects work without modification.
+
+**Verification** — pre-commit 10/10 PASS. `pytest` 1726 passing
+(no new tests needed — schema changes are validated by existing
+`test_validate_seed.py` runs). SKILL thinness: samvil-seed 98/120
+(compressed After Approval + Chain blocks for room), samvil-qa
+116/120 (compressed Anti-Patterns + Phase Z evidence block for
+room). No new MCP tools (Pass 2.5 + Phase Z + samvil-seed use
+existing `load_interview_progress` / `claim_post`).
+
+**v2 Roadmap progress** — Phase 1 + 2A + 2B + 3 ✅. Next: Phase 4
+(v4.24) — Infrastructure Hardening (EventStore direct read,
+mechanical.toml contract, samvil-benchmark skill).
+
+---
+
 ## v4.22.0 — 2026-05-16
 
 **v2 Roadmap Phase 2B — Active Pain Capture (MINOR)**

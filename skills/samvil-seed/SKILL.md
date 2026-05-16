@@ -62,55 +62,33 @@ If `stage_can_proceed.can_proceed` is false, show blockers and stop.
 
 **Fallback (no progress file or empty)**: convert `interview-summary.md` into valid v3 `project.seed.json` per the legacy regeneration rules.
 
+**Evaluation principles derivation (v4.23.0)**: After the consolidation summary, derive `seed.evaluation_principles[]` from interview material — *source-trace, not invention*:
+1. Each entry in `constraints_aggregated` becomes a candidate principle: `{principle: "<constraint as positive>", weight: 0.7, rationale: "<original constraint>", source_phase: "<phase>"}`. e.g. "100MB 이상 거부" → "사용자 업로드는 100MB 이하만 처리된다".
+2. PHI-06 vague-AC rewrites become principles: `{principle: <rewritten AC>, weight: 0.6, source_phase: "<phase>"}`.
+3. Each `refined_by_phase[*].decision` whose phase is `core` or `scope` adds: `{principle: <decision>, weight: 0.5, rationale: "core decision", source_phase: "<phase>"}`.
+4. Hard ceiling: 8 principles. If more candidates, merge semantically-overlapping pairs and warn the user.
+5. Present the derived principles to the user: `AskUserQuestion(["이 품질 기준이 맞나요?"], [좋아 / 가중치 조정 / 항목 추가/삭제])`. On adjust: collect changes, re-validate, re-present (max 2 loops).
+
+**Exit conditions derivation (v4.23.0)**: Default to one entry — `"모든 features의 acceptance_criteria가 PASS이고 evaluation_principles 중 weight ≥ 0.5인 항목이 모두 PASS"`. If the user explicitly named tier-specific completion criteria in the interview (recorded in `refined_by_phase[*].out_of_scope` or interview-summary), append those verbatim.
+
+`evaluation_principles` and `exit_conditions` are **optional schema fields** — old seeds without them remain valid (samvil-qa falls back to v4.22 logic).
+
 In both paths: validate against `references/seed-schema.json`, present, and ask approval. If edits are requested, revise and re-present.
 
 ## After Approval
 
 1. Write approved JSON to `project.seed.json`.
-2. Call:
-
-```
-mcp__samvil_mcp__save_seed_version(
-  session_id="<session_id>",
-  version=1,
-  seed_json="<escaped approved seed JSON>",
-  change_summary="Initial seed from interview"
-)
-
-mcp__samvil_mcp__complete_stage(
-  session_id="<session_id>",
-  stage="seed",
-  verdict="pass"
-)
-```
-
-3. Append a short `.samvil/handoff.md` entry; never overwrite.
-4. Best-effort `mcp__samvil_mcp__clear_interview_progress(project_root=".")` — interview-progress.json is no longer authoritative once seed.json is approved (interview-summary.md remains the narrative record).
+2. `mcp__samvil_mcp__save_seed_version(session_id, version=1, seed_json=<escaped>, change_summary="Initial seed from interview")` + `mcp__samvil_mcp__complete_stage(session_id, stage="seed", verdict="pass")`.
+3. Append `.samvil/handoff.md` (cat >> or Edit, never Write).
+4. Best-effort `mcp__samvil_mcp__clear_interview_progress(project_root=".")` — interview-summary.md remains narrative record.
 
 ## Chain
 
 Use `host_chain_strategy.chain_via`:
+- `skill_tool`: invoke `samvil-council` (standard/thorough/full) or `samvil-design` (minimal).
+- `file_marker`: write `.samvil/next-skill.json` with `{schema_version:"1.0", chain_via:"file_marker", host, next_skill, reason, from_stage:"seed", created_by:"samvil-seed"}` — `next_skill` per tier (minimal → `samvil-design`, else `samvil-council`).
 
-- `skill_tool`: invoke `samvil-council` for standard/thorough/full, or
-  `samvil-design` for minimal.
-- `file_marker`: write `.samvil/next-skill.json`:
-
-```json
-{
-  "schema_version": "1.0",
-  "chain_via": "file_marker",
-  "host": "<host>",
-  "next_skill": "samvil-design",
-  "reason": "minimal tier skips council",
-  "from_stage": "seed",
-  "created_by": "samvil-seed"
-}
-```
-
-For standard/thorough/full, use `samvil-council`.
-
-If MCP is unavailable, fall back to the legacy chaining rules in
-`SKILL.legacy.md` and mention that orchestration was degraded.
+If MCP unavailable: fall back to `SKILL.legacy.md` legacy chaining rules + announce degraded orchestration.
 
 ## Invariants
 

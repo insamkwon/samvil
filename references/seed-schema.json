@@ -231,6 +231,42 @@
       "minItems": 1,
       "description": "Explicitly excluded features. Empty = scope creep risk."
     },
+    "evaluation_principles": {
+      "type": "array",
+      "description": "(v4.23.0) Weighted quality principles harvested from the interview (Refine Gate or PHI-06 derivations). samvil-qa uses these to score features so the seed itself anchors the QA verdict — same seed scored at different times produces consistent verdicts. Optional for backward compatibility; absent → samvil-qa falls back to its v4.22 logic.",
+      "items": {
+        "type": "object",
+        "required": ["principle"],
+        "additionalProperties": false,
+        "properties": {
+          "principle": {
+            "type": "string",
+            "minLength": 5,
+            "description": "Korean prose. e.g. '사용자는 첫 30초 안에 핵심 가치를 본다'"
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "default": 0.5,
+            "description": "Relative importance 0.0–1.0. Weights are normalized at QA time; absolute scale is not required."
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Why this principle exists — typically the interview answer or Refine Gate constraint that surfaced it. Source-trace, not invention."
+          },
+          "source_phase": {
+            "type": "string",
+            "description": "Phase id (core/scope/lifecycle/...) where the principle was derived. Used by retro to spot which phase produced strong vs weak principles."
+          }
+        }
+      }
+    },
+    "exit_conditions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 5 },
+      "description": "(v4.23.0) Workflow termination conditions in Korean prose. e.g. '모든 features의 acceptance_criteria가 PASS이고 evaluation_principles 중 가중치 ≥ 0.5인 항목이 모두 PASS' — read by samvil-evolve to decide when to stop iterating, and by samvil-qa to decide when verdict is final. Optional; absent → existing tier-based ambiguity_target + floor system continues to govern."
+    },
     "version": {
       "type": "integer",
       "minimum": 1,
