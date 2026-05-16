@@ -4,6 +4,78 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.24.0 — 2026-05-16
+
+**v2 Roadmap Phase 4 — Infrastructure Hardening (G4.1 MCP-free Recovery) (MINOR)**
+
+Closes W7 from the v2 roadmap analysis ("Recovery requires MCP"). When the
+MCP server is unreachable (network glitch, plugin reload, server restart),
+the user could previously not recover an in-flight SAMVIL session — they
+needed MCP to even *find out* what session was running. v4.24 adds a
+pure-Python CLI reader that consumes the file-based SSOT
+(`.samvil/events.jsonl` + `project.state.json`) directly with no MCP
+dependency.
+
+**G4.1 EventStore Direct Read (MCP-free Recovery)**
+
+- New module `mcp/samvil_mcp/event_store_reader.py` — pure Python,
+  zero MCP/aiosqlite imports. Three public functions:
+    - `read_events(project_root)` → entries + by_stage + by_session
+      + first/last_ts summary
+    - `read_state(project_root)` → parsed project.state.json or error
+    - `list_in_flight_sessions(project_root)` → in-flight sessions
+      sorted by last_ts descending, with heuristic that excludes
+      sessions whose last event is `*_complete` in terminal stages
+      (retro / complete)
+- CLI entry point: `python -m samvil_mcp.event_store_reader
+  --project=<path> [--json]`. Produces a human-readable summary or
+  JSON. Exit code 0 on success, 1 on file errors.
+- `IN_FLIGHT_STAGES` constant defines what counts as recoverable
+  (interview / seed / council / design / scaffold / build / qa /
+  deploy / evolve). Aligned with `references/state-schema.json` enum
+  minus terminal states.
+- `samvil-resume` SKILL.md adds an explicit MCP-free fallback block
+  after Boot Sequence — if MCP is unreachable, run the CLI, parse
+  `current_stage`, and manually invoke the next stage skill. Announces
+  `[SAMVIL] ⚠ MCP unreachable — using file-based fallback.` so the
+  user knows recovery is degraded but working.
+- Tests: `mcp/tests/test_event_store_reader.py` — 15 cases covering
+  read_events (happy / missing / malformed / Korean), read_state
+  (missing / malformed / non-object / happy), list_in_flight_sessions
+  (no events / detected / terminal exclusion / multi-session sort),
+  IN_FLIGHT_STAGES sanity, format_in_flight_text output shape.
+
+**Why this matters (concretely)** — pre-v4.24 a user with an
+interrupted samvil-build session and MCP down has these options:
+restart Claude / fix MCP / try samvil-resume (which itself needs MCP).
+After v4.24 they can run one command in any shell, see what stage
+they're at, and decide how to continue — even from another machine
+that has the project directory but no SAMVIL plugin.
+
+**Compatibility** — additive only. New module + new SKILL paragraph.
+No schema change, no migration. CLI is opt-in (samvil-resume still
+prefers MCP).
+
+**Verification** — pre-commit 10/10 PASS. `pytest` 1741 passing
+(+15 new). CLI smoke-tested on real `~/dev/todo-app` project (15
+events, 0 in-flight — correctly reports completed pipeline). SKILL
+thinness: samvil-resume 96/120 (untouched by the addition because
+the resume SKILL was already lean).
+
+**v2 Roadmap progress** — Phase 1 ✅ + 2A ✅ + 2B ✅ + 3 ✅ + 4 G4.1 ✅.
+Remaining v2 Roadmap items:
+- G4.2 mechanical.toml contract — deferred to v4.25.0 (depends on
+  samvil-scaffold + samvil-build refactor; better as separate release)
+- G4.3 samvil-benchmark skill — deferred to v4.25.0 (better as
+  separate release alongside G4.2)
+- G5.1~G5.4 Future use cases (publish / standalone QA /
+  tutorial-welcome / multi-repo brownfield) — v4.26+ optional
+
+Scope discipline: shipping one well-tested goal per release is safer
+than three at once. v4.25 will bundle G4.2 + G4.3 if both are ready.
+
+---
+
 ## v4.23.0 — 2026-05-16
 
 **v2 Roadmap Phase 3 — Seed Quality Meta (MINOR)**

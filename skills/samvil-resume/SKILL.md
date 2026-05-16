@@ -12,10 +12,11 @@ For a brand-new project with no prior state, fall through to `samvil-interview`.
 
 ## Boot Sequence
 
-1. `mcp__samvil_mcp__save_event(session_id="<sid-or-null>", event_type="stage_change", stage="resume", data='{"action":"resume_start"}')`
-   — best-effort, non-fatal if no session_id yet.
+1. `mcp__samvil_mcp__save_event(session_id="<sid-or-null>", event_type="stage_change", stage="resume", data='{"action":"resume_start"}')` — best-effort, non-fatal if no session_id yet.
 2. `mcp__samvil_mcp__resume_session(project_root="<cwd>")` — reads state.json, handoff.md.
 3. Branch on `found` (see Step 1 / Step 2 below).
+
+**MCP-free fallback (v4.24)**: Steps 1-2 모두 "MCP unreachable" 등으로 실패하면 CLI `python -m samvil_mcp.event_store_reader --project=<cwd>` 실행. `.samvil/events.jsonl` + `project.state.json` 직접 읽음. 출력의 `current_stage` 사용해 다음 stage 수동 invoke. 사용자에게 `[SAMVIL] ⚠ MCP unreachable — using file-based fallback.` 안내.
 
 ## Step 1 — Not Resumable
 
