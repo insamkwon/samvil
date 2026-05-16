@@ -4,6 +4,84 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.28.0 — 2026-05-16
+
+**v2 Roadmap complete — G5.3 tutorial/welcome + G5.4 multi-repo brownfield (MINOR)**
+
+Final v2 roadmap release. Closes G5.3 (onboarding) and G5.4
+(multi-repo brownfield support). All 14 Goals of `docs/samvil-v2-roadmap.md`
+are now shipped across v4.20 → v4.28.
+
+**G5.3 samvil-welcome + samvil-tutorial**
+
+- New skill `skills/samvil-welcome/SKILL.md` + Codex command. Korean
+  onboarding for new users. 7 steps: identity + value (15s) →
+  reassurance (10s) → ask user state → tutorial / real-project /
+  brownfield path → next resources. Honest about friction
+  (Circuit Breaker, Zero-Refactor Rule, all decisions confirmed).
+- New skill `skills/samvil-tutorial/SKILL.md` + Codex command. 5-min
+  hands-on walkthrough of all 5 SAMVIL stages using a sample
+  "할 일 앱" in isolated `~/dev/samvil-tutorial-app/`. Each stage
+  explains its purpose with 1-screen-each pacing. Non-destructive
+  (separate from real projects).
+- Both terminal skills (no chain). Welcome routes to tutorial /
+  real / brownfield. Tutorial routes back to `/samvil` for real
+  project.
+
+**G5.4 multi-repo brownfield**
+
+- `samvil-analyze` SKILL Step 1 now offers single vs multi-repo
+  branch. Multi-repo mode: user provides comma-separated paths or
+  registers `~/.samvil/brownfield-repos.json`. Step 1+ iterates per
+  repo (separate `<project_root>/project.seed.json` each); Step 5
+  optionally surfaces a unified seed view.
+- Useful for ZEP-style microservice environments where one logical
+  change spans multiple repos (e.g. zep-crm + zep-client + zep-apps).
+
+**v2 Roadmap complete (v4.20 → v4.28, 9 releases)**
+
+```
+v4.20 Phase 1   Non-Skip Gates + Restate Gate
+v4.21 Phase 2A  Refine Gate (5-section payload)
+v4.22 Phase 2B  Active Pain Capture
+v4.23 Phase 3   evaluation_principles + exit_conditions
+v4.24 Phase 4   G4.1 MCP-free Recovery (EventStore reader)
+v4.25 Hotfix    G3.2 real implementation (closed v4.23 SKILL gap)
+v4.26 Phase 4   G4.2 mechanical.toml + G4.3 samvil-benchmark
+v4.27 Future    G5.1 samvil-publish + G5.2 standalone QA --target=artifact
+v4.28 Future    G5.3 welcome + tutorial / G5.4 multi-repo brownfield
+```
+
+**What SAMVIL gained from this arc**
+
+- Information loss channels closed (Refine Gate, Restate Gate,
+  Progressive AC, Epic Claim, structural persistence)
+- Self-improvement loop opened at 3 seams (pain capture +
+  benchmark + retro)
+- Semantic intent measurable (evaluation_principles + seed-as-QA)
+- Recovery doesn't require MCP
+- Onboarding for new users
+- Multi-purpose extensions (publish, standalone QA, multi-repo)
+
+**Compatibility** — additive only. Three new skills (welcome,
+tutorial, publish, benchmark all terminal). samvil-analyze adds
+multi-repo mode without breaking single-repo flow. No schema
+changes since v4.23. No migration needed.
+
+**Verification** — pre-commit 10/10 PASS. `pytest` 1791 passing.
+186 MCP tools unchanged. SKILL thinness samvil-welcome 106/120,
+samvil-tutorial 105/120, samvil-analyze 92/120.
+
+**Next** — v2 Roadmap is done. Next direction will be informed by:
+- actual pain capture data (G2.2) from real `/samvil` runs
+- samvil-benchmark quarterly comparisons (G4.3)
+- user feedback on the v4.20+ behaviors
+
+No predetermined v3 Roadmap — we now have the measurement
+infrastructure to let data drive priorities instead of intuition.
+
+---
+
 ## v4.27.0 — 2026-05-16
 
 **v2 Roadmap G5.1 publish + G5.2 standalone QA (MINOR)**
