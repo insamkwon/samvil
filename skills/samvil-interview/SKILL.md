@@ -109,6 +109,8 @@ After Step 5 approval: `mcp__samvil_mcp__merge_brownfield_seed(existing_seed_jso
 **Greenfield**: Invoke Skill tool with `samvil-seed`. **NO COMPACT**. Codex CLI fallback: read `skills/samvil-seed/SKILL.md`.
 **Brownfield**: Invoke Skill tool with `samvil-seed` (merged seed already written; samvil-seed enters presentation-only mode → samvil-council → samvil-scaffold → samvil-build). Same full pipeline as greenfield.
 
+**페인 캡처 (v4.22)**: chain 직전 `AskUserQuestion(["이 인터뷰 어땠어?"], [⭐ 좋아 / ⭐⭐⭐ 보통 / ⭐⭐⭐⭐⭐ 불편 / Skip])`. Skip 외 응답은 `capture_stage_pain(stage="interview", severity=<1|3|5>, pain_text="")`. severity 5 시 후속 1줄 `"구체적으로?"` → pain_text 함께 재호출.
+
 ## Anti-Patterns
 
 1. Asking 2+ questions in a single AskUserQuestion. 2. Skipping summary verification (Zero-Question Mode included). 3. Accepting a vague AC without offering a rewrite (PHI-06). 4. Exposing framework names (AARRR/JTBD/HEART) to the user. 5. Self-verifying the `interview_to_seed` gate verdict (Generator ≠ Judge). 6. Hard-coding `chain.next_skill` instead of always invoking `samvil-seed`. 7. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.

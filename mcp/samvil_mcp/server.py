@@ -5012,6 +5012,72 @@ async def clear_interview_progress(project_root: str) -> str:
         return json.dumps({"ok": False, "error": str(e)})
 
 
+# ── Active Pain Capture (v4.22.0 — semantic feedback signal) ──
+
+
+@mcp.tool()
+async def capture_stage_pain(
+    project_root: str,
+    stage: str,
+    severity: int,
+    pain_text: str = "",
+    session_id: str = "",
+    ts: str = "",
+) -> str:
+    """Capture a per-stage user pain signal to
+    ``<project_root>/.samvil/pain-feedback.jsonl``.
+
+    Closes the gap where samvil-retro could only see *build/mechanical*
+    failures and missed *semantic* pain ("seed didn't match what I
+    said", "had to manually edit constraints"). Without this signal,
+    retro can only suggest incremental improvements; with it, retro can
+    detect systematic gaps.
+
+    ``stage`` must be one of: interview / seed / council / design /
+    scaffold / build / qa / deploy / retro / evolve.
+    ``severity`` 1..5 (1 = 다 좋아, 5 = 재작업 필요).
+    ``pain_text`` optional for severity 1-3; the result flags
+    ``pain_required_but_missing=true`` when severity >= 4 and pain_text
+    is empty so the caller can ask a follow-up.
+
+    Best-effort — file errors return ok=False rather than raising.
+    """
+    try:
+        from .pain_capture import capture_pain as _capture
+        result = _capture(
+            project_root=project_root,
+            stage=stage,
+            severity=severity,
+            pain_text=pain_text,
+            session_id=session_id,
+            ts=(ts or None),
+        )
+        _log_mcp_health("ok" if result.get("ok") else "fail", "capture_stage_pain")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "capture_stage_pain", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
+@mcp.tool()
+async def load_pain_feedback(project_root: str) -> str:
+    """Replay ``.samvil/pain-feedback.jsonl`` into aggregated form for
+    samvil-retro consumption.
+
+    Returns ``{ok, exists, entries, by_stage, by_severity, severity_avg,
+    high_severity_count, high_severity_texts, path}``. Malformed lines
+    and invalid stages are silently skipped.
+    """
+    try:
+        from .pain_capture import load_pain_feedback as _load
+        result = _load(project_root=project_root)
+        _log_mcp_health("ok" if result.get("ok") else "fail", "load_pain_feedback")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "load_pain_feedback", str(e))
+        return json.dumps({"ok": False, "error": str(e)})
+
+
 # ── Entry point ───────────────────────────────────────────────
 
 

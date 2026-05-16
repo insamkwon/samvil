@@ -35,8 +35,9 @@ stage_durations_ms,total_duration_ms,bottleneck_stages,build_pass_rate,qa_pass_r
 `v3_leaf_stats.{total_leaf_events,by_status,feature_tree_complete}`,
 `mcp_health.{exists,total,ok,fail,fail_rate,failed_tools,warning}`,
 `next_suggestion_id` (e.g. `v3-031`), `feedback_entries_count`, `errors[]`.
-On `error`: report `⚠ MCP unreachable`, fall back to manual file reads
-from `SKILL.legacy.md` (P8). Continue — retro is best-effort.
+On `error`: ⚠ MCP unreachable → fallback to manual file reads from `SKILL.legacy.md` (P8). Continue.
+
+**Pain feedback (v4.22)**: `mcp__samvil_mcp__load_pain_feedback(project_root=".")` → `by_stage` + `high_severity_texts` + `severity_avg` are *primary* suggestion input. high_severity (≥4) 텍스트는 recurring_patterns보다 강한 신호.
 
 ## Step 2 — Render dashboard
 
@@ -91,20 +92,7 @@ mutate `metrics`, `stages`, `seed_name`, or `timestamp`.
 
 ## Step 5 — Pipeline-end Compressor narrate (v3.2 §6.1)
 
-Best-effort one-page briefing. Skip silently on failure (log to `.samvil/mcp-health.jsonl`).
-
-```
-mcp__samvil_mcp__narrate_build_prompt(project_root=".", since="")
-→ run prompt through current Compressor model (frugal cost_tier;
-  route_task(task_role="compressor") picks the model)
-mcp__samvil_mcp__narrate_parse(raw="<LLM response>")
-→ print under "Pipeline summary" header
-mcp__samvil_mcp__claim_post(project_root=".", claim_type="policy_adoption",
-  subject="pipeline_end:<seed.name>", statement="run summary recorded",
-  authority_file=".samvil/retro/retro-<run_id>.yaml",
-  claimed_by="agent:retro-analyst",
-  evidence_json='[".samvil/retro/retro-<run_id>.yaml",".samvil/events.jsonl"]')
-```
+Best-effort one-page briefing (skip silently on failure, log to `.samvil/mcp-health.jsonl`): `narrate_build_prompt(project_root=".", since="")` → run through Compressor model (frugal `cost_tier`, `route_task(task_role="compressor")`) → `narrate_parse(raw="<LLM resp>")` → print under "Pipeline summary" → `claim_post(claim_type="policy_adoption", subject="pipeline_end:<seed.name>", statement="run summary recorded", authority_file=".samvil/retro/retro-<run_id>.yaml", claimed_by="agent:retro-analyst", evidence_json='[".samvil/retro/retro-<run_id>.yaml",".samvil/events.jsonl"]')`.
 
 ## Chain (terminal)
 
@@ -114,7 +102,8 @@ mcp__samvil_mcp__claim_post(project_root=".", claim_type="policy_adoption",
 
 ## Anti-Patterns
 
-1. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
+1. **`AskUserQuestion` 호출 포맷**: `questions=["<질문>"]` 배열 — 문자열 직접 전달 시 `InputValidationError`.
+
 ## Legacy reference
 
-Full Korean prose, dashboard examples, preset auto-accumulation prompt template, and verbose JSON schema in `SKILL.legacy.md`. Consult only when retro regresses or is extended.
+Full Korean prose, dashboard examples, preset auto-accumulation template, verbose JSON schema: `SKILL.legacy.md`.

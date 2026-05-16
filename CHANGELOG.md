@@ -4,6 +4,84 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.22.0 — 2026-05-16
+
+**v2 Roadmap Phase 2B — Active Pain Capture (MINOR)**
+
+Closes the self-improvement feedback loop. Pre-v4.22, the only signals
+that reached samvil-retro were mechanical (build failures, QA fail
+counts). User *semantic* pain ("seed didn't match my intent", "had to
+manually edit constraints", "this stage took too long") never entered
+the system — users solved it themselves and moved on. v4.22 adds an
+explicit channel so that pain becomes a first-class retro input,
+breaking the closed measurement loop diagnosed in the SAMVIL-v2
+roadmap.
+
+**G2.2 Active Pain Capture**
+
+- New module `mcp/samvil_mcp/pain_capture.py` — pure Python (file-only,
+  no DB), atomic JSONL writes via `fcntl.flock`, never raises (INV-5).
+- Two new MCP tools:
+  - `capture_stage_pain(project_root, stage, severity, pain_text,
+    session_id, ts)` — appends one entry to
+    `.samvil/pain-feedback.jsonl`. severity 1..5 (1 = 다 좋아, 5 =
+    재작업 필요). pain_text optional for 1-3, the result flags
+    `pain_required_but_missing=true` for severity 4-5 with empty text
+    so the caller can ask a follow-up.
+  - `load_pain_feedback(project_root)` — replays with aggregations:
+    `by_stage`, `by_severity`, `severity_avg`, `high_severity_count`,
+    `high_severity_texts`, `entries`.
+- `samvil-interview` SKILL — adds a single line at Step 6 (chain) that
+  asks the user `AskUserQuestion(["이 인터뷰 어땠어?"], [⭐ 좋아 /
+  ⭐⭐⭐ 보통 / ⭐⭐⭐⭐⭐ 불편 / Skip])` and calls `capture_stage_pain`
+  on non-Skip responses. severity 5 triggers a one-line follow-up.
+- `samvil-retro` SKILL — Step 1 aggregation now includes
+  `load_pain_feedback`. `high_severity_texts` (severity ≥ 4) are
+  declared *primary* suggestion input, ranked above the existing
+  `recurring_patterns` because they carry first-person pain
+  evidence, not just historical co-occurrence.
+- Tests: `mcp/tests/test_pain_capture.py` — 13 cases covering happy
+  path, invalid stage / severity, high-severity text requirement flag,
+  Korean UTF-8 preservation, append (not overwrite), unwritable path
+  graceful failure, missing file load, aggregations (per-stage /
+  per-severity / avg / high-severity), malformed line skipping.
+
+**Why this matters (concretely)**
+
+Pre-v4.22 retro insight ceiling:
+  - "Build failed 3 times this run" — visible
+  - "Bottleneck is in scaffold" — visible
+  - "Seed didn't capture the 100MB constraint" — *invisible*
+  - "Interview asked the same question twice" — *invisible*
+  - "User had to manually edit seed after generation" — *invisible*
+
+After v4.22, the bottom three become explicit pain entries. samvil-retro
+can spot patterns like "scope semantic pain at severity 4+ in 3 of last
+5 runs" and propose harness changes that target the *semantic* layer,
+not just the mechanical layer.
+
+**Compatibility** — additive only. No schema bump. No migration. SKILL
+behaviour change: samvil-interview asks one extra optional question at
+chain time (skippable). samvil-retro consumes a new optional input
+file (gracefully absent if pain capture never ran).
+
+**Verification** — pre-commit 10/10 PASS. `pytest` 1726 passing
+(+13 new). 180 MCP tools (+2). SKILL thinness:
+samvil-interview 120/120 (added 1 line, no further compression
+needed), samvil-retro 109/120 (compressed Step 5 narrate block + Anti-
+Patterns + Legacy reference to make room).
+
+**v2 Roadmap progress** — Phase 1 ✅ + Phase 2A ✅ + Phase 2B ✅.
+Next: Phase 3 (v4.23) — `seed.evaluation_principles` +
+`seed.exit_conditions` + Seed-as-QA-Target.
+
+**Future Phase 2C** — Per-stage pain capture at seed / build / qa is
+deliberately not in this release. Validating samvil-interview's prompt
+shape first; will expand to other stages in a follow-up patch once we
+see whether 5-level severity is the right granularity.
+
+---
+
 ## v4.21.0 — 2026-05-16
 
 **v2 Roadmap Phase 2A — Refine Gate (MINOR)**
