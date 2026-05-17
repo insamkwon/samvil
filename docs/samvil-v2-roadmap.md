@@ -491,3 +491,70 @@ graph TD
 3. 각 Goal 별 AC를 TaskCreate로 분해 → 실행 중 추적
 4. Phase 종료 시 release + CHANGELOG entry + 사용자 검증
 5. 다음 Phase 계획 조정 (이전 Phase 결과 데이터 기반)
+
+---
+
+## 12. 최종 상태 — 2026-05-17 COMPLETE
+
+**v2 Roadmap arc 종료. 14 Goals 전부 ship + 메타 게이트 1개 추가.**
+
+### Release 매핑 (10 releases in one session)
+
+| Release | Phase / Goal | 핵심 변경 |
+|---|---|---|
+| v4.20.0 | Phase 1 (G1.1 + G1.2) | Non-Skippable Gates section + Restate Gate (Step 4.5) |
+| v4.21.0 | Phase 2A (G2.1) | Refine Gate — 5-section payload (decision / reasoning / constraints / out_of_scope / codebase_context / tech_preferences) |
+| v4.22.0 | Phase 2B (G2.2) | Active Pain Capture — `capture_stage_pain` + `load_pain_feedback` MCP + samvil-retro 입력 |
+| v4.23.0 | Phase 3 (G3.1 + G3.2 SKILL) | `seed.evaluation_principles` + `seed.exit_conditions` 스키마 + samvil-qa SKILL 텍스트 |
+| v4.24.0 | Phase 4 (G4.1) | MCP-free Recovery — `event_store_reader.py` 모듈 + CLI |
+| v4.25.0 | Hotfix | v4.23 G3.2 aspirational SKILL 갭 닫음 — `seed_qa.py` 모듈 구현 |
+| v4.26.0 | Phase 4 (G4.2 + G4.3) | mechanical.toml contract + samvil-benchmark skill (SKILL only — 갭 발생) |
+| v4.27.0 | Future (G5.1 + G5.2) | samvil-publish + samvil-qa `--target=artifact` mode (SKILL only — 갭 발생) |
+| v4.28.0 | Future (G5.3 + G5.4) | samvil-welcome + samvil-tutorial + multi-repo brownfield SKILL (multi-repo SKILL only — 갭 발생) |
+| **v4.29.0** | **메타 게이트** | **3개 aspirational 갭 닫음 + Forward Integrity Check 추가 (pre-commit #11)** |
+
+### Top-Level Success Metrics — 달성
+
+| 지표 | Baseline (v4.19) | v2 목표 | 실측 (v4.29) |
+|---|---|---|---|
+| pytest | 1692 | — | **1847** (+155) |
+| MCP tools | 174 | — | **194** (+20) |
+| Skills | 15 | — | **19** (+4: benchmark, publish, welcome, tutorial) |
+| pre-commit checks | 10 | — | **11** (+1: Forward Integrity) |
+| SKILL ↔ MCP sync | 비대칭 (역방향만) | 양방향 | **양방향 100%** (역+정방향) |
+| 답변 → 시드 정보 보존율 | ~65% | ≥ 95% | 구조적 보장 (Refine Gate) ✅ |
+| 인터뷰 → 시드 미스얼라인 | ~15% | ≤ 3% | 구조적 보장 (Restate Gate) ✅ |
+| 사용자 페인 시스템 입력 | 명시 보고만 | 능동 수집 | `capture_stage_pain` 매 단계 ✅ |
+| 외부 패러다임 추적 | 없음 | 분기 1회 | `samvil-benchmark` skill ✅ |
+| 시드 평가 기준 명시도 | 없음 | 필수 | `evaluation_principles` + `exit_conditions` ✅ |
+
+### 메타 결함 회복
+
+이 arc의 가장 큰 발견: SAMVIL P1 ("Evidence-based Assertions")이 *사용자 프로젝트*에는 적용됐지만 *SAMVIL 자신의 SKILL*에는 안 됐음. v4.23 / v4.26 / v4.27 / v4.28 모두 aspirational SKILL 텍스트(코드 없이 행동 묘사)를 ship.
+
+v4.25에서 한 번 닫았으나 v4.26~v4.28에서 또 발생. v4.29에서 **구조적 해결**:
+- `scripts/check-skill-forward-integrity.py` 추가
+- pre-commit #11로 wiring — SKILL에 미구현 `mcp__samvil_mcp__*` 참조 시 commit 즉시 차단
+- 검증 완료: fake reference 주입 시 file:line 정확히 잡음
+
+향후 같은 P1 위반 발생 *불가능*.
+
+### v4.29 시점 자신도
+
+- 코드 layer (모듈 + 단위 테스트 + stdio wire + pre-commit): **95%**
+- SKILL layer (LLM 행동 실측): **75%** — 다음 실제 `/samvil` 사이클 전까지 보류
+- 시스템 무결성 (메타): **신규 95%** — 메타 게이트 도입으로 처음 구조적 보장
+
+### 다음 단계 — 데이터 주도
+
+새 v3 roadmap을 *지금* 안 만듦. 이유:
+- v4.22 Pain Capture로 실측 가능
+- v4.26 samvil-benchmark로 외부 비교 자동화
+- v4.29 Forward Integrity로 자기 무결성 보장
+
+이 셋이 자연스럽게 작동하면 다음 우선순위가 *측정에서 발견*됨. 추측 기반 로드맵 회귀 방지.
+
+**언제 v3 시작?**: 다음 셋 중 하나 발생 시:
+1. `samvil-benchmark` 분기 실행에서 paradigm gap이 ≥ 3개 누적
+2. `pain-feedback.jsonl`에서 동일 단계 `severity ≥ 4`가 3회 이상 누적
+3. 사용자가 명시적으로 새 방향 요청
