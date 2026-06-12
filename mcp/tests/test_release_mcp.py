@@ -9,7 +9,6 @@ from samvil_mcp.server import (
     build_release_evidence_bundle,
     build_release_report,
     evaluate_release_gate,
-    read_release_evidence_bundle,
     read_release_report,
     render_release_evidence_bundle,
     render_release_report,
@@ -53,7 +52,6 @@ def test_release_tools_validate_project_root():
     assert evaluate_release_gate("")["status"] == "error"
     assert run_release_checks("", commands_json="[]")["status"] == "error"
     assert build_release_evidence_bundle("")["status"] == "error"
-    assert read_release_evidence_bundle("")["status"] == "error"
     assert render_release_evidence_bundle("")["status"] == "error"
 
 
@@ -92,13 +90,10 @@ def test_release_evidence_bundle_tools(tmp_path):
     run_release_checks(str(root), commands_json=commands, persist=True)
 
     built = build_release_evidence_bundle(str(root), persist=True)
-    read = read_release_evidence_bundle(str(root))
     rendered = render_release_evidence_bundle(str(root))
 
     assert built["status"] == "ok"
     assert Path(built["path"]).exists()
     assert built["bundle"]["release"]["source"] == "runner"
-    assert read["status"] == "ok"
-    assert "Release Evidence Bundle" in read["context"]
     assert rendered["status"] == "ok"
-    assert rendered["context"] == read["context"]
+    assert "Release Evidence Bundle" in rendered["context"]

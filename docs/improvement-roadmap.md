@@ -56,10 +56,20 @@
 
 ## Wave 2 — 도구 정리 + 복원력
 
-- [ ] **2.1 미사용 도구 단계적 삭제**
+- [x] **2.1 미사용 도구 단계적 삭제**
   Wave 1.4 리포트 기반. doctor/디버깅용 화이트리스트 먼저 정의.
   한 커밋에 최대 10개씩 삭제, 매 커밋마다 wiring + pytest green.
   AC: 미사용 도구 0개(화이트리스트 제외), 전체 도구 수 감소 기록.
+  ✅ done — 도구 194 → 186 (8개 삭제: validate_state, extract_query,
+  format_research, adversarial_prompt, loop_should_stop, read_repair_report,
+  render_repair_report, read_release_evidence_bundle). 모듈 함수는 유지
+  (테스트가 모듈 직접 검증). 보존 결정: mechanical_toml 3종(v4.26 문서화된
+  보류), compute_parallel_safety(W5.1), evaluate_qa_convergence(W4.2 후보),
+  leaf checkpoint read/clear(write 사용 중), Mountain 복구 5종(W5.3에서
+  모듈 단위 처분), 디버그 조회(get_events/list_sessions/list_checkpoints).
+  체인 3종(advance_chain 등)은 W2.2에서 처분 결정. 잔여는 전부
+  allowlist에 사유 기록됨. evidence: `docs/unused-tools-report.md` 재생성
+  (63 uncited / 18 deletable), pytest 1858 passed, stdio roundtrip OK.
 - [ ] **2.2 체인 폴백 마커**
   스킬 체인 invoke 실패 시 `.samvil/next-skill.json` 자동 기록 +
   `chain_attempt` 이벤트(save_event) 추가. `_EVENT_TYPE_TO_STAGE` 등

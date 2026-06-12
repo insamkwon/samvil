@@ -195,9 +195,6 @@ REVERSE_CHECK_ALLOWLIST: frozenset[str] = frozenset(
         "materialize_rebuild_reentry",
         "read_leaf_checkpoint",
         "render_progress_panel",
-        # Research/format tools — PATH 4 not wired beyond SKILL.legacy.md
-        "extract_query",
-        "format_research",
         # AC analysis tools — planned for samvil-build but not wired
         "analyze_ac_dependencies",
         "compare_generations",
@@ -217,12 +214,8 @@ REVERSE_CHECK_ALLOWLIST: frozenset[str] = frozenset(
         "meta_probe_prompt",
         "rate_budget_acquire",
         "validate_profiles",
-        "validate_state",
-        # Adversarial testing — standalone diagnostic, not part of pipeline
-        "adversarial_prompt",
         # Event/loop tools — utility helpers not yet wired to any skill body
         "get_events",
-        "loop_should_stop",
         # ── Sync tools below were invisible until the W1.4 regex fix
         # (async-only pattern missed plain `def` tools). Categorized here;
         # keep-or-delete is decided in W2.1 via docs/unused-tools-report.md.
@@ -231,16 +224,13 @@ REVERSE_CHECK_ALLOWLIST: frozenset[str] = frozenset(
         "build_release_evidence_bundle",
         "build_release_report",
         "evaluate_release_gate",
-        "read_release_evidence_bundle",
         "read_release_report",
         "render_release_evidence_bundle",
         "render_release_report",
         "run_release_checks",
         # Run/repair report tools — benchmark + standalone QA reporting
         "build_run_report",
-        "read_repair_report",
         "read_run_report",
-        "render_repair_report",
         "render_run_report",
         # Retro observation pipeline — derive/append pair not yet in thin retro skill
         "append_retro_observations",
