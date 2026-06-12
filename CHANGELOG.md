@@ -4,6 +4,89 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.30.0 — 2026-06-12
+
+**Robustness Roadmap — 16-item hardening arc (MINOR)**
+
+Full execution of `docs/improvement-roadmap.md`: a 5-wave robustness
+program derived from a codebase audit + ouroboros (Q00) architecture
+comparison. 16/16 items landed across 17 commits, every commit green on
+the full pre-commit gate. User-visible changes: background builds, a
+deterministic QA ralph loop, chain-break self-recovery, and hook health
+in the boot table.
+
+**Wave 1 — foundations**
+
+- `claim_ledger`: flock-based locking on post/verify/reject (same
+  pattern as `rate_budget._locked`) + `integrity_errors()` collision
+  detection exposed via `stats()`. Concurrent hook + skill writes can
+  no longer collide on claim_id (INV-1).
+- Hook health: hooks now log ok/fail to `~/.samvil/mcp-health.jsonl`
+  (`source: "hook"`, pure-bash fallback when python itself is down);
+  `health_check` aggregates `hook_failures_24h` and the boot table
+  renders a Hooks row.
+- `utils.py`: deduped `_read_json_safe` from six modules (two variants).
+- Unused-tool audit: `check-skill-wiring.py --report` writes
+  `docs/unused-tools-report.md`; fixed the reverse-check regex that
+  silently skipped 31 sync `def` tools.
+
+**Wave 2 — resilience**
+
+- Deleted 8 dead tool wrappers (194 → 186); every kept-but-uncited tool
+  now carries a documented reason in the allowlist.
+- Chain-break recovery (the historical QA→Retro break, generalized):
+  stage-end hook writes the expected `.samvil/next-skill.json`,
+  stage-start hook clears it on continuation and flags divergence; a
+  surviving marker is the recovery point — `resume_session()` exposes
+  it as `chain_marker` and prefers its `next_skill`.
+- `classify_build_failure` (new `error_classifier.py`): transient
+  infrastructure failures (network/timeout/5xx whitelist) get one
+  backoff retry WITHOUT consuming a circuit-breaker attempt; permanent
+  signals override; unknown stays permanent. Wired into samvil-build;
+  samvil-deploy only annotates (no auto-retry, P10).
+
+**Wave 3 — structure**
+
+- Boot contract: `references/skill-boot-template.md` (normative) +
+  drift check across 14 stage skills. First catch: samvil-seed had no
+  stage-entry `save_event`.
+- `compose_agent_prompt` (new `agent_composer.py`): MCP-owned assembly
+  of agent persona + context files + task — replaces all four
+  `<paste agents/<name>.md>` sites (council R1/R2, qa Pass 2/3,
+  evolve wonder). Ends the documented dual-source sync hazard.
+- `gen-legacy-index.py`: generated line-number section index atop the
+  three largest `SKILL.legacy.md` files — P8 fallback reads jump to the
+  needed section instead of ingesting 1,700 lines.
+
+**Wave 4 — ouroboros absorption**
+
+- Background jobs (`background_jobs.py` + `tools_jobs.py`):
+  `job_start` / `job_status` / `job_result` / `job_cancel`. File-is-SSOT
+  registry at `.samvil/jobs/<id>.json`, 5s heartbeat, process-group
+  kill, timeout, orphan detection (stale heartbeat + dead pid →
+  interrupted). Opt-in build wiring via `config.background_build`.
+- MCP-owned ralph loop: samvil-qa step 5 now consults
+  `evaluate_qa_convergence` for continue/blocked/failed (P3 — the LLM
+  no longer self-judges convergence) + new A→B→A oscillation detection
+  (window=3, non-adjacent issue-set recurrence).
+
+**Wave 5 — finish**
+
+- QA Pass 2 parallel leaf batches via `compute_parallel_safety`
+  (Playwright-dependent leaves stay sequential — single browser).
+- `measure_seed_drift` (new `drift.py`): goal(0.5)/constraint(0.3)/
+  ontology(0.2) lexical drift; `excessive` pauses evolution for user
+  confirmation (P2). Wired into samvil-evolve Step 6.
+- `query_projection` (new `projection.py`): point-in-time session
+  snapshot replayed from the events stream; wired into samvil-doctor
+  as session forensics.
+- server.py decomposition pattern established: `tools_<domain>.py` +
+  `register_*_tools(mcp, log)`, audit scripts scan multi-file, job
+  tools migrated first with tool-count preservation asserted.
+  Remaining domains migrate mechanically in follow-up commits.
+
+---
+
 ## v4.29.0 — 2026-05-17
 
 **Closed aspirational SKILL gaps + new Forward Integrity gate (MINOR)**
