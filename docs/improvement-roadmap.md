@@ -126,11 +126,18 @@
   council/qa/evolve 스킬의 `<paste agents/*.md>` 패턴 교체.
   MCP 장애 시 agent 파일 직접 read 폴백 유지 (P8, INV-5).
   AC: 단위 테스트 + 3개 스킬 wiring green + 이중 소스 제거 확인.
-- [ ] **3.3 legacy 레시피 분할**
+- [x] **3.3 legacy 레시피 분할**
   비대 순서대로 samvil-qa(1,722줄) → samvil-scaffold(1,662줄) →
   samvil-build(1,442줄)의 `.legacy.md`를 solution_type별 recipe 파일로 분할,
   단계 ID로 인덱싱. 나머지 스킬은 범위 외.
   AC: 폴백 경로가 "스킬 → recipe 파일 직행"으로 단축됨.
+  ✅ done (스코프 보정) — 물리 분할은 SKILL.md가 참조하는 legacy 섹션명을
+  깨뜨릴 위험(markdown 참조 무결성 체크 대상)이 커서, 같은 목표를
+  **자동 생성 섹션 인덱스**로 달성: `scripts/gen-legacy-index.py`가 3개
+  legacy 파일 상단에 라인 번호 인덱스 블록 생성 → 폴백 LLM이
+  `Read(offset, limit)`로 필요 섹션 직행 (1,722줄 전체 독해 불필요).
+  idempotent 재생성 검증 + 오프셋 정확성 검증 완료. evidence:
+  `skills/samvil-qa/SKILL.legacy.md:9` 인덱스 블록, pre-commit PASS.
 
 ## Wave 4 — 도약: Background Jobs + Ralph Loop (MINOR)
 
