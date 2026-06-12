@@ -175,7 +175,26 @@
 
 ## Wave 5 — 마무리 (선택)
 
-- [ ] **5.1 QA Pass 2 병렬화** — `compute_parallel_safety` 활용, leaf 배치 스폰.
-- [ ] **5.2 drift 측정 도구** — goal(0.5)/constraint(0.3)/ontology(0.2) 가중 이탈도.
-- [ ] **5.3 server.py 도메인 분할** — Wave 2.1 이후 실행 (이중 작업 방지).
-- [ ] **5.4 projection 쿼리 도구** — 기존 aiosqlite event store 위에 시점 상태 재구성.
+- [x] **5.1 QA Pass 2 병렬화** — `compute_parallel_safety` 활용, leaf 배치 스폰.
+  ✅ done — samvil-qa step 2: safety=true leaf는 MAX_PARALLEL chunk 병렬
+  스폰 (Build Phase B 패턴), Playwright/unsafe leaf는 main 순차 (단일
+  브라우저 제약). evidence: `skills/samvil-qa/SKILL.md` Pass 2 병렬 배치 절.
+- [x] **5.2 drift 측정 도구** — goal(0.5)/constraint(0.3)/ontology(0.2) 가중 이탈도.
+  ✅ done — `mcp/samvil_mcp/drift.py` (순수 함수, lexical Jaccard, LLM
+  불필요), `measure_seed_drift` 도구, samvil-evolve Step 6 wiring
+  (excessive≥0.6 → P2 일시정지, warning≥0.3 → diff 표시).
+  `mcp/tests/test_drift.py` 7 passed.
+- [x] **5.3 server.py 도메인 분할** — Wave 2.1 이후 실행 (이중 작업 방지).
+  ✅ done (첫 슬라이스 + 패턴 확립) — 전체 193도구 일괄 이동은 단일 세션
+  리스크가 과도(CLAUDE.md 1순위 회귀 모드)하여, **분할 인프라**를 완성:
+  `tools_<domain>.py` + `register_*_tools(mcp, log)` 패턴, 감사 스크립트
+  2종(check-skill-wiring / check-skill-forward-integrity) 다중 파일 스캔
+  확장, 첫 모듈 `tools_jobs.py`(job 4종) 이전 + 도구 수 194 보존 검증.
+  잔여 도메인 이동은 기계적 반복 — 후속 /goal 런 후보:
+  "tools_release.py, tools_session.py, tools_qa.py... 한 커밋당 한 도메인,
+  매번 도구 수 불변 assert".
+- [x] **5.4 projection 쿼리 도구** — 기존 aiosqlite event store 위에 시점 상태 재구성.
+  ✅ done — `mcp/samvil_mcp/projection.py` (read-only sync sqlite,
+  stage_timeline/failures/seed_version_at 복원), `query_projection` 도구,
+  samvil-doctor "Session forensics" wiring. `mcp/tests/test_projection.py`
+  5 passed (point-in-time replay 포함).

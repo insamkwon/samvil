@@ -318,10 +318,18 @@ def _collect_mcp_tools() -> list[str]:
     server = REPO / "mcp" / "samvil_mcp" / "server.py"
     if not server.exists():
         return []
-    text = server.read_text(errors="ignore")
-    # Both `async def` and plain `def` tools — 31 tools are sync and were
-    # invisible to the async-only pattern (W1.4 fix).
-    return re.findall(r"@mcp\.tool\(\)\s*\n(?:async )?def (\w+)", text)
+    # W5.3: tools live in server.py plus extracted tools_*.py modules.
+    sources = [server] + sorted(server.parent.glob("tools_*.py"))
+    names: list[str] = []
+    for src in sources:
+        text = src.read_text(errors="ignore")
+        # Both `async def` and plain `def` tools — 31 tools are sync and
+        # were invisible to the async-only pattern (W1.4 fix). Indented
+        # defs (register-pattern modules) are matched too.
+        names.extend(
+            re.findall(r"@mcp\.tool\(\)\s*\n\s*(?:async )?def (\w+)", text)
+        )
+    return names
 
 
 def _collect_legacy_text() -> str:
