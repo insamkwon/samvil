@@ -405,22 +405,23 @@ MINOR 위치(두 번째 숫자)는 10 도달 시 MAJOR로 자동 승격되지 �
 2. `plugin.json`의 `version` 올리기 (SSOT).
 3. `README.md` 첫 줄의 `` `vX.Y.Z` `` 동기화.
 4. `mcp/samvil_mcp/__init__.py`의 `__version__` 동기화.
-5. 캐시 동기화: 변경 파일을 plugin cache에 복사.
-6. minor/major 버전업 시 git tag: `git tag vX.Y.0 && git push --tags`.
+5. minor/major 버전업 시 git tag: `git tag vX.Y.0 && git push --tags`.
+
+> **캐시 동기화는 불필요** (v4.30.2에서 확인): 이 레포는 directory source
+> 마켓플레이스로 등록되어 있어 (`known_marketplaces.json` →
+> `installLocation: <이 레포>`) 레포 자체가 라이브 플러그인 소스다.
+> 커밋하면 다음 CC 세션부터 바로 반영된다. 과거의
+> `~/.claude/plugins/cache/samvil/...` 복사 지침은 폐기.
 
 ## 개발 컨벤션
 
 ### 코드 변경 후 필수
 
 ```bash
-# 1. 캐시 동기화 (변경된 파일만)
-CACHE=$(ls -td ~/.claude/plugins/cache/samvil/samvil/*/ 2>/dev/null | head -1)
-cp <변경 파일> "$CACHE/<같은 경로>/"
-
-# 2. MCP 테스트 (MCP 변경 시)
+# 1. MCP 테스트 (MCP 변경 시)
 cd mcp && source .venv/bin/activate && python -m pytest tests/ -v
 
-# 3. 커밋 + 버전 증가 + push
+# 2. 커밋 + 버전 증가 + push (캐시 복사 불필요 — directory source)
 ```
 
 ### 스킬 수정 시
@@ -444,14 +445,19 @@ chore: 설정, 버전, 구조 변경
 
 1. **orphaned 마커** — CC가 directory source 플러그인 캐시에 `.orphaned_at`
    붙임. 로드 안 되면 해당 파일 삭제.
-2. **QA → Retro 체인** — 수정 완료됐지만, 실행 시 체인 끊김이 또 발생하면
-   스킬의 Invoke 지시 확인.
+2. ~~QA → Retro 체인 끊김~~ — v4.30.0 W2.2에서 구조적으로 해소: stage hook
+   핸드셰이크가 `.samvil/next-skill.json`을 기록/클리어하고, 살아남은 마커는
+   `samvil-resume`이 복구 지점으로 사용. 재발 시 hook health
+   (`health_check`의 Hooks 행)부터 확인.
 
 ## Recent versions
 
 Active changelog: `CHANGELOG.md` (v3.19+, every release with full
-detail). The current line is the **v3.33.x Consolidation series**
-(Tier 1 merge of dead modules / dead tools, Tier 2 in flight).
+detail). The current line is the **v4.30.x Robustness series** —
+16-item hardening arc (`docs/improvement-roadmap.md`): SSOT locking,
+chain-break self-recovery, transient retry, MCP-owned ralph loop,
+background jobs, drift measurement. Verified by multi-solution_type
+dogfood runs (web/game/automation + failure path + evolve cycle).
 
 Pre-v3.19 history is archived in `docs/CHANGELOG-legacy.md` and covers:
 

@@ -4,6 +4,20 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.30.3 — 2026-06-13
+
+**Docs housekeeping after the v4.30 verification campaign (PATCH)**
+
+- CLAUDE.md: QA→Retro chain break moved to resolved (W2.2 hook
+  handshake); cache-sync instructions retired (repo is a directory-source
+  plugin — commits are live, the cache path never existed); Recent
+  versions section now describes the v4.30.x Robustness series.
+- docs/unused-tools-report.md regenerated against the post-W2.1 tool
+  surface (62 uncited / 17 deletable).
+- .playwright-mcp/ (dogfood browser snapshots) gitignored.
+
+---
+
 ## v4.30.2 — 2026-06-13
 
 **Retro metrics DB fallback (PATCH, dogfood finding #10)**

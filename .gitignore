@@ -17,3 +17,4 @@ project.state.json
 mcp/project.state.json
 # Claude Code per-project local settings (machine-specific permissions)
 .claude/settings.local.json
+.playwright-mcp/
