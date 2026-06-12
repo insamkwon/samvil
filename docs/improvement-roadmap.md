@@ -86,7 +86,14 @@
   (handshake), `mcp/samvil_mcp/resume.py` (`chain_marker` 필드),
   tmp dir fire test: 기록→클리어→divergence 감지 확인,
   `mcp/tests/test_resume.py` 37 passed.
-- [ ] **2.3 transient 오류 재시도**
+- [x] **2.3 transient 오류 재시도**
+  ✅ done — evidence: `mcp/samvil_mcp/error_classifier.py` (transient
+  화이트리스트 12패턴 + permanent override 6패턴, 보수적: unknown→permanent,
+  permanent 신호가 transient와 공존 시 permanent 우선), server.py
+  `classify_build_failure` 도구 (P8: 분류기 장애 시 permanent 폴백),
+  samvil-build Circuit Breaker wiring (transient → backoff 재시도 1회,
+  breaker 카운트 미소모), samvil-deploy는 P10 유지 — 자동 재시도 없이
+  리포트 주석만. `mcp/tests/test_error_classifier.py` 9 tests green.
   오류 분류기: transient 화이트리스트(network error / timeout /
   ECONNREFUSED / 503)만 백오프 1회 재시도, 나머지는 즉시 실패 유지.
   build/deploy 경로에 적용.

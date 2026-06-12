@@ -4420,6 +4420,46 @@ async def get_health_tier_summary(
 
 
 @mcp.tool()
+async def classify_build_failure(
+    project_root: str,
+    log_path: str = ".samvil/build.log",
+    attempt: int = 1,
+) -> str:
+    """Classify a build/deploy failure as transient vs permanent (W2.3).
+
+    Reads the tail of the failure log and returns
+    {failure_class, matched_transient, matched_permanent, backoff_seconds,
+    counts_against_circuit_breaker, recommendation}.
+    Transient (network/timeout/5xx) → retry after backoff WITHOUT consuming
+    a circuit-breaker attempt. Permanent → normal fix-then-retry path.
+    """
+    try:
+        from .error_classifier import classify_failure
+
+        path = Path(project_root) / log_path
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            log_text = "\n".join(lines[-120:])
+        except OSError:
+            log_text = ""
+        verdict = classify_failure(log_text, attempt=attempt)
+        _log_mcp_health("ok", "classify_build_failure")
+        return json.dumps(verdict.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "classify_build_failure", str(e))
+        # P8: classification failure must never block the build loop —
+        # fall back to the permanent path (counts against breaker).
+        return json.dumps(
+            {
+                "failure_class": "permanent",
+                "counts_against_circuit_breaker": True,
+                "recommendation": "classifier unavailable — treat as permanent",
+                "error": str(e),
+            }
+        )
+
+
+@mcp.tool()
 async def health_check() -> str:
     """Return SAMVIL system info for the Health Check table.
 
