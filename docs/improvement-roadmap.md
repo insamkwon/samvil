@@ -44,7 +44,11 @@
   qa_finalize (`read_json_safe`), resume, orchestrator (`read_json_or_empty`).
   evidence: `mcp/samvil_mcp/utils.py:14`, `mcp/tests/test_utils.py` 4 tests,
   전체 suite 1858 passed.
-- [ ] **1.4 미사용 도구 역방향 감사 (리포트만)**
+- [x] **1.4 미사용 도구 역방향 감사 (리포트만)**
+  ✅ done — evidence: `scripts/check-skill-wiring.py` `--report` 모드 +
+  `docs/unused-tools-report.md` (194 tools / 71 uncited / 26 deletable).
+  보너스: 기존 역방향 체크 regex가 sync `def` 도구 31개를 못 보던 버그 수정,
+  신규 가시화된 24개를 사유와 함께 allowlist 등록. scripts 자기참조 오염 제거.
   `scripts/check-skill-wiring.py` 확장: server.py의 `@mcp.tool()` 이름 중
   어떤 `skills/*/SKILL.md`(+ `.legacy.md`)에도 참조되지 않는 것 목록 출력.
   이 단계에서는 삭제하지 않는다. 결과를 `docs/unused-tools-report.md`로 저장.
