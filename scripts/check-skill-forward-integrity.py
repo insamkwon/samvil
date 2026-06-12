@@ -52,15 +52,20 @@ INTENTIONAL_FUTURE_REFS: dict[str, str] = {
 
 
 def collect_registered_tools() -> set[str]:
-    """Return the set of @mcp.tool() function names in server.py.
+    """Return the set of @mcp.tool() function names.
 
-    Matches both ``async def`` (most v3+ tools) and bare ``def``
-    (legacy synchronous tools) since both are valid @mcp.tool()
-    forms in FastMCP.
+    W5.3: tools live in server.py plus extracted ``tools_*.py`` modules
+    (register-pattern). Matches both ``async def`` and bare ``def``,
+    indented or top-level.
     """
-    content = SERVER_PY.read_text(encoding="utf-8")
-    matches = re.findall(r"@mcp\.tool\(\)\s*\n(?:async\s+)?def (\w+)", content)
-    return set(matches)
+    sources = [SERVER_PY] + sorted(SERVER_PY.parent.glob("tools_*.py"))
+    names: set[str] = set()
+    for src in sources:
+        content = src.read_text(encoding="utf-8")
+        names.update(
+            re.findall(r"@mcp\.tool\(\)\s*\n\s*(?:async\s+)?def (\w+)", content)
+        )
+    return names
 
 
 def collect_skill_references() -> dict[str, list[tuple[Path, int, str]]]:

@@ -35,7 +35,7 @@ Score 1–5 from `four_dim_baseline`: **Quality** (qa_verdict + AC counts) · **
 
 Cycle 1 = `config.model_routing.evolve` (default `opus`); cycle 2+ = `evolve_cycle` (default `sonnet`).
 
-1. **Wonder** — spawn `wonder-analyst` (paste `agents/wonder-analyst.md`) with seed + `.samvil/evolve-context.json` + focus dims + prior failures: `mcp__samvil_mcp__load_failures_for_wonder(project_path=".")`. Wonder consumes `.samvil/build.log`, `.samvil/fix-log.md`, and `events.jsonl — structured build/QA event trail` to surface **repeated error signatures**, **repeated error categories**, reverted fixes, and **workaround patterns** that signal a spec issue rather than implementation.
+1. **Wonder** — spawn `wonder-analyst` (prompt: `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["wonder-analyst"]', context_files_json='["project.seed.json",".samvil/evolve-context.json"]', task=<wonder task>)`; `missing_agents` 시 `agents/wonder-analyst.md` 직접 paste 폴백, P8) with seed + `.samvil/evolve-context.json` + focus dims + prior failures: `mcp__samvil_mcp__load_failures_for_wonder(project_path=".")`. Wonder consumes `.samvil/build.log`, `.samvil/fix-log.md`, and `events.jsonl — structured build/QA event trail` to surface **repeated error signatures**, **repeated error categories**, reverted fixes, and **workaround patterns** that signal a spec issue rather than implementation.
 2. **AC splits** — for each leaf in `seed.features[*].acceptance_criteria` (recursively): `mcp__samvil_mcp__suggest_ac_split(description=<leaf>)`. Collect `should_split=true`. Empty → skip mention.
 3. **Reflect** — spawn `reflect-proposer` sequentially with wonder output + split candidates. Both ≤400 words.
 
@@ -65,7 +65,9 @@ Render diff block (Wonder findings · Proposed changes · Convergence trend) and
 ```
 mcp__samvil_mcp__check_convergence_gates(eval_result_json=<curr>, history_json=<prior>)
 mcp__samvil_mcp__check_convergence(seed_history='<JSON array>')   # legacy similarity
+mcp__samvil_mcp__measure_seed_drift(original_seed_json='<v1 seed>', current_seed_json='<new seed>')   # W5.2 방향성
 ```
+Drift `verdict=excessive` → 수렴 여부와 무관하게 일시정지 + "원래 목표에서 벗어났습니다 — 의도한 방향인가요?" 확인 (P2). `warning` → diff 블록에 drift 요약 표시.
 
 Gates: **eval** (score≥0.7 + final_approved) · **per_ac** (all PASS) · **regression** (no PASS→FAIL across cycles, P5) · **evolution** (≥1 mutation, no stagnant loop) · **validation** (not skipped/error). Any gate fails → render `verdict.blocked_by` + `verdict.reasons` + 4-choice menu (rollback / re-design failed AC / force converge [discouraged] / manual). **Anti-pattern: Blind convergence** — never override without user input.
 

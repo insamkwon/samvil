@@ -28,15 +28,7 @@ _STAGE_NEXT_SKILL: dict[str, str] = {
 }
 
 
-def _read_json_safe(path: Path) -> dict[str, Any]:
-    try:
-        if not path.exists():
-            return {}
-        with path.open("r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+from .utils import read_json_or_empty as _read_json_safe  # noqa: E402
 
 
 def _minutes_since(ts_iso: str | None) -> int | None:
@@ -177,11 +169,23 @@ def resume_session(project_root: str) -> dict[str, Any]:
             "samvil_tier": "standard",
             "project_name": "",
             "in_progress_leaf": None,
+            "chain_marker": None,
         }
 
     current_stage = state.get("current_stage", "")
     last_ts = state.get("last_progress_at")
     leaf = read_leaf_checkpoint(project_root)
+
+    # W2.2 — chain-break recovery: the stage-end hook writes
+    # .samvil/next-skill.json when a stage completes; the stage-start hook
+    # clears it when the chain actually continues. A surviving marker means
+    # the chain invoke never happened — its next_skill is the recovery point.
+    from .chain_markers import read_chain_marker
+
+    chain_marker = read_chain_marker(str(root))
+    marker_next = ""
+    if chain_marker and chain_marker.get("next_skill"):
+        marker_next = str(chain_marker["next_skill"])
 
     seed = _read_json_safe(root / "project.seed.json")
     if not seed:
@@ -198,7 +202,9 @@ def resume_session(project_root: str) -> dict[str, Any]:
         "found": True,
         "last_stage": current_stage,
         "stage_progress": _stage_progress(state, leaf),
-        "next_skill": _STAGE_NEXT_SKILL.get(current_stage, f"samvil-{current_stage}"),
+        "next_skill": marker_next
+        or _STAGE_NEXT_SKILL.get(current_stage, f"samvil-{current_stage}"),
+        "chain_marker": chain_marker,
         "minutes_since": _minutes_since(last_ts),
         "last_event_at": last_ts,
         "handoff_excerpt": _handoff_excerpt(samvil_dir),

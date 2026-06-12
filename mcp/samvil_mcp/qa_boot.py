@@ -123,12 +123,7 @@ _QA_CHECKLIST_PATHS: dict[str, str] = {
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
-def _read_json_safe(path: Path) -> dict[str, Any] | None:
-    """Best-effort JSON read. Returns None on missing/invalid file."""
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+from .utils import read_json_safe as _read_json_safe  # noqa: E402
 
 
 def _resolve_pass1(

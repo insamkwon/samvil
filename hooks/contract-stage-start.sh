@@ -51,6 +51,39 @@ SUBJECT="stage:$STAGE"
 STATEMENT="entered $STAGE stage via hook"
 AUTHORITY="project.state.json"
 
+# 5b. Chain marker handshake (W2.2): the previous stage's end hook wrote
+#     .samvil/next-skill.json. Entering the expected skill clears it
+#     (chain healthy). Entering a different stage skill = divergence —
+#     keep the marker and flag it so health_check surfaces the anomaly.
+CHAIN_STATE="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
+import os, sys
+project_root, skill_name = sys.argv[1:3]
+try:
+    sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
+    from samvil_mcp.chain_markers import clear_chain_marker, read_chain_marker
+    marker = read_chain_marker(project_root)
+    if marker is None or not marker.get("next_skill"):
+        print("no-marker")
+    elif marker["next_skill"] == skill_name:
+        clear_chain_marker(project_root)
+        print(f"continued={marker.get('from_stage','?')}->{skill_name}")
+    else:
+        print(f"diverged=expected:{marker['next_skill']};got:{skill_name}")
+except Exception as e:
+    sys.stderr.write(f"[samvil-contract-hook] chain marker check failed: {e}\n")
+    print("no-marker")
+PY
+)"
+case "$CHAIN_STATE" in
+  continued=*)
+    samvil_contract_log_health "chain" "ok" "$CHAIN_STATE"
+    ;;
+  diverged=*)
+    samvil_contract_log_health "chain" "fail" "$CHAIN_STATE"
+    echo "[samvil-contract] WARN: chain $CHAIN_STATE" >&2
+    ;;
+esac
+
 # 6. Append the stage_start claim, capture the claim_id, and bind it to
 #    state.json.stage_claims so the post-hook can verify the match.
 CLAIM_ID="$(samvil_contract_append_claim \
@@ -64,7 +97,11 @@ CLAIM_ID="$(samvil_contract_append_claim \
 
 if [ -n "$CLAIM_ID" ]; then
   samvil_contract_append_stage_claim_to_state "$PROJECT_ROOT" "$STAGE" "$CLAIM_ID"
+  samvil_contract_log_health "stage-start" "ok" "claim $CLAIM_ID ($STAGE)"
   echo "[samvil-contract] pre-stage claim posted: $CLAIM_ID ($STAGE)" >&2
+else
+  samvil_contract_log_health "stage-start" "fail" "stage_start claim not posted ($STAGE)"
+  echo "[samvil-contract] WARN: stage_start claim not posted ($STAGE)" >&2
 fi
 
 exit 0

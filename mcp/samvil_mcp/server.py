@@ -60,7 +60,6 @@ from .stagnation_v3_2 import (
 from .jurisdiction import (
     Jurisdiction,
     check_jurisdiction as _check_jurisdiction_core,
-    loop_should_stop as _loop_should_stop,
 )
 from .diagnostic import (
     diagnose_environment_async as _diagnose_environment_async,
@@ -139,7 +138,6 @@ from .retro_v3_2 import (
 )
 from .interview_v3_2 import (
     InterviewLevel,
-    build_adversarial_prompt as _build_adv_prompt,
     build_meta_probe_prompt as _build_meta_prompt,
     compute_seed_readiness as _compute_seed_readiness_core,
     confidence_follow_up as _confidence_follow_up,
@@ -239,11 +237,6 @@ from .telemetry import (
     read_run_report as _read_run_report_file,
     render_run_report as _render_run_report,
     write_run_report as _write_run_report,
-)
-from .repair import (
-    build_repair_report as _build_repair_report,
-    read_repair_report as _read_repair_report_file,
-    render_repair_report as _render_repair_report,
 )
 from .release import (
     build_release_evidence_bundle as _build_release_evidence_bundle,
@@ -1217,16 +1210,6 @@ async def validate_seed(seed_json: str) -> str:
     return json.dumps(result)
 
 
-@mcp.tool()
-async def validate_state(state_json: str) -> str:
-    """Validate a state JSON against state-schema.json.
-    Returns {valid: bool, errors: [...]}."""
-    from .seed_manager import validate_state as _validate
-    state = json.loads(state_json)
-    result = _validate(state)
-    return json.dumps(result)
-
-
 # ── Phase 3: QA Enhancement tools (v2.5.0) ────────────────────
 
 
@@ -1520,34 +1503,6 @@ async def semantic_check(code: str, context_hint: str = "") -> str:
     except Exception as e:
         _log_mcp_health("fail", "semantic_check", str(e))
         return json.dumps({"risk_level": "LOW", "error": str(e)})
-
-
-# ── Research WebFetch tools (v2.7.0, PATH 4) ─────────────────
-
-
-@mcp.tool()
-async def extract_query(question: str) -> str:
-    """Extract searchable query from a research-routed question.
-
-    Strips common prefixes like 'What are...', '최신...' to produce
-    a concise search query.
-    """
-    from .research import extract_research_query
-    return json.dumps({"query": extract_research_query(question)})
-
-
-@mcp.tool()
-async def format_research(results_json: str) -> str:
-    """Format Tavily search results for user confirmation.
-
-    Args:
-        results_json: JSON array of search results from Tavily
-
-    Returns: {has_results, summary_markdown, sources[], count}
-    """
-    from .research import format_research_results
-    results = json.loads(results_json)
-    return json.dumps(format_research_results(results))
 
 
 # ── Skip Externally Satisfied ACs tools (v2.6.0, #08) ────────
@@ -2686,18 +2641,6 @@ async def meta_probe_prompt(phase: str, answers_summary: str) -> str:
 
 
 @mcp.tool()
-async def adversarial_prompt(summary: str, samvil_tier: str = "standard") -> str:
-    """Build the T5 adversarial interviewer prompt."""
-    try:
-        prompt = _build_adv_prompt(summary=summary, samvil_tier=samvil_tier)
-        _log_mcp_health("ok", "adversarial_prompt")
-        return json.dumps({"prompt": prompt})
-    except Exception as e:
-        _log_mcp_health("fail", "adversarial_prompt", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
 async def narrate_build_prompt(project_root: str = ".", since: str = "") -> str:
     """Assemble the narrate context and build the Compressor prompt.
 
@@ -2765,33 +2708,6 @@ async def check_jurisdiction(
         return json.dumps(v.to_dict())
     except Exception as e:
         _log_mcp_health("fail", "check_jurisdiction", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
-async def loop_should_stop(
-    last_failure_signature: str,
-    failure_history_json: str,
-    ac_mutation_needed: bool = False,
-    seed_contradiction: bool = False,
-    irreversible_next: bool = False,
-    model_confidence_below: bool = False,
-) -> str:
-    """Auto-stop checker. Returns `{"stop": bool, "reason": "..."}`."""
-    try:
-        history = json.loads(failure_history_json or "[]")
-        stop, reason = _loop_should_stop(
-            last_failure_signature=last_failure_signature,
-            failure_history=history,
-            ac_mutation_needed=ac_mutation_needed,
-            seed_contradiction=seed_contradiction,
-            irreversible_next=irreversible_next,
-            model_confidence_below=model_confidence_below,
-        )
-        _log_mcp_health("ok", "loop_should_stop")
-        return json.dumps({"stop": stop, "reason": reason})
-    except Exception as e:
-        _log_mcp_health("fail", "loop_should_stop", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -3327,40 +3243,6 @@ def append_retro_observations(project_root: str, observations_json: str) -> dict
 
 
 @mcp.tool()
-def read_repair_report(project_root: str) -> dict:
-    """Read .samvil/repair-report.json if present."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        report = _read_repair_report_file(project_root)
-        _log_mcp_health("ok", "read_repair_report")
-        if report is None:
-            return {"status": "missing"}
-        return {"status": "ok", "report": report}
-    except Exception as e:
-        _log_mcp_health("fail", "read_repair_report", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def render_repair_report(project_root: str, refresh: bool = False) -> dict:
-    """Render a repair report as markdown; optionally refresh it first."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        report = _build_repair_report(project_root) if refresh else _read_repair_report_file(project_root)
-        if report is None:
-            return {"status": "missing"}
-        _log_mcp_health("ok", "render_repair_report")
-        return {"status": "ok", "context": _render_repair_report(report)}
-    except Exception as e:
-        _log_mcp_health("fail", "render_repair_report", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
 def build_release_report(project_root: str, checks_json: str = "", persist: bool = True) -> dict:
     """Build a release readiness report from release check evidence."""
     err = _validate_project_root(project_root)
@@ -3479,23 +3361,6 @@ def build_release_evidence_bundle(project_root: str, persist: bool = True) -> di
         return {"status": "ok", "path": path, "bundle": bundle}
     except Exception as e:
         _log_mcp_health("fail", "build_release_evidence_bundle", str(e))
-        return {"status": "error", "error": str(e)}
-
-
-@mcp.tool()
-def read_release_evidence_bundle(project_root: str) -> dict:
-    """Read .samvil/release-summary.md if present."""
-    err = _validate_project_root(project_root)
-    if err is not None:
-        return err
-    try:
-        context = _read_release_evidence_bundle_file(project_root)
-        _log_mcp_health("ok", "read_release_evidence_bundle")
-        if context is None:
-            return {"status": "missing"}
-        return {"status": "ok", "context": context}
-    except Exception as e:
-        _log_mcp_health("fail", "read_release_evidence_bundle", str(e))
         return {"status": "error", "error": str(e)}
 
 
@@ -4555,6 +4420,129 @@ async def get_health_tier_summary(
 
 
 @mcp.tool()
+async def query_projection(
+    session_id: str,
+    at_timestamp: str = "",
+) -> str:
+    """Reconstruct session state at a point in time from the event stream (W5.4).
+
+    Replays events up to at_timestamp (ISO; empty = now) into a snapshot:
+    current_stage, stage_timeline, counts, recent failures, active seed
+    version. For debugging, retro analysis, and stall forensics.
+    """
+    try:
+        from .projection import query_projection as _query
+
+        result = _query(str(DB_PATH), session_id, at_timestamp or None)
+        _log_mcp_health("ok", "query_projection")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "query_projection", str(e))
+        return json.dumps({"found": False, "error": str(e)})
+
+
+@mcp.tool()
+async def measure_seed_drift(
+    original_seed_json: str,
+    current_seed_json: str,
+) -> str:
+    """Measure direction drift between two seed versions (W5.2).
+
+    3-component lexical drift: goal(0.5) + constraint(0.3) + ontology(0.2).
+    Returns {goal_drift, constraint_drift, ontology_drift, total_drift,
+    verdict: ok|warning|excessive, next_action}. Catches 'high-quality but
+    wrong-direction' evolution the 5 evolve_checks cannot see.
+    """
+    try:
+        from .drift import measure_drift
+
+        result = measure_drift(
+            json.loads(original_seed_json), json.loads(current_seed_json)
+        )
+        _log_mcp_health("ok", "measure_seed_drift")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "measure_seed_drift", str(e))
+        return json.dumps({"verdict": "error", "error": str(e)})
+
+
+@mcp.tool()
+async def compose_agent_prompt(
+    agent_names_json: str,
+    project_root: str = ".",
+    header: str = "You are {name} for SAMVIL.",
+    context_files_json: str = "[]",
+    context_inline: str = "",
+    task: str = "",
+) -> str:
+    """Compose Agent-tool prompts from agents/*.md personas (W3.2).
+
+    MCP-owned single source for agent behavior — replaces the manual
+    "<paste agents/<name>.md>" pattern. Returns {prompts: {name: str},
+    missing_agents: [], missing_context: [], agents_dir}.
+    missing_agents non-empty → caller falls back to direct file paste (P8).
+    """
+    try:
+        from .agent_composer import compose_agent_prompts
+
+        names = json.loads(agent_names_json or "[]")
+        ctx_files = json.loads(context_files_json or "[]")
+        result = compose_agent_prompts(
+            list(names),
+            project_root=project_root,
+            header=header,
+            context_files=list(ctx_files),
+            context_inline=context_inline,
+            task=task,
+        )
+        _log_mcp_health("ok", "compose_agent_prompt")
+        return json.dumps(result.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "compose_agent_prompt", str(e))
+        return json.dumps({"prompts": {}, "missing_agents": [], "error": str(e)})
+
+
+@mcp.tool()
+async def classify_build_failure(
+    project_root: str,
+    log_path: str = ".samvil/build.log",
+    attempt: int = 1,
+) -> str:
+    """Classify a build/deploy failure as transient vs permanent (W2.3).
+
+    Reads the tail of the failure log and returns
+    {failure_class, matched_transient, matched_permanent, backoff_seconds,
+    counts_against_circuit_breaker, recommendation}.
+    Transient (network/timeout/5xx) → retry after backoff WITHOUT consuming
+    a circuit-breaker attempt. Permanent → normal fix-then-retry path.
+    """
+    try:
+        from .error_classifier import classify_failure
+
+        path = Path(project_root) / log_path
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            log_text = "\n".join(lines[-120:])
+        except OSError:
+            log_text = ""
+        verdict = classify_failure(log_text, attempt=attempt)
+        _log_mcp_health("ok", "classify_build_failure")
+        return json.dumps(verdict.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "classify_build_failure", str(e))
+        # P8: classification failure must never block the build loop —
+        # fall back to the permanent path (counts against breaker).
+        return json.dumps(
+            {
+                "failure_class": "permanent",
+                "counts_against_circuit_breaker": True,
+                "recommendation": "classifier unavailable — treat as permanent",
+                "error": str(e),
+            }
+        )
+
+
+@mcp.tool()
 async def health_check() -> str:
     """Return SAMVIL system info for the Health Check table.
 
@@ -4577,12 +4565,49 @@ async def health_check() -> str:
     except Exception:
         tool_count = 0
 
+    # Hook health (W1.2): hooks log to the same mcp-health.jsonl with
+    # source="hook". Surface failures from the last 24h so the boot table
+    # can show them instead of users discovering missing claims later.
+    hook_failures_24h = 0
+    last_hook_failure: dict | None = None
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        health_path = Path.home() / ".samvil" / "mcp-health.jsonl"
+        if health_path.exists():
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            # Tail only — the file grows unbounded.
+            lines = health_path.read_text(encoding="utf-8").splitlines()[-500:]
+            for line in lines:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("source") != "hook" or entry.get("status") != "fail":
+                    continue
+                try:
+                    ts = datetime.fromisoformat(entry.get("timestamp", ""))
+                except ValueError:
+                    continue
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if ts >= cutoff:
+                    hook_failures_24h += 1
+                    last_hook_failure = entry
+    except Exception:
+        pass
+
+    hooks_label = (
+        "✅" if hook_failures_24h == 0 else f"⚠️ {hook_failures_24h} fail(24h)"
+    )
     result = {
         "samvil_version": _samvil_version,
         "tool_count": tool_count,
         "db_ok": db_ok,
         "python_version": f"{_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro}",
-        "summary": f"SAMVIL v{_samvil_version} | {tool_count} tools | DB {'✅' if db_ok else '❌'} | Python {_sys.version_info.major}.{_sys.version_info.minor}",
+        "hook_failures_24h": hook_failures_24h,
+        "last_hook_failure": last_hook_failure,
+        "summary": f"SAMVIL v{_samvil_version} | {tool_count} tools | DB {'✅' if db_ok else '❌'} | Hooks {hooks_label} | Python {_sys.version_info.major}.{_sys.version_info.minor}",
     }
     _log_mcp_health("ok", "health_check")
     return json.dumps(result)
@@ -5459,6 +5484,14 @@ async def parse_brownfield_inline_paths(paths_csv: str) -> str:
 
 def main():
     mcp.run(transport="stdio")
+
+
+# ── Extracted tool modules (W5.3 decomposition pattern) ──────
+# Each tools_<domain>.py registers its own @mcp.tool() set. Keeps
+# server.py shrinking without changing tool behavior or names.
+from .tools_jobs import register_job_tools  # noqa: E402
+
+register_job_tools(mcp, _log_mcp_health)
 
 
 if __name__ == "__main__":

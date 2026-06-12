@@ -51,6 +51,47 @@ export SAMVIL_PLUGIN_ROOT
 # Keep in sync with references/contract-layer-protocol.md's task_role table.
 SAMVIL_STAGE_SKILLS="samvil-interview samvil-pm-interview samvil-seed samvil-council samvil-design samvil-scaffold samvil-build samvil-qa samvil-deploy samvil-retro samvil-evolve"
 
+# samvil_contract_log_health <hook_name> <status> [detail]
+#   Append a hook health entry to ~/.samvil/mcp-health.jsonl (same file
+#   server.py._log_mcp_health uses) so health_check / retro can see hook
+#   outcomes instead of losing them to stderr. Best-effort: if Python is
+#   unavailable (venv missing), fall back to a crude pure-bash append so
+#   the failure itself is still visible.
+samvil_contract_log_health() {
+  local hook_name="$1"
+  local status="$2"
+  local detail="${3:-}"
+  "$SAMVIL_PY" - "$hook_name" "$status" "$detail" <<'PY' 2>/dev/null
+import json, sys
+from datetime import datetime, timezone
+from pathlib import Path
+hook, status, detail = sys.argv[1:4]
+try:
+    p = Path.home() / ".samvil" / "mcp-health.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "status": status,
+        "tool": f"hook:{hook}",
+        "error": detail,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "source": "hook",
+    }
+    with p.open("a") as f:
+        f.write(json.dumps(entry) + "\n")
+except Exception:
+    pass
+PY
+  if [ $? -ne 0 ]; then
+    # Python itself failed — record that fact without it.
+    local ts
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
+    mkdir -p "$HOME/.samvil" 2>/dev/null
+    printf '{"status":"fail","tool":"hook:%s","error":"python-unavailable","timestamp":"%s","source":"hook"}\n' \
+      "$hook_name" "$ts" >> "$HOME/.samvil/mcp-health.jsonl" 2>/dev/null
+  fi
+  return 0
+}
+
 # samvil_contract_extract_skill_name <tool_input_json>
 #   Parse the Skill tool input. Returns the skill name on stdout or empty
 #   on failure. Accepts either a raw JSON string or quoted form.

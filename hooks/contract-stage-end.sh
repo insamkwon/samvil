@@ -49,8 +49,9 @@ SUBJECT="stage:$STAGE"
 samvil_contract_verify_claim "$PROJECT_ROOT" "$SUBJECT" "agent:user"
 
 # 2. Evaluate the next gate. Metrics are collected from local files
-#    using a Python helper so logic stays in one place.
-"$SAMVIL_PY" - "$PROJECT_ROOT" "$STAGE" "$TOOL_EXIT" <<'PY' 2>/dev/null
+#    using a Python helper so logic stays in one place. The heredoc prints
+#    a one-line sentinel on stdout so we can record hook health below.
+GATE_RESULT="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$STAGE" "$TOOL_EXIT" <<'PY' 2>/dev/null
 import json, os, sys
 from pathlib import Path
 
@@ -138,6 +139,7 @@ metrics_file = _load_json(project / ".samvil" / "metrics.json")
 
 gate_name = STAGE_TO_GATE.get(stage)
 if gate_name is None:
+    print(f"skip;stage={stage};no-gate")
     sys.exit(0)
 
 tier = (
@@ -166,6 +168,7 @@ except Exception as e:
 from dataclasses import asdict
 
 ledger = ClaimLedger(project / ".samvil" / "claims.jsonl")
+posted = True
 try:
     ledger.post(
         type="gate_verdict",
@@ -177,6 +180,7 @@ try:
         meta=asdict(verdict),
     )
 except Exception as e:
+    posted = False
     sys.stderr.write(f"[samvil-contract-hook] gate_verdict post failed: {e}\n")
 
 # Print a short line so the user sees what happened.
@@ -184,6 +188,49 @@ sys.stderr.write(
     f"[samvil-contract] post-stage {stage} → {gate_name}={verdict.verdict} "
     f"(tier={tier}, failed={verdict.failed_checks})\n"
 )
+# Sentinel for the bash wrapper's health logging (stdout, not stderr).
+print(f"gate={gate_name};verdict={verdict.verdict};posted={posted}")
 PY
+)"
+
+# 3. Write the expected next-skill marker (W2.2 chain-break recovery).
+#    The stage-start hook clears it when the chain actually continues.
+#    A surviving marker = the chain invoke never happened — samvil-resume
+#    reads it as the recovery point.
+MARKER_RESULT="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
+import os, sys
+project_root, skill_name = sys.argv[1:3]
+try:
+    sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
+    from samvil_mcp.chain_markers import write_chain_marker
+    marker = write_chain_marker(project_root, "claude_code", skill_name)
+    nxt = marker.get("next_skill", "")
+    if nxt:
+        print(f"marker={skill_name}->{nxt}")
+    else:
+        print("marker=pipeline-end")
+except Exception as e:
+    sys.stderr.write(f"[samvil-contract-hook] chain marker write failed: {e}\n")
+PY
+)"
+if [ -n "$MARKER_RESULT" ]; then
+  samvil_contract_log_health "chain" "ok" "$MARKER_RESULT"
+else
+  samvil_contract_log_health "chain" "fail" "next-skill marker not written after $STAGE"
+fi
+
+# 4. Record hook health so failures are visible in health_check, not
+#    just lost to stderr (W1.2).
+case "$GATE_RESULT" in
+  skip\;*)
+    : # no gate for this stage — not a failure
+    ;;
+  *posted=True*)
+    samvil_contract_log_health "stage-end" "ok" "$GATE_RESULT ($STAGE)"
+    ;;
+  *)
+    samvil_contract_log_health "stage-end" "fail" "${GATE_RESULT:-gate eval produced no verdict} ($STAGE)"
+    ;;
+esac
 
 exit 0

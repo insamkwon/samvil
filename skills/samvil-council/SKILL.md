@@ -35,11 +35,12 @@ Apply `selected_tier` (full matrix in `SKILL.legacy.md`):
 
 1. Print `[SAMVIL] Spawning N agents for Council Round 1 (Research) | MAX_PARALLEL=<N>` then `mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")`.
 2. Determine `MAX_PARALLEL`: `config.max_parallel` if set else CPU/memory heuristic (`SKILL.legacy.md` Step 2b — CPU≤4→1, ≥8→3, mem>80% → -1).
-3. Split agents into chunks of `MAX_PARALLEL`. **Spawn each chunk in ONE message** (Agent tool, parallel):
+3. **Compose prompts (MCP-owned, W3.2)**: `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["<r1 names>"]', project_root=".", header="You are {name} for SAMVIL Council Gate A, Round 1.", context_files_json='["project.seed.json","interview-summary.md"]', task='Return JSON: {"agent":"<name>","topics":[{"topic":"<short>","stance":"<one-liner>","is_blind_spot":bool}]}\nUnder 500 words.')` → `prompts.<name>`. `missing_agents` 비어있지 않으면 해당 agent만 legacy 방식(`<paste agents/<name>.md>` 직접 조립)으로 폴백 (P8).
+   Split agents into chunks of `MAX_PARALLEL`. **Spawn each chunk in ONE message** (Agent tool, parallel):
    ```
    Agent(description: "SAMVIL Council R1: <name>",
          model: config.model_routing.council_research || "haiku",
-         prompt: "You are <name> for SAMVIL Council Gate A, Round 1.\n\n<paste agents/<name>.md>\n\n## Context\nSeed:\n<paste project.seed.json>\nInterview:\n<paste interview-summary.md>\n\n## Task\nReturn JSON: {\"agent\":\"<name>\",\"topics\":[{\"topic\":\"<short>\",\"stance\":\"<one-liner>\",\"is_blind_spot\":bool}]}\nUnder 500 words.",
+         prompt: <prompts.<name> from compose_agent_prompt>,
          subagent_type: "general-purpose")
    ```
 4. Between chunks: `is_state_stalled` → if stalled, `increment_stall_recovery_count` + `build_reawake_message`, print, continue. Cap at 3 reawakes (then surface skip/abort/retry AskUserQuestion).
@@ -56,11 +57,11 @@ Returned `round1_debate_points.{consensus,debate,blind_spots}` is structured tru
 
 ## Step 4 — Round 2 (Review, parallel spawn)
 
-Same MAX_PARALLEL chunked-parallel pattern as Step 2. For each Round 2 agent:
+Same MAX_PARALLEL chunked-parallel pattern as Step 2. Compose via `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["<r2 names>"]', header="You are {name} for SAMVIL Council Gate A, Round 2.", context_files_json='["project.seed.json","interview-summary.md"]', context_inline="<round2_injection_md from Step 3, if Round 1 ran>\n위 논쟁점/블라인드 스팟에 입장을 표명하세요.", task='Return JSON: {"agent":"<name>","sections":[{"section":"<name>","verdict":"approve|challenge|reject","severity":"minor|blocking","reasoning":"<one line>"}]}\nUnder 500 words.')` — `missing_agents`는 legacy paste로 폴백 (P8). For each Round 2 agent:
 ```
 Agent(description: "SAMVIL Council R2: <name>",
       model: config.model_routing.council || "sonnet",
-      prompt: "You are <name> for SAMVIL Council Gate A, Round 2.\n\n<paste agents/<name>.md>\n\n## Context\nSeed:\n<paste project.seed.json>\nInterview:\n<paste interview-summary.md>\n\n{If Round 1 ran:}\n<paste round2_injection_md from Step 3>\n위 논쟁점/블라인드 스팟에 입장을 표명하세요.\n\n## Task\nReturn JSON: {\"agent\":\"<name>\",\"sections\":[{\"section\":\"<name>\",\"verdict\":\"approve|challenge|reject\",\"severity\":\"minor|blocking\",\"reasoning\":\"<one line>\"}]}\nUnder 500 words.",
+      prompt: <prompts.<name>>,
       subagent_type: "general-purpose")
 ```
 Heartbeat + stall checks between chunks (same as Step 2). Collect as `round2_verdicts`.

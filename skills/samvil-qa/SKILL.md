@@ -42,7 +42,9 @@ Returns `pass1`, `pass1b`, `should_proceed_to_pass2`, `verdict_reason`, `events[
 
 **Tier branch** per `boot.resume_hint.selected_tier`:
 - **`minimal`** — inline per legacy `## Pass 2: Functional Verification`.
-- **`standard` / `thorough` / `full`** — independent agents per legacy `### Spawn Pass 2 Independent Agent` + `### Spawn Pass 3 Independent Agent` (Agent tool, model `<resume_hint.current_model_qa.model_id or "sonnet">`, paste `agents/qa-functional.md` / `agents/qa-quality.md`, **agents do NOT write files** — main session is sole writer per legacy "Central Synthesis Rules").
+- **`standard` / `thorough` / `full`** — independent agents per legacy `### Spawn Pass 2 Independent Agent` + `### Spawn Pass 3 Independent Agent` (Agent tool, model `<resume_hint.current_model_qa.model_id or "sonnet">`, prompt은 `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["qa-functional"]' or `'["qa-quality"]'`, context_files_json=..., task=<legacy spawn 블록의 Task>)`로 조립 — `missing_agents` 시 `agents/*.md` 직접 paste 폴백(P8), **agents do NOT write files** — main session is sole writer per legacy "Central Synthesis Rules").
+
+**병렬 배치 (W5.1, standard+ tier)**: 전체 leaf를 `mcp__samvil_mcp__compute_parallel_safety(leaves_json=<[{id,likely_files,shared_resources}]>)`로 판정 → `safety=true` leaf들은 `MAX_PARALLEL` chunk로 나눠 Pass 2 에이전트를 **ONE message에 병렬 스폰** (Build Phase B 패턴). Playwright runtime이 필요한 leaf와 `safety=false` leaf는 main session 순차 처리 (단일 브라우저 세션 제약).
 
 For each Pass 2 leaf (legacy `### Pass 2 Tree Setup (v3.0.0+)`):
 1. `tree_json = parse_ac_tree(ac_data_json=<feature.acceptance_criteria>)`.
@@ -85,7 +87,7 @@ Apply in order (each best-effort, INV-5):
 
 - `verdict == PASS` → exit Ralph loop → "Chain on PASS".
 - `finalize.blocked.detected == true` → `[SAMVIL] ✗ QA BLOCKED after iteration <N>` (legacy "BLOCKED" block), `save_event(event_type="qa_blocked", ...)`, exit Ralph, surface user options.
-- `verdict == REVISE` and `iteration < qa_max_iterations` → fix per legacy `## Ralph Loop (if REVISE)` (read error, write fix, `npm run build > <paths.build_log> 2>&1`, append to `<paths.fix_log>`), append to state `qa_history`: `{iteration:<N>,verdict:"REVISE",issue_ids:[...]}`, increment iter. **Convergence rule**: each iter MUST reduce total issue count vs prior.
+- `verdict == REVISE` → **루프 판정은 MCP 소유 (W4.2)**: `mcp__samvil_mcp__evaluate_qa_convergence(project_root=".", synthesis_json=<step 4 evidence>)` → `gate_verdict`가 `continue`일 때만 fix per legacy `## Ralph Loop (if REVISE)` (read error, write fix, `npm run build > <paths.build_log> 2>&1`, append to `<paths.fix_log>`), append to state `qa_history`: `{iteration:<N>,verdict:"REVISE",issue_ids:[...]}`, increment iter. `blocked`(동일 이슈 반복 / 이슈 수 미감소 / A→B→A 진동 감지) → exit Ralph, `next_action` 그대로 사용자에게 표시. `failed` → "Chain on FAIL". LLM이 수렴 여부를 자체 판단하지 않는다 (P3).
 - `iteration >= qa_max_iterations` → FAIL → "Chain on FAIL".
 
 ## Standalone QA Modes (v4.23/v4.25/v4.27)

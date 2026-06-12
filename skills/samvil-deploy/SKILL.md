@@ -50,9 +50,11 @@ cd ~/dev/<seed.name>
 <selected_platform.command>   # substitute <seed.name> in the template
 ```
 
-Failures: report once, no auto-retry. Per-platform recovery hints
-(Vercel cred, Railway nixpacks, Coolify Dockerfile, EAS keystore) live
-in `SKILL.legacy.md`.
+Failures: report once, no auto-retry (P10). Annotate the report with
+`mcp__samvil_mcp__classify_build_failure(project_root=".", log_path="<deploy log>")`
+— `transient` → tell the user a plain re-run will likely succeed.
+Per-platform recovery hints (Vercel cred, Railway nixpacks, Coolify
+Dockerfile, EAS keystore) live in `SKILL.legacy.md`.
 
 `automation` deploy is recipe-driven, not a shell binary:
 
