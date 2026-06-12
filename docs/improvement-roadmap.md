@@ -101,11 +101,19 @@
 
 ## Wave 3 — 스킬 구조 정리
 
-- [ ] **3.1 부트 시퀀스 템플릿화**
+- [x] **3.1 부트 시퀀스 템플릿화**
   12개 스킬의 ~50줄 중복 부트 시퀀스를 `references/skill-boot-template.md`로
   추출. 핵심 3줄(save_event / jurisdiction / 파일 read)은 각 스킬에 인라인
   유지. `check-skill-wiring.py`에 부트 드리프트 검출 추가.
   AC: 12개 스킬 모두 템플릿 참조, wiring green.
+  ✅ done (스코프 보정) — 조사 결과 "50줄×12 중복" 전제가 과장이었음: 실제
+  부트는 스킬당 4~6줄 + 대부분 stage 특화 호출이라 추출 이득이 없음. 대신
+  **계약 강제**로 전환: `references/skill-boot-template.md` (규범 문서) +
+  `check-skill-wiring.py` `check_boot_contract()` (14개 stage skill에
+  save_event + P8 폴백 토큰 강제). 즉시 효과: samvil-seed의 stage entry
+  save_event 누락(CLAUDE.md 체크리스트 위반) 드리프트를 발견·수정.
+  evidence: `skills/samvil-seed/SKILL.md` Inputs 0번, boot contract 14/14
+  conform, pre-commit PASS.
 - [ ] **3.2 compose_agent_prompt MCP 도구**
   에이전트 프롬프트 조립을 MCP가 소유: `compose_agent_prompt(agent_names,
   context)` 신설 → `agents/*.md` 로딩 + 컨텍스트 주입 + 최종 프롬프트 반환.

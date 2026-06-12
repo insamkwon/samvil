@@ -146,6 +146,49 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
 ]
 
 
+# Boot contract (W3.1): every stage skill must emit a stage-entry event and
+# declare a P8 fallback path. Normative doc: references/skill-boot-template.md
+BOOT_CONTRACT_SKILLS: tuple[str, ...] = (
+    "samvil",
+    "samvil-interview",
+    "samvil-pm-interview",
+    "samvil-seed",
+    "samvil-council",
+    "samvil-design",
+    "samvil-scaffold",
+    "samvil-build",
+    "samvil-qa",
+    "samvil-deploy",
+    "samvil-retro",
+    "samvil-evolve",
+    "samvil-analyze",
+    "samvil-resume",
+)
+
+
+def check_boot_contract() -> bool:
+    """Each stage skill: save_event present + legacy/P8 fallback present."""
+    all_green = True
+    for skill in BOOT_CONTRACT_SKILLS:
+        path = REPO / "skills" / skill / "SKILL.md"
+        if not path.exists():
+            _fail(f"boot-contract {skill}: SKILL.md missing")
+            all_green = False
+            continue
+        text = path.read_text(errors="ignore")
+        missing = []
+        if "save_event" not in text:
+            missing.append("save_event (stage entry)")
+        if "SKILL.legacy.md" not in text and "P8" not in text:
+            missing.append("P8/legacy fallback")
+        if missing:
+            _fail(f"boot-contract {skill}: missing {missing}")
+            all_green = False
+    if all_green:
+        _ok(f"boot contract: {len(BOOT_CONTRACT_SKILLS)} stage skills conform")
+    return all_green
+
+
 def _ok(msg: str) -> None:
     print(f"  ✓ {msg}")
 
@@ -406,6 +449,12 @@ def main() -> int:
             all_green = False
         else:
             _ok(f"{skill_name}: all {len(required)} tokens present")
+
+    # Boot contract check (W3.1)
+    print()
+    print("Boot contract: stage skills follow references/skill-boot-template.md ...")
+    if not check_boot_contract():
+        all_green = False
 
     # Reverse check: every @mcp.tool() must be referenced in at least one skill/codex file
     print()

@@ -22,6 +22,7 @@ skip "Build Seed" step entirely. Instead:
 
 ## Inputs
 
+0. **Stage entry (boot contract — `references/skill-boot-template.md`)**: `mcp__samvil_mcp__save_event(session_id="<sid>", event_type="seed_started", stage="seed", data="{}")` — best-effort; auto-claims `evidence_posted subject="stage:seed"`.
 1. Read `project.state.json` for `session_id`, `current_stage`, `_brownfield_seed_merged`, and host name
    (`host`, `runtime`, or `agent_host`; default `generic`).
 2. Read `project.config.json` for `selected_tier` / `samvil_tier`.
