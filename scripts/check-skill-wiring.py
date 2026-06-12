@@ -243,7 +243,6 @@ REVERSE_CHECK_ALLOWLIST: frozenset[str] = frozenset(
         # AC analysis tools — planned for samvil-build but not wired
         "analyze_ac_dependencies",
         "compare_generations",
-        "compute_parallel_safety",
         "load_external_satisfactions",
         "synthesize_qa_evidence",
         "update_progress",

@@ -44,6 +44,8 @@ Returns `pass1`, `pass1b`, `should_proceed_to_pass2`, `verdict_reason`, `events[
 - **`minimal`** — inline per legacy `## Pass 2: Functional Verification`.
 - **`standard` / `thorough` / `full`** — independent agents per legacy `### Spawn Pass 2 Independent Agent` + `### Spawn Pass 3 Independent Agent` (Agent tool, model `<resume_hint.current_model_qa.model_id or "sonnet">`, prompt은 `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["qa-functional"]' or `'["qa-quality"]'`, context_files_json=..., task=<legacy spawn 블록의 Task>)`로 조립 — `missing_agents` 시 `agents/*.md` 직접 paste 폴백(P8), **agents do NOT write files** — main session is sole writer per legacy "Central Synthesis Rules").
 
+**병렬 배치 (W5.1, standard+ tier)**: 전체 leaf를 `mcp__samvil_mcp__compute_parallel_safety(leaves_json=<[{id,likely_files,shared_resources}]>)`로 판정 → `safety=true` leaf들은 `MAX_PARALLEL` chunk로 나눠 Pass 2 에이전트를 **ONE message에 병렬 스폰** (Build Phase B 패턴). Playwright runtime이 필요한 leaf와 `safety=false` leaf는 main session 순차 처리 (단일 브라우저 세션 제약).
+
 For each Pass 2 leaf (legacy `### Pass 2 Tree Setup (v3.0.0+)`):
 1. `tree_json = parse_ac_tree(ac_data_json=<feature.acceptance_criteria>)`.
 2. Drive Playwright runtime per legacy `### Runtime Verification with Playwright MCP` (or static fallback per `### Fallback to Static Analysis`).
