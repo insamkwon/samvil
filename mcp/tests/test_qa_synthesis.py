@@ -210,3 +210,62 @@ def test_materialize_qa_synthesis_marks_blocked_on_repeated_issues(tmp_path):
         for line in (tmp_path / ".samvil" / "events.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [event["event_type"] for event in events] == ["qa_unimplemented", "qa_verdict", "qa_blocked"]
+
+
+# ── W4.2 oscillation detection (MCP-owned ralph loop control) ──────
+
+
+def test_oscillation_a_b_a_is_blocked() -> None:
+    """Issue set A recurs after an intermediate different set B."""
+    from samvil_mcp.qa_synthesis import evaluate_qa_convergence
+
+    set_a = ["pass2:ac-1:fail", "pass3:perf"]
+    set_b = ["pass2:ac-2:fail"]
+    history = [
+        {"iteration": 1, "verdict": "REVISE", "issue_ids": set_a},
+        {"iteration": 2, "verdict": "REVISE", "issue_ids": set_b},
+    ]
+    synthesis = {
+        "verdict": "REVISE",
+        "iteration": 3,
+        "max_iterations": 5,
+        "issue_ids": set_a,  # A again — fixes are cycling
+    }
+    gate = evaluate_qa_convergence(synthesis, history)
+    assert gate["verdict"] == "blocked"
+    assert "oscillation" in gate["reason"]
+
+
+def test_shrinking_issue_set_continues() -> None:
+    from samvil_mcp.qa_synthesis import evaluate_qa_convergence
+
+    history = [
+        {"iteration": 1, "verdict": "REVISE", "issue_ids": ["a", "b", "c"]},
+        {"iteration": 2, "verdict": "REVISE", "issue_ids": ["a", "b"]},
+    ]
+    synthesis = {
+        "verdict": "REVISE",
+        "iteration": 3,
+        "max_iterations": 5,
+        "issue_ids": ["a"],
+    }
+    gate = evaluate_qa_convergence(synthesis, history)
+    assert gate["verdict"] == "continue"
+
+
+def test_oscillation_needs_two_history_rows() -> None:
+    """With a single history row the oscillation rule must not fire —
+    any block here comes from the (stricter) count rule instead."""
+    from samvil_mcp.qa_synthesis import evaluate_qa_convergence
+
+    history = [{"iteration": 1, "verdict": "REVISE", "issue_ids": ["x"]}]
+    synthesis = {
+        "verdict": "REVISE",
+        "iteration": 2,
+        "max_iterations": 5,
+        "issue_ids": ["y"],
+    }
+    gate = evaluate_qa_convergence(synthesis, history)
+    assert "oscillation" not in gate["reason"]
+    # same count as previous -> existing no-decrease rule blocks
+    assert gate["verdict"] == "blocked"

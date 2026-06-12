@@ -218,6 +218,13 @@ def evaluate_qa_convergence(synthesis: dict[str, Any], qa_history: list[dict[str
         gate_verdict = "blocked"
         reason = "identical QA issues persisted across two consecutive iterations"
         next_action = "manual intervention: evolve seed, skip to retro, or fix manually"
+    elif issue_ids and _oscillating(issue_ids, history, window=3):
+        # W4.2 (ouroboros oscillation_window): the current issue set already
+        # appeared in a *non-adjacent* earlier iteration — fixes are cycling
+        # A→B→A, which adjacent-only comparison cannot see.
+        gate_verdict = "blocked"
+        reason = "oscillation detected: current QA issue set recurred from an earlier iteration"
+        next_action = "stop auto-fix cycle: evolve seed or fix manually (fixes are undoing each other)"
     elif previous_count is not None and issue_count >= previous_count and issue_count > 0:
         gate_verdict = "blocked"
         reason = "QA issue count did not decrease from previous iteration"
@@ -368,6 +375,22 @@ def _previous_issue_ids(history: list[dict[str, Any]]) -> set[str] | None:
         if isinstance(issue_ids, list):
             return {str(item) for item in issue_ids if str(item)}
     return None
+
+
+def _oscillating(
+    current: set[str], history: list[dict[str, Any]], window: int = 3
+) -> bool:
+    """True when `current` matches a non-adjacent issue set within the
+    last `window` history rows (A→B→A cycling). The adjacent row is
+    handled by the identical-issues check, so it is excluded here."""
+    recent = [row for row in history if isinstance(row.get("issue_ids"), list)][-window:]
+    if len(recent) < 2:
+        return False
+    for row in recent[:-1]:  # exclude the adjacent (last) row
+        past = {str(item) for item in row["issue_ids"] if str(item)}
+        if past and past == current:
+            return True
+    return False
 
 
 def _slug(value: str) -> str:

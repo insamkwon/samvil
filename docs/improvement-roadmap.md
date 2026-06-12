@@ -157,11 +157,21 @@
   4도구, samvil-build INV-2에 opt-in wiring (`config.background_build`).
   `mcp/tests/test_background_jobs.py` 8 tests + 도구 레이어 E2E (시작→
   비차단 확인→폴링→completed/exit 0 회수) 직접 검증 완료.
-- [ ] **4.2 MCP 소유 Ralph Loop 컨트롤러**
+- [x] **4.2 MCP 소유 Ralph Loop 컨트롤러**
   루프 제어를 LLM에서 MCP로: max_iterations, oscillation window(3),
   regression window(2)를 결정론적으로 판정하는 도구 신설.
   samvil-qa Ralph 루프에 우선 wiring (evolve는 후속).
   AC: 진동/퇴화 시나리오 단위 테스트 + QA 체인에서 동작 확인.
+  ✅ done — 신설이 아닌 **기존 자산 활성화**: `evaluate_qa_convergence`가
+  이미 max_iterations/동일이슈/이슈수미감소 판정을 구현했으나 미사용
+  (W2.1에서 보존했던 그 도구). 추가: A→B→A **진동 감지**
+  (`qa_synthesis._oscillating`, window=3, 비인접 iteration 비교).
+  퇴화는 기존 "1회라도 미감소 → blocked" 규칙이 ouroboros window(2)보다
+  엄격해 유지. samvil-qa step 5의 LLM 수동 "Convergence rule"을 도구
+  호출로 교체 — "LLM이 수렴 여부를 자체 판단하지 않는다 (P3)".
+  evidence: `mcp/samvil_mcp/qa_synthesis.py` oscillation 분기,
+  `skills/samvil-qa/SKILL.md` step 5, `mcp/tests/test_qa_synthesis.py`
+  13 passed (진동/축소/단일히스토리 케이스).
 
 ## Wave 5 — 마무리 (선택)
 

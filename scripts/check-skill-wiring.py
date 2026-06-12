@@ -234,7 +234,6 @@ REVERSE_CHECK_ALLOWLIST: frozenset[str] = frozenset(
         "build_qa_recovery_routing",
         "build_rebuild_reentry",
         "clear_leaf_checkpoint",
-        "evaluate_qa_convergence",
         "evaluate_stuck_recovery",
         "materialize_final_e2e_bundle",
         "materialize_post_rebuild_qa",

@@ -85,7 +85,7 @@ Apply in order (each best-effort, INV-5):
 
 - `verdict == PASS` → exit Ralph loop → "Chain on PASS".
 - `finalize.blocked.detected == true` → `[SAMVIL] ✗ QA BLOCKED after iteration <N>` (legacy "BLOCKED" block), `save_event(event_type="qa_blocked", ...)`, exit Ralph, surface user options.
-- `verdict == REVISE` and `iteration < qa_max_iterations` → fix per legacy `## Ralph Loop (if REVISE)` (read error, write fix, `npm run build > <paths.build_log> 2>&1`, append to `<paths.fix_log>`), append to state `qa_history`: `{iteration:<N>,verdict:"REVISE",issue_ids:[...]}`, increment iter. **Convergence rule**: each iter MUST reduce total issue count vs prior.
+- `verdict == REVISE` → **루프 판정은 MCP 소유 (W4.2)**: `mcp__samvil_mcp__evaluate_qa_convergence(project_root=".", synthesis_json=<step 4 evidence>)` → `gate_verdict`가 `continue`일 때만 fix per legacy `## Ralph Loop (if REVISE)` (read error, write fix, `npm run build > <paths.build_log> 2>&1`, append to `<paths.fix_log>`), append to state `qa_history`: `{iteration:<N>,verdict:"REVISE",issue_ids:[...]}`, increment iter. `blocked`(동일 이슈 반복 / 이슈 수 미감소 / A→B→A 진동 감지) → exit Ralph, `next_action` 그대로 사용자에게 표시. `failed` → "Chain on FAIL". LLM이 수렴 여부를 자체 판단하지 않는다 (P3).
 - `iteration >= qa_max_iterations` → FAIL → "Chain on FAIL".
 
 ## Standalone QA Modes (v4.23/v4.25/v4.27)
