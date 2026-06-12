@@ -70,11 +70,22 @@
   체인 3종(advance_chain 등)은 W2.2에서 처분 결정. 잔여는 전부
   allowlist에 사유 기록됨. evidence: `docs/unused-tools-report.md` 재생성
   (63 uncited / 18 deletable), pytest 1858 passed, stdio roundtrip OK.
-- [ ] **2.2 체인 폴백 마커**
+- [x] **2.2 체인 폴백 마커**
   스킬 체인 invoke 실패 시 `.samvil/next-skill.json` 자동 기록 +
   `chain_attempt` 이벤트(save_event) 추가. `_EVENT_TYPE_TO_STAGE` 등
   server.py 매핑 갱신 (CLAUDE.md 체크리스트 준수).
   AC: stdio roundtrip 테스트 green, QA→Retro 전환 경로에 우선 적용.
+  ✅ done — 설계 변경: 스킬 본문 수정 대신 **hook 핸드셰이크**로 결정론화
+  (120줄 thinness 캡 보호 + 이벤트 매핑 churn 회피. save_event는 v3.2부터
+  lenient라 신규 enum 불필요; 관측은 W1.2의 hook health 채널 재사용).
+  stage-end hook이 기대 next-skill 마커 기록 → stage-start hook이 진입
+  일치 시 클리어 / divergence 시 fail 기록 → 마커 생존 = 체인 단절 =
+  `resume_session()`이 마커의 next_skill을 복구 지점으로 우선 사용.
+  QA→Retro 포함 전 전환에 일괄 적용됨. evidence:
+  `hooks/contract-stage-end.sh` (marker write), `hooks/contract-stage-start.sh`
+  (handshake), `mcp/samvil_mcp/resume.py` (`chain_marker` 필드),
+  tmp dir fire test: 기록→클리어→divergence 감지 확인,
+  `mcp/tests/test_resume.py` 37 passed.
 - [ ] **2.3 transient 오류 재시도**
   오류 분류기: transient 화이트리스트(network error / timeout /
   ECONNREFUSED / 503)만 백오프 1회 재시도, 나머지는 즉시 실패 유지.

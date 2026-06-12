@@ -283,3 +283,42 @@ def test_stage_progress_build_with_leaf_and_completed(tmp_path: Path) -> None:
     result = _stage_progress(state, leaf)
     assert "1 done" in result
     assert "feat_auth" in result
+
+
+# ── W2.2 chain marker integration ──────────────────────────────────
+
+
+def test_resume_prefers_surviving_chain_marker(tmp_path: Path) -> None:
+    """A surviving next-skill.json means the chain broke — its next_skill
+    wins over the state-derived re-entry skill."""
+    from samvil_mcp.resume import resume_session
+
+    (tmp_path / "project.state.json").write_text(
+        json.dumps({"current_stage": "qa", "last_progress_at": "2026-06-12T00:00:00Z"})
+    )
+    samvil = tmp_path / ".samvil"
+    samvil.mkdir()
+    (samvil / "next-skill.json").write_text(
+        json.dumps(
+            {
+                "next_skill": "samvil-retro",
+                "from_stage": "samvil-qa",
+                "chain_via": "skill_tool",
+            }
+        )
+    )
+    result = resume_session(str(tmp_path))
+    assert result["found"] is True
+    assert result["next_skill"] == "samvil-retro"
+    assert result["chain_marker"]["from_stage"] == "samvil-qa"
+
+
+def test_resume_without_marker_uses_stage_mapping(tmp_path: Path) -> None:
+    from samvil_mcp.resume import resume_session
+
+    (tmp_path / "project.state.json").write_text(
+        json.dumps({"current_stage": "build"})
+    )
+    result = resume_session(str(tmp_path))
+    assert result["next_skill"] == "samvil-build"
+    assert result["chain_marker"] is None

@@ -193,7 +193,33 @@ print(f"gate={gate_name};verdict={verdict.verdict};posted={posted}")
 PY
 )"
 
-# 3. Record hook health so failures are visible in health_check, not
+# 3. Write the expected next-skill marker (W2.2 chain-break recovery).
+#    The stage-start hook clears it when the chain actually continues.
+#    A surviving marker = the chain invoke never happened — samvil-resume
+#    reads it as the recovery point.
+MARKER_RESULT="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
+import os, sys
+project_root, skill_name = sys.argv[1:3]
+try:
+    sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
+    from samvil_mcp.chain_markers import write_chain_marker
+    marker = write_chain_marker(project_root, "claude_code", skill_name)
+    nxt = marker.get("next_skill", "")
+    if nxt:
+        print(f"marker={skill_name}->{nxt}")
+    else:
+        print("marker=pipeline-end")
+except Exception as e:
+    sys.stderr.write(f"[samvil-contract-hook] chain marker write failed: {e}\n")
+PY
+)"
+if [ -n "$MARKER_RESULT" ]; then
+  samvil_contract_log_health "chain" "ok" "$MARKER_RESULT"
+else
+  samvil_contract_log_health "chain" "fail" "next-skill marker not written after $STAGE"
+fi
+
+# 4. Record hook health so failures are visible in health_check, not
 #    just lost to stderr (W1.2).
 case "$GATE_RESULT" in
   skip\;*)

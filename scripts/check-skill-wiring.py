@@ -168,7 +168,9 @@ REVERSE_CHECK_ALLOWLIST: frozenset[str] = frozenset(
         "read_mechanical_toml",
         "write_default_mechanical_toml",
         "resolve_mechanical_command",
-        # Pipeline orchestration tools — replaced by HostCapability / aggregator pattern
+        # Chain marker tools — W2.2 made the marker subsystem load-bearing
+        # (stage hooks write/clear .samvil/next-skill.json; resume reads it).
+        # These wrappers are the direct-MCP interface for non-Skill hosts.
         "advance_chain",
         "get_chain_continuation",
         "get_next_stage",
