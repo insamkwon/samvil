@@ -21,10 +21,18 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator
+
+try:  # POSIX
+    import fcntl  # type: ignore[import-not-found]
+    _HAS_FLOCK = True
+except ImportError:  # pragma: no cover — Windows fallback
+    fcntl = None  # type: ignore[assignment]
+    _HAS_FLOCK = False
 
 # Typed whitelist — Anything not in this set goes to events.jsonl, not claims.
 CLAIM_TYPES: tuple[str, ...] = (
@@ -45,6 +53,30 @@ CLAIM_STATUSES: tuple[str, ...] = ("pending", "verified", "rejected")
 # Evidence format: "path/to/file.ext:line_no" or bare "path/to/file.ext".
 # We accept both but require at least one element on verify.
 _EVIDENCE_WITH_LINE = re.compile(r"^(?P<path>[^:]+):(?P<line>\d+)$")
+
+
+@contextmanager
+def _locked(path: Path) -> Iterator[None]:
+    """Hold an exclusive advisory lock on a sibling `.lock` file.
+
+    Same pattern as rate_budget._locked. Hooks and the main skill can both
+    write claims, so seq computation + append must be atomic across
+    processes. Falls back to a no-op on platforms without fcntl (Windows).
+    """
+    if not _HAS_FLOCK:
+        yield
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def _now_iso() -> str:
@@ -189,23 +221,24 @@ class ClaimLedger:
         if not subject or not statement:
             raise ClaimLedgerError("subject and statement are required.")
 
-        ts = _now_iso()
-        existing = self._latest_by_id().keys()
-        seq = self._next_seq(existing, ts)
-        claim = Claim(
-            claim_id=_claim_id(ts, seq),
-            type=type,
-            subject=subject,
-            statement=statement,
-            authority_file=authority_file,
-            evidence=list(evidence or []),
-            claimed_by=claimed_by,
-            verified_by=None,
-            status="pending",
-            ts=ts,
-            meta=dict(meta or {}),
-        )
-        self._append(claim)
+        with _locked(self.path):
+            ts = _now_iso()
+            existing = self._latest_by_id().keys()
+            seq = self._next_seq(existing, ts)
+            claim = Claim(
+                claim_id=_claim_id(ts, seq),
+                type=type,
+                subject=subject,
+                statement=statement,
+                authority_file=authority_file,
+                evidence=list(evidence or []),
+                claimed_by=claimed_by,
+                verified_by=None,
+                status="pending",
+                ts=ts,
+                meta=dict(meta or {}),
+            )
+            self._append(claim)
         return claim
 
     def verify(
@@ -227,62 +260,63 @@ class ClaimLedger:
             synthetic/test scenarios — production callers should let the
             check run).
         """
-        current = self._latest_by_id().get(claim_id)
-        if current is None:
-            raise ClaimLedgerError(f"claim {claim_id!r} does not exist.")
-        if current.status == "verified":
-            return current  # idempotent
-        if current.status == "rejected":
-            raise ClaimLedgerError(
-                f"claim {claim_id!r} is already rejected; cannot verify."
-            )
-
-        if not verified_by:
-            raise ClaimLedgerError("verified_by is required (Judge identity).")
-        if verified_by == current.claimed_by:
-            raise ClaimLedgerError(
-                f"Generator ≠ Judge invariant violated: "
-                f"{current.claimed_by!r} cannot verify its own claim."
-            )
-
-        merged_evidence = list(current.evidence) + list(evidence or [])
-        # Preserve insertion order, drop dupes
-        seen: set[str] = set()
-        dedup: list[str] = []
-        for e in merged_evidence:
-            if e in seen:
-                continue
-            seen.add(e)
-            dedup.append(e)
-        merged_evidence = dedup
-
-        if not merged_evidence:
-            raise ClaimLedgerError(
-                f"claim {claim_id!r} cannot be verified: evidence is empty."
-            )
-
-        if not skip_file_resolution:
-            unresolved = _unresolved_evidence(merged_evidence, project_root)
-            if unresolved:
+        with _locked(self.path):
+            current = self._latest_by_id().get(claim_id)
+            if current is None:
+                raise ClaimLedgerError(f"claim {claim_id!r} does not exist.")
+            if current.status == "verified":
+                return current  # idempotent
+            if current.status == "rejected":
                 raise ClaimLedgerError(
-                    f"claim {claim_id!r} has unresolved evidence entries: "
-                    f"{unresolved}"
+                    f"claim {claim_id!r} is already rejected; cannot verify."
                 )
 
-        verified = Claim(
-            claim_id=current.claim_id,
-            type=current.type,
-            subject=current.subject,
-            statement=current.statement,
-            authority_file=current.authority_file,
-            evidence=merged_evidence,
-            claimed_by=current.claimed_by,
-            verified_by=verified_by,
-            status="verified",
-            ts=_now_iso(),
-            meta=dict(current.meta),
-        )
-        self._append(verified)
+            if not verified_by:
+                raise ClaimLedgerError("verified_by is required (Judge identity).")
+            if verified_by == current.claimed_by:
+                raise ClaimLedgerError(
+                    f"Generator ≠ Judge invariant violated: "
+                    f"{current.claimed_by!r} cannot verify its own claim."
+                )
+
+            merged_evidence = list(current.evidence) + list(evidence or [])
+            # Preserve insertion order, drop dupes
+            seen: set[str] = set()
+            dedup: list[str] = []
+            for e in merged_evidence:
+                if e in seen:
+                    continue
+                seen.add(e)
+                dedup.append(e)
+            merged_evidence = dedup
+
+            if not merged_evidence:
+                raise ClaimLedgerError(
+                    f"claim {claim_id!r} cannot be verified: evidence is empty."
+                )
+
+            if not skip_file_resolution:
+                unresolved = _unresolved_evidence(merged_evidence, project_root)
+                if unresolved:
+                    raise ClaimLedgerError(
+                        f"claim {claim_id!r} has unresolved evidence entries: "
+                        f"{unresolved}"
+                    )
+
+            verified = Claim(
+                claim_id=current.claim_id,
+                type=current.type,
+                subject=current.subject,
+                statement=current.statement,
+                authority_file=current.authority_file,
+                evidence=merged_evidence,
+                claimed_by=current.claimed_by,
+                verified_by=verified_by,
+                status="verified",
+                ts=_now_iso(),
+                meta=dict(current.meta),
+            )
+            self._append(verified)
         return verified
 
     def reject(
@@ -298,41 +332,42 @@ class ClaimLedger:
         reason is stored under `meta.reject_reason` so downstream tooling
         (retro, consensus) can inspect it without parsing free text.
         """
-        current = self._latest_by_id().get(claim_id)
-        if current is None:
-            raise ClaimLedgerError(f"claim {claim_id!r} does not exist.")
-        if current.status == "rejected":
-            return current  # idempotent
-        if current.status == "verified":
-            raise ClaimLedgerError(
-                f"claim {claim_id!r} is already verified; cannot reject."
+        with _locked(self.path):
+            current = self._latest_by_id().get(claim_id)
+            if current is None:
+                raise ClaimLedgerError(f"claim {claim_id!r} does not exist.")
+            if current.status == "rejected":
+                return current  # idempotent
+            if current.status == "verified":
+                raise ClaimLedgerError(
+                    f"claim {claim_id!r} is already verified; cannot reject."
+                )
+
+            if not verified_by:
+                raise ClaimLedgerError("verified_by is required (Judge identity).")
+            if verified_by == current.claimed_by:
+                raise ClaimLedgerError(
+                    "Generator ≠ Judge invariant violated on reject."
+                )
+
+            meta = dict(current.meta)
+            if reason:
+                meta["reject_reason"] = reason
+
+            rejected = Claim(
+                claim_id=current.claim_id,
+                type=current.type,
+                subject=current.subject,
+                statement=current.statement,
+                authority_file=current.authority_file,
+                evidence=list(current.evidence),
+                claimed_by=current.claimed_by,
+                verified_by=verified_by,
+                status="rejected",
+                ts=_now_iso(),
+                meta=meta,
             )
-
-        if not verified_by:
-            raise ClaimLedgerError("verified_by is required (Judge identity).")
-        if verified_by == current.claimed_by:
-            raise ClaimLedgerError(
-                "Generator ≠ Judge invariant violated on reject."
-            )
-
-        meta = dict(current.meta)
-        if reason:
-            meta["reject_reason"] = reason
-
-        rejected = Claim(
-            claim_id=current.claim_id,
-            type=current.type,
-            subject=current.subject,
-            statement=current.statement,
-            authority_file=current.authority_file,
-            evidence=list(current.evidence),
-            claimed_by=current.claimed_by,
-            verified_by=verified_by,
-            status="rejected",
-            ts=_now_iso(),
-            meta=meta,
-        )
-        self._append(rejected)
+            self._append(rejected)
         return rejected
 
     # ── Queries ────────────────────────────────────────────────────────
@@ -349,6 +384,30 @@ class ClaimLedger:
     def all_claims(self) -> list[Claim]:
         return list(self._latest_by_id().values())
 
+    def integrity_errors(self) -> list[str]:
+        """Return claim_ids whose rows disagree on post identity.
+
+        Append-only rows legitimately repeat a claim_id (post → verify →
+        reject each append). A *collision* is two different posts landing on
+        the same claim_id — detectable as rows whose identity tuple
+        (type, subject, statement, claimed_by) differs. Pre-lock ledgers
+        (< v4.30) could produce these under concurrent writes.
+        """
+        identities: dict[str, tuple[str, str, str, str]] = {}
+        conflicted: set[str] = set()
+        for row in self._iter_raw():
+            try:
+                c = Claim.from_dict(row)
+            except (KeyError, TypeError):
+                continue
+            ident = (c.type, c.subject, c.statement, c.claimed_by)
+            seen = identities.get(c.claim_id)
+            if seen is None:
+                identities[c.claim_id] = ident
+            elif seen != ident:
+                conflicted.add(c.claim_id)
+        return sorted(conflicted)
+
     def stats(self) -> dict:
         by_status = {s: 0 for s in CLAIM_STATUSES}
         by_type: dict[str, int] = {}
@@ -359,6 +418,7 @@ class ClaimLedger:
             "total": sum(by_status.values()),
             "by_status": by_status,
             "by_type": by_type,
+            "integrity_errors": self.integrity_errors(),
         }
 
     def materialize_view(

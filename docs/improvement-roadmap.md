@@ -18,7 +18,10 @@
 
 ## Wave 1 — 기반 다지기
 
-- [ ] **1.1 claim_ledger 파일 잠금**
+- [x] **1.1 claim_ledger 파일 잠금**
+  ✅ done — evidence: `mcp/samvil_mcp/claim_ledger.py:62` (`_locked`),
+  post/verify/reject 잠금 적용, `integrity_errors()` + stats 노출,
+  `mcp/tests/test_claim_ledger_lock.py` 4 tests green.
   `mcp/samvil_mcp/rate_budget.py`의 `_locked()` (fcntl.flock + `_HAS_FLOCK`
   폴백) 패턴을 `mcp/samvil_mcp/claim_ledger.py`의 post/verify/reject에 적용.
   로드 시 중복 claim_id 무결성 검사 추가.
