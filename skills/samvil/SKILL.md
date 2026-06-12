@@ -20,7 +20,7 @@ prose, Health Check details, project init schema, and Gate A protocol in
 ## Boot Sequence (INV-1)
 
 1. Run these in parallel (best-effort, all non-fatal per P8):
-   - `mcp__samvil_mcp__health_check()` → `samvil_version`, `tool_count`, `db_ok`, `python_version`
+   - `mcp__samvil_mcp__health_check()` → `samvil_version`, `tool_count`, `db_ok`, `python_version`, `hook_failures_24h`, `last_hook_failure`
    - `mcp__samvil_mcp__get_health_tier_summary(project_root="<cwd>")` → tier line
    - Bash: `node --version 2>/dev/null && echo OK || echo MISSING`
    - Bash: `uv --version 2>/dev/null || echo MISSING`
@@ -37,8 +37,11 @@ prose, Health Check details, project init schema, and Gate A protocol in
    | gh           | ✅/⚠️ <version or MISSING>       |
    | MCP 도구     | ✅ <tool_count>개                 |
    | DB           | ✅/❌                             |
+   | Hooks        | ✅ / ⚠️ <hook_failures_24h> fail(24h) |
    | Health Tier  | ✅/⚠️/🔴 <HEALTHY/DEGRADED/CRITICAL> |
    ```
+   `hook_failures_24h > 0` → table 아래에 `last_hook_failure.error` 한 줄 출력
+   (claim ledger가 불완전할 수 있음을 사용자에게 알림).
    Node.js MISSING → halt with install instructions. All others degrade gracefully.
 2. Files are SSOT — never trust conversation history for tier or stage. Inputs come from the aggregator, not memory.
 3. `mcp__samvil_mcp__check_jurisdiction(action_description="SAMVIL pipeline start: <prompt> at tier=<tier>", command="", filenames_json='["project.seed.json","project.state.json","project.config.json"]', diff_text="")` — once at boot. `user` jurisdiction → confirm explicitly (`ㄱ`/`고`/`yes`); `external` → resolve dependency then `claim_post(type="evidence_posted")`; `ai` → continue silently.

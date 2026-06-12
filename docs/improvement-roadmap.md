@@ -26,7 +26,12 @@
   폴백) 패턴을 `mcp/samvil_mcp/claim_ledger.py`의 post/verify/reject에 적용.
   로드 시 중복 claim_id 무결성 검사 추가.
   AC: 동시 post 테스트(`mcp/tests/`) 추가 + pytest green.
-- [ ] **1.2 hook 헬스 가시화**
+- [x] **1.2 hook 헬스 가시화**
+  ✅ done — evidence: `hooks/_contract-helpers.sh` (`samvil_contract_log_health`,
+  python-unavailable bash 폴백 포함), stage-start/end 양쪽 wiring,
+  `health_check`에 `hook_failures_24h` + summary `Hooks ✅/⚠️`,
+  `skills/samvil/SKILL.md` 부트 테이블 Hooks 행, tmp dir fire test 통과,
+  `mcp/tests/test_health_check_hooks.py` 3 tests green.
   `hooks/_contract-helpers.sh` 경유 실패가 stderr로만 가는 문제. hook
   exit 상태를 `.samvil/mcp-health.jsonl`에 기록하고, samvil 오케스트레이터
   부트 헬스 테이블에 hook 상태 1줄 추가.

@@ -4577,12 +4577,49 @@ async def health_check() -> str:
     except Exception:
         tool_count = 0
 
+    # Hook health (W1.2): hooks log to the same mcp-health.jsonl with
+    # source="hook". Surface failures from the last 24h so the boot table
+    # can show them instead of users discovering missing claims later.
+    hook_failures_24h = 0
+    last_hook_failure: dict | None = None
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        health_path = Path.home() / ".samvil" / "mcp-health.jsonl"
+        if health_path.exists():
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+            # Tail only — the file grows unbounded.
+            lines = health_path.read_text(encoding="utf-8").splitlines()[-500:]
+            for line in lines:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("source") != "hook" or entry.get("status") != "fail":
+                    continue
+                try:
+                    ts = datetime.fromisoformat(entry.get("timestamp", ""))
+                except ValueError:
+                    continue
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if ts >= cutoff:
+                    hook_failures_24h += 1
+                    last_hook_failure = entry
+    except Exception:
+        pass
+
+    hooks_label = (
+        "✅" if hook_failures_24h == 0 else f"⚠️ {hook_failures_24h} fail(24h)"
+    )
     result = {
         "samvil_version": _samvil_version,
         "tool_count": tool_count,
         "db_ok": db_ok,
         "python_version": f"{_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro}",
-        "summary": f"SAMVIL v{_samvil_version} | {tool_count} tools | DB {'✅' if db_ok else '❌'} | Python {_sys.version_info.major}.{_sys.version_info.minor}",
+        "hook_failures_24h": hook_failures_24h,
+        "last_hook_failure": last_hook_failure,
+        "summary": f"SAMVIL v{_samvil_version} | {tool_count} tools | DB {'✅' if db_ok else '❌'} | Hooks {hooks_label} | Python {_sys.version_info.major}.{_sys.version_info.minor}",
     }
     _log_mcp_health("ok", "health_check")
     return json.dumps(result)

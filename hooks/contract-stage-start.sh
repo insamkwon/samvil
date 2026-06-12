@@ -64,7 +64,11 @@ CLAIM_ID="$(samvil_contract_append_claim \
 
 if [ -n "$CLAIM_ID" ]; then
   samvil_contract_append_stage_claim_to_state "$PROJECT_ROOT" "$STAGE" "$CLAIM_ID"
+  samvil_contract_log_health "stage-start" "ok" "claim $CLAIM_ID ($STAGE)"
   echo "[samvil-contract] pre-stage claim posted: $CLAIM_ID ($STAGE)" >&2
+else
+  samvil_contract_log_health "stage-start" "fail" "stage_start claim not posted ($STAGE)"
+  echo "[samvil-contract] WARN: stage_start claim not posted ($STAGE)" >&2
 fi
 
 exit 0
