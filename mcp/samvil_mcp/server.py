@@ -4420,6 +4420,28 @@ async def get_health_tier_summary(
 
 
 @mcp.tool()
+async def query_projection(
+    session_id: str,
+    at_timestamp: str = "",
+) -> str:
+    """Reconstruct session state at a point in time from the event stream (W5.4).
+
+    Replays events up to at_timestamp (ISO; empty = now) into a snapshot:
+    current_stage, stage_timeline, counts, recent failures, active seed
+    version. For debugging, retro analysis, and stall forensics.
+    """
+    try:
+        from .projection import query_projection as _query
+
+        result = _query(str(DB_PATH), session_id, at_timestamp or None)
+        _log_mcp_health("ok", "query_projection")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "query_projection", str(e))
+        return json.dumps({"found": False, "error": str(e)})
+
+
+@mcp.tool()
 async def measure_seed_drift(
     original_seed_json: str,
     current_seed_json: str,

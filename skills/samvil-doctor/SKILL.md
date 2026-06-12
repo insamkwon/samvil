@@ -63,6 +63,11 @@ Also call `mcp__samvil_mcp__get_health_tier_summary(project_root="<cwd>")` — b
 If the call itself errors, the doctor reports `⚠ MCP unreachable` and
 falls back to the shell facts only (P8 graceful degradation).
 
+**Session forensics (사용자가 "세션이 왜 멈췄어/어디까지 갔어"류 질문 시)**:
+`mcp__samvil_mcp__query_projection(session_id="<sid>", at_timestamp="<옵션 ISO>")`
+— 이벤트 스트림 replay로 해당 시점의 stage_timeline / 최근 failures /
+active seed version 스냅샷을 복원해 보여준다 (W5.4).
+
 ## Output
 
 Render one report with three sections (Shell / MCP / Models). Each
