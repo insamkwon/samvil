@@ -11,6 +11,15 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.optional-dependencies]
+# Fresh-clone contributors: `pip install -e ".[test]"` then `pytest tests/`.
+# pytest-asyncio was previously undeclared — tests failed at collection on
+# a clean venv (found in the v4.30.0 fresh-clone verification).
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
 [project.scripts]
 samvil-mcp = "samvil_mcp.server:main"
 

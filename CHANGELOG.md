@@ -4,6 +4,20 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.30.1 — 2026-06-12
+
+**Fresh-clone test deps (PATCH)**
+
+v4.30.0 release verification included a full fresh-clone simulation
+(GitHub clone → clean venv → suite → hooks → MCP stdio roundtrip).
+Everything passed except one gap: `pytest-asyncio` was never declared,
+so `pytest` failed at collection on a clean venv. Added
+`[project.optional-dependencies] test` — contributors now run
+`pip install -e ".[test]"` and the full suite (1,898 tests) passes
+from a pristine clone (verified on Python 3.14).
+
+---
+
 ## v4.30.0 — 2026-06-12
 
 **Robustness Roadmap — 16-item hardening arc (MINOR)**
