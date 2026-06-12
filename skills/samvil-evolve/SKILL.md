@@ -35,7 +35,7 @@ Score 1–5 from `four_dim_baseline`: **Quality** (qa_verdict + AC counts) · **
 
 Cycle 1 = `config.model_routing.evolve` (default `opus`); cycle 2+ = `evolve_cycle` (default `sonnet`).
 
-1. **Wonder** — spawn `wonder-analyst` (paste `agents/wonder-analyst.md`) with seed + `.samvil/evolve-context.json` + focus dims + prior failures: `mcp__samvil_mcp__load_failures_for_wonder(project_path=".")`. Wonder consumes `.samvil/build.log`, `.samvil/fix-log.md`, and `events.jsonl — structured build/QA event trail` to surface **repeated error signatures**, **repeated error categories**, reverted fixes, and **workaround patterns** that signal a spec issue rather than implementation.
+1. **Wonder** — spawn `wonder-analyst` (prompt: `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["wonder-analyst"]', context_files_json='["project.seed.json",".samvil/evolve-context.json"]', task=<wonder task>)`; `missing_agents` 시 `agents/wonder-analyst.md` 직접 paste 폴백, P8) with seed + `.samvil/evolve-context.json` + focus dims + prior failures: `mcp__samvil_mcp__load_failures_for_wonder(project_path=".")`. Wonder consumes `.samvil/build.log`, `.samvil/fix-log.md`, and `events.jsonl — structured build/QA event trail` to surface **repeated error signatures**, **repeated error categories**, reverted fixes, and **workaround patterns** that signal a spec issue rather than implementation.
 2. **AC splits** — for each leaf in `seed.features[*].acceptance_criteria` (recursively): `mcp__samvil_mcp__suggest_ac_split(description=<leaf>)`. Collect `should_split=true`. Empty → skip mention.
 3. **Reflect** — spawn `reflect-proposer` sequentially with wonder output + split candidates. Both ≤400 words.
 

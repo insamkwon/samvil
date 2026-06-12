@@ -42,7 +42,7 @@ Returns `pass1`, `pass1b`, `should_proceed_to_pass2`, `verdict_reason`, `events[
 
 **Tier branch** per `boot.resume_hint.selected_tier`:
 - **`minimal`** — inline per legacy `## Pass 2: Functional Verification`.
-- **`standard` / `thorough` / `full`** — independent agents per legacy `### Spawn Pass 2 Independent Agent` + `### Spawn Pass 3 Independent Agent` (Agent tool, model `<resume_hint.current_model_qa.model_id or "sonnet">`, paste `agents/qa-functional.md` / `agents/qa-quality.md`, **agents do NOT write files** — main session is sole writer per legacy "Central Synthesis Rules").
+- **`standard` / `thorough` / `full`** — independent agents per legacy `### Spawn Pass 2 Independent Agent` + `### Spawn Pass 3 Independent Agent` (Agent tool, model `<resume_hint.current_model_qa.model_id or "sonnet">`, prompt은 `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["qa-functional"]' or `'["qa-quality"]'`, context_files_json=..., task=<legacy spawn 블록의 Task>)`로 조립 — `missing_agents` 시 `agents/*.md` 직접 paste 폴백(P8), **agents do NOT write files** — main session is sole writer per legacy "Central Synthesis Rules").
 
 For each Pass 2 leaf (legacy `### Pass 2 Tree Setup (v3.0.0+)`):
 1. `tree_json = parse_ac_tree(ac_data_json=<feature.acceptance_criteria>)`.

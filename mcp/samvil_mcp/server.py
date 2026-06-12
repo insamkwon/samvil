@@ -4420,6 +4420,42 @@ async def get_health_tier_summary(
 
 
 @mcp.tool()
+async def compose_agent_prompt(
+    agent_names_json: str,
+    project_root: str = ".",
+    header: str = "You are {name} for SAMVIL.",
+    context_files_json: str = "[]",
+    context_inline: str = "",
+    task: str = "",
+) -> str:
+    """Compose Agent-tool prompts from agents/*.md personas (W3.2).
+
+    MCP-owned single source for agent behavior — replaces the manual
+    "<paste agents/<name>.md>" pattern. Returns {prompts: {name: str},
+    missing_agents: [], missing_context: [], agents_dir}.
+    missing_agents non-empty → caller falls back to direct file paste (P8).
+    """
+    try:
+        from .agent_composer import compose_agent_prompts
+
+        names = json.loads(agent_names_json or "[]")
+        ctx_files = json.loads(context_files_json or "[]")
+        result = compose_agent_prompts(
+            list(names),
+            project_root=project_root,
+            header=header,
+            context_files=list(ctx_files),
+            context_inline=context_inline,
+            task=task,
+        )
+        _log_mcp_health("ok", "compose_agent_prompt")
+        return json.dumps(result.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "compose_agent_prompt", str(e))
+        return json.dumps({"prompts": {}, "missing_agents": [], "error": str(e)})
+
+
+@mcp.tool()
 async def classify_build_failure(
     project_root: str,
     log_path: str = ".samvil/build.log",

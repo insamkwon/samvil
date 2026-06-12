@@ -114,7 +114,13 @@
   save_event 누락(CLAUDE.md 체크리스트 위반) 드리프트를 발견·수정.
   evidence: `skills/samvil-seed/SKILL.md` Inputs 0번, boot contract 14/14
   conform, pre-commit PASS.
-- [ ] **3.2 compose_agent_prompt MCP 도구**
+- [x] **3.2 compose_agent_prompt MCP 도구**
+  ✅ done — evidence: `mcp/samvil_mcp/agent_composer.py` (persona 로딩 +
+  frontmatter 제거 + context 파일 주입 + task 블록, 컨텍스트 24k cap),
+  server.py `compose_agent_prompt` 도구, `<paste agents/*.md>` 4곳 교체
+  (council R1/R2, qa Pass2/3 spawn, evolve wonder-analyst). missing_agents
+  시 직접 paste 폴백 유지 (P8). `mcp/tests/test_agent_composer.py` 6 tests
+  (실제 agents/ 디렉토리 해상도 검증 포함).
   에이전트 프롬프트 조립을 MCP가 소유: `compose_agent_prompt(agent_names,
   context)` 신설 → `agents/*.md` 로딩 + 컨텍스트 주입 + 최종 프롬프트 반환.
   council/qa/evolve 스킬의 `<paste agents/*.md>` 패턴 교체.
