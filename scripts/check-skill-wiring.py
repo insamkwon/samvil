@@ -262,6 +262,9 @@ REVERSE_CHECK_ALLOWLIST: frozenset[str] = frozenset(
         "validate_profiles",
         # Event/loop tools — utility helpers not yet wired to any skill body
         "get_events",
+        # Background jobs (W4.1) — start/status/result wired in samvil-build;
+        # cancel is a user-initiated escape hatch, no scripted call site.
+        "job_cancel",
         # ── Sync tools below were invisible until the W1.4 regex fix
         # (async-only pattern missed plain `def` tools). Categorized here;
         # keep-or-delete is decided in W2.1 via docs/unused-tools-report.md.

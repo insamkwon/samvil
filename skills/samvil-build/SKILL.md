@@ -27,7 +27,7 @@ mcp__samvil_mcp__aggregate_build_phase_a(project_path="~/dev/<seed.name>", run_s
 
 Returns `solution_type`, `framework`, `build_verify {command, log_path, language}`, `recipe_path`, `paths {handoff, fix_log, events, rate_budget, sanity_log}`, `sanity {passed, failures[], warnings[]}`, `resume_hint {completed_features, current_model_build}`, `errors[]`, `notes[]`. On `error`: `⚠ MCP unreachable`, fall back to `SKILL.legacy.md` Phase A boot/recipe lookup (P8, INV-5).
 
-Read `recipe_path`. Build core_experience per legacy `### solution_type: "<type>"` (web-app/game/automation/mobile-app/dashboard). **Build verify (INV-2)**: `cd ~/dev/<seed.name> && <build_verify.command> > <build_verify.log_path> 2>&1; echo "Exit code: $?"`.
+Read `recipe_path`. Build core_experience per legacy `### solution_type: "<type>"` (web-app/game/automation/mobile-app/dashboard). **Build verify (INV-2)**: `cd ~/dev/<seed.name> && <build_verify.command> > <build_verify.log_path> 2>&1; echo "Exit code: $?"`. `config.background_build == true`이면 대신 `mcp__samvil_mcp__job_start(project_root="~/dev/<seed.name>", command="<build_verify.command>", log_path="<build_verify.log_path>")` → `job_status` 폴링(5~10s 간격, 폴링 사이에 다음 leaf 프롬프트 준비) → `job_result`로 exit code 회수.
 
 **Module Boundary pre-check (M1)**: if `.samvil/modules/` exists, run `enforce_boundary(project_root="~/dev/<seed.name>", module_name="<feature>")` for the feature's module. If `violation_count > 0`, surface violations in worker prompt so it avoids cross-module imports.
 

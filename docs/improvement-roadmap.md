@@ -144,12 +144,19 @@
 > ouroboros(Q00) 패턴 흡수. 코드 복사가 아니라 패턴 이식.
 > 전제: Wave 1.1(잠금) + Wave 2.2(체인 폴백) 완료 — 동시 쓰기/무인 실패 증폭 방지.
 
-- [ ] **4.1 Background Job 시스템 (최소 범위)**
+- [x] **4.1 Background Job 시스템 (최소 범위)**
   `start_build` / `job_status` / `job_result` / `cancel_job` 4개 도구 +
   heartbeat 기록. job 상태는 events 기반 영속(QUEUED→RUNNING→
   COMPLETED/FAILED/CANCELLED). zombie 감지는 v2로 보류.
   AC: 빌드를 백그라운드로 시작 → 다른 입력 가능 → 폴링으로 결과 수신,
   E2E 직접 검증.
+  ✅ done — evidence: `mcp/samvil_mcp/background_jobs.py` (file-is-SSOT job
+  registry `.samvil/jobs/<id>.json`, watcher thread heartbeat 5s, process
+  group kill, timeout, **orphan 감지는 v1에 포함**: heartbeat stale + pid
+  dead → interrupted), server.py `job_start/job_status/job_result/job_cancel`
+  4도구, samvil-build INV-2에 opt-in wiring (`config.background_build`).
+  `mcp/tests/test_background_jobs.py` 8 tests + 도구 레이어 E2E (시작→
+  비차단 확인→폴링→completed/exit 0 회수) 직접 검증 완료.
 - [ ] **4.2 MCP 소유 Ralph Loop 컨트롤러**
   루프 제어를 LLM에서 MCP로: max_iterations, oscillation window(3),
   regression window(2)를 결정론적으로 판정하는 도구 신설.
