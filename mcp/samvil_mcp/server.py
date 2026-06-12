@@ -4420,6 +4420,31 @@ async def get_health_tier_summary(
 
 
 @mcp.tool()
+async def measure_seed_drift(
+    original_seed_json: str,
+    current_seed_json: str,
+) -> str:
+    """Measure direction drift between two seed versions (W5.2).
+
+    3-component lexical drift: goal(0.5) + constraint(0.3) + ontology(0.2).
+    Returns {goal_drift, constraint_drift, ontology_drift, total_drift,
+    verdict: ok|warning|excessive, next_action}. Catches 'high-quality but
+    wrong-direction' evolution the 5 evolve_checks cannot see.
+    """
+    try:
+        from .drift import measure_drift
+
+        result = measure_drift(
+            json.loads(original_seed_json), json.loads(current_seed_json)
+        )
+        _log_mcp_health("ok", "measure_seed_drift")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "measure_seed_drift", str(e))
+        return json.dumps({"verdict": "error", "error": str(e)})
+
+
+@mcp.tool()
 async def job_start(
     project_root: str,
     command: str,

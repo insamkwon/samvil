@@ -65,7 +65,9 @@ Render diff block (Wonder findings · Proposed changes · Convergence trend) and
 ```
 mcp__samvil_mcp__check_convergence_gates(eval_result_json=<curr>, history_json=<prior>)
 mcp__samvil_mcp__check_convergence(seed_history='<JSON array>')   # legacy similarity
+mcp__samvil_mcp__measure_seed_drift(original_seed_json='<v1 seed>', current_seed_json='<new seed>')   # W5.2 방향성
 ```
+Drift `verdict=excessive` → 수렴 여부와 무관하게 일시정지 + "원래 목표에서 벗어났습니다 — 의도한 방향인가요?" 확인 (P2). `warning` → diff 블록에 drift 요약 표시.
 
 Gates: **eval** (score≥0.7 + final_approved) · **per_ac** (all PASS) · **regression** (no PASS→FAIL across cycles, P5) · **evolution** (≥1 mutation, no stagnant loop) · **validation** (not skipped/error). Any gate fails → render `verdict.blocked_by` + `verdict.reasons` + 4-choice menu (rollback / re-design failed AC / force converge [discouraged] / manual). **Anti-pattern: Blind convergence** — never override without user input.
 
