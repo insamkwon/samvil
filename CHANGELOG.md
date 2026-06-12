@@ -4,6 +4,22 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.30.2 — 2026-06-13
+
+**Retro metrics DB fallback (PATCH, dogfood finding #10)**
+
+The v4.30 full-pipeline dogfood (click-counter, headless, QA PASS)
+exposed a measurement bug: `aggregate_retro_metrics` read
+`.samvil/events.jsonl` while `save_event` persisted to the SQLite
+store, so a healthy run reported `qa_pass_rate=0.0` and all stages
+skipped. The aggregator now (1) replays the session's events from
+`~/.samvil/samvil.db` when the file is empty, and (2) derives
+qa_pass_rate from `ac_verdict` events (latest verdict per leaf) when
+qa-results.json / metrics.json never materialized. Both fallbacks are
+read-only, best-effort, and annotated in `errors[]`.
+
+---
+
 ## v4.30.1 — 2026-06-12
 
 **Fresh-clone test deps (PATCH)**

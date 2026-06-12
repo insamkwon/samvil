@@ -599,6 +599,70 @@ def summarize_mcp_health(path: Path) -> dict[str, Any]:
     }
 
 
+def _events_from_db(session_id: str) -> list[dict[str, Any]]:
+    """DB fallback for events (#10, v4.30 dogfood finding).
+
+    save_event persists to ~/.samvil/samvil.db; the .samvil/events.jsonl
+    dual-write is not guaranteed on every host path. When the file is
+    empty, replay the session's events from the store so flow compliance
+    and agent stats don't report 'all stages skipped' on a healthy run.
+    Read-only + best-effort: any failure returns [].
+    """
+    if not session_id:
+        return []
+    import sqlite3
+
+    db_path = Path.home() / ".samvil" / "samvil.db"
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        return []
+    try:
+        rows = con.execute(
+            "SELECT event_type, stage, data, timestamp FROM events "
+            "WHERE session_id = ? ORDER BY timestamp ASC",
+            (session_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        con.close()
+
+    out: list[dict[str, Any]] = []
+    for event_type, stage, data, ts in rows:
+        try:
+            parsed = json.loads(data or "{}")
+        except (json.JSONDecodeError, TypeError):
+            parsed = {}
+        out.append(
+            {
+                "event_type": event_type,
+                "stage": stage,
+                "data": parsed,
+                "timestamp": ts,
+            }
+        )
+    return out
+
+
+def _qa_pass_rate_from_events(events: list[dict[str, Any]]) -> float | None:
+    """Derive QA pass rate from ac_verdict events when qa-results.json /
+    metrics.json never materialized (#10). Latest verdict per leaf wins."""
+    latest: dict[str, str] = {}
+    for ev in events:
+        if ev.get("event_type") != "ac_verdict":
+            continue
+        data = ev.get("data") or {}
+        leaf = str(data.get("leaf_id") or data.get("ac_id") or "")
+        status = str(data.get("status") or data.get("verdict") or "").upper()
+        if leaf and status:
+            latest[leaf] = status
+    if not latest:
+        return None
+    passed = sum(1 for s in latest.values() if s == "PASS")
+    return round(passed / len(latest), 3)
+
+
 # ── Top-level aggregator ───────────────────────────────────────────────
 
 
@@ -644,11 +708,27 @@ def aggregate_retro_metrics(
     state = _read_json(proj / "project.state.json")
     metrics = _read_json(proj / ".samvil" / "metrics.json")
     events = _read_jsonl(proj / ".samvil" / "events.jsonl")
+    if not events:
+        # #10: file empty but the store may hold the full trail (INV-5).
+        events = _events_from_db(str(state.get("session_id") or ""))
+        if events:
+            errors.append(
+                "events.jsonl empty — replayed "
+                f"{len(events)} events from the session store (#10 fallback)"
+            )
     interview_summary = proj / "interview-summary.md"
     # v3-003: also load qa-results.json as a file-based fallback source
     qa_results = _read_json(proj / ".samvil" / "qa-results.json")
 
     rm = extract_metrics(state, metrics, seed, interview_summary, qa_results=qa_results or None)
+
+    if rm.qa_pass_rate == 0.0:
+        derived = _qa_pass_rate_from_events(events)
+        if derived is not None:
+            rm.qa_pass_rate = derived
+            errors.append(
+                "qa_pass_rate derived from ac_verdict events (#10 fallback)"
+            )
 
     # Resolve harness-feedback.log location:
     # 1. explicit plugin_root arg
