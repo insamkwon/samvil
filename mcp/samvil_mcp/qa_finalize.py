@@ -64,11 +64,7 @@ QA_FINALIZE_SCHEMA_VERSION = "1.0"
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
-def _read_json_safe(path: Path) -> dict[str, Any] | None:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+from .utils import read_json_safe as _read_json_safe  # noqa: E402
 
 
 def _resolve_tier(state: dict[str, Any], config: dict[str, Any]) -> str:

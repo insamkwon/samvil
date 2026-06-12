@@ -36,10 +36,14 @@
   exit 상태를 `.samvil/mcp-health.jsonl`에 기록하고, samvil 오케스트레이터
   부트 헬스 테이블에 hook 상태 1줄 추가.
   AC: tmp dir에서 수동 fire test로 기록 확인. hook은 여전히 exit 0 유지 (P8).
-- [ ] **1.3 유틸 중복 제거**
+- [x] **1.3 유틸 중복 제거**
   `_read_json_safe()`가 `build_phase_a.py`와 `build_phase_z.py`에 중복.
   `mcp/samvil_mcp/utils.py`로 추출 후 양쪽 import.
   AC: pytest green, 동작 동일.
+  ✅ done — 실제 중복은 6개 모듈(2 변형)이었음: build_phase_a/z, qa_boot,
+  qa_finalize (`read_json_safe`), resume, orchestrator (`read_json_or_empty`).
+  evidence: `mcp/samvil_mcp/utils.py:14`, `mcp/tests/test_utils.py` 4 tests,
+  전체 suite 1858 passed.
 - [ ] **1.4 미사용 도구 역방향 감사 (리포트만)**
   `scripts/check-skill-wiring.py` 확장: server.py의 `@mcp.tool()` 이름 중
   어떤 `skills/*/SKILL.md`(+ `.legacy.md`)에도 참조되지 않는 것 목록 출력.

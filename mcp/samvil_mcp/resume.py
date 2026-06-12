@@ -28,15 +28,7 @@ _STAGE_NEXT_SKILL: dict[str, str] = {
 }
 
 
-def _read_json_safe(path: Path) -> dict[str, Any]:
-    try:
-        if not path.exists():
-            return {}
-        with path.open("r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+from .utils import read_json_or_empty as _read_json_safe  # noqa: E402
 
 
 def _minutes_since(ts_iso: str | None) -> int | None:
