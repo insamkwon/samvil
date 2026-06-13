@@ -180,12 +180,26 @@ def resume_session(project_root: str) -> dict[str, Any]:
     # .samvil/next-skill.json when a stage completes; the stage-start hook
     # clears it when the chain actually continues. A surviving marker means
     # the chain invoke never happened — its next_skill is the recovery point.
+    #
+    # v4.30.4 guard: the hook fires when the Skill tool *returns* (i.e. at
+    # stage start), so the marker exists while the stage is still running.
+    # Trust it only when the state shows the marker's stage actually
+    # completed — otherwise a mid-stage crash would skip the unfinished
+    # stage (e.g. half-built project sent straight to QA).
     from .chain_markers import read_chain_marker
 
     chain_marker = read_chain_marker(str(root))
     marker_next = ""
     if chain_marker and chain_marker.get("next_skill"):
-        marker_next = str(chain_marker["next_skill"])
+        marker_stage = str(chain_marker.get("from_stage", "")).replace("samvil-", "")
+        completed = [
+            str(s).replace("samvil-", "")
+            for s in (state.get("completed_stages") or [])
+        ]
+        if marker_stage and (
+            marker_stage in completed or marker_stage != current_stage
+        ):
+            marker_next = str(chain_marker["next_skill"])
 
     seed = _read_json_safe(root / "project.seed.json")
     if not seed:

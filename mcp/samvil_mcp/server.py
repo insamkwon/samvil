@@ -4576,8 +4576,19 @@ async def health_check() -> str:
         health_path = Path.home() / ".samvil" / "mcp-health.jsonl"
         if health_path.exists():
             cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-            # Tail only — the file grows unbounded.
-            lines = health_path.read_text(encoding="utf-8").splitlines()[-500:]
+            # Byte-tail read — the file grows ~10k lines/day across all
+            # projects; a fixed 500-line tail covered only ~3.5h of a
+            # busy day (v4.30.4 review finding). 4 MB ≳ 2 days of traffic
+            # without reading the whole multi-MB file.
+            _TAIL_BYTES = 4 * 1024 * 1024
+            with health_path.open("rb") as fh:
+                fh.seek(0, 2)
+                size = fh.tell()
+                fh.seek(max(0, size - _TAIL_BYTES))
+                tail = fh.read().decode("utf-8", errors="ignore")
+            lines = tail.splitlines()
+            if size > _TAIL_BYTES and lines:
+                lines = lines[1:]  # drop the partial first line
             for line in lines:
                 try:
                     entry = json.loads(line)

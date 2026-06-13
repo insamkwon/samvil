@@ -20,10 +20,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# agents/ lives at the plugin root: <root>/agents, this file at
-# <root>/mcp/samvil_mcp/agent_composer.py → parents[2] == <root>.
-_PLUGIN_ROOT = Path(__file__).resolve().parents[2]
-_AGENTS_DIR = _PLUGIN_ROOT / "agents"
+def _resolve_agents_dir() -> Path:
+    """Locate the packaged agents/ directory.
+
+    Source-tree layout: <root>/mcp/samvil_mcp/agent_composer.py →
+    parents[2] == <root>. But production runs install samvil_mcp into a
+    uvx venv (site-packages), where parents[2] is lib/pythonX.Y — so
+    prefer CLAUDE_PLUGIN_ROOT (set by the Claude Code plugin runtime)
+    and fall back to the source-tree guess (v4.30.4 review finding).
+    """
+    import os as _os
+
+    env_root = _os.environ.get("CLAUDE_PLUGIN_ROOT", "")
+    if env_root:
+        cand = Path(env_root) / "agents"
+        if cand.is_dir():
+            return cand
+    return Path(__file__).resolve().parents[2] / "agents"
+
+
+_AGENTS_DIR = _resolve_agents_dir()
 
 _MAX_CONTEXT_CHARS = 24_000  # per context file, defensive cap
 
@@ -84,7 +100,9 @@ def compose_agent_prompts(
     """
     result = ComposedPrompts()
     root = Path(project_root)
-    adir = Path(agents_dir) if agents_dir else _AGENTS_DIR
+    # Resolve at call time, not import time — CLAUDE_PLUGIN_ROOT may be
+    # set after module import in some host startup orders.
+    adir = Path(agents_dir) if agents_dir else _resolve_agents_dir()
     result.agents_dir = str(adir)
 
     context_blocks: list[str] = []

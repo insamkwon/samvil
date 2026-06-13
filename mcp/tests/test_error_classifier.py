@@ -45,9 +45,22 @@ def test_empty_log_is_permanent() -> None:
     assert classify_failure("").failure_class == "permanent"
 
 
-def test_backoff_scales_with_attempt_and_caps() -> None:
-    assert classify_failure("ETIMEDOUT", attempt=2).backoff_seconds == 60
-    assert classify_failure("ETIMEDOUT", attempt=99).backoff_seconds == MAX_BACKOFF_SECONDS
+def test_attempt_2_plus_consumes_circuit_breaker() -> None:
+    """One free retry only (v4.30.4): persistent transients escalate."""
+    first = classify_failure("ETIMEDOUT", attempt=1)
+    assert first.counts_against_circuit_breaker is False
+    retry = classify_failure("ETIMEDOUT", attempt=2)
+    assert retry.counts_against_circuit_breaker is True
+    assert retry.backoff_seconds == 0
+
+
+def test_test_runner_timeout_is_permanent() -> None:
+    """Jest/Playwright test timeouts are code defects (v4.30.4)."""
+    for log in (
+        "Test timeout of 30000ms exceeded.",
+        "thrown: Exceeded timeout of 5000 ms for a test",
+    ):
+        assert classify_failure(log).failure_class == "permanent", log
 
 
 def test_transient_examples() -> None:

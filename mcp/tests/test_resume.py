@@ -294,7 +294,13 @@ def test_resume_prefers_surviving_chain_marker(tmp_path: Path) -> None:
     from samvil_mcp.resume import resume_session
 
     (tmp_path / "project.state.json").write_text(
-        json.dumps({"current_stage": "qa", "last_progress_at": "2026-06-12T00:00:00Z"})
+        json.dumps(
+            {
+                "current_stage": "qa",
+                "completed_stages": ["build", "qa"],
+                "last_progress_at": "2026-06-12T00:00:00Z",
+            }
+        )
     )
     samvil = tmp_path / ".samvil"
     samvil.mkdir()
@@ -311,6 +317,25 @@ def test_resume_prefers_surviving_chain_marker(tmp_path: Path) -> None:
     assert result["found"] is True
     assert result["next_skill"] == "samvil-retro"
     assert result["chain_marker"]["from_stage"] == "samvil-qa"
+
+
+def test_mid_stage_crash_reenters_instead_of_skipping(tmp_path: Path) -> None:
+    """Marker exists (written at stage start) but the stage never
+    completed - resume must re-enter the stage, not jump past it
+    (v4.30.4 guard)."""
+    from samvil_mcp.resume import resume_session
+
+    (tmp_path / "project.state.json").write_text(
+        json.dumps({"current_stage": "build", "completed_stages": ["seed"]})
+    )
+    samvil = tmp_path / ".samvil"
+    samvil.mkdir()
+    (samvil / "next-skill.json").write_text(
+        json.dumps({"next_skill": "samvil-qa", "from_stage": "samvil-build"})
+    )
+    result = resume_session(str(tmp_path))
+    assert result["next_skill"] == "samvil-build"  # re-enter, don't skip
+    assert result["chain_marker"] is not None  # still surfaced as info
 
 
 def test_resume_without_marker_uses_stage_mapping(tmp_path: Path) -> None:

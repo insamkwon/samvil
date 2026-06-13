@@ -79,7 +79,12 @@ case "$CHAIN_STATE" in
     samvil_contract_log_health "chain" "ok" "$CHAIN_STATE"
     ;;
   diverged=*)
-    samvil_contract_log_health "chain" "fail" "$CHAIN_STATE"
+    # "warn", not "fail": legitimate non-linear transitions (QA REVISE →
+    # build re-entry, evolve cycles, tier-based stage skips) all land
+    # here — counting them as failures made hook_failures_24h cry wolf
+    # on healthy runs (v4.30.4 review finding). A real chain break shows
+    # up as a SURVIVING marker, not as divergence.
+    samvil_contract_log_health "chain" "warn" "$CHAIN_STATE"
     echo "[samvil-contract] WARN: chain $CHAIN_STATE" >&2
     ;;
 esac

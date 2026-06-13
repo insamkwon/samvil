@@ -48,6 +48,9 @@ _PERMANENT_OVERRIDES: tuple[tuple[str, str], ...] = (
     ("type_error", r"\btypeerror\b"),
     ("reference_error", r"referenceerror"),
     ("compile_failed", r"failed to compile"),
+    # Test-runner timeouts are code defects, not infrastructure — they
+    # match the generic timeout pattern otherwise (v4.30.4 review finding).
+    ("test_timeout", r"test timeout|timeout of \d+ ?ms exceeded|exceeded timeout of"),
 )
 
 DEFAULT_BACKOFF_SECONDS = 30
@@ -90,6 +93,22 @@ def classify_failure(log_text: str, attempt: int = 1) -> FailureVerdict:
         backoff = min(
             DEFAULT_BACKOFF_SECONDS * max(1, attempt), MAX_BACKOFF_SECONDS
         )
+        # One free retry only — enforced here, not just in SKILL prose
+        # (v4.30.4 review finding): a persistently flaky environment must
+        # not loop outside the circuit breaker forever.
+        if attempt >= 2:
+            return FailureVerdict(
+                failure_class="transient",
+                matched_transient=matched_transient,
+                matched_permanent=[],
+                backoff_seconds=0,
+                counts_against_circuit_breaker=True,
+                recommendation=(
+                    "Transient signature persisted after a free retry — "
+                    "treat as permanent: investigate the environment or "
+                    "escalate via the normal circuit-breaker path."
+                ),
+            )
         return FailureVerdict(
             failure_class="transient",
             matched_transient=matched_transient,

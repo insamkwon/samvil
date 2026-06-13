@@ -369,11 +369,23 @@ def _extract_issue_ids(synthesis: dict[str, Any]) -> set[str]:
     ))
 
 
+def _row_issue_ids(row: dict[str, Any]) -> set[str] | None:
+    """Issue ids from a qa_history row. LLM-written state uses
+    `issue_ids` per SKILL.md, but `issues` appears in the wild and
+    qa_finalize._detect_blocked already accepts it — the loop gate must
+    see the same data (v4.30.4 review finding)."""
+    for key in ("issue_ids", "issues"):
+        value = row.get(key)
+        if isinstance(value, list):
+            return {str(item) for item in value if str(item)}
+    return None
+
+
 def _previous_issue_ids(history: list[dict[str, Any]]) -> set[str] | None:
     for row in reversed(history):
-        issue_ids = row.get("issue_ids")
-        if isinstance(issue_ids, list):
-            return {str(item) for item in issue_ids if str(item)}
+        ids = _row_issue_ids(row)
+        if ids is not None:
+            return ids
     return None
 
 
@@ -382,12 +394,18 @@ def _oscillating(
 ) -> bool:
     """True when `current` matches a non-adjacent issue set within the
     last `window` history rows (A→B→A cycling). The adjacent row is
-    handled by the identical-issues check, so it is excluded here."""
-    recent = [row for row in history if isinstance(row.get("issue_ids"), list)][-window:]
-    if len(recent) < 2:
+    handled by the identical-issues check, so it is excluded here.
+
+    The window is taken over the RAW history (last `window` rows), not
+    over rows-that-happen-to-have-ids — filtering first stretched the
+    window to ancient iterations and produced premature blocks."""
+    recent = history[-window:]
+    rows_with_ids = [
+        ids for ids in (_row_issue_ids(row) for row in recent) if ids is not None
+    ]
+    if len(rows_with_ids) < 2:
         return False
-    for row in recent[:-1]:  # exclude the adjacent (last) row
-        past = {str(item) for item in row["issue_ids"] if str(item)}
+    for past in rows_with_ids[:-1]:  # exclude the adjacent (last) row
         if past and past == current:
             return True
     return False

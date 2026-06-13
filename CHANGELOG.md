@@ -4,6 +4,50 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.30.4 — 2026-06-13
+
+**Adversarial review fixes — 9 findings, 4 proven by repro (PATCH)**
+
+Two independent review agents attacked the v4.30 diff with constructed
+failure scenarios; everything they proved is fixed and pinned by
+regression tests (mcp/tests/test_v4304_review_fixes.py).
+
+- background_jobs: all record mutations now read-modify-write inside one
+  flock (`_mutate_job`) — the unlocked heartbeat could resurrect a
+  CANCELLED record back to RUNNING (proven lost-update race). The
+  spawned shell writes a `.exit` sidecar so a job finishing after an MCP
+  restart finalizes COMPLETED/FAILED with its real exit code instead of
+  INTERRUPTED (proven). cancel_job reconciles stale records instead of
+  SIGTERMing a possibly-reused pid; SIGTERM escalates to SIGKILL after
+  5s; project_root is expanduser'd (the SKILL-documented `~/dev/<name>`
+  call always errored); default log path is per-job (shared default
+  interleaved two jobs' output — proven).
+- resume: a surviving chain marker is trusted as the recovery point only
+  when its stage is in completed_stages — the marker is written at stage
+  start, so a mid-stage crash now re-enters the stage instead of
+  skipping it (e.g. half-built project sent to QA).
+- agent_composer: agents/ resolution prefers CLAUDE_PLUGIN_ROOT, fixing
+  installed (uvx/site-packages) layouts where parents[2] pointed into
+  the venv and every persona fell back to legacy paste.
+- qa_synthesis: history rows using `issues` (accepted by
+  qa_finalize._detect_blocked) are now seen by the loop gate too —
+  identical-issue Ralph loops could previously keep burning iterations
+  (proven). Oscillation window measured over raw rows, not
+  rows-with-ids (premature blocks from ancient issue sets).
+- health_check: hook-failure window reads a 4 MB byte-tail — the fixed
+  500-line tail covered ~3.5h of a real busy day, not 24h (proven on
+  the live 152k-line file).
+- error_classifier: test-runner timeouts classified permanent; the free
+  transient retry is capped at one by the module itself (attempt ≥ 2
+  consumes the circuit breaker).
+- drift: AC dicts using `criterion` and nested `children` now feed
+  ontology_drift (tree rewrites previously scored 0.0 drift).
+- hooks: chain divergence logs as `warn`, not `fail` — QA REVISE
+  re-entry, evolve cycles, and tier skips are legitimate non-linear
+  transitions and were polluting hook_failures_24h.
+
+---
+
 ## v4.30.3 — 2026-06-13
 
 **Docs housekeeping after the v4.30 verification campaign (PATCH)**

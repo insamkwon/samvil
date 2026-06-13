@@ -62,6 +62,24 @@ def _constraints(seed: dict[str, Any]) -> set[str]:
     return out
 
 
+def _ac_tokens(ac: Any) -> set[str]:
+    """Tokens from one AC node — handles string ACs, dict ACs in their
+    schema variants (description / text / criterion), and AC-tree nodes
+    with nested children (v4.30.4 review finding: criterion + children
+    were silently skipped, zeroing ontology_drift for tree rewrites)."""
+    out: set[str] = set()
+    if isinstance(ac, str):
+        return _tokens(ac)
+    if not isinstance(ac, dict):
+        return out
+    out |= _tokens(
+        str(ac.get("description") or ac.get("text") or ac.get("criterion") or "")
+    )
+    for child in ac.get("children") or []:
+        out |= _ac_tokens(child)
+    return out
+
+
 def _ontology(seed: dict[str, Any]) -> set[str]:
     out: set[str] = set()
     for feature in seed.get("features") or []:
@@ -70,10 +88,7 @@ def _ontology(seed: dict[str, Any]) -> set[str]:
         out |= _tokens(str(feature.get("name") or ""))
         acs = feature.get("acceptance_criteria") or []
         for ac in acs if isinstance(acs, list) else []:
-            if isinstance(ac, dict):
-                out |= _tokens(str(ac.get("description") or ac.get("text") or ""))
-            else:
-                out |= _tokens(str(ac))
+            out |= _ac_tokens(ac)
     return out
 
 

@@ -5,15 +5,21 @@ file-is-SSOT philosophy (INV-1): every job is a JSON file under
 `<project_root>/.samvil/jobs/<job_id>.json`, so job state survives MCP
 server restarts and is inspectable without any tool.
 
-Lifecycle: QUEUED → RUNNING → COMPLETED | FAILED | CANCELLED | INTERRUPTED
+Lifecycle: RUNNING → COMPLETED | FAILED | CANCELLED | INTERRUPTED
 
-- start_job() spawns the command in its own session (process group) with
-  stdout/stderr appended to a log file, then returns immediately.
-- A watcher thread finalizes the job file when the process exits
-  (heartbeat: the thread also bumps `last_heartbeat_at` while waiting).
-- If the MCP server died mid-job, the next job_status() call detects the
-  orphan via pid-liveness and marks it INTERRUPTED (zombie cleanup v1;
-  full owner-process tracking is deferred).
+v4.30.4 hardening (adversarial review findings):
+- All job-record mutations are read-modify-write **inside one flock**
+  (`_mutate_job`) — the unlocked heartbeat used to resurrect a
+  CANCELLED record back to RUNNING (lost-update race, proven by repro).
+- The spawned shell writes its own exit code to a `.exit` sidecar, so a
+  job that finishes after the MCP server died is finalized correctly on
+  the next status read instead of being misreported as INTERRUPTED.
+- cancel_job no longer SIGTERMs a recorded pid blindly: a stale job is
+  finalized from the sidecar / marked interrupted, never killed (pid
+  reuse protection).
+- SIGTERM escalates to SIGKILL after a grace period.
+- Default log path is per-job (`.samvil/jobs/<id>.log`) — a shared
+  default interleaved two jobs' output and poisoned log_tail diagnosis.
 
 Scale assumption: solo-dev — a handful of concurrent jobs, not a queue.
 """
@@ -28,7 +34,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .claim_ledger import _locked  # same advisory-lock helper (W1.1)
 
@@ -45,6 +51,7 @@ _TERMINAL = {STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELLED, STATUS_INTERRUPT
 
 DEFAULT_TIMEOUT_SECONDS = 1800
 _HEARTBEAT_INTERVAL = 5.0
+_KILL_GRACE_SECONDS = 5.0
 _LOG_TAIL_CHARS = 4000
 
 
@@ -64,17 +71,48 @@ def _job_path(project_root: str | Path, job_id: str) -> Path:
     return _jobs_dir(project_root) / f"{safe}.json"
 
 
-def _write_job(path: Path, data: dict[str, Any]) -> None:
-    with _locked(path):
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
-        tmp.replace(path)
+def _exit_path(job_path: Path) -> Path:
+    return job_path.with_suffix(".exit")
+
+
+def _write_job_unlocked(path: Path, data: dict[str, Any]) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    tmp.replace(path)
 
 
 def _read_job(path: Path) -> dict[str, Any] | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _mutate_job(
+    path: Path, fn: Callable[[dict[str, Any]], dict[str, Any] | None]
+) -> dict[str, Any] | None:
+    """Atomically read-modify-write the job record under the flock.
+
+    `fn` receives the current record and returns the updated record, or
+    None to abort the mutation (e.g. record already terminal). Returns
+    whatever was written (or the unchanged record on abort).
+    """
+    with _locked(path):
+        data = _read_job(path)
+        if data is None:
+            return None
+        updated = fn(data)
+        if updated is None:
+            return data
+        _write_job_unlocked(path, updated)
+        return updated
+
+
+def _read_exit_code(job_path: Path) -> int | None:
+    try:
+        raw = _exit_path(job_path).read_text(encoding="utf-8").strip()
+        return int(raw)
+    except (OSError, ValueError):
         return None
 
 
@@ -90,12 +128,12 @@ def _pid_alive(pid: int) -> bool:
         return True
 
 
-def _log_tail(project_root: str | Path, log_path: str) -> str:
+def _log_tail(project_root: str | Path, log_path: str, limit: int = _LOG_TAIL_CHARS) -> str:
     try:
         text = (Path(project_root) / log_path).read_text(
             encoding="utf-8", errors="ignore"
         )
-        return text[-_LOG_TAIL_CHARS:]
+        return text[-limit:]
     except OSError:
         return ""
 
@@ -104,30 +142,43 @@ def start_job(
     project_root: str,
     command: str,
     *,
-    log_path: str = ".samvil/job.log",
+    log_path: str = "",
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     kind: str = "build",
 ) -> dict[str, Any]:
     """Spawn `command` (shell) in the project root; return immediately.
 
     The command runs in its own session so cancel can kill the whole
-    process group. stdout/stderr append to `log_path` (INV-2).
+    process group. stdout/stderr append to `log_path` (INV-2); empty
+    log_path defaults to a per-job file under .samvil/jobs/.
+    The wrapped shell records its exit code to a `.exit` sidecar so the
+    outcome survives an MCP server restart.
     """
-    root = Path(project_root).resolve()
+    root = Path(project_root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError(f"project_root is not a directory: {project_root}")
     timeout_seconds = max(10, min(int(timeout_seconds), 7200))
 
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     path = _job_path(root, job_id)
+    if not log_path:
+        log_path = f"{_SAMVIL_DIR}/{_JOBS_DIR}/{job_id}.log"
     log_file = root / log_path
     log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Exit-code sidecar: written by the shell itself, not by us — the
+    # only finalization source that survives MCP death.
+    exit_file = _exit_path(path)
+    wrapped = (
+        f"( {command}\n); __rc=$?; "
+        f"printf '%s' \"$__rc\" > {json.dumps(str(exit_file))}; exit $__rc"
+    )
 
     with log_file.open("a", encoding="utf-8") as logf:
         logf.write(f"\n── [{job_id}] $ {command}\n")
         logf.flush()
         proc = subprocess.Popen(
-            command,
+            wrapped,
             shell=True,
             cwd=str(root),
             stdout=logf,
@@ -149,7 +200,8 @@ def start_job(
         "finished_at": None,
         "reason": "",
     }
-    _write_job(path, record)
+    with _locked(path):
+        _write_job_unlocked(path, record)
 
     watcher = threading.Thread(
         target=_watch,
@@ -172,13 +224,17 @@ def _watch(path: Path, proc: subprocess.Popen, timeout_seconds: int) -> None:
             _kill_group(proc.pid)
             _finalize(path, exit_code=None, status=STATUS_FAILED, reason="timeout")
             return
-        data = _read_job(path)
-        if data is not None:
-            if data.get("status") == STATUS_CANCELLED:
-                _kill_group(proc.pid)
-                return  # cancel() already finalized the record
+
+        def _heartbeat(data: dict[str, Any]) -> dict[str, Any] | None:
+            if data.get("status") in _TERMINAL:
+                return None  # cancel (or anything terminal) wins — never resurrect
             data["last_heartbeat_at"] = _now()
-            _write_job(path, data)
+            return data
+
+        current = _mutate_job(path, _heartbeat)
+        if current is not None and current.get("status") == STATUS_CANCELLED:
+            _kill_group(proc.pid)
+            return  # cancel_job already finalized the record
         time.sleep(_HEARTBEAT_INTERVAL)
 
 
@@ -188,49 +244,95 @@ def _finalize(
     status: str | None = None,
     reason: str = "",
 ) -> None:
-    data = _read_job(path) or {}
-    if data.get("status") in _TERMINAL:
-        return
-    if status is None:
-        status = STATUS_COMPLETED if exit_code == 0 else STATUS_FAILED
-    data.update(
-        status=status,
-        exit_code=exit_code,
-        finished_at=_now(),
-        reason=reason or data.get("reason", ""),
-    )
-    _write_job(path, data)
+    def _apply(data: dict[str, Any]) -> dict[str, Any] | None:
+        if data.get("status") in _TERMINAL:
+            return None
+        final = status or (STATUS_COMPLETED if exit_code == 0 else STATUS_FAILED)
+        data.update(
+            status=final,
+            exit_code=exit_code,
+            finished_at=_now(),
+            reason=reason or data.get("reason", ""),
+        )
+        return data
+
+    _mutate_job(path, _apply)
 
 
 def _kill_group(pid: int) -> None:
+    """SIGTERM the process group; escalate to SIGKILL after a grace
+    period if the leader is still alive."""
     try:
-        os.killpg(os.getpgid(pid), signal.SIGTERM)
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, PermissionError, OSError):
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        return
+    deadline = _now() + _KILL_GRACE_SECONDS
+    while _now() < deadline:
+        if not _pid_alive(pid):
+            return
+        time.sleep(0.2)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError, OSError):
         pass
 
 
+def _reconcile_stale(path: Path, data: dict[str, Any]) -> dict[str, Any]:
+    """A record stuck in RUNNING whose watcher is gone: finalize from the
+    exit sidecar when the command actually finished, else mark
+    interrupted. Returns the (possibly updated) record."""
+    stale = _now() - float(data.get("last_heartbeat_at", 0)) > 3 * _HEARTBEAT_INTERVAL
+    if not stale:
+        return data
+    sidecar = _read_exit_code(path)
+    if sidecar is not None:
+        # Command completed on its own after the server died — real outcome.
+        def _apply(d: dict[str, Any]) -> dict[str, Any] | None:
+            if d.get("status") in _TERMINAL:
+                return None
+            d.update(
+                status=STATUS_COMPLETED if sidecar == 0 else STATUS_FAILED,
+                exit_code=sidecar,
+                finished_at=_now(),
+                reason="finalized from exit sidecar (owner process died mid-run)",
+            )
+            return d
+
+        return _mutate_job(path, _apply) or data
+    if not _pid_alive(int(data.get("pid", -1))):
+        def _apply(d: dict[str, Any]) -> dict[str, Any] | None:
+            if d.get("status") in _TERMINAL:
+                return None
+            d.update(
+                status=STATUS_INTERRUPTED,
+                finished_at=_now(),
+                reason="owner process died and job process is gone (orphan)",
+            )
+            return d
+
+        return _mutate_job(path, _apply) or data
+    return data  # process still running headless — leave it be
+
+
 def job_status(project_root: str, job_id: str) -> dict[str, Any]:
-    """Current job snapshot + log tail. Detects orphaned jobs."""
+    """Current job snapshot + log tail. Reconciles orphaned jobs."""
     path = _job_path(project_root, job_id)
     data = _read_job(path)
     if data is None:
         return {"job_id": job_id, "status": "not_found"}
 
-    # Orphan detection: record says running, but the watcher (and maybe
-    # the whole MCP server) is gone and so is the process.
     if data.get("status") == STATUS_RUNNING:
-        stale = _now() - float(data.get("last_heartbeat_at", 0)) > 3 * _HEARTBEAT_INTERVAL
-        if stale and not _pid_alive(int(data.get("pid", -1))):
-            data["status"] = STATUS_INTERRUPTED
-            data["reason"] = "owner process died (orphan detected on status read)"
-            data["finished_at"] = _now()
-            _write_job(path, data)
+        data = _reconcile_stale(path, data)
 
     out = dict(data)
     out["elapsed_seconds"] = round(
         (data.get("finished_at") or _now()) - float(data.get("started_at", _now())), 1
     )
-    out["log_tail"] = _log_tail(project_root, str(data.get("log_path", "")))[-800:]
+    out["log_tail"] = _log_tail(project_root, str(data.get("log_path", "")), 800)
     return out
 
 
@@ -240,9 +342,7 @@ def job_result(project_root: str, job_id: str) -> dict[str, Any]:
     if snap.get("status") == STATUS_RUNNING:
         return {"job_id": job_id, "status": STATUS_RUNNING, "done": False}
     snap["done"] = snap.get("status") in _TERMINAL
-    snap["log_tail"] = _log_tail(
-        project_root, str(snap.get("log_path", ""))
-    )
+    snap["log_tail"] = _log_tail(project_root, str(snap.get("log_path", "")))
     return snap
 
 
@@ -253,12 +353,31 @@ def cancel_job(project_root: str, job_id: str) -> dict[str, Any]:
         return {"job_id": job_id, "status": "not_found"}
     if data.get("status") in _TERMINAL:
         return {"job_id": job_id, "status": data["status"], "note": "already terminal"}
-    data["status"] = STATUS_CANCELLED
-    data["finished_at"] = _now()
-    data["reason"] = "cancelled by caller"
-    _write_job(path, data)
-    _kill_group(int(data.get("pid", -1)))
-    return {"job_id": job_id, "status": STATUS_CANCELLED}
+
+    # Stale record → reconcile instead of killing a possibly-reused pid.
+    data = _reconcile_stale(path, data)
+    if data.get("status") in _TERMINAL:
+        return {
+            "job_id": job_id,
+            "status": data["status"],
+            "note": "job had already ended; reconciled instead of killing",
+        }
+
+    def _apply(d: dict[str, Any]) -> dict[str, Any] | None:
+        if d.get("status") in _TERMINAL:
+            return None
+        d.update(
+            status=STATUS_CANCELLED,
+            finished_at=_now(),
+            reason="cancelled by caller",
+        )
+        return d
+
+    updated = _mutate_job(path, _apply)
+    if updated is not None and updated.get("status") == STATUS_CANCELLED:
+        _kill_group(int(data.get("pid", -1)))
+        return {"job_id": job_id, "status": STATUS_CANCELLED}
+    return {"job_id": job_id, "status": (updated or data).get("status", "unknown")}
 
 
 def list_jobs(project_root: str) -> list[dict[str, Any]]:

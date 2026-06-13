@@ -25,7 +25,7 @@ def register_job_tools(mcp: Any, log_mcp_health: Callable[..., None]) -> None:
     async def job_start(
         project_root: str,
         command: str,
-        log_path: str = ".samvil/job.log",
+        log_path: str = "",
         timeout_seconds: int = 1800,
         kind: str = "build",
     ) -> str:
@@ -34,7 +34,8 @@ def register_job_tools(mcp: Any, log_mcp_health: Callable[..., None]) -> None:
         Returns immediately with {job_id, status:"running", pid, log_path}.
         Job state lives in .samvil/jobs/<job_id>.json (INV-1) and survives
         MCP restarts. Poll with job_status; fetch outcome with job_result;
-        stop with job_cancel. Output appends to log_path (INV-2).
+        stop with job_cancel. Output appends to log_path (INV-2); empty
+        log_path defaults to a per-job file (shared logs interleave).
         """
         try:
             from .background_jobs import start_job as _start_job
