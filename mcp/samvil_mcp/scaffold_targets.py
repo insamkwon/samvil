@@ -115,6 +115,7 @@ SCAFFOLD_CATALOG: dict[str, dict[str, Any]] = {
             "npm install -D tailwindcss-animate@1.0.7",
             "shadcn init + add button card input dialog label select textarea",
             "npm install -D @playwright/test && npx playwright install chromium",
+            "scaffold_test_harness (playwright.config + smoke spec + test script)",
             "configure Supabase if seed.tech_stack mentions it",
             "next.config.mjs output:'standalone'",
         ],
@@ -159,6 +160,7 @@ SCAFFOLD_CATALOG: dict[str, dict[str, Any]] = {
             "vite.config.ts: add resolve.alias @ → ./src",
             "shadcn init + add button card input dialog label select textarea",
             "npm install -D @playwright/test && npx playwright install chromium",
+            "scaffold_test_harness (playwright.config + smoke spec + test script)",
         ],
         "sanity_checks": [
             {"path": "package.json", "required": True},

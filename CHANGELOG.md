@@ -4,6 +4,38 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.31.0 — 2026-06-14
+
+**Tests-as-deliverable — verification that travels with the app (MINOR)**
+
+User feedback after real usage: SAMVIL output felt untrustworthy —
+"QA PASS" but the delivered repo had zero tests, so you couldn't
+re-verify, and `npm test` did nothing. Root cause: samvil-qa drove
+Playwright through MCP interactively to verify each AC, then discarded
+the steps. Verification was a one-shot service, not a deliverable.
+
+This release makes QA's verification a committed artifact:
+
+- `test_deliverable.py` + `scaffold_test_harness` + `emit_ac_spec`:
+  samvil-scaffold now writes `playwright.config.ts`, a baseline smoke
+  spec, and a real `npm test` script (browser solution_types).
+  samvil-qa records each Playwright action as a structured step while
+  verifying a leaf and serializes them into `tests/e2e/<feature>.spec.ts`
+  — one `test()` per AC. `empty_acs` surfaces any leaf the QA couldn't
+  record so the gap is visible, not silent.
+- webServer runs `npm run build && npm run preview` so `npm test` always
+  verifies the current source / deployable bundle (the B4 dogfood caught
+  a stale-dist footgun where edits silently passed).
+- End-to-end proven on the click-counter dogfood: `npm test` → 4 passed
+  on the correct app, and a +1→+2 regression turns the relevant specs
+  red without a manual rebuild. Trust moves from "believe the harness"
+  to "run it yourself."
+
+After this, a delivered SAMVIL project ships with runnable tests that
+re-execute exactly what QA checked.
+
+---
+
 ## v4.30.4 — 2026-06-13
 
 **Adversarial review fixes — 9 findings, 4 proven by repro (PATCH)**

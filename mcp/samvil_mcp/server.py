@@ -4442,6 +4442,123 @@ async def query_projection(
 
 
 @mcp.tool()
+async def scaffold_test_harness(
+    project_root: str,
+    base_url: str = "http://localhost:4173",
+    base_path: str = "/",
+) -> str:
+    """Write a runnable test harness into a freshly scaffolded project (B1).
+
+    Creates playwright.config.ts, a baseline tests/e2e/smoke.spec.ts, and
+    patches package.json with a `test` script + @playwright/test devDep.
+    Makes `npm test` real and green from scaffold time — the foundation
+    for tests-as-deliverable. Returns the files written.
+    """
+    try:
+        from .test_deliverable import (
+            package_json_test_patch,
+            playwright_config,
+            smoke_spec,
+        )
+
+        root = Path(project_root).expanduser().resolve()
+        if not root.is_dir():
+            return json.dumps({"status": "error", "error": f"not a dir: {project_root}"})
+
+        written: list[str] = []
+        (root / "tests" / "e2e").mkdir(parents=True, exist_ok=True)
+
+        config_path = root / "playwright.config.ts"
+        config_path.write_text(playwright_config(base_url), encoding="utf-8")
+        written.append("playwright.config.ts")
+
+        smoke_path = root / "tests" / "e2e" / "smoke.spec.ts"
+        smoke_path.write_text(smoke_spec(base_path), encoding="utf-8")
+        written.append("tests/e2e/smoke.spec.ts")
+
+        pkg_path = root / "package.json"
+        pkg_patched = False
+        if pkg_path.exists():
+            try:
+                pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+                pkg = package_json_test_patch(pkg)
+                pkg_path.write_text(
+                    json.dumps(pkg, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                pkg_patched = True
+                written.append("package.json (test script + devDep)")
+            except (json.JSONDecodeError, OSError) as e:
+                _log_mcp_health("warn", "scaffold_test_harness", f"pkg patch: {e}")
+
+        _log_mcp_health("ok", "scaffold_test_harness")
+        return json.dumps(
+            {
+                "status": "ok",
+                "written": written,
+                "package_json_patched": pkg_patched,
+                "next": "install with `npm install` then `npm test`",
+            }
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "scaffold_test_harness", str(e))
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+@mcp.tool()
+async def emit_ac_spec(
+    project_root: str,
+    feature_name: str,
+    acs_json: str,
+    base_path: str = "/",
+) -> str:
+    """Serialize a feature's verified ACs into a committed spec file (B3).
+
+    `acs_json` is the structured steps samvil-qa collected while driving
+    Playwright for the feature: [{ac_id, description, steps:[...]}]. Writes
+    tests/e2e/<feature>.spec.ts — one test() per AC. This is how QA's
+    one-shot verification becomes a test the user can re-run (`npm test`).
+    Returns the path written and per-AC step counts.
+    """
+    try:
+        from .test_deliverable import feature_spec_filename, spec_from_acs
+
+        root = Path(project_root).expanduser().resolve()
+        if not root.is_dir():
+            return json.dumps({"status": "error", "error": f"not a dir: {project_root}"})
+
+        acs = json.loads(acs_json or "[]")
+        if not isinstance(acs, list):
+            return json.dumps({"status": "error", "error": "acs_json must be a list"})
+
+        rel = feature_spec_filename(feature_name)
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            spec_from_acs(feature_name, acs, base_path=base_path), encoding="utf-8"
+        )
+
+        coverage = {
+            str(ac.get("ac_id") or "?"): len(ac.get("steps") or [])
+            for ac in acs
+            if isinstance(ac, dict)
+        }
+        _log_mcp_health("ok", "emit_ac_spec")
+        return json.dumps(
+            {
+                "status": "ok",
+                "spec_path": rel,
+                "ac_count": len(coverage),
+                "steps_per_ac": coverage,
+                "empty_acs": [k for k, v in coverage.items() if v == 0],
+            }
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "emit_ac_spec", str(e))
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+@mcp.tool()
 async def measure_seed_drift(
     original_seed_json: str,
     current_seed_json: str,
