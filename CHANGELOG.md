@@ -4,6 +4,17 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.32.1 — 2026-06-14
+
+**README body reflects tests-as-deliverable (PATCH)**
+
+The v4.31/v4.32 version line was bumped but the README body never
+mentioned the headline change — that a delivered project ships with
+runnable tests. Added it to '이런 게 만들어져요', the flow diagram's
+검증 step, and the differentiator table. No code change.
+
+---
+
 ## v4.32.0 — 2026-06-14
 
 **Trustworthy output, Arc A — close the spec↔intent gap (MINOR)**
