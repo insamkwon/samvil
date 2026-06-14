@@ -48,7 +48,7 @@ Returns `pass1`, `pass1b`, `should_proceed_to_pass2`, `verdict_reason`, `events[
 
 For each Pass 2 leaf (legacy `### Pass 2 Tree Setup (v3.0.0+)`):
 1. `tree_json = parse_ac_tree(ac_data_json=<feature.acceptance_criteria>)`.
-2. Drive Playwright runtime per legacy `### Runtime Verification with Playwright MCP` (or static fallback per `### Fallback to Static Analysis`).
+2. Drive Playwright runtime per legacy `### Runtime Verification with Playwright MCP` (or static fallback per `### Fallback to Static Analysis`). **While driving, record each action as a step** (`{action:goto|click|fill|press|reload|expect_text|expect_visible|expect_no_console_errors, role/name or selector, contains/equals/value/key/url}`) keyed by leaf — this becomes the deliverable spec (B).
 3. **Pass 2.5 Reward Hacking detection** per leaf evidence:
    - `validate_evidence(evidences_json=<["src/file:line",...]>, project_root=".")` — `all_valid=false` or `valid_count<1` → downgrade to FAIL (P1, E1).
    - `semantic_check(code=<snippet ±3 lines>, context_hint=<AC>)` — `risk_level=HIGH` → downgrade PASS/PARTIAL → FAIL; MEDIUM → PASS → PARTIAL with Socratic Questions surfaced.
@@ -56,7 +56,7 @@ For each Pass 2 leaf (legacy `### Pass 2 Tree Setup (v3.0.0+)`):
 5. `update_leaf_status(ac_tree_json=<tree>, leaf_id=<id>, status=<s>, evidence_json=<files+screenshots>)` → use returned `tree`.
 6. `save_event(event_type="ac_verdict", data='{"feature":"...", "leaf_id":"...","status":"..."}')`.
 
-After all leaves: `print(json.loads(render_ac_tree_hud(ac_tree_json=tree_json))["ascii"])`; append to `qa-report.md`.
+After all leaves: `print(json.loads(render_ac_tree_hud(ac_tree_json=tree_json))["ascii"])`; append to `qa-report.md`. **Emit deliverable spec (B, browser solution_types)**: per feature, `mcp__samvil_mcp__emit_ac_spec(project_root="~/dev/<seed.name>", feature_name="<feature>", acs_json=<[{ac_id, description, steps:[recorded steps]}]>, base_path="/")` → writes `tests/e2e/<feature>.spec.ts`. `empty_acs` 비어있지 않으면 해당 AC는 step 미기록 → 재방문하거나 TODO로 남김. 결과: 사용자가 `npm test`로 QA가 검증한 걸 재실행 가능.
 
 **Evaluation principles (v4.23/v4.25, when `seed.evaluation_principles` present)**: After Pass 2 verdicts collected, call `mcp__samvil_mcp__score_acs_against_principles(ac_verdicts_json=<JSON list>, evaluation_principles_json=<seed.evaluation_principles JSON>)` — returns per-leaf `principle_hits`, `weighted_score`, `downgrade_recommended`. Apply downgrades verbatim (PASS→PARTIAL where flagged). Phase Z calls `mcp__samvil_mcp__evaluate_exit_conditions(seed_json, qa_state_json)`; `verdict_blocked=true` → verdict cannot be PASS this iteration.
 
