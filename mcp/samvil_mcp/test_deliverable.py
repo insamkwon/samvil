@@ -186,10 +186,13 @@ export default defineConfig({{
     {{ name: 'chromium', use: {{ ...devices['Desktop Chrome'] }} }},
   ],
   webServer: {{
-    command: 'npm run preview',
+    // Build first so the test always reflects current source — otherwise
+    // `npm test` silently passes against a stale dist/ build (a real
+    // footgun caught in the B4 dogfood). Verifies the deployable bundle.
+    command: 'npm run build && npm run preview',
     url: {_js(base_url)},
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
   }},
 }});
 """
