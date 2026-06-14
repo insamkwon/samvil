@@ -53,6 +53,7 @@ If `stage_can_proceed.can_proceed` is false, show blockers and stop.
 3. Deduplicate semantically equivalent ACs across phases (string-similar or LLM judgment). Prefer the user's exact wording when in doubt.
 4. Assign IDs `F<N>.AC<N>` per `references/ac-tree-guide.md` (each AC gets `id`, `description`, `status: pending`, `evidence: []`).
 5. Show the user a **consolidation summary**: "인터뷰에서 확정한 잠정 AC <N>개가 <M>개 feature로 정리되었습니다. 중복 <K>개 제거." then the seed preview.
+6. **Negative/edge AC coverage (A1)**: per feature, `mcp__samvil_mcp__negative_ac_checklist(feature_name="<feature>", happy_acs_json=<[ac descriptions]>)` → for each `required_edges[]` entry, add one concrete AC (fill `ac_template`, set `kind: "negative"`) **or** mark it N/A with a one-line reason. Happy-path-only features are the #1 cause of "QA PASS but I keep fixing it" — do not skip silently. Present added negatives in the summary: "엣지 케이스 AC <P>개 추가 (빈 입력/경계/새로고침 등)." These become real ACs (verified by QA, serialized to specs like any other).
 
 **Refine Gate harvest (v4.21, when `refined_answers` present)**:
 - `constraints_aggregated[]` → seed.constraints (사용자가 인터뷰에서 명시한 제약은 *모두* 보존, 추가 LLM 추론 금지)
