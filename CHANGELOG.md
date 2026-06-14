@@ -4,6 +4,43 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.32.0 — 2026-06-14
+
+**Trustworthy output, Arc A — close the spec↔intent gap (MINOR)**
+
+The other half of the user's "결과물이 못 미덥다" feedback (A): even with
+tests that travel (v4.31.0, B), an output you "keep fixing" usually means
+QA verified the wrong spec — the AC tree captured only the happy path, or
+the AC didn't match what was in your head. Three changes attack that:
+
+- **A1 — forced negative/edge AC coverage.** `negative_ac.py` +
+  `negative_ac_checklist` detect each feature's behavior patterns
+  (create / persist / list / delete / numeric / toggle / search) and
+  return the edge categories it MUST cover. samvil-seed turns each into a
+  concrete `kind='negative'` AC (empty input, oversized input, boundary,
+  survives-reload, empty state, confirm-delete…) or marks it N/A with a
+  reason. Happy-path-only features — the #1 "breaks the moment a real
+  user touches it" cause — can no longer ship silently. The negatives
+  flow through QA and into specs like any AC.
+- **A3 — adversarial robustness pass.** `emit_adversarial_spec` writes
+  `tests/e2e/adversarial.spec.ts` probing what no AC anticipated: rapid
+  8× clicks (race / double-submit), 2000-char + empty + whitespace
+  input, double reload — asserting zero console errors / pageerrors.
+  samvil-qa (standard+) feeds it the buttons/inputs found on the happy
+  path; a red adversarial test is a defect no AC covered → REVISE.
+  Proven on the click-counter dogfood (8 tests pass incl. 3 rapid-click
+  probes + reload stability).
+- **A2 — concrete behavior confirmation.** samvil-seed now renders each
+  feature's ACs (incl. the negatives) as a concrete behavior sequence
+  ("click → 0→1 → saved → survives reload / empty submit → rejected")
+  and asks "이렇게 동작하면 맞나요?" before any code is built — catching
+  "QA PASS but not what I meant" at spec time.
+
+Together with v4.31.0 (B), verification now both *travels* (npm test) and
+*covers the failure modes that actually bite* (negatives + adversarial).
+
+---
+
 ## v4.31.0 — 2026-06-14
 
 **Tests-as-deliverable — verification that travels with the app (MINOR)**

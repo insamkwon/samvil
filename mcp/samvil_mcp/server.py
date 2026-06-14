@@ -4442,6 +4442,34 @@ async def query_projection(
 
 
 @mcp.tool()
+async def negative_ac_checklist(
+    feature_name: str,
+    happy_acs_json: str,
+) -> str:
+    """Return the edge categories a feature must cover beyond happy path (A1).
+
+    Detects what kind of behavior the happy-path ACs describe (create,
+    persist, list, delete, numeric, toggle, search) and returns the
+    negative/edge categories that must each become a concrete AC
+    (kind='negative') or be marked N/A with a reason. Closes the
+    'QA PASS but I keep fixing it' spec↔intent gap — happy-path-only ACs
+    are exactly what breaks the moment a real user touches the app.
+    """
+    try:
+        from .negative_ac import negative_ac_checklist as _checklist
+
+        acs = json.loads(happy_acs_json or "[]")
+        if not isinstance(acs, list):
+            return json.dumps({"error": "happy_acs_json must be a list"})
+        result = _checklist(feature_name, acs)
+        _log_mcp_health("ok", "negative_ac_checklist")
+        return json.dumps(result.to_dict())
+    except Exception as e:
+        _log_mcp_health("fail", "negative_ac_checklist", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def scaffold_test_harness(
     project_root: str,
     base_url: str = "http://localhost:4173",
@@ -4502,6 +4530,48 @@ async def scaffold_test_harness(
         )
     except Exception as e:
         _log_mcp_health("fail", "scaffold_test_harness", str(e))
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+@mcp.tool()
+async def emit_adversarial_spec(
+    project_root: str,
+    buttons_json: str = "[]",
+    inputs_json: str = "[]",
+    base_path: str = "/",
+) -> str:
+    """Write a generic 'frustrated user' robustness spec (A3).
+
+    `buttons_json` = button role-names, `inputs_json` = input selectors the
+    QA discovered on the happy path. Generates tests/e2e/adversarial.spec.ts
+    probing rapid clicks, oversized/empty input, and reload — asserting no
+    console errors or crashes. Catches the breakage no AC anticipated.
+    """
+    try:
+        from .test_deliverable import adversarial_spec
+
+        root = Path(project_root).expanduser().resolve()
+        if not root.is_dir():
+            return json.dumps({"status": "error", "error": f"not a dir: {project_root}"})
+        buttons = json.loads(buttons_json or "[]")
+        inputs = json.loads(inputs_json or "[]")
+        (root / "tests" / "e2e").mkdir(parents=True, exist_ok=True)
+        path = root / "tests" / "e2e" / "adversarial.spec.ts"
+        path.write_text(
+            adversarial_spec(list(buttons), list(inputs), base_path=base_path),
+            encoding="utf-8",
+        )
+        _log_mcp_health("ok", "emit_adversarial_spec")
+        return json.dumps(
+            {
+                "status": "ok",
+                "spec_path": "tests/e2e/adversarial.spec.ts",
+                "button_probes": len(buttons),
+                "input_probes": len(inputs),
+            }
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "emit_adversarial_spec", str(e))
         return json.dumps({"status": "error", "error": str(e)})
 
 

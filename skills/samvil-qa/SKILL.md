@@ -58,6 +58,8 @@ For each Pass 2 leaf (legacy `### Pass 2 Tree Setup (v3.0.0+)`):
 
 After all leaves: `print(json.loads(render_ac_tree_hud(ac_tree_json=tree_json))["ascii"])`; append to `qa-report.md`. **Emit deliverable spec (B, browser solution_types)**: per feature, `mcp__samvil_mcp__emit_ac_spec(project_root="~/dev/<seed.name>", feature_name="<feature>", acs_json=<[{ac_id, description, steps:[recorded steps]}]>, base_path="/")` → writes `tests/e2e/<feature>.spec.ts`. `empty_acs` 비어있지 않으면 해당 AC는 step 미기록 → 재방문하거나 TODO로 남김. 결과: 사용자가 `npm test`로 QA가 검증한 걸 재실행 가능.
 
+**Adversarial pass (A3, standard+ browser)**: 해피패스 검증 중 발견한 버튼 role-name / input selector를 모아 `mcp__samvil_mcp__emit_adversarial_spec(project_root="~/dev/<seed.name>", buttons_json=<["증가","리셋",...]>, inputs_json=<["#title",...]>, base_path="/")` → `tests/e2e/adversarial.spec.ts` (연타/초장문/빈값/새로고침 → 콘솔에러·크래시 0 단언). `npm test`에 포함되어 실행됨. 적대 테스트가 빨간불이면 AC엔 없던 결함 → REVISE 입력으로 처리.
+
 **Evaluation principles (v4.23/v4.25, when `seed.evaluation_principles` present)**: After Pass 2 verdicts collected, call `mcp__samvil_mcp__score_acs_against_principles(ac_verdicts_json=<JSON list>, evaluation_principles_json=<seed.evaluation_principles JSON>)` — returns per-leaf `principle_hits`, `weighted_score`, `downgrade_recommended`. Apply downgrades verbatim (PASS→PARTIAL where flagged). Phase Z calls `mcp__samvil_mcp__evaluate_exit_conditions(seed_json, qa_state_json)`; `verdict_blocked=true` → verdict cannot be PASS this iteration.
 
 ### 3. Pass 3 — quality

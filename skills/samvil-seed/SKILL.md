@@ -53,6 +53,7 @@ If `stage_can_proceed.can_proceed` is false, show blockers and stop.
 3. Deduplicate semantically equivalent ACs across phases (string-similar or LLM judgment). Prefer the user's exact wording when in doubt.
 4. Assign IDs `F<N>.AC<N>` per `references/ac-tree-guide.md` (each AC gets `id`, `description`, `status: pending`, `evidence: []`).
 5. Show the user a **consolidation summary**: "인터뷰에서 확정한 잠정 AC <N>개가 <M>개 feature로 정리되었습니다. 중복 <K>개 제거." then the seed preview.
+6. **Negative/edge AC coverage (A1)**: per feature, `mcp__samvil_mcp__negative_ac_checklist(feature_name="<feature>", happy_acs_json=<[ac descriptions]>)` → for each `required_edges[]` entry, add one concrete AC (fill `ac_template`, set `kind: "negative"`) **or** mark it N/A with a one-line reason. Happy-path-only features are the #1 cause of "QA PASS but I keep fixing it" — do not skip silently. Present added negatives in the summary: "엣지 케이스 AC <P>개 추가 (빈 입력/경계/새로고침 등)." These become real ACs (verified by QA, serialized to specs like any other).
 
 **Refine Gate harvest (v4.21, when `refined_answers` present)**:
 - `constraints_aggregated[]` → seed.constraints (사용자가 인터뷰에서 명시한 제약은 *모두* 보존, 추가 LLM 추론 금지)
@@ -75,6 +76,8 @@ If `stage_can_proceed.can_proceed` is false, show blockers and stop.
 `evaluation_principles` and `exit_conditions` are **optional schema fields** — old seeds without them remain valid (samvil-qa falls back to v4.22 logic).
 
 In both paths: validate against `references/seed-schema.json`, present, and ask approval. If edits are requested, revise and re-present.
+
+**Concrete behavior confirmation (A2)**: 추상 AC 텍스트만 보여주지 말 것 — 핵심 feature마다 AC(네거티브 포함)를 **실제 동작 시퀀스**로 풀어서 제시한다. 예: `"AC 통과" 대신 "증가 버튼 클릭 → 숫자 0→1 → 자동 저장 → 새로고침해도 1 유지 / 빈 값 추가 시도 → 거부 + 안내"`. 그 다음 `AskUserQuestion(["이렇게 동작하면 맞나요?"], [네 맞아요 / 다르게 동작해야 해요])`. "다르게" → 어느 동작이 어떻게 달라야 하는지 받아 AC 수정 후 재표시. 목적: "QA는 PASS인데 내 의도와 다름"을 빌드 전에 잡는다 (spec↔intent 격차).
 
 ## After Approval
 

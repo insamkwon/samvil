@@ -169,3 +169,44 @@ def test_emit_ac_spec_flags_empty_acs(tmp_path: Path) -> None:
     acs = json.dumps([{"ac_id": "AC-9", "description": "untested", "steps": []}])
     result = json.loads(asyncio.run(emit_ac_spec(str(tmp_path), "f", acs)))
     assert result["empty_acs"] == ["AC-9"]
+
+
+# ── A3 adversarial spec ───────────────────────────────────────────
+
+
+def test_adversarial_spec_probes_buttons_and_inputs() -> None:
+    from samvil_mcp.test_deliverable import adversarial_spec
+
+    spec = adversarial_spec(["증가", "리셋"], ["#title"], base_path="/")
+    assert 'getByRole("button", { name: "증가" })' in spec
+    assert 'getByRole("button", { name: "리셋" })' in spec
+    assert 'page.locator("#title")' in spec
+    assert "'x'.repeat(2000)" in spec
+    assert "await page.reload()" in spec
+    assert "pageerror" in spec
+    # rapid-click loop present
+    assert "for (let i = 0; i < 8" in spec
+
+
+def test_adversarial_spec_empty_lists_still_has_reload() -> None:
+    from samvil_mcp.test_deliverable import adversarial_spec
+
+    spec = adversarial_spec([], [], base_path="/")
+    assert "reload mid-session stays stable" in spec
+
+
+def test_emit_adversarial_spec_tool(tmp_path) -> None:
+    import asyncio
+    from samvil_mcp.server import emit_adversarial_spec
+
+    result = json.loads(
+        asyncio.run(
+            emit_adversarial_spec(
+                str(tmp_path), json.dumps(["증가"]), json.dumps(["#title"])
+            )
+        )
+    )
+    assert result["status"] == "ok"
+    assert result["button_probes"] == 1
+    assert result["input_probes"] == 1
+    assert (tmp_path / "tests" / "e2e" / "adversarial.spec.ts").exists()
