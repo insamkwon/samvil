@@ -4534,6 +4534,48 @@ async def scaffold_test_harness(
 
 
 @mcp.tool()
+async def emit_adversarial_spec(
+    project_root: str,
+    buttons_json: str = "[]",
+    inputs_json: str = "[]",
+    base_path: str = "/",
+) -> str:
+    """Write a generic 'frustrated user' robustness spec (A3).
+
+    `buttons_json` = button role-names, `inputs_json` = input selectors the
+    QA discovered on the happy path. Generates tests/e2e/adversarial.spec.ts
+    probing rapid clicks, oversized/empty input, and reload — asserting no
+    console errors or crashes. Catches the breakage no AC anticipated.
+    """
+    try:
+        from .test_deliverable import adversarial_spec
+
+        root = Path(project_root).expanduser().resolve()
+        if not root.is_dir():
+            return json.dumps({"status": "error", "error": f"not a dir: {project_root}"})
+        buttons = json.loads(buttons_json or "[]")
+        inputs = json.loads(inputs_json or "[]")
+        (root / "tests" / "e2e").mkdir(parents=True, exist_ok=True)
+        path = root / "tests" / "e2e" / "adversarial.spec.ts"
+        path.write_text(
+            adversarial_spec(list(buttons), list(inputs), base_path=base_path),
+            encoding="utf-8",
+        )
+        _log_mcp_health("ok", "emit_adversarial_spec")
+        return json.dumps(
+            {
+                "status": "ok",
+                "spec_path": "tests/e2e/adversarial.spec.ts",
+                "button_probes": len(buttons),
+                "input_probes": len(inputs),
+            }
+        )
+    except Exception as e:
+        _log_mcp_health("fail", "emit_adversarial_spec", str(e))
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+@mcp.tool()
 async def emit_ac_spec(
     project_root: str,
     feature_name: str,
