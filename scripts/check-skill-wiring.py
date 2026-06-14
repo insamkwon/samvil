@@ -263,9 +263,8 @@ REVERSE_CHECK_ALLOWLIST: frozenset[str] = frozenset(
         # Background jobs (W4.1) — start/status/result wired in samvil-build;
         # cancel is a user-initiated escape hatch, no scripted call site.
         "job_cancel",
-        # Tests-as-deliverable (B) — wired into samvil-scaffold (harness) and
-        # samvil-qa (emit) in the following commits of this arc.
-        "scaffold_test_harness",
+        # Tests-as-deliverable (B) — emit_ac_spec wired into samvil-qa in
+        # the next commit of this arc.
         "emit_ac_spec",
         # ── Sync tools below were invisible until the W1.4 regex fix
         # (async-only pattern missed plain `def` tools). Categorized here;

@@ -90,11 +90,11 @@ retry. Two failures → STOP, report user (P10).
 mcp__samvil_mcp__evaluate_scaffold_target(project_path="~/dev/<seed.name>", run_sanity_checks=true)
 ```
 
-`sanity_result.all_passed` true: continue. Otherwise per
-`sanity_result.failures[]`:
-- `must_contain` failure (Tailwind overwrite) → re-write per `SKILL.legacy.md`, re-run Step 5.
-- `missing` failure → re-create from `SKILL.legacy.md`.
-Cap 2 attempts; second failure → AskUserQuestion (record in retro).
+`sanity_result.all_passed` true: continue. Otherwise per `sanity_result.failures[]`: `must_contain` (Tailwind overwrite) → re-write per `SKILL.legacy.md`, re-run; `missing` → re-create from legacy. Cap 2 attempts; second failure → AskUserQuestion (record in retro).
+
+## Step 5.5 — Test Harness (tests-as-deliverable, B)
+
+Browser solution_types (`web-app`/`dashboard`/`game`): `mcp__samvil_mcp__scaffold_test_harness(project_root="~/dev/<seed.name>", base_url="http://localhost:4173", base_path="/")` → writes `playwright.config.ts` + `tests/e2e/smoke.spec.ts` + patches `package.json` `test` script. The delivered repo gets a runnable `npm test` from here; samvil-qa later appends one spec per AC. `automation` keeps its `tests/test_dry_run.*` (scaffold catalog). On `error`: best-effort, continue (P8) — QA still verifies, just no committed spec.
 
 ## Step 6 — Persist + Chain
 
