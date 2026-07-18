@@ -72,3 +72,14 @@ def test_all_stage_skills_forbid_unapproved_force_proceed() -> None:
         text = (repo / "skills" / skill / "SKILL.md").read_text()
         assert "gate_override" in text, skill
         assert "force_proceed" in text, skill
+
+
+def test_interview_batches_only_independent_questions() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    thin = (repo / "skills" / "samvil-interview" / "SKILL.md").read_text()
+    legacy = (repo / "skills" / "samvil-interview" / "SKILL.legacy.md").read_text()
+
+    for text in (thin, legacy):
+        assert "독립 질문 2~3개" in text
+        assert "의존 질문" in text
+    assert "Asking 2+ questions in a single AskUserQuestion" not in thin

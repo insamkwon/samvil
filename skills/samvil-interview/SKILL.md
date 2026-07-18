@@ -54,7 +54,7 @@ Per question: `route_question(question, manifest_facts, force_user=(streak>=3))`
 
 ## Step 2 — Phase Loop (Korean, host-bound)
 
-Run **only the phases in `aggregate.required_phases`**. **한 번에 하나씩** AskUserQuestion (객관식 + Other), preset-aware options. Prefix every prompt with the latest `score_ambiguity.next_question_prefix` (`[질문 N/max]`). Adaptive follow-up (short→expand, long→structure, vague→choose). Framework names (AARRR/JTBD/HEART) never exposed to user.
+Run **only the phases in `aggregate.required_phases`**. 같은 Phase에서 답변 순서가 서로 영향을 주지 않는 **독립 질문 2~3개**는 한 AskUserQuestion의 `questions=[...]`로 묶고, 앞 답변에 따라 뒤 질문이 달라지는 **의존 질문**은 순차 실행한다. Prefix each question with the latest budget range (`[질문 N/max]`) and increment `questions_asked` per question, not per batch. Preset-aware options; adaptive follow-up (short→expand, long→structure, vague→choose). Framework names never exposed.
 
 Per-`solution_type` question bodies + Phase id/trigger/body 매핑 표: `SKILL.legacy.md` §"Phase id / Trigger / Body 매핑 표".
 
@@ -112,7 +112,7 @@ After Step 5 approval: `mcp__samvil_mcp__merge_brownfield_seed(existing_seed_jso
 
 ## Anti-Patterns
 
-1. Asking 2+ questions in a single AskUserQuestion. 2. Skipping summary verification (Zero-Question Mode included). 3. Accepting a vague AC without offering a rewrite (PHI-06). 4. Exposing framework names (AARRR/JTBD/HEART) to the user. 5. Self-verifying the `interview_to_seed` gate verdict (Generator ≠ Judge). 6. Hard-coding `chain.next_skill` instead of always invoking `samvil-seed`. 7. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
+1. Batching 4+ questions or batching **의존 질문** in one AskUserQuestion. 2. Skipping summary verification (Zero-Question Mode included). 3. Accepting a vague AC without offering a rewrite (PHI-06). 4. Exposing framework names (AARRR/JTBD/HEART) to the user. 5. Self-verifying the `interview_to_seed` gate verdict (Generator ≠ Judge). 6. Hard-coding `chain.next_skill` instead of always invoking `samvil-seed`. 7. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — 독립 질문 2~3개는 `questions=[q1,q2,q3]`, 단일/의존 질문은 `questions=[q1]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

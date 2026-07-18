@@ -299,7 +299,7 @@ MCP 실패 시 fallback: tier 이름 기반 prose lookup (이 SKILL의 기존 �
 
 ## Step 3: 인터뷰 질문
 
-모든 질문은 **AskUserQuestion** 도구로 객관식 제시. preset이 있으면 보기에 preset 기본값 포함.
+모든 질문은 **AskUserQuestion** 도구로 객관식 제시. 같은 Phase의 독립 질문 2~3개는 한 번에 묶고, 의존 질문은 순차 실행한다. preset이 있으면 보기에 preset 기본값 포함.
 
 ### 답변 적응형 질문 (Adaptive Follow-up)
 
@@ -318,7 +318,7 @@ MCP 실패 시 fallback: tier 이름 기반 prose lookup (이 SKILL의 기존 �
 
 ### Phase 1: Core Understanding (2-3 questions)
 
-**한 번에 하나씩.** 답변 후 다음 질문.
+**배치 규칙:** 같은 Phase의 독립 질문 2~3개만 한 번에 묶는다. 의존 질문은 답변 후 다음 질문.
 
 #### solution_type: "web-app" (기본)
 
@@ -1248,7 +1248,7 @@ Each section must be non-empty. Constraints must have >= 1 item. Success criteri
 
 1. **모든 질문은 AskUserQuestion 도구 사용** — 객관식 보기 + Other
 2. **대화는 한국어로.** 기술 용어와 코드만 영어.
-3. **한 번에 하나씩.** 2개 이상 질문 금지. Framework 이름(AARRR/JTBD/HEART) 사용자에게 노출 금지.
+3. **독립 질문 2~3개 배치 허용.** 의존 질문 또는 4개 이상 배치 금지. Framework 이름(AARRR/JTBD/HEART) 사용자에게 노출 금지.
 4. **preset 있으면 활용.** 질문을 줄이고 보기 품질 높임.
 5. **Phase 2.5 (Unknown Unknowns)**: thorough/full/deep 기본 + 자동 감지. preset 매칭 실패 + 짧은 답변 비율 > 50%면 minimal/standard도 활성화.
 6. **Phase 2.6 (Non-functional)**: thorough+ 의무 — thorough는 3Q, full/deep는 7Q 전체. (v3.1.0)

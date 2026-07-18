@@ -431,7 +431,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 > 목적: standard tier 사용자 확인 ~25회 → **12회 이하**. "one-line → app" 약속을
 > 실제 경험에 근접시킨다.
 
-- [ ] **3.1 인터뷰 질문 예산제 (min → max 전환)**
+- [x] **3.1 인터뷰 질문 예산제 (min → max 전환)**
   설계: `references/decision-boundaries.md`에 tier별 `max_questions` 단일 정의
   (제안: minimal 6 / standard 12 / thorough 20 / full 30). interview_engine에
   예산 카운터 추가 — 예산 소진 시 ambiguity가 임계 미달이어도 **"지금까지로 seed
@@ -441,6 +441,16 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   (스코프 보정: 현재 thin SKILL에는 감사 당시의 `No phase reprompt cap` 문구가 이미
   없고, legacy의 vague-AC 최대 2회 보정은 국소 안전장치다. 이를 제거하지 않고 전역
   `max_questions`/사용자 +5 연장 계약이 상위 경계로 강제되도록 구현한다.)
+  - 완료 증거: `616eb4e`; `mcp/samvil_mcp/interview_engine.py:73`,
+    `mcp/samvil_mcp/interview_engine.py:178`,
+    `mcp/samvil_mcp/interview_engine.py:212`,
+    `mcp/samvil_mcp/interview_aggregate.py:398`, `mcp/samvil_mcp/server.py:1108`,
+    `mcp/tests/test_interview_engine.py:77`,
+    `mcp/tests/test_interview_engine.py:86`,
+    `mcp/tests/test_interview_engine.py:95`,
+    `mcp/tests/test_interview_smoke.py:143`,
+    `references/decision-boundaries.md:33`, `skills/samvil-interview/SKILL.md:65`,
+    `skills/samvil-interview/SKILL.md:69`, `CHANGELOG.md:7`.
 - [ ] **3.2 배치 질문 (왕복 절반화)**
   같은 Phase 내 독립 질문 2-3개를 AskUserQuestion 1회의 다중 질문(questions
   배열)으로 묶는 규약을 interview SKILL에 명문화. 서로 의존하는 질문만 순차.
