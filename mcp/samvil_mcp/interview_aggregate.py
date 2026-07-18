@@ -3,7 +3,7 @@
 Single best-effort call that collects everything the (now ~180-LOC) skill
 body needs but that is not already covered by `score_ambiguity`,
 `scan_manifest`, `route_question`, `update_answer_streak`, `manage_tracks`,
-`get_tier_phases`, `compute_seed_readiness`, `gate_check`, etc.
+`get_tier_phases`, `score_ambiguity`, `gate_check`, etc.
 
 Specifically:
 
@@ -28,7 +28,7 @@ The skill body still owns:
     question loops + summary verification).
   - Per-question routing call to `route_question` (per-question, not
     pre-flightable here).
-  - Final `compute_seed_readiness` + `gate_check` + `claim_post`
+  - Final `score_ambiguity` + `gate_check` + `claim_post`
     (post_stage Contract Layer step — owned by skill).
 
 All reads are best-effort. Missing files yield empty defaults and a
@@ -305,7 +305,7 @@ def aggregate_interview_state(
       - AskUserQuestion checkpoints (Phase 1–4 + summary).
       - Per-question `route_question` calls (those need the live
         question text and current streak, not pre-flight).
-      - Final `compute_seed_readiness` + `gate_check` + `claim_post`
+      - Final `score_ambiguity` + `gate_check` + `claim_post`
         (post_stage Contract Layer step).
 
     Returns a dict with:

@@ -105,11 +105,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "interview_to_seed": {
             "policy": "hard",
             "thresholds": {
-                "minimal": {"seed_readiness": 0.80},
-                "standard": {"seed_readiness": 0.88},
-                "thorough": {"seed_readiness": 0.93},
-                "full": {"seed_readiness": 0.96},
-                "deep": {"seed_readiness": 0.985},
+                "minimal": {"seed_readiness": 0.80, "ambiguity_converged": True},
+                "standard": {"seed_readiness": 0.88, "ambiguity_converged": True},
+                "thorough": {"seed_readiness": 0.93, "ambiguity_converged": True},
+                "full": {"seed_readiness": 0.96, "ambiguity_converged": True},
+                "deep": {"seed_readiness": 0.985, "ambiguity_converged": True},
             },
         },
         "seed_to_council": {

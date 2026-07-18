@@ -13,7 +13,7 @@ Per HANDOFF-v3.2-DECISIONS.md §3.②: the interview axis becomes
 
 This module owns:
   * The `InterviewLevel` enum and level → techniques mapping.
-  * `seed_readiness` scoring (T1): pure-Python weighted sum over 5 dims.
+  * T1 selection; deterministic readiness scoring lives in `interview_engine`.
   * Meta-probe heuristic (T2): prompt generator + blind-spot list.
   * User confidence marking (T3): tacit-extraction follow-ups.
   * Scenario simulation (T4): walk a draft seed through a toy timeline.
@@ -79,103 +79,7 @@ LEVEL_TO_TECHNIQUES: dict[InterviewLevel, tuple[Technique, ...]] = {
 }
 
 
-# ── T1 — seed_readiness scoring ───────────────────────────────────────
-
-
-# Weights are `(initial estimate)` per §3.②. They're registered as
-# experimental_policy entries by scripts/seed-experiments.py.
-READINESS_WEIGHTS: dict[str, float] = {
-    "intent_clarity": 0.25,
-    "constraint_clarity": 0.20,
-    "ac_testability": 0.25,
-    "lifecycle_coverage": 0.20,
-    "decision_boundary": 0.10,
-}
-assert abs(sum(READINESS_WEIGHTS.values()) - 1.0) < 1e-9, "weights must sum to 1.0"
-
-# Per-dimension floors (initial estimates, scoped by samvil_tier).
-READINESS_FLOORS: dict[str, dict[str, float]] = {
-    "minimal": {
-        "intent_clarity": 0.60,
-        "constraint_clarity": 0.60,
-        "ac_testability": 0.60,
-        "lifecycle_coverage": 0.50,
-        "decision_boundary": 0.40,
-    },
-    "standard": {
-        "intent_clarity": 0.75,
-        "constraint_clarity": 0.70,
-        "ac_testability": 0.85,
-        "lifecycle_coverage": 0.80,
-        "decision_boundary": 0.70,
-    },
-    "thorough": {
-        "intent_clarity": 0.85,
-        "constraint_clarity": 0.80,
-        "ac_testability": 0.90,
-        "lifecycle_coverage": 0.85,
-        "decision_boundary": 0.90,
-    },
-    "full": {
-        "intent_clarity": 0.90,
-        "constraint_clarity": 0.85,
-        "ac_testability": 0.95,
-        "lifecycle_coverage": 0.90,
-        "decision_boundary": 0.95,
-    },
-    "deep": {
-        "intent_clarity": 0.92,
-        "constraint_clarity": 0.90,
-        "ac_testability": 0.98,
-        "lifecycle_coverage": 0.95,
-        "decision_boundary": 0.98,
-    },
-}
-
-
-@dataclass
-class SeedReadinessScore:
-    total: float
-    dimensions: dict[str, float]
-    floors: dict[str, float]
-    below_floor: list[str]
-
-    def to_dict(self) -> dict:
-        return {
-            "total": self.total,
-            "dimensions": self.dimensions,
-            "floors": self.floors,
-            "below_floor": self.below_floor,
-        }
-
-
-def compute_seed_readiness(
-    dimensions: dict[str, float],
-    *,
-    samvil_tier: str = "standard",
-) -> SeedReadinessScore:
-    """Pure function. Caller populates each dimension in [0, 1].
-
-    Tiers control per-dim floors, not the weighted sum — the weights
-    themselves are fixed by the spec to keep score semantics constant
-    across tiers.
-    """
-    missing = set(READINESS_WEIGHTS) - set(dimensions)
-    if missing:
-        # Treat missing dimensions as 0 — honest about the gap.
-        dimensions = {**{k: 0.0 for k in missing}, **dimensions}
-    total = sum(
-        dimensions[k] * w
-        for k, w in READINESS_WEIGHTS.items()
-    )
-    floors = READINESS_FLOORS.get(samvil_tier, READINESS_FLOORS["standard"])
-    below = [k for k, v in dimensions.items() if v < floors.get(k, 0.0)]
-    return SeedReadinessScore(
-        total=total,
-        dimensions={k: float(dimensions.get(k, 0.0)) for k in READINESS_WEIGHTS},
-        floors=dict(floors),
-        below_floor=below,
-    )
+# T1 seed_readiness is computed by interview_engine.score_ambiguity.
 
 
 # ── T2 — Meta Self-Probe ──────────────────────────────────────────────

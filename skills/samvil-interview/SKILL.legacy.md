@@ -961,25 +961,25 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_com
 
 > Spec: `references/contract-layer-protocol.md`.
 
-Compute `seed_readiness` from the interview dimensions (intent_clarity /
-constraint_clarity / ac_testability / lifecycle_coverage /
-decision_boundary). Score each on [0,1] from the answers you recorded;
-if a dimension wasn't probed, pass its current best estimate and flag
-it in the summary.
+Compute `seed_readiness` only through `score_ambiguity` using the persisted
+interview answers and actual question count. Never ask the LLM to assign
+readiness dimensions or fill an unprobed dimension with an estimate.
 
 ```
-# 1. Multi-dimensional readiness
-mcp__samvil_mcp__compute_seed_readiness(
-  dimensions_json='{"intent_clarity":<float>,"constraint_clarity":<float>,"ac_testability":<float>,"lifecycle_coverage":<float>,"decision_boundary":<float>}',
-  samvil_tier="<from project.config.json>"
+# 1. Deterministic readiness from the canonical ambiguity engine
+mcp__samvil_mcp__score_ambiguity(
+  interview_state='<persisted answers JSON>',
+  tier="<from project.config.json>",
+  questions_asked=<actual>,
+  question_extensions=<actual>
 )
-→ Parse total + below_floor. Attach the total to state.json.seed_readiness.
+→ Persist seed_readiness + ambiguity + dimension_scores + converged.
 
 # 2. Gate check for interview → seed
 mcp__samvil_mcp__gate_check(
   gate_name="interview_to_seed",
   samvil_tier="<tier>",
-  metrics_json='{"seed_readiness": <total>}',
+  metrics_json='{"seed_readiness": <score.seed_readiness>, "ambiguity_converged": <score.converged>}',
   project_root="."
 )
 → On verdict=block: DO NOT chain to samvil-seed yet. Emit the

@@ -7,12 +7,9 @@ import pytest
 from samvil_mcp.interview_v3_2 import (
     InterviewLevel,
     LEVEL_TO_TECHNIQUES,
-    READINESS_WEIGHTS,
-    SeedReadinessScore,
     Technique,
     build_adversarial_prompt,
     build_meta_probe_prompt,
-    compute_seed_readiness,
     confidence_follow_up,
     pal_select_level,
     parse_meta_probe_result,
@@ -51,53 +48,6 @@ def test_max_includes_adversarial() -> None:
 
 
 # ── T1: seed_readiness ────────────────────────────────────────────────
-
-
-def test_readiness_weights_sum_to_1() -> None:
-    assert abs(sum(READINESS_WEIGHTS.values()) - 1.0) < 1e-9
-
-
-def test_readiness_all_ones_gives_1() -> None:
-    score = compute_seed_readiness(
-        {k: 1.0 for k in READINESS_WEIGHTS},
-        samvil_tier="standard",
-    )
-    assert abs(score.total - 1.0) < 1e-9
-    assert score.below_floor == []
-
-
-def test_readiness_below_floor_flagged() -> None:
-    score = compute_seed_readiness(
-        {
-            "intent_clarity": 0.60,
-            "constraint_clarity": 0.80,
-            "ac_testability": 0.70,  # floor 0.85 at standard
-            "lifecycle_coverage": 0.80,
-            "decision_boundary": 0.70,
-        },
-        samvil_tier="standard",
-    )
-    assert "ac_testability" in score.below_floor
-
-
-def test_readiness_missing_dims_treated_as_zero() -> None:
-    score = compute_seed_readiness({"intent_clarity": 0.9}, samvil_tier="standard")
-    # Only intent_clarity at 0.9, others 0 → total = 0.9 * 0.25 = 0.225
-    assert abs(score.total - 0.225) < 1e-9
-
-
-def test_readiness_tier_changes_floors() -> None:
-    dims = {
-        "intent_clarity": 0.70,
-        "constraint_clarity": 0.65,
-        "ac_testability": 0.70,
-        "lifecycle_coverage": 0.60,
-        "decision_boundary": 0.60,
-    }
-    minimal = compute_seed_readiness(dims, samvil_tier="minimal")
-    thorough = compute_seed_readiness(dims, samvil_tier="thorough")
-    # Same dims but tighter floors → more below_floor violations at higher tier.
-    assert len(thorough.below_floor) > len(minimal.below_floor)
 
 
 # ── T2: meta probe ────────────────────────────────────────────────────

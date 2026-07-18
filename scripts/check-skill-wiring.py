@@ -44,7 +44,6 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
         "skills/samvil-interview/SKILL.md",
         (
             "contract-layer-protocol",
-            "compute_seed_readiness",
             "gate_check",
             "interview_to_seed",
             "render_domain_context",

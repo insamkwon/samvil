@@ -8,6 +8,9 @@ All notable changes to SAMVIL are documented here.
 
 - Added enforced per-tier interview question budgets, `[질문 N/max]` progress,
   and an explicit draft-or-extend-by-5 choice at the cap.
+- Unified interview readiness under the deterministic 10-dimension ambiguity
+  engine, removed LLM-assigned readiness scores, and added Korean vague-text
+  detection with Hangul-aware length floors.
 
 ---
 

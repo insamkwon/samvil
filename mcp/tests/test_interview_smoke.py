@@ -18,9 +18,9 @@ on lives below:
   same payload.
 - Graceful degradation — missing files / unreadable preset dir never
   raises, only populates `errors[]`.
-- Wiring — both the new aggregator and the legacy MCP tools the skill
-  still calls (`route_question`, `score_ambiguity`, `compute_seed_readiness`,
-  `gate_check`, `claim_post`, `render_domain_context`, `save_event`)
+- Wiring — both the new aggregator and the MCP tools the skill still calls
+  (`route_question`, `score_ambiguity`, `gate_check`, `claim_post`,
+  `render_domain_context`, `save_event`)
   are registered on `samvil_mcp.server.mcp`.
 
 The Korean phase prompts and tier-routing prose stay in SKILL.md and are
@@ -427,10 +427,10 @@ def test_interview_tools_registered_on_server() -> None:
         "update_answer_streak",
         "manage_tracks",
         "get_tier_phases",
-        "compute_seed_readiness",
         "gate_check",
         "claim_post",
         "render_domain_context",
         "save_event",
     ):
         assert required in names, f"missing MCP tool: {required}"
+    assert "compute_seed_readiness" not in names

@@ -155,6 +155,10 @@ class TestResultSchema:
 # ── Core dimension tests (v2.4.0 backward-compat) ──────────────
 
 class TestCoreDimensions:
+    def test_seed_readiness_is_inverse_of_deterministic_ambiguity(self):
+        result = score_ambiguity({}, tier="standard")
+        assert result["seed_readiness"] == round(1.0 - result["ambiguity"], 3)
+
     def test_vague_target_user_lowers_goal_clarity(self):
         state = {
             "target_user": "everyone",
@@ -184,6 +188,31 @@ class TestCoreDimensions:
         }
         result = score_ambiguity(state)
         assert result["criteria_testability"] < 0.7
+
+    def test_korean_vague_criteria_lower_testability(self):
+        state = {
+            "acceptance_criteria": [
+                "화면이 좋고 예쁘게 보인다",
+                "저장이 빠르게 동작한다",
+                "탐색이 직관적이다",
+            ]
+        }
+        result = score_ambiguity(state)
+        assert result["criteria_testability"] < 0.7
+
+    def test_korean_generic_target_user_is_vague(self):
+        result = score_ambiguity({"target_user": "누구나"})
+        assert result["dimension_scores"]["stakeholder"] >= 0.8
+
+    def test_korean_dense_target_user_uses_shorter_length_floor(self):
+        result = score_ambiguity(
+            {
+                "target_user": "초등학교 교사",
+                "core_problem": "수업별 자료를 반복해서 정리해야 한다",
+                "core_experience": "수업을 고르고 자료를 바로 연다",
+            }
+        )
+        assert result["goal_clarity"] == 1.0
 
     def test_too_many_features_penalizes_constraints(self):
         state = {

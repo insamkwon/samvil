@@ -72,6 +72,22 @@ def test_deep_tier_has_higher_floor() -> None:
     assert v.verdict == Verdict.BLOCK.value
 
 
+def test_interview_gate_requires_engine_convergence() -> None:
+    blocked = gate_check(
+        GateName.INTERVIEW_TO_SEED.value,
+        samvil_tier="standard",
+        metrics={"seed_readiness": 0.99, "ambiguity_converged": False},
+    )
+    passed = gate_check(
+        GateName.INTERVIEW_TO_SEED.value,
+        samvil_tier="standard",
+        metrics={"seed_readiness": 0.99, "ambiguity_converged": True},
+    )
+    assert blocked.verdict == Verdict.BLOCK.value
+    assert "ambiguity_converged" in blocked.failed_checks
+    assert passed.verdict == Verdict.PASS.value
+
+
 # ── Skip + boolean thresholds ─────────────────────────────────────────
 
 

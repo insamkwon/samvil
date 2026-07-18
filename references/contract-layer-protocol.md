@@ -13,7 +13,7 @@ pre_stage  →  [stage body unchanged]  →  post_stage
 ```
 
 Each skill references this protocol by name; the minimal per-stage
-addition is the **domain-specific** call (e.g. `compute_seed_readiness`
+addition is the **domain-specific** call (e.g. `score_ambiguity`
 at the end of interview because only interview has those dimensions).
 
 ## Protocol at a glance
@@ -133,7 +133,7 @@ Used when calling `gate_check` at post_stage.
 
 | After stage | gate_name | Metrics the skill passes |
 |-------------|-----------|--------------------------|
-| interview | `interview_to_seed` | `{"seed_readiness": <float>, ...per-dim scores}` |
+| interview | `interview_to_seed` | `{"seed_readiness": <float>, "ambiguity_converged": bool}` |
 | seed | `seed_to_council` | `{"schema_valid": bool, "schema_version_min": "3.2"}` |
 | council | `council_to_design` | `{"consensus_required": bool}` |
 | design | `design_to_scaffold` | `{"blueprint_valid": bool, "stack_matrix_match": bool}` |

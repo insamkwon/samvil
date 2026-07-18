@@ -11,7 +11,7 @@ The dogfood comparison requires running real interviews, which needs a
 live Claude Code session. This script verifies the code paths:
 
   A — all 5 interview_level values are recognized and map to techniques.
-  B — seed_readiness scoring is consistent with the floors.
+  B — deterministic seed_readiness is derived from ambiguity scoring.
   C — PAL adaptive picks different levels for different project prompts.
   D — narrate context assembly works on the repo's own .samvil/ dir.
   E — narrate prompt contains the expected sections and the parser
@@ -30,12 +30,11 @@ sys.path.insert(0, str(REPO / "mcp"))
 
 from samvil_mcp.interview_v3_2 import (  # noqa: E402
     InterviewLevel,
-    READINESS_FLOORS,
-    compute_seed_readiness,
     pal_select_level,
     resolve_level,
     techniques_for_level,
 )
+from samvil_mcp.interview_engine import score_ambiguity  # noqa: E402
 from samvil_mcp.narrate import (  # noqa: E402
     build_context,
     build_narrate_prompt,
@@ -73,28 +72,34 @@ def check_a_levels() -> bool:
 
 
 def check_b_readiness_scoring() -> bool:
-    print("B) seed_readiness scoring")
-    score_low = compute_seed_readiness(
+    print("B) deterministic seed_readiness scoring")
+    score_low = score_ambiguity({}, tier="standard")
+    score_high = score_ambiguity(
         {
-            "intent_clarity": 0.50,
-            "constraint_clarity": 0.50,
-            "ac_testability": 0.50,
-            "lifecycle_coverage": 0.50,
-            "decision_boundary": 0.50,
+            "target_user": "Agency designers managing 5 client projects",
+            "core_problem": "Status updates are scattered across tools",
+            "core_experience": "Open one dashboard to review project health",
+            "features": ["dashboard", "status filters", "weekly summary"],
+            "exclusions": ["invoicing", "chat", "file uploads"],
+            "constraints": ["Next.js", "Supabase", "loads under 2 seconds"],
+            "acceptance_criteria": [
+                "Dashboard loads in under 2 seconds",
+                "User filters 20 projects by status",
+                "Weekly summary shows error rate below 1%",
+            ],
         },
-        samvil_tier="standard",
+        tier="standard",
     )
-    score_high = compute_seed_readiness(
-        {k: 1.0 for k in ("intent_clarity", "constraint_clarity",
-                          "ac_testability", "lifecycle_coverage",
-                          "decision_boundary")},
-        samvil_tier="standard",
-    )
-    if not (score_low.total < 0.6 < score_high.total):
-        _fail(f"scoring not monotone: low={score_low.total} high={score_high.total}")
+    if not score_low["seed_readiness"] < score_high["seed_readiness"]:
+        _fail(
+            "scoring not monotone: "
+            f"low={score_low['seed_readiness']} high={score_high['seed_readiness']}"
+        )
         return False
-    _ok(f"low={score_low.total:.2f} below_floor={score_low.below_floor}; "
-        f"high={score_high.total:.2f}")
+    _ok(
+        f"low={score_low['seed_readiness']:.2f}; "
+        f"high={score_high['seed_readiness']:.2f}"
+    )
     return True
 
 

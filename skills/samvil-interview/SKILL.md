@@ -86,8 +86,8 @@ Step 5 직전 한 줄 재진술. Epic Claim과 *같은 한 줄에 수렴*이 이
 ## Step 5 — Persist + Contract Layer (post_stage)
 
 1. `mcp__samvil_mcp__load_interview_progress(project_root=".")` → use returned `qa_entries` + `ac_by_phase` as source of truth for summary generation. Do NOT rely on conversation context. Write summary to `aggregate.paths.interview_summary` (Korean, sections per `SKILL.legacy.md` §"Output Format" by `solution_type`). Each section non-empty; constraints ≥1; success criteria ≥3. **삭제하지 않음** — samvil-seed가 progress 파일을 consume 후 `clear_interview_progress` 호출.
-2. `mcp__samvil_mcp__compute_seed_readiness(dimensions_json='{"intent_clarity":<f>,"constraint_clarity":<f>,"ac_testability":<f>,"lifecycle_coverage":<f>,"decision_boundary":<f>}', samvil_tier="<tier>")` — score each dim from recorded answers; flag estimates in summary.
-3. `mcp__samvil_mcp__gate_check(gate_name="interview_to_seed", samvil_tier="<tier>", metrics_json='{"seed_readiness":<total>}', project_root=".")`.
+2. Re-run `mcp__samvil_mcp__score_ambiguity(interview_state='<persisted answers JSON>', tier="<tier>", questions_asked=<actual>, question_extensions=<actual>)`; persist its deterministic `seed_readiness`, `ambiguity`, `dimension_scores`, and `converged`. Never ask the LLM to assign readiness dimensions.
+3. `mcp__samvil_mcp__gate_check(gate_name="interview_to_seed", samvil_tier="<tier>", metrics_json='{"seed_readiness":<score.seed_readiness>,"ambiguity_converged":<score.converged>}', project_root=".")`.
    - `block` → loop back to failing dim's owning Phase (`required_action.type` ∈ `split_ac/run_research/stronger_model/ask_user`). Cap 2 escalations via `gate_should_force_user`.
    - `escalate` → bump `interview_level` one step (`normal→deep→max`) and re-run that Phase.
    - `pass` → continue.

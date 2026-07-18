@@ -16,24 +16,17 @@ glossary, their value sets are intentionally non-overlapping.
 
 ## Techniques
 
-### T1 — multi-dimensional seed_readiness
+### T1 — deterministic seed_readiness
 
-Weighted sum over 5 dims (weights are `(initial estimate)`):
+`mcp/samvil_mcp/interview_engine.score_ambiguity` is the single scorer. It
+derives 10 ambiguity dimensions from persisted interview answers and exposes
+`seed_readiness = 1 - ambiguity`. The caller supplies only answers, actual
+question count, tier, and explicit question extensions; the LLM never assigns
+readiness dimension values.
 
-```
-seed_readiness =
-    intent_clarity        × 0.25
-  + constraint_clarity    × 0.20
-  + ac_testability        × 0.25
-  + lifecycle_coverage    × 0.20
-  + decision_boundary     × 0.10
-```
-
-Per-dimension floors are `samvil_tier`-dependent. See
-`mcp/samvil_mcp/interview_v3_2.READINESS_FLOORS`. Interview → Seed gate
-(§3.⑥) reads the total score; the three escalation checks
-(`ac_testability`, `lifecycle_coverage`, `decision_boundary_clarity`)
-are the per-dim floors.
+Interview → Seed requires both the tier-specific `seed_readiness` floor and
+`ambiguity_converged=true`, which includes core floors and question-budget
+completion.
 
 ### T2 — Meta Self-Probe
 

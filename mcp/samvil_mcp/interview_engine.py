@@ -79,6 +79,21 @@ MAX_QUESTIONS = {
 }
 QUESTION_EXTENSION = 5
 
+_GENERIC_TARGET_USERS = {
+    "users", "people", "everyone", "anyone", "customers",
+    "누구나", "모두", "사람들",
+}
+
+
+def _is_short_text(value: str, latin_minimum: int) -> bool:
+    """Use a 60% floor for Hangul-dense text to avoid English-length bias."""
+    minimum = (latin_minimum * 3 + 4) // 5 if re.search(r"[가-힣]", value) else latin_minimum
+    return len(value.strip()) < minimum
+
+
+def _is_generic_target_user(value: str) -> bool:
+    return value.strip().lower() in _GENERIC_TARGET_USERS
+
 # Required interview phases per tier (v3.1.0, Sprint 1)
 TIER_REQUIRED_PHASES = {
     "minimal":  {"core", "scope"},
@@ -184,12 +199,14 @@ def score_ambiguity(
         budget_action = "continue"
     next_question_number = min(questions_asked + 1, effective_max_q)
 
+    ambiguity = round(overall, 3)
     return {
         # Core dimension clarities (backward-compatible) ──────────
         "goal_clarity":         goal_clarity,
         "constraint_clarity":   constraint_clarity,
         "criteria_testability": criteria_testability,
-        "ambiguity":            round(overall, 3),
+        "ambiguity":            ambiguity,
+        "seed_readiness":       round(1.0 - ambiguity, 3),
         "converged":            converged,
         "target":               target,
         "tier":                 tier,
@@ -274,21 +291,21 @@ def _score_goal(state: dict) -> float:
     target_user = state.get("target_user", "")
     if not target_user:
         penalties += 0.4
-    elif len(target_user) < 10:
+    elif _is_generic_target_user(target_user):
         penalties += 0.2
-    elif any(v in target_user.lower() for v in ["everyone", "anyone", "people", "users"]):
-        penalties += 0.15
+    elif _is_short_text(target_user, 10):
+        penalties += 0.2
 
     core_problem = state.get("core_problem", "")
     if not core_problem:
         penalties += 0.3
-    elif len(core_problem) < 15:
+    elif _is_short_text(core_problem, 15):
         penalties += 0.15
 
     core_exp = state.get("core_experience", "")
     if not core_exp:
         penalties += 0.3
-    elif len(core_exp) < 10:
+    elif _is_short_text(core_exp, 10):
         penalties += 0.15
 
     return min(penalties, 1.0)
@@ -334,6 +351,7 @@ def _score_criteria(state: dict) -> float:
         r"\bgood\b", r"\bnice\b", r"\bfast\b", r"\bclean\b",
         r"\buser.?friendly\b", r"\bintuitive\b", r"\bsmooth\b",
         r"\bprofessional\b", r"\bmodern\b", r"\bresponsive\b",
+        r"좋(?:은|게|고)", r"빠른|빠르게", r"간단한", r"예쁘게", r"직관적",
     ]
     vague_count = sum(
         1 for c in criteria
@@ -414,9 +432,9 @@ def _score_nonfunctional(state: dict) -> float:
 def _score_stakeholder(state: dict) -> float:
     """Score stakeholder specificity: role + context? (0=specific, 1=vague)"""
     target_user = state.get("target_user", "")
-    if not target_user or len(target_user) < 10:
+    if not target_user or _is_short_text(target_user, 10):
         return 1.0
-    vague_only = target_user.strip().lower() in {"users", "people", "everyone", "anyone", "customers"}
+    vague_only = _is_generic_target_user(target_user)
     if vague_only:
         return 0.9
     has_number = bool(re.search(r'\d+', target_user))

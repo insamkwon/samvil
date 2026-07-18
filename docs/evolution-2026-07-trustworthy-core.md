@@ -459,7 +459,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `skills/samvil-interview/SKILL.legacy.md:302`,
     `skills/samvil-interview/SKILL.legacy.md:321`,
     `mcp/tests/test_skill_wiring.py:77`.
-- [ ] **3.3 오케스트레이터 시작 질문 3→1**
+- [x] **3.3 오케스트레이터 시작 질문 3→1**
   - L3 solution_type 확인(samvil/SKILL.md:62-64): `confidence == high`면 확인
     생략하고 진행 알림만(ℹ️ 아이콘, P7) — anti-pattern 2(:109)를 "저신뢰일 때만
     확인"으로 완화. P2는 '결정'에 적용되는 원칙이지 키워드 타입 판별은
@@ -469,6 +469,12 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   (스코프 보정: aggregator는 `brownfield.errors` 하위 필드가 아니라
   전역 `errors[]`에 `brownfield:` 접두 오류를 반환한다. 스킬 분기는 현재
   코드 스키마를 기준으로 오류·충돌 시에만 모드를 다시 묻는다.)
+  - 완료 증거: `a8f1ece`; `skills/samvil/SKILL.md:54`,
+    `skills/samvil/SKILL.md:64`, `skills/samvil/SKILL.md:109`,
+    `skills/samvil/SKILL.legacy.md:185`,
+    `skills/samvil/SKILL.legacy.md:287`,
+    `mcp/samvil_mcp/orchestrator.py:589`,
+    `mcp/tests/test_skill_wiring.py:88`.
 - [ ] **3.4 ambiguity 스코어러 정리 + 한국어 대응**
   - 중복 스코어러 2개(interview_engine.score_ambiguity 10-dim vs
     interview_v3_2.compute_seed_readiness 5-dim — 후자는 LLM이 점수를 직접 매기게

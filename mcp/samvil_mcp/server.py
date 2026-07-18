@@ -141,7 +141,6 @@ from .retro_v3_2 import (
 from .interview_v3_2 import (
     InterviewLevel,
     build_meta_probe_prompt as _build_meta_prompt,
-    compute_seed_readiness as _compute_seed_readiness_core,
     confidence_follow_up as _confidence_follow_up,
     pal_select_level as _pal_select_level,
     parse_meta_probe_result as _parse_meta_result,
@@ -2847,27 +2846,6 @@ async def compute_parallel_safety(leaves_json: str) -> str:
 
 
 @mcp.tool()
-async def compute_seed_readiness(
-    dimensions_json: str,
-    samvil_tier: str = "standard",
-) -> str:
-    """Compute the multi-dimensional seed_readiness score (T1).
-
-    `dimensions_json` is a JSON object with keys `intent_clarity`,
-    `constraint_clarity`, `ac_testability`, `lifecycle_coverage`,
-    `decision_boundary` (values in [0, 1]).
-    """
-    try:
-        dims = json.loads(dimensions_json)
-        score = _compute_seed_readiness_core(dims, samvil_tier=samvil_tier)
-        _log_mcp_health("ok", "compute_seed_readiness")
-        return json.dumps(score.to_dict())
-    except Exception as e:
-        _log_mcp_health("fail", "compute_seed_readiness", str(e))
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
 async def meta_probe_prompt(phase: str, answers_summary: str) -> str:
     """Build the T2 Meta Self-Probe prompt. Caller runs the LLM and pipes
     the raw response into `meta_probe_parse`.
@@ -4117,7 +4095,7 @@ async def aggregate_interview_state(
 
     Companion to existing `score_ambiguity`, `route_question`,
     `update_answer_streak`, `manage_tracks`, `get_tier_phases`,
-    `compute_seed_readiness`, `gate_check` — this tool covers the boot
+    `gate_check` — this tool covers the boot
     pre-flight (tier, mode, preset match, manifest scan) that was
     inline in the legacy 1259-LOC interview skill body.
     """
