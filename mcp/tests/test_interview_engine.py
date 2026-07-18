@@ -204,6 +204,10 @@ class TestCoreDimensions:
         result = score_ambiguity({"target_user": "누구나"})
         assert result["dimension_scores"]["stakeholder"] >= 0.8
 
+    def test_short_generic_target_user_is_still_classified_as_generic(self):
+        result = score_ambiguity({"target_user": "users"})
+        assert result["dimension_scores"]["stakeholder"] == 0.9
+
     def test_korean_dense_target_user_uses_shorter_length_floor(self):
         result = score_ambiguity(
             {

@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Parse a Bash tool payload and report a destructive command reason."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shlex
+from pathlib import PurePath
+from typing import Any
+
+
+SQL_CLIENTS = {"mariadb", "mysql", "psql", "sqlite3", "sqlcmd"}
+SHELLS = {"bash", "dash", "sh", "zsh"}
+CHAIN_TOKENS = {";", "&&", "||", "|", "&"}
+GIT_GLOBAL_WITH_VALUE = {
+    "-c",
+    "-C",
+    "--config-env",
+    "--exec-path",
+    "--git-dir",
+    "--namespace",
+    "--super-prefix",
+    "--work-tree",
+}
+
+
+def _find_command(value: Any) -> str | None:
+    if isinstance(value, dict):
+        command = value.get("command")
+        if isinstance(command, str):
+            return command
+        nested = _find_command(value.get("tool_input"))
+        if nested is not None:
+            return nested
+        for child in value.values():
+            nested = _find_command(child)
+            if nested is not None:
+                return nested
+    elif isinstance(value, list):
+        for child in value:
+            nested = _find_command(child)
+            if nested is not None:
+                return nested
+    return None
+
+
+def extract_command(raw: str) -> str:
+    try:
+        return _find_command(json.loads(raw)) or ""
+    except (json.JSONDecodeError, TypeError):
+        return raw
+
+
+def _executable(token: str) -> str:
+    return PurePath(token).name.casefold()
+
+
+def _segments(command: str) -> list[list[str]]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    segments: list[list[str]] = [[]]
+    for token in lexer:
+        if token in CHAIN_TOKENS:
+            if segments[-1]:
+                segments.append([])
+            continue
+        segments[-1].append(token)
+    return [segment for segment in segments if segment]
+
+
+def _command_start(tokens: list[str]) -> int:
+    index = 0
+    while index < len(tokens):
+        executable = _executable(tokens[index])
+        if executable == "sudo":
+            index += 1
+            while index < len(tokens) and tokens[index].startswith("-"):
+                index += 1
+            continue
+        if executable == "env":
+            index += 1
+            while index < len(tokens):
+                token = tokens[index]
+                if token.startswith("-") or ("=" in token and not token.startswith("=")):
+                    index += 1
+                    continue
+                break
+            continue
+        if "=" in tokens[index] and not tokens[index].startswith(("/", "./", "../")):
+            index += 1
+            continue
+        break
+    return index
+
+
+def _git_subcommand(args: list[str]) -> tuple[str, list[str]]:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            index += 1
+            break
+        key = token.split("=", 1)[0]
+        if key in GIT_GLOBAL_WITH_VALUE:
+            index += 1 if "=" in token else 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return token.casefold(), args[index + 1 :]
+    if index < len(args):
+        return args[index].casefold(), args[index + 1 :]
+    return "", []
+
+
+def _git_reason(args: list[str]) -> str | None:
+    subcommand, sub_args = _git_subcommand(args)
+    if subcommand == "reset" and "--hard" in sub_args:
+        return "git reset --hard"
+    if subcommand == "clean":
+        short_flags = "".join(
+            token[1:]
+            for token in sub_args
+            if token.startswith("-") and not token.startswith("--")
+        )
+        forced = "f" in short_flags or "--force" in sub_args
+        directories = "d" in short_flags or "--dirs" in sub_args
+        if forced and directories:
+            return "git clean with force and directory removal"
+    if subcommand == "push":
+        forced = any(
+            token == "-f"
+            or token == "--force"
+            or token.startswith("--force=")
+            for token in sub_args
+        )
+        if forced:
+            return "git force push"
+    return None
+
+
+def _rm_reason(args: list[str]) -> str | None:
+    short_flags = "".join(
+        token[1:]
+        for token in args
+        if token.startswith("-") and not token.startswith("--")
+    )
+    recursive = "r" in short_flags or "R" in short_flags or "--recursive" in args
+    forced = "f" in short_flags or "--force" in args
+    if not (recursive and forced):
+        return None
+    targets = [token for token in args if not token.startswith("-")]
+    for target in targets:
+        allowed_cache = target == ".next" or target.startswith(".next/")
+        allowed_state = target == ".samvil" or target.startswith(".samvil/")
+        dangerous = (
+            target in {"/", "~", ".", "./", "..", "../", "*", "./*"}
+            or target.startswith("/")
+            or target.startswith("~/")
+            or target.startswith("$")
+            or "${" in target
+        )
+        if dangerous and not (allowed_cache or allowed_state):
+            return f"recursive forced removal of {target}"
+    return None
+
+
+def _sql_reason(executable: str, args: list[str]) -> str | None:
+    if executable not in SQL_CLIENTS:
+        return None
+    if re.search(r"\bdrop\s+(?:table|database)\b", " ".join(args), re.IGNORECASE):
+        return "destructive SQL statement"
+    return None
+
+
+def analyze_command(command: str) -> str | None:
+    for tokens in _segments(command):
+        start = _command_start(tokens)
+        if start >= len(tokens):
+            continue
+        executable = _executable(tokens[start])
+        args = tokens[start + 1 :]
+        if executable in SHELLS and "-c" in args:
+            command_index = args.index("-c") + 1
+            if command_index < len(args):
+                nested = analyze_command(args[command_index])
+                if nested:
+                    return nested
+        if executable == "git":
+            reason = _git_reason(args)
+        elif executable == "rm":
+            reason = _rm_reason(args)
+        else:
+            reason = _sql_reason(executable, args)
+        if reason:
+            return reason
+    return None
+
+
+def main() -> int:
+    reason = analyze_command(extract_command(os.environ.get("TOOL_INPUT", "")))
+    if reason:
+        print(reason)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

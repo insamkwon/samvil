@@ -23,7 +23,7 @@ them so no two axes share a value name.
 | Agent model-responsibility layer (§3.⑤) | **`model_role`** | `generator`, `reviewer`, `judge`, `repairer`, `researcher`, `compressor` |
 | Host support level | **`host_support`** | `native` (Claude Code), `integration` (Codex routing/MCP/marker), `experimental_stub` (Gemini) |
 | Contract ledger entry (§3.①) | **`claim`** | typed record with status `pending` / `verified` / `rejected` |
-| Typed subset of claim | **`claim.type`** | `seed_field_set`, `ac_verdict`, `gate_verdict`, `gate_override`, `evolve_decision`, `policy_adoption`, `evidence_posted`, `claim_disputed`, `consensus_verdict`, `migration_applied`, `stagnation_declared` |
+| Typed subset of claim | **`claim.type`** | `seed_field_set`, `ac_verdict`, `gate_verdict`, `user_approval`, `gate_override`, `evolve_decision`, `policy_adoption`, `evidence_posted`, `claim_disputed`, `consensus_verdict`, `migration_applied`, `stagnation_declared` |
 
 ## Banned or legacy names
 

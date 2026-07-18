@@ -6,11 +6,13 @@ import asyncio
 import json
 import shlex
 import sys
+import time
 from pathlib import Path
 
 from samvil_mcp.ac_verification import (
     prepare_seed_verify_contracts,
     run_ac_verification,
+    validate_verify_contract,
 )
 
 
@@ -81,6 +83,12 @@ def test_automation_candidate_requires_explicit_confirmed_command() -> None:
     ]
 
 
+def test_verify_contract_requires_executable_command() -> None:
+    errors = validate_verify_contract({"artifacts": ["result.txt"]})
+
+    assert errors == ["verify.command is required"]
+
+
 def test_command_exit_assertion_and_artifact_are_primary_evidence(tmp_path: Path) -> None:
     python = shlex.quote(sys.executable)
     command = (
@@ -132,6 +140,30 @@ def test_pipeline_cannot_hide_failing_test_command(tmp_path: Path) -> None:
 
     assert result["exit_code"] == 7
     assert result["passed"] is False
+
+
+def test_normalized_ac_ids_cannot_collide_on_log_path(tmp_path: Path) -> None:
+    first = run_ac_verification(tmp_path, "AC/1", {"command": "printf first"})
+    second = run_ac_verification(tmp_path, "AC?1", {"command": "printf second"})
+
+    assert first["log_file"] != second["log_file"]
+    assert (tmp_path / first["log_file"]).read_text().startswith("first")
+    assert (tmp_path / second["log_file"]).read_text().startswith("second")
+
+
+def test_timeout_terminates_entire_process_group(tmp_path: Path) -> None:
+    result = run_ac_verification(
+        tmp_path,
+        "AC-timeout",
+        {"command": "(sleep 0.4; touch escaped.txt) & wait"},
+        timeout_seconds=0.05,
+    )
+
+    time.sleep(0.6)
+
+    assert result["timed_out"] is True
+    assert result["exit_code"] == 124
+    assert not (tmp_path / "escaped.txt").exists()
 
 
 def test_ac_verification_mcp_tool(tmp_path: Path) -> None:

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import os
 import re
+import signal
 import subprocess
 from pathlib import Path
 from typing import Any, Iterator
@@ -24,12 +27,14 @@ def validate_verify_contract(verify: Any) -> list[str]:
         return ["verify must be an object"]
     unknown = sorted(set(verify) - VERIFY_KEYS)
     errors = [f"verify has unknown fields: {unknown}"] if unknown else []
-    if not any(key in verify for key in VERIFY_KEYS):
-        errors.append("verify must define command, artifacts, or assertion")
-    for key in ("command", "assertion"):
-        value = verify.get(key)
-        if value is not None and (not isinstance(value, str) or not value.strip()):
-            errors.append(f"verify.{key} must be a non-empty string")
+    command = verify.get("command")
+    if not isinstance(command, str) or not command.strip():
+        errors.append("verify.command is required")
+    assertion = verify.get("assertion")
+    if assertion is not None and (
+        not isinstance(assertion, str) or not assertion.strip()
+    ):
+        errors.append("verify.assertion must be a non-empty string")
     artifacts = verify.get("artifacts")
     if artifacts is not None and (
         not isinstance(artifacts, list)
@@ -105,7 +110,8 @@ def prepare_seed_verify_contracts(seed: dict[str, Any]) -> dict[str, Any]:
 
 def _safe_log_name(ac_id: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", ac_id).strip("-.")
-    return safe or "ac"
+    digest = hashlib.sha256(ac_id.encode("utf-8")).hexdigest()[:10]
+    return f"{safe or 'ac'}-{digest}"
 
 
 def _artifact_status(root: Path, artifacts: list[str]) -> dict[str, list[str]]:
@@ -151,31 +157,34 @@ def run_ac_verification(
 
     exit_code = 1
     timed_out = False
-    try:
-        completed = subprocess.run(
+    process = subprocess.Popen(
             ["bash", "-o", "pipefail", "-c", command],
             cwd=root,
             text=True,
-            capture_output=True,
-            timeout=max(0.01, timeout_seconds),
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
         )
-        exit_code = completed.returncode
-        output = (completed.stdout or "") + (completed.stderr or "")
+    try:
+        stdout, stderr = process.communicate(timeout=max(0.01, timeout_seconds))
+        exit_code = process.returncode
+        output = (stdout or "") + (stderr or "")
     except subprocess.TimeoutExpired as exc:
         timed_out = True
         exit_code = 124
-        stdout = (
-            exc.stdout.decode("utf-8", errors="replace")
-            if isinstance(exc.stdout, bytes)
-            else (exc.stdout or "")
-        )
-        stderr = (
-            exc.stderr.decode("utf-8", errors="replace")
-            if isinstance(exc.stderr, bytes)
-            else (exc.stderr or "")
-        )
-        output = stdout + stderr
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = process.communicate(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = process.communicate()
+        output = (stdout or "") + (stderr or "")
 
     relative_log = f".samvil/ac-evidence/{_safe_log_name(ac_id)}.log"
     separator = "" if not output or output.endswith("\n") else "\n"

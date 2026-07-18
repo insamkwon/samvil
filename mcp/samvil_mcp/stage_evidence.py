@@ -102,12 +102,17 @@ def _collect_qa(root: Path) -> tuple[dict[str, Any], list[str], list[str]]:
                 report_valid = True
             else:
                 missing.append(report_relative)
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeError, json.JSONDecodeError):
             missing.append(report_relative)
     else:
         missing.append(report_relative)
 
-    runtime_verified = report_valid and (passed + failed + skipped > 0)
+    runtime_verified = (
+        report_valid
+        and exit_code == 0
+        and passed > 0
+        and failed == 0
+    )
     return (
         {
             "npm_test": {

@@ -1227,7 +1227,7 @@ Key: shadcn/ui 우선 | cn() 사용 | 'use client' 필수 | TypeScript strict | 
 - Agent가 완료되면 즉시 결과 라인 출력
 - 실패 시 로그 파일 경로 안내
 
-**Example with MAX_PARALLEL=2 and 5 independent features:**
+**Example with MAX_PARALLEL set to 2 and 5 independent features:**
 - Chunk 1: spawn agents for feature A + feature B (parallel) → wait
 - Chunk 2: spawn agents for feature C + feature D (parallel) → wait
 - Chunk 3: spawn agent for feature E (single) → wait

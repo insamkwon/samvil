@@ -91,9 +91,14 @@ class SemanticFinding:
         }
 
 
-def analyze_shell_evidence(command: str, execution_log: str) -> dict:
-    """Reject filter-pipeline test evidence without a canonical exit marker."""
-    mismatch = bool(PIPE_FILTER.search(command) and not EXIT_MARKER.search(execution_log))
+def analyze_shell_evidence(
+    command: str,
+    execution_log: str,
+    *,
+    runner_exit_code: int | None = None,
+) -> dict:
+    """Reject filtered evidence unless the trusted runner reports success."""
+    mismatch = bool(PIPE_FILTER.search(command) and runner_exit_code != 0)
     findings = []
     if mismatch:
         findings.append(
@@ -103,7 +108,7 @@ def analyze_shell_evidence(command: str, execution_log: str) -> dict:
                 "severity": "HIGH",
                 "explanation": (
                     "test output is filtered through tail/grep without a "
-                    "SAMVIL_EXIT marker"
+                    "trusted runner exit status"
                 ),
             }
         )
@@ -119,6 +124,7 @@ def analyze_code_snippet(
     context_hint: str = "",
     shell_command: str = "",
     execution_log: str = "",
+    runner_exit_code: int | None = None,
 ) -> dict:
     """Analyze a code snippet for reward hacking signals.
 
@@ -213,7 +219,11 @@ def analyze_code_snippet(
             ))
 
     if shell_command:
-        shell_result = analyze_shell_evidence(shell_command, execution_log)
+        shell_result = analyze_shell_evidence(
+            shell_command,
+            execution_log,
+            runner_exit_code=runner_exit_code,
+        )
         if not shell_result["accepted"]:
             findings.append(
                 SemanticFinding(

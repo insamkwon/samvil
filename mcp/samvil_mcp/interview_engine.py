@@ -432,11 +432,12 @@ def _score_nonfunctional(state: dict) -> float:
 def _score_stakeholder(state: dict) -> float:
     """Score stakeholder specificity: role + context? (0=specific, 1=vague)"""
     target_user = state.get("target_user", "")
-    if not target_user or _is_short_text(target_user, 10):
+    if not target_user:
         return 1.0
-    vague_only = _is_generic_target_user(target_user)
-    if vague_only:
+    if _is_generic_target_user(target_user):
         return 0.9
+    if _is_short_text(target_user, 10):
+        return 1.0
     has_number = bool(re.search(r'\d+', target_user))
     has_context = any(kw in target_user.lower() for kw in [
         "who", "that", "with", "at", "managing", "working", "using",

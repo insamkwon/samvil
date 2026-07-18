@@ -48,7 +48,7 @@ def test_default_pipeline_skips_council() -> None:
 
 
 def test_minimal_skips_council_even_when_requested() -> None:
-    assert should_skip_stage("council", "minimal") is True
+    assert should_skip_stage("council", "minimal", council_opt_in=True) is True
 
 
 @pytest.mark.parametrize("tier", ["standard", "thorough", "full"])

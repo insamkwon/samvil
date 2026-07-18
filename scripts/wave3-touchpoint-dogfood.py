@@ -11,8 +11,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "mcp"))
 
-from samvil_mcp.interview_engine import score_ambiguity  # noqa: E402
-from samvil_mcp.orchestrator import aggregate_orchestrator_state  # noqa: E402
+from samvil_mcp.dogfood_interactions import run_standard_interaction_workflow  # noqa: E402
 
 
 def _require_skill_contracts() -> None:
@@ -68,36 +67,16 @@ def _clear_dashboard_state() -> dict:
 def run_dogfood() -> dict:
     _require_skill_contracts()
     with tempfile.TemporaryDirectory(prefix="samvil-wave3-dogfood-") as tmp:
-        orchestrator = aggregate_orchestrator_state(
+        workflow = run_standard_interaction_workflow(
             tmp,
             prompt="에이전시 프로젝트 KPI 대시보드",
-            cli_tier="",
-            mode_hint="",
-            host_name="codex_cli",
+            interview_state=_clear_dashboard_state(),
         )
-
-    interview = score_ambiguity(
-        _clear_dashboard_state(),
-        tier="standard",
-        questions_asked=10,
-    )
-
-    touchpoints = [
-        {"stage": "orchestrator", "checkpoint": "tier", "calls": 1},
-        {"stage": "interview", "checkpoint": "epic_claim", "calls": 1},
-        {"stage": "interview", "checkpoint": "core_batch", "calls": 1, "questions": 3},
-        {"stage": "interview", "checkpoint": "scope_batch", "calls": 1, "questions": 3},
-        {"stage": "interview", "checkpoint": "lifecycle_batch", "calls": 1, "questions": 2},
-        {"stage": "interview", "checkpoint": "success_metric_batch", "calls": 1, "questions": 2},
-        {"stage": "interview", "checkpoint": "summary_review", "calls": 1},
-        {"stage": "interview", "checkpoint": "restate_review", "calls": 1},
-        {"stage": "interview", "checkpoint": "pain_capture", "calls": 1},
-        {"stage": "seed", "checkpoint": "principles_review", "calls": 1},
-        {"stage": "seed", "checkpoint": "behavior_review", "calls": 1},
-        {"stage": "seed", "checkpoint": "final_seed_approval", "calls": 1},
-    ]
-    total_calls = sum(row["calls"] for row in touchpoints)
-    budget_questions = sum(row.get("questions", 0) for row in touchpoints)
+    orchestrator = workflow["orchestrator"]
+    interview = workflow["interview"]
+    touchpoints = workflow["touchpoints"]
+    total_calls = workflow["ask_user_question_calls"]
+    budget_questions = workflow["questions_asked"]
     batch_sizes = [
         row["questions"] for row in touchpoints if "questions" in row
     ]
@@ -120,4 +99,13 @@ def run_dogfood() -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps(run_dogfood(), ensure_ascii=False, indent=2))
+    result = run_dogfood()
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if not (
+        result["solution_type"] == "dashboard"
+        and result["solution_confidence"] == "high"
+        and result["questions_asked"] == 10
+        and result["interview_converged"] is True
+        and result["within_goal"] is True
+    ):
+        raise SystemExit(1)

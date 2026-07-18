@@ -40,7 +40,10 @@ samvil_contract_is_stage_skill "$SKILL_NAME" || exit 0
 # 3. Seed the root marker from explicit input before interview creates state/seed.
 INPUT_PROJECT_ROOT="$(samvil_contract_extract_project_root "$TOOL_INPUT")"
 if [ -n "$INPUT_PROJECT_ROOT" ]; then
-  PROJECT_ROOT="$(samvil_contract_write_project_root_marker "$INPUT_PROJECT_ROOT")"
+  PROJECT_ROOT="$(samvil_contract_write_project_root_marker "$INPUT_PROJECT_ROOT")" || {
+    samvil_contract_log_health "stage-start" "fail" "invalid explicit project root"
+    exit 0
+  }
 fi
 PROJECT_ROOT="${PROJECT_ROOT:-$(samvil_contract_find_project_root)}"
 [ -z "$PROJECT_ROOT" ] && exit 0
@@ -59,7 +62,9 @@ AUTHORITY="project.state.json"
 #     .samvil/next-skill.json. Entering the expected skill clears it
 #     (chain healthy). Entering a different stage skill = divergence —
 #     keep the marker and flag it so health_check surfaces the anomaly.
-CHAIN_STATE="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
+CHAIN_STATE="no-marker"
+if [ "$SAMVIL_PY_AVAILABLE" = "1" ]; then
+  CHAIN_STATE="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
 import os, sys
 project_root, skill_name = sys.argv[1:3]
 try:
@@ -78,6 +83,7 @@ except Exception as e:
     print("no-marker")
 PY
 )"
+fi
 case "$CHAIN_STATE" in
   continued=*)
     samvil_contract_log_health "chain" "ok" "$CHAIN_STATE"

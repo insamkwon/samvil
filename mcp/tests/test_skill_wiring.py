@@ -36,6 +36,27 @@ def test_reference_tool_check_rejects_unregistered_tool(tmp_path: Path) -> None:
     assert unresolved == {"budget_status": ["references/protocol.md:1"]}
 
 
+def test_reference_tool_check_catches_non_allowlisted_tool_prefix(tmp_path: Path) -> None:
+    server = tmp_path / "mcp" / "samvil_mcp" / "server.py"
+    server.parent.mkdir(parents=True)
+    server.write_text(
+        "@mcp.tool()\nasync def validate_seed(seed_path: str):\n    pass\n",
+        encoding="utf-8",
+    )
+    references = tmp_path / "references"
+    references.mkdir()
+    (references / "protocol.md").write_text(
+        "Call `validate_missing(seed_path='x')` through MCP.\n",
+        encoding="utf-8",
+    )
+
+    wiring = _load_wiring_module()
+
+    assert wiring.find_unresolved_reference_tools(tmp_path) == {
+        "validate_missing": ["references/protocol.md:1"]
+    }
+
+
 def test_interview_question_limits_use_decision_boundaries_ssot() -> None:
     repo = Path(__file__).resolve().parents[2]
     thin = (repo / "skills" / "samvil-interview" / "SKILL.md").read_text()
@@ -138,5 +159,23 @@ def test_numeric_drift_check_requires_ssot_citation(tmp_path: Path) -> None:
     issues = wiring.find_skill_numeric_drift(tmp_path)
 
     assert issues == [
-        "samvil-build: MAX_RETRIES shared without decision-boundaries SSOT citation"
+        "samvil-build: named constants missing decision-boundaries SSOT citation"
+    ]
+
+
+def test_numeric_drift_check_rejects_one_sided_constant(tmp_path: Path) -> None:
+    wiring = _load_wiring_module()
+    skill = tmp_path / "skills" / "samvil-build"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "references/decision-boundaries.md\nMAX_RETRIES=2\n",
+        encoding="utf-8",
+    )
+    (skill / "SKILL.legacy.md").write_text(
+        "references/decision-boundaries.md\n",
+        encoding="utf-8",
+    )
+
+    assert wiring.find_skill_numeric_drift(tmp_path) == [
+        "samvil-build: MAX_RETRIES missing from legacy"
     ]

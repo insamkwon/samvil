@@ -26,13 +26,14 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 REFERENCE_TOOL_CALL_RE = re.compile(
-    r"`((?:claim|gate|route|rate_budget|budget)_[a-z0-9_]+)\([^`]*\)`"
+    r"`([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\([^`]*\)`"
 )
 REFERENCE_TOOL_LABEL_RE = re.compile(
-    r"`((?:claim|gate|route|rate_budget|budget)_[a-z0-9_]+)`\s+tool\b"
+    r"`([a-z][a-z0-9]+(?:_[a-z0-9]+)+)`\s+tool\b"
 )
+REFERENCE_TOOL_PREFIXED_RE = re.compile(r"mcp__samvil_mcp__([a-z][a-z0-9_]*)")
 NAMED_NUMERIC_CONSTANT_RE = re.compile(
-    r"\b([A-Z][A-Z0-9_]{2,})\s*(?:=|:)\s*(\d+(?:\.\d+)?)\b"
+    r"\b([A-Z][A-Z0-9_]{2,})[ \t]*(?:=|:)[ \t]*(\d+(?:\.\d+)?)\b"
 )
 DECISION_BOUNDARIES_REF = "references/decision-boundaries.md"
 
@@ -362,13 +363,20 @@ def find_unresolved_reference_tools(repo: Path = REPO) -> dict[str, list[str]]:
         )
 
     unresolved: dict[str, list[str]] = {}
+    tool_prefixes = {name.split("_", 1)[0] for name in registered}
+    tool_prefixes.update({"budget", "claim", "gate", "rate", "route"})
     references = repo / "references"
     if not references.exists():
         return unresolved
     for path in sorted(references.rglob("*.md")):
         for lineno, line in enumerate(path.read_text(errors="ignore").splitlines(), start=1):
-            candidates = set(REFERENCE_TOOL_CALL_RE.findall(line))
-            candidates.update(REFERENCE_TOOL_LABEL_RE.findall(line))
+            raw_candidates = set(REFERENCE_TOOL_CALL_RE.findall(line))
+            raw_candidates.update(REFERENCE_TOOL_LABEL_RE.findall(line))
+            candidates = {
+                name for name in raw_candidates
+                if name.split("_", 1)[0] in tool_prefixes
+            }
+            candidates.update(REFERENCE_TOOL_PREFIXED_RE.findall(line))
             for name in sorted(candidates - registered):
                 unresolved.setdefault(name, []).append(
                     f"{path.relative_to(repo)}:{lineno}"
@@ -395,18 +403,27 @@ def find_skill_numeric_drift(repo: Path = REPO) -> list[str]:
             thin_values.setdefault(name, set()).add(value)
         for name, value in NAMED_NUMERIC_CONSTANT_RE.findall(legacy):
             legacy_values.setdefault(name, set()).add(value)
-        for name in sorted(thin_values.keys() & legacy_values.keys()):
+        names = thin_values.keys() | legacy_values.keys()
+        for name in sorted(names):
+            if name not in thin_values:
+                issues.append(f"{skill_dir.name}: {name} missing from thin")
+                continue
+            if name not in legacy_values:
+                issues.append(f"{skill_dir.name}: {name} missing from legacy")
+                continue
             left = sorted(thin_values[name])
             right = sorted(legacy_values[name])
             if left != right:
                 issues.append(
                     f"{skill_dir.name}: {name} thin={left} legacy={right}"
                 )
-                continue
-            if DECISION_BOUNDARIES_REF not in thin or DECISION_BOUNDARIES_REF not in legacy:
-                issues.append(
-                    f"{skill_dir.name}: {name} shared without decision-boundaries SSOT citation"
-                )
+        if names and (
+            DECISION_BOUNDARIES_REF not in thin
+            or DECISION_BOUNDARIES_REF not in legacy
+        ):
+            issues.append(
+                f"{skill_dir.name}: named constants missing decision-boundaries SSOT citation"
+            )
     return issues
 
 

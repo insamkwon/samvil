@@ -87,6 +87,28 @@ def test_read_events_accepts_legacy_ts(project_root: Path) -> None:
     assert result["last_ts"] == "2026-05-16T10:00:00Z"
 
 
+def test_read_events_normalizes_non_string_and_null_timestamps(
+    project_root: Path,
+) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "start", "stage": "build",
+         "timestamp": 123},
+        {"session_id": "s1", "event_type": "middle", "stage": "build",
+         "ts": None},
+        {"session_id": "s1", "event_type": "end", "stage": "build",
+         "timestamp": "2026-05-16T10:00:00Z"},
+    ])
+
+    result = read_events(project_root=str(project_root))
+
+    assert result["first_ts"] == "123"
+    assert result["last_ts"] == "2026-05-16T10:00:00Z"
+    sessions = list_in_flight_sessions(project_root=str(project_root))
+    assert sessions["in_flight_sessions"][0]["last_event_ts"] == (
+        "2026-05-16T10:00:00Z"
+    )
+
+
 def test_read_events_skips_malformed(project_root: Path) -> None:
     samvil = project_root / ".samvil"
     samvil.mkdir()

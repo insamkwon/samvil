@@ -17,6 +17,14 @@ BACKUP_FILENAME = "project.v3-2.backup.json"
 
 
 def _migrate_seed_dict(seed: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    source_version = str(seed.get("schema_version") or "")
+    if source_version == V33_SCHEMA_VERSION:
+        return copy.deepcopy(seed), []
+    if source_version != "3.2":
+        raise ValueError(
+            "v3.3 migration requires schema_version '3.2'; "
+            f"got {source_version!r}"
+        )
     original = copy.deepcopy(seed)
     preparation = prepare_seed_verify_contracts(original)
     prepared = preparation["seed"]

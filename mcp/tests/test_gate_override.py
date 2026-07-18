@@ -26,14 +26,25 @@ def _post_block(ledger: ClaimLedger, gate: str) -> None:
     )
 
 
+def _record_user_approval(ledger: ClaimLedger, gate: str, reason: str) -> str:
+    return ledger.record_host_user_approval(
+        gate=gate,
+        reason=reason,
+        host_event_id=f"ask_user_{gate}",
+    ).claim_id
+
+
 def test_gate_override_records_verified_user_claim(tmp_path: Path) -> None:
     ledger = ClaimLedger(tmp_path / ".samvil" / "claims.jsonl")
     _post_block(ledger, "qa_to_deploy")
 
+    reason = "accept static-only deployment risk"
+    approval_claim_id = _record_user_approval(ledger, "qa_to_deploy", reason)
     result = gate_override(
         tmp_path,
         gate="qa_to_deploy",
-        reason="accept static-only deployment risk",
+        reason=reason,
+        approval_claim_id=approval_claim_id,
     )
 
     claim = active_gate_override(ledger, "qa_to_deploy")
@@ -44,26 +55,34 @@ def test_gate_override_records_verified_user_claim(tmp_path: Path) -> None:
     assert claim.verified_by == "agent:user"
     assert claim.meta["overridden_by"] == "user"
     assert claim.meta["reason"] == "accept static-only deployment risk"
+    assert claim.meta["approval_claim_id"] == approval_claim_id
 
 
-def test_gate_override_rejects_non_user_approval(tmp_path: Path) -> None:
+def test_gate_override_rejects_missing_host_approval(tmp_path: Path) -> None:
+    ledger = ClaimLedger(tmp_path / ".samvil" / "claims.jsonl")
+    _post_block(ledger, "qa_to_deploy")
+
     with pytest.raises(ValueError, match="explicit user approval"):
         gate_override(
             tmp_path,
             gate="qa_to_deploy",
             reason="agent chose to proceed",
-            approved_by="agent:qa-functional",
+            approval_claim_id="claim_missing",
         )
 
 
 def test_gate_override_is_consumed_by_newer_gate_verdict(tmp_path: Path) -> None:
     ledger = ClaimLedger(tmp_path / ".samvil" / "claims.jsonl")
     _post_block(ledger, "qa_to_deploy")
-    gate_override(tmp_path, gate="qa_to_deploy", reason="one-time approval")
+    reason = "one-time approval"
+    approval_claim_id = _record_user_approval(ledger, "qa_to_deploy", reason)
+    gate_override(
+        tmp_path,
+        gate="qa_to_deploy",
+        reason=reason,
+        approval_claim_id=approval_claim_id,
+    )
     assert active_gate_override(ledger, "qa_to_deploy") is not None
-
-    _post_block(ledger, "qa_to_deploy")
-
     assert active_gate_override(ledger, "qa_to_deploy") is None
 
 
@@ -73,19 +92,22 @@ def test_gate_override_mcp_tool_records_claim(tmp_path: Path) -> None:
     ledger = ClaimLedger(tmp_path / ".samvil" / "claims.jsonl")
     _post_block(ledger, "build_to_qa")
 
+    reason = "user accepts build evidence risk"
+    approval_claim_id = _record_user_approval(ledger, "build_to_qa", reason)
     result = json.loads(
         asyncio.run(
             gate_override_tool(
                 project_root=str(tmp_path),
                 gate="build_to_qa",
-                reason="user accepts build evidence risk",
-                approved_by="user",
+                reason=reason,
+                approval_claim_id=approval_claim_id,
             )
         )
     )
 
     assert result["status"] == "verified"
     assert active_gate_override(ledger, "build_to_qa") is not None
+    assert active_gate_override(ledger, "build_to_qa") is None
 
 
 def test_stage_end_hook_applies_override_once(tmp_path: Path) -> None:
@@ -115,7 +137,15 @@ def test_stage_end_hook_applies_override_once(tmp_path: Path) -> None:
     ]
 
     subprocess.run(command, cwd=project, env=env, check=True)
-    gate_override(project, gate="qa_to_deploy", reason="user accepts runtime risk")
+    ledger = ClaimLedger(project / ".samvil" / "claims.jsonl")
+    reason = "user accepts runtime risk"
+    approval_claim_id = _record_user_approval(ledger, "qa_to_deploy", reason)
+    gate_override(
+        project,
+        gate="qa_to_deploy",
+        reason=reason,
+        approval_claim_id=approval_claim_id,
+    )
     subprocess.run(command, cwd=project, env=env, check=True)
 
     health_path = home / ".samvil" / "mcp-health.jsonl"

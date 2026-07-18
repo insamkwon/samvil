@@ -33,7 +33,7 @@ import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -676,6 +676,10 @@ def _stage_durations_from_events(events: list[dict[str, Any]]) -> dict[str, int]
             timestamp = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
         except ValueError:
             continue
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = timestamp.astimezone(timezone.utc)
         bounds.setdefault(stage, []).append(timestamp)
 
     durations: dict[str, int] = {}

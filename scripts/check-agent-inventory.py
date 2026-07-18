@@ -49,7 +49,12 @@ def main() -> int:
         errors.append(f"inline identities unexpectedly have persona files: {inline_on_disk}")
 
     for path in COUNT_DOCS:
-        match = COUNT_PATTERN.search(path.read_text())
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            errors.append(f"missing count document: {path}")
+            continue
+        match = COUNT_PATTERN.search(text)
         if not match:
             errors.append(f"missing persona count marker: {path.relative_to(REPO)}")
         elif int(match.group(1)) != len(persona_names):

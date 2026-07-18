@@ -23,8 +23,10 @@ def _load_failure_list(path: Path) -> list[dict]:
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except json.JSONDecodeError:
+        if isinstance(data, list):
+            return data
+        raise ValueError("failure list root must be a JSON array")
+    except (json.JSONDecodeError, ValueError):
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         backup = path.with_name(f"{path.name}.corrupt-{stamp}")
         path.replace(backup)

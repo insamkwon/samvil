@@ -41,7 +41,7 @@ def test_expired_acquire_does_not_consume_slot(tmp_path: Path):
 def test_recent_acquire_still_consumes_slot(tmp_path: Path):
     p = tmp_path / "rb.jsonl"
     p.write_text(json.dumps({
-        "ts": time.time() - (30 * 60 - 1),
+        "ts": time.time() - 60,
         "worker_id": "live-worker",
         "kind": "acquire",
     }) + "\n")
@@ -50,6 +50,21 @@ def test_recent_acquire_still_consumes_slot(tmp_path: Path):
 
     assert r["acquired"] is False
     assert r["current"] == 1
+
+
+def test_malformed_acquire_timestamp_does_not_consume_slot(tmp_path: Path):
+    p = tmp_path / "rb.jsonl"
+    p.write_text(json.dumps({
+        "ts": "not-a-timestamp",
+        "worker_id": "malformed-worker",
+        "kind": "acquire",
+    }) + "\n")
+
+    result = acquire(str(p), "replacement-worker", max_concurrent=1)
+
+    assert result["acquired"] is True
+    assert result["current"] == 1
+    assert stats(str(p))["active_workers"] == ["replacement-worker"]
 
 
 def test_release_opens_slot(tmp_path: Path):

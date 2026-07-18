@@ -118,7 +118,7 @@ def render_qa_synthesis(synthesis: dict[str, Any]) -> str:
         f"- Iteration: {synthesis.get('iteration')}/{synthesis.get('max_iterations')}",
     ]
     runtime = synthesis.get("runtime_evidence") or {}
-    if runtime:
+    if runtime.get("ran") is True:
         lines.append(
             "- Runtime tests: "
             f"passed={runtime.get('passed', 0)}, "

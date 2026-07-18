@@ -14,8 +14,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "mcp"))
 
-from samvil_mcp.interview_engine import score_ambiguity  # noqa: E402
-from samvil_mcp.orchestrator import aggregate_orchestrator_state  # noqa: E402
+from samvil_mcp.dogfood_interactions import run_standard_interaction_workflow  # noqa: E402
 from samvil_mcp.qa_finalize import finalize_qa_verdict  # noqa: E402
 from samvil_mcp.qa_synthesis import materialize_qa_synthesis  # noqa: E402
 from samvil_mcp.retro_aggregate import aggregate_retro_metrics  # noqa: E402
@@ -61,18 +60,13 @@ def run_dogfood() -> dict:
         samvil = root / ".samvil"
         samvil.mkdir()
 
-        orchestrator = aggregate_orchestrator_state(
+        workflow = run_standard_interaction_workflow(
             str(root),
             prompt="매일 파트너 CSV를 정리해서 슬랙으로 보내는 자동화",
-            cli_tier="",
-            mode_hint="",
-            host_name="codex_cli",
+            interview_state=_clear_automation_state(),
         )
-        interview = score_ambiguity(
-            _clear_automation_state(),
-            tier="standard",
-            questions_asked=10,
-        )
+        orchestrator = workflow["orchestrator"]
+        interview = workflow["interview"]
 
         (root / "project.seed.json").write_text(
             json.dumps(
@@ -163,7 +157,6 @@ def run_dogfood() -> dict:
             check=False,
         )
 
-        touchpoints = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
         return {
             "scenario": "standard-automation",
             "solution_type": orchestrator["solution_type"]["solution_type"],
@@ -174,11 +167,26 @@ def run_dogfood() -> dict:
             "qa_reported_passed": qa_reported_passed,
             "injected_failure_gate_verdict": injected["verdict"],
             "destructive_guard_blocked": guard.returncode == 1,
-            "ask_user_question_calls": sum(touchpoints),
+            "ask_user_question_calls": workflow["ask_user_question_calls"],
+            "touchpoints": workflow["touchpoints"],
             "interview_ambiguity": interview["ambiguity"],
             "interview_converged": interview["converged"],
         }
 
 
 if __name__ == "__main__":
-    print(json.dumps(run_dogfood(), ensure_ascii=False, indent=2))
+    result = run_dogfood()
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    expected = (
+        result["solution_type"] == "automation"
+        and result["solution_confidence"] == "high"
+        and result["events_file_exists"] is True
+        and result["stage_durations_ms"].get("interview") == 1000
+        and result["qa_reported_passed"] == result["raw_test_passed"] == 3
+        and result["injected_failure_gate_verdict"] == "block"
+        and result["destructive_guard_blocked"] is True
+        and result["ask_user_question_calls"] <= 12
+        and result["interview_converged"] is True
+    )
+    if not expected:
+        raise SystemExit(1)

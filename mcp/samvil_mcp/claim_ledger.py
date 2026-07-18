@@ -39,6 +39,7 @@ CLAIM_TYPES: tuple[str, ...] = (
     "seed_field_set",
     "ac_verdict",
     "gate_verdict",
+    "user_approval",
     "gate_override",
     "evolve_decision",
     "policy_adoption",
@@ -371,18 +372,23 @@ class ClaimLedger:
             self._append(rejected)
         return rejected
 
-    def record_gate_override(
+    def record_host_user_approval(
         self,
         *,
         gate: str,
         reason: str,
-        approved_by: str = "user",
+        host_event_id: str,
     ) -> Claim:
-        """Append a verified, user-authoritative one-time gate override."""
-        if approved_by not in {"user", "agent:user"}:
-            raise ClaimLedgerError("gate override requires explicit user approval.")
-        if not gate or not reason.strip():
-            raise ClaimLedgerError("gate and non-empty reason are required.")
+        """Record approval emitted by a host AskUserQuestion interaction.
+
+        This method is intentionally not exposed as an MCP tool. Host adapters
+        own the interaction boundary; model-authored ``approved_by`` strings
+        are not accepted as authority.
+        """
+        if not gate or not reason.strip() or not host_event_id.strip():
+            raise ClaimLedgerError(
+                "gate, non-empty reason, and host_event_id are required."
+            )
 
         with _locked(self.path):
             ts = _now_iso()
@@ -390,11 +396,105 @@ class ClaimLedger:
             seq = self._next_seq(existing, ts)
             claim = Claim(
                 claim_id=_claim_id(ts, seq),
+                type="user_approval",
+                subject=gate,
+                statement=f"host recorded user approval: {reason.strip()}",
+                authority_file=".samvil/claims.jsonl",
+                evidence=[f"host-event:{host_event_id.strip()}"],
+                claimed_by="host:AskUserQuestion",
+                verified_by="agent:user",
+                status="verified",
+                ts=ts,
+                meta={
+                    "source": "host",
+                    "reason": reason.strip(),
+                    "host_event_id": host_event_id.strip(),
+                    "consumed": False,
+                },
+            )
+            self._append(claim)
+        return claim
+
+    def record_gate_override(
+        self,
+        *,
+        gate: str,
+        reason: str,
+        approval_claim_id: str,
+    ) -> Claim:
+        """Atomically consume host approval and append a verified override."""
+        if not gate or not reason.strip() or not approval_claim_id:
+            raise ClaimLedgerError(
+                "gate, non-empty reason, and explicit user approval are required."
+            )
+
+        with _locked(self.path):
+            latest = self._latest_by_id()
+            verdicts = [
+                claim
+                for claim in latest.values()
+                if claim.subject == gate and claim.type == "gate_verdict"
+            ]
+            if not verdicts:
+                raise ClaimLedgerError(
+                    "gate override requires a recorded blocked gate verdict."
+                )
+            latest_verdict = max(verdicts, key=lambda claim: claim.claim_id)
+            verdict_value = str(
+                latest_verdict.meta.get("verdict") or latest_verdict.statement
+            ).casefold()
+            if "block" not in verdict_value:
+                raise ClaimLedgerError(
+                    "gate override requires the latest gate verdict to be block."
+                )
+
+            approval = latest.get(approval_claim_id)
+            valid_approval = (
+                approval is not None
+                and approval.type == "user_approval"
+                and approval.subject == gate
+                and approval.status == "verified"
+                and approval.verified_by == "agent:user"
+                and approval.meta.get("source") == "host"
+                and approval.meta.get("reason") == reason.strip()
+                and approval.meta.get("consumed") is False
+                and approval.claim_id > latest_verdict.claim_id
+            )
+            if not valid_approval:
+                raise ClaimLedgerError(
+                    "gate override requires explicit user approval from a "
+                    "fresh host interaction."
+                )
+
+            ts = _now_iso()
+            seq = self._next_seq(latest.keys(), ts)
+            override_id = _claim_id(ts, seq)
+            consumed_meta = dict(approval.meta)
+            consumed_meta.update(
+                {"consumed": True, "consumed_by": override_id, "consumed_at": ts}
+            )
+            self._append(
+                Claim(
+                    claim_id=approval.claim_id,
+                    type=approval.type,
+                    subject=approval.subject,
+                    statement=approval.statement,
+                    authority_file=approval.authority_file,
+                    evidence=list(approval.evidence),
+                    claimed_by=approval.claimed_by,
+                    verified_by=approval.verified_by,
+                    status=approval.status,
+                    ts=approval.ts,
+                    meta=consumed_meta,
+                )
+            )
+            claim = Claim(
+                claim_id=override_id,
                 type="gate_override",
                 subject=gate,
                 statement=f"user approved gate override: {reason.strip()}",
                 authority_file=".samvil/claims.jsonl",
-                evidence=["user-approval"],
+                evidence=[f"approval-claim:{approval_claim_id}"],
                 claimed_by="agent:orchestrator-agent",
                 verified_by="agent:user",
                 status="verified",
@@ -403,10 +503,62 @@ class ClaimLedger:
                     "overridden_by": "user",
                     "reason": reason.strip(),
                     "one_time": True,
+                    "consumed": False,
+                    "approval_claim_id": approval_claim_id,
                 },
             )
             self._append(claim)
         return claim
+
+    def consume_gate_override(self, gate: str) -> Claim | None:
+        """Atomically return and consume the newest eligible override."""
+        with _locked(self.path):
+            latest = self._latest_by_id()
+            verdicts = [
+                claim
+                for claim in latest.values()
+                if claim.subject == gate and claim.type == "gate_verdict"
+            ]
+            if not verdicts:
+                return None
+            latest_verdict = max(verdicts, key=lambda claim: claim.claim_id)
+            verdict_value = str(
+                latest_verdict.meta.get("verdict") or latest_verdict.statement
+            ).casefold()
+            if "block" not in verdict_value:
+                return None
+            overrides = [
+                claim
+                for claim in latest.values()
+                if claim.subject == gate
+                and claim.type == "gate_override"
+                and claim.status == "verified"
+                and claim.verified_by == "agent:user"
+                and claim.meta.get("overridden_by") == "user"
+                and claim.meta.get("consumed") is False
+                and claim.claim_id > latest_verdict.claim_id
+            ]
+            if not overrides:
+                return None
+            override = max(overrides, key=lambda claim: claim.claim_id)
+            consumed_meta = dict(override.meta)
+            consumed_meta.update({"consumed": True, "consumed_at": _now_iso()})
+            self._append(
+                Claim(
+                    claim_id=override.claim_id,
+                    type=override.type,
+                    subject=override.subject,
+                    statement=override.statement,
+                    authority_file=override.authority_file,
+                    evidence=list(override.evidence),
+                    claimed_by=override.claimed_by,
+                    verified_by=override.verified_by,
+                    status=override.status,
+                    ts=override.ts,
+                    meta=consumed_meta,
+                )
+            )
+            return override
 
     # ── Queries ────────────────────────────────────────────────────────
 

@@ -94,7 +94,7 @@ def _replay(
             try:
                 acquired_at = float(ev.get("ts"))
             except (TypeError, ValueError):
-                acquired_at = current_time
+                continue
             if current_time - acquired_at <= ttl_seconds:
                 active[wid] = acquired_at
             else:

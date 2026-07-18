@@ -50,7 +50,12 @@ def _project_paths(project_root: str | Path) -> tuple[Path, Path]:
 
 def _event_timestamp(entry: dict) -> str:
     """Read the canonical timestamp while accepting legacy ``ts`` rows."""
-    return entry.get("timestamp") or entry.get("ts", "")
+    value = entry.get("timestamp")
+    if value is None or value == "":
+        value = entry.get("ts")
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else str(value)
 
 
 def read_events(project_root: str | Path) -> dict:

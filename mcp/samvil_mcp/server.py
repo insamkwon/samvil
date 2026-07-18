@@ -1639,6 +1639,7 @@ async def semantic_check(
     context_hint: str = "",
     shell_command: str = "",
     execution_log: str = "",
+    runner_exit_code: int | None = None,
 ) -> str:
     """Detect reward hacking signals in a code snippet.
 
@@ -1656,6 +1657,7 @@ async def semantic_check(
                 context_hint,
                 shell_command=shell_command,
                 execution_log=execution_log,
+                runner_exit_code=runner_exit_code,
             )
         )
     except Exception as e:
@@ -2674,7 +2676,7 @@ async def gate_override(
     project_root: str,
     gate: str,
     reason: str,
-    approved_by: str = "user",
+    approval_claim_id: str,
 ) -> str:
     """Record a one-time gate exception after explicit user approval."""
     try:
@@ -2684,7 +2686,7 @@ async def gate_override(
             project_root,
             gate=gate,
             reason=reason,
-            approved_by=approved_by,
+            approval_claim_id=approval_claim_id,
         )
         _log_mcp_health("ok", "gate_override")
         return json.dumps(result)

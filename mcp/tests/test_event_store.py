@@ -8,7 +8,7 @@ import tempfile
 import pytest
 import pytest_asyncio
 
-from samvil_mcp.event_store import EventStore
+from samvil_mcp.event_store import EventStore, _migration_plan
 from samvil_mcp.models import EventType, Stage
 
 
@@ -88,6 +88,25 @@ async def test_initialize_adds_project_root_to_existing_sessions_table(tmp_path)
     with sqlite3.connect(db_path) as db:
         columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
     assert "project_root" in columns
+
+
+def test_migration_plan_only_contains_missing_schema_changes() -> None:
+    plan = _migration_plan(
+        events_columns={"id", "token_count"},
+        sessions_columns={"id", "samvil_tier"},
+    )
+
+    assert plan == ["ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''"]
+
+    legacy = _migration_plan(
+        events_columns={"id"},
+        sessions_columns={"id", "agent_tier"},  # glossary-allow: legacy fixture
+    )
+    assert legacy == [
+        "ALTER TABLE events ADD COLUMN token_count INTEGER DEFAULT NULL",
+        "ALTER TABLE sessions RENAME COLUMN agent_tier TO samvil_tier",  # glossary-allow: expected migration
+        "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''",
+    ]
 
 
 @pytest.mark.asyncio

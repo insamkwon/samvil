@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Callable
 
@@ -18,7 +19,7 @@ def register_benchmark_tools(
         try:
             from .benchmark import fetch_external_changelog as _fetch
 
-            result = _fetch(url=url, timeout=timeout)
+            result = await asyncio.to_thread(_fetch, url=url, timeout=timeout)
             log_mcp_health(
                 "ok" if result.get("ok") else "fail",
                 "benchmark_fetch_target",

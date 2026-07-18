@@ -33,7 +33,7 @@ def test_build_uses_last_exit_marker_and_execution_block(tmp_path: Path) -> None
     assert result["missing"] == []
 
 
-def test_qa_parses_playwright_json_report_and_exit_marker(tmp_path: Path) -> None:
+def test_failed_playwright_report_is_not_runtime_verified(tmp_path: Path) -> None:
     _write(tmp_path / ".samvil" / "qa.log", "playwright output\nSAMVIL_EXIT:0\n")
     _write(
         tmp_path / ".samvil" / "test-results.json",
@@ -60,14 +60,64 @@ def test_qa_parses_playwright_json_report_and_exit_marker(tmp_path: Path) -> Non
             "skipped": 3,
             "from": ".samvil/test-results.json",
         },
-        "runtime_verified": True,
-        "static_only": False,
+        "runtime_verified": False,
+        "static_only": True,
     }
     assert result["evidence_files"] == [
         ".samvil/qa.log",
         ".samvil/test-results.json",
     ]
     assert result["missing"] == []
+
+
+def test_successful_playwright_report_is_runtime_verified(tmp_path: Path) -> None:
+    _write(tmp_path / ".samvil" / "qa.log", "SAMVIL_EXIT:0\n")
+    _write(
+        tmp_path / ".samvil" / "test-results.json",
+        json.dumps({"stats": {"expected": 3, "unexpected": 0, "skipped": 1}}),
+    )
+
+    result = collect_stage_evidence(tmp_path, "qa")
+
+    assert result["qa"]["runtime_verified"] is True
+    assert result["qa"]["static_only"] is False
+
+
+def test_nonzero_exit_is_not_runtime_verified_even_when_report_passes(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path / ".samvil" / "qa.log", "SAMVIL_EXIT:1\n")
+    _write(
+        tmp_path / ".samvil" / "test-results.json",
+        json.dumps({"stats": {"expected": 3, "unexpected": 0, "skipped": 0}}),
+    )
+
+    result = collect_stage_evidence(tmp_path, "qa")
+
+    assert result["qa"]["runtime_verified"] is False
+
+
+def test_all_skipped_report_is_not_runtime_verified(tmp_path: Path) -> None:
+    _write(tmp_path / ".samvil" / "qa.log", "SAMVIL_EXIT:0\n")
+    _write(
+        tmp_path / ".samvil" / "test-results.json",
+        json.dumps({"stats": {"expected": 0, "unexpected": 0, "skipped": 3}}),
+    )
+
+    result = collect_stage_evidence(tmp_path, "qa")
+
+    assert result["qa"]["runtime_verified"] is False
+
+
+def test_non_utf8_report_fails_closed(tmp_path: Path) -> None:
+    _write(tmp_path / ".samvil" / "qa.log", "SAMVIL_EXIT:0\n")
+    report = tmp_path / ".samvil" / "test-results.json"
+    report.write_bytes(b"\xff\xfe\x00")
+
+    result = collect_stage_evidence(tmp_path, "qa")
+
+    assert result["qa"]["runtime_verified"] is False
+    assert ".samvil/test-results.json" in result["missing"]
 
 
 def test_missing_evidence_fails_closed(tmp_path: Path) -> None:

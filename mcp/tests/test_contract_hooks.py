@@ -29,6 +29,31 @@ def test_contract_helper_reports_missing_python_explicitly() -> None:
     assert result.stdout.strip() == "DEGRADED(no python)"
 
 
+def test_python_backed_helpers_noop_cleanly_without_python(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    command = (
+        'source hooks/_contract-helpers.sh; '
+        'samvil_contract_extract_skill_name \'{"skill":"samvil-build"}\'; '
+        f'samvil_contract_append_claim {project} evidence_posted subject statement authority agent; '
+        f'samvil_contract_verify_claim {project} subject agent; '
+        f'samvil_contract_update_state {project} key value; '
+        f'samvil_contract_append_stage_claim_to_state {project} build claim_1'
+    )
+    env = os.environ.copy()
+    env["SAMVIL_FORCE_NO_PYTHON"] = "1"
+    result = subprocess.run(
+        ["bash", "-c", command],
+        cwd=REPO,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "command not found" not in result.stderr
+    assert not (project / "project.state.json").exists()
+
+
 def test_interview_start_hook_seeds_project_root_before_state_exists(tmp_path: Path) -> None:
     project = tmp_path / "fresh-project"
     project.mkdir()
@@ -60,6 +85,37 @@ def test_interview_start_hook_seeds_project_root_before_state_exists(tmp_path: P
     state = json.loads((project / "project.state.json").read_text())
     assert marker.read_text().strip() == str(project.resolve())
     assert state["stage_claims"]["interview"].startswith("claim_")
+
+
+def test_explicit_invalid_project_root_does_not_fall_back_to_cwd(tmp_path: Path) -> None:
+    fallback = tmp_path / "fallback"
+    fallback.mkdir()
+    fallback_state = fallback / "project.state.json"
+    fallback_state.write_text("{}", encoding="utf-8")
+    invalid_root = tmp_path / "not-a-directory"
+    invalid_root.write_text("x", encoding="utf-8")
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "TOOL_NAME": "Skill",
+            "CLAUDE_PLUGIN_ROOT": str(REPO),
+        }
+    )
+
+    subprocess.run(
+        [
+            "bash",
+            str(REPO / "hooks" / "contract-stage-start.sh"),
+            json.dumps({"skill": "samvil-build", "project_root": str(invalid_root)}),
+        ],
+        cwd=fallback,
+        env=env,
+        check=True,
+    )
+
+    assert json.loads(fallback_state.read_text(encoding="utf-8")) == {}
+    assert not (fallback / ".samvil").exists()
 
 
 def test_plugin_does_not_run_stage_end_on_skill_prompt_load() -> None:

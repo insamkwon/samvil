@@ -51,10 +51,9 @@ CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_name);
 CREATE INDEX IF NOT EXISTS idx_seed_versions_session ON seed_versions(session_id, version);
 """
 
-# In-place migrations for already-initialized DBs. Each statement is wrapped
-# in try/except OperationalError at runtime, so idempotency is "try and
-# ignore the already-applied error" rather than a version table. Keep the
-# list short and strictly additive.
+# In-place migrations for already-initialized DBs. Initialization first
+# introspects each table and executes only the statements whose target schema
+# is absent. Keep the list short and strictly additive.
 #
 # - token_count column: added in v0.8.0.
 # - samvil_tier rename: v3.2 glossary sweep. Old column name was the v3.1
@@ -62,11 +61,35 @@ CREATE INDEX IF NOT EXISTS idx_seed_versions_session ON seed_versions(session_id
 #   The rename aligns the DB with the settled vocabulary. The literal old
 #   name must appear in the ALTER TABLE statement below, so both comment
 #   and SQL are glossary-allow anchors.
-_MIGRATIONS = [
-    "ALTER TABLE events ADD COLUMN token_count INTEGER DEFAULT NULL",
-    "ALTER TABLE sessions RENAME COLUMN agent_tier TO samvil_tier",  # glossary-allow: rename source
-    "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''",
-]
+TOKEN_COUNT_MIGRATION = "ALTER TABLE events ADD COLUMN token_count INTEGER DEFAULT NULL"
+TIER_RENAME_MIGRATION = (
+    "ALTER TABLE sessions RENAME COLUMN agent_tier TO samvil_tier"  # glossary-allow: rename source
+)
+PROJECT_ROOT_MIGRATION = (
+    "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''"
+)
+
+
+def _migration_plan(
+    *,
+    events_columns: set[str],
+    sessions_columns: set[str],
+) -> list[str]:
+    """Return only schema changes missing from the current database."""
+    plan: list[str] = []
+    if "token_count" not in events_columns:
+        plan.append(TOKEN_COUNT_MIGRATION)
+    if "samvil_tier" not in sessions_columns and "agent_tier" in sessions_columns:  # glossary-allow: legacy column detection
+        plan.append(TIER_RENAME_MIGRATION)
+        sessions_columns = (sessions_columns - {"agent_tier"}) | {"samvil_tier"}  # glossary-allow: migration projection
+    if "project_root" not in sessions_columns:
+        plan.append(PROJECT_ROOT_MIGRATION)
+    return plan
+
+
+async def _table_columns(db: aiosqlite.Connection, table: str) -> set[str]:
+    cursor = await db.execute(f"PRAGMA table_info({table})")
+    return {str(row[1]) for row in await cursor.fetchall()}
 
 
 def _now() -> str:
@@ -85,12 +108,13 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(SCHEMA)
-            # Run migrations (ignore errors if column already exists)
-            for migration in _MIGRATIONS:
-                try:
-                    await db.execute(migration)
-                except aiosqlite.OperationalError:
-                    pass
+            events_columns = await _table_columns(db, "events")
+            sessions_columns = await _table_columns(db, "sessions")
+            for migration in _migration_plan(
+                events_columns=events_columns,
+                sessions_columns=sessions_columns,
+            ):
+                await db.execute(migration)
             await db.commit()
 
     # ── Sessions ──────────────────────────────────────────

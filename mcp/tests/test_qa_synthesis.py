@@ -210,6 +210,21 @@ def test_render_qa_synthesis_includes_runtime_test_counts() -> None:
     assert ".samvil/test-results.json" in rendered
 
 
+def test_render_qa_synthesis_hides_unverified_runtime_counts() -> None:
+    result = synthesize_qa_evidence(_base([
+        {"id": "AC-1", "criterion": "Create task", "verdict": "PASS"},
+    ]))
+    result["runtime_evidence"] = {
+        "ran": False,
+        "passed": 99,
+        "failed": 0,
+        "skipped": 0,
+        "from": "untrusted.log",
+    }
+
+    assert "Runtime tests:" not in render_qa_synthesis(result)
+
+
 def test_materialize_qa_synthesis_writes_report_results_events_and_state(tmp_path):
     (tmp_path / "project.state.json").write_text(
         json.dumps({"session_id": "s1", "current_stage": "qa", "qa_history": []}),

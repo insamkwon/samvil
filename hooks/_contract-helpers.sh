@@ -78,6 +78,14 @@ samvil_contract_log_health() {
   local hook_name="$1"
   local status="$2"
   local detail="${3:-}"
+  if [ "$SAMVIL_PY_AVAILABLE" != "1" ]; then
+    local ts
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
+    mkdir -p "$HOME/.samvil" 2>/dev/null
+    printf '{"status":"fail","tool":"hook:%s","error":"python-unavailable","timestamp":"%s","source":"hook"}\n' \
+      "$hook_name" "$ts" >> "$HOME/.samvil/mcp-health.jsonl" 2>/dev/null
+    return 0
+  fi
   "$SAMVIL_PY" - "$hook_name" "$status" "$detail" <<'PY' 2>/dev/null
 import json, sys
 from datetime import datetime, timezone
@@ -114,6 +122,7 @@ PY
 #   on failure. Accepts either a raw JSON string or quoted form.
 samvil_contract_extract_skill_name() {
   local raw="$1"
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || { echo ""; return 0; }
   "$SAMVIL_PY" - "$raw" <<'PY' 2>/dev/null
 import json, sys
 raw = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -263,6 +272,7 @@ samvil_contract_append_claim() {
   local evidence="${7:-[]}"
 
   [ -z "$root" ] && return 0
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || return 0
 
   "$SAMVIL_PY" - "$root" "$ctype" "$subject" "$statement" "$authority" "$claimed_by" "$evidence" <<'PY' 2>/dev/null
 import json, sys, os
@@ -298,6 +308,7 @@ samvil_contract_verify_claim() {
   local verified_by="$3"
 
   [ -z "$root" ] && return 0
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || return 0
 
   "$SAMVIL_PY" - "$root" "$subject" "$verified_by" <<'PY' 2>/dev/null
 import sys, os
@@ -335,6 +346,7 @@ samvil_contract_update_state() {
   local key="$2"
   local value="$3"
   [ -z "$root" ] && return 0
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || return 0
 
   "$SAMVIL_PY" - "$root" "$key" "$value" <<'PY' 2>/dev/null
 import json, os, sys
@@ -357,8 +369,10 @@ try:
         try:
             try:
                 state = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
+            except FileNotFoundError:
                 state = {}
+            if not isinstance(state, dict):
+                raise ValueError("project.state.json must contain an object")
             state[key] = value
             with tmp.open("w", encoding="utf-8") as handle:
                 json.dump(state, handle, indent=2, ensure_ascii=False)
@@ -383,6 +397,7 @@ samvil_contract_append_stage_claim_to_state() {
   local claim_id="$3"
   [ -z "$root" ] && return 0
   [ -z "$claim_id" ] && return 0
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || return 0
 
   "$SAMVIL_PY" - "$root" "$stage" "$claim_id" <<'PY' 2>/dev/null
 import json, os, sys
@@ -405,8 +420,10 @@ try:
         try:
             try:
                 state = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
+            except FileNotFoundError:
                 state = {}
+            if not isinstance(state, dict):
+                raise ValueError("project.state.json must contain an object")
             stage_claims = state.setdefault("stage_claims", {})
             stage_claims[stage] = claim_id
             with tmp.open("w", encoding="utf-8") as handle:

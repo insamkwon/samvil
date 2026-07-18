@@ -95,6 +95,22 @@ def test_self_correction_backs_up_corrupt_accumulator(tmp_path) -> None:
     assert backups[0].read_text(encoding="utf-8") == '{"partial":'
 
 
+def test_self_correction_backs_up_schema_invalid_accumulator(tmp_path) -> None:
+    samvil = tmp_path / ".samvil"
+    samvil.mkdir()
+    path = samvil / "failed_acs.json"
+    path.write_text('{"not": "a list"}', encoding="utf-8")
+
+    result = accumulate_failed_acs(
+        str(tmp_path), [{"ac_id": "AC-2", "cycle": 2, "reason": "retry"}]
+    )
+
+    assert result["total_accumulated"] == 1
+    backups = list(samvil.glob("failed_acs.json.corrupt-*"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == '{"not": "a list"}'
+
+
 def test_failed_ac_reader_backs_up_and_reinitializes_corrupt_file(tmp_path) -> None:
     samvil = tmp_path / ".samvil"
     samvil.mkdir()

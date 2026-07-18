@@ -127,14 +127,35 @@ def test_piped_test_log_without_exit_marker_is_rejected() -> None:
     assert result["findings"][0]["code"] == "EVIDENCE_FORM_MISMATCH"
 
 
-def test_piped_test_log_with_exit_marker_is_accepted() -> None:
+def test_piped_test_log_with_trusted_success_status_is_accepted() -> None:
     result = analyze_shell_evidence(
         "npm test | grep FAIL",
         "1 failed\nSAMVIL_EXIT:1\n",
+        runner_exit_code=0,
     )
 
     assert result["accepted"] is True
     assert result["risk_level"] == "LOW"
+
+
+def test_piped_test_log_rejects_spoofed_success_marker() -> None:
+    result = analyze_shell_evidence(
+        "npm test | tail -1",
+        "1 failed\nSAMVIL_EXIT:0\n",
+        runner_exit_code=1,
+    )
+
+    assert result["accepted"] is False
+    assert result["risk_level"] == "HIGH"
+
+
+def test_piped_test_log_without_trusted_status_is_rejected() -> None:
+    result = analyze_shell_evidence(
+        "npm test | tail -1",
+        "9 passed\nSAMVIL_EXIT:0\n",
+    )
+
+    assert result["accepted"] is False
 
 
 def test_semantic_analysis_merges_shell_evidence_finding() -> None:
@@ -160,6 +181,7 @@ def test_semantic_check_mcp_accepts_shell_evidence() -> None:
                 code="const value = await run();",
                 shell_command="npm test | tail -20",
                 execution_log="1 failed\n",
+                runner_exit_code=1,
             )
         )
     )

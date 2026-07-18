@@ -6,6 +6,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from samvil_mcp.migrate_v3_3 import (
     BACKUP_FILENAME,
     V33_SCHEMA_VERSION,
@@ -38,6 +40,15 @@ def test_migrate_seed_adds_browser_verify_contract() -> None:
         "command": "npx playwright test tests/e2e/counter.spec.ts"
     }
     assert changes
+
+
+@pytest.mark.parametrize("schema_version", ["2.0", "3.1", "3.4", "4.0", ""])
+def test_migration_rejects_unsupported_source_versions(schema_version: str) -> None:
+    seed = _seed()
+    seed["schema_version"] = schema_version
+
+    with pytest.raises(ValueError, match="requires schema_version '3.2'"):
+        _migrate_seed_dict(seed)
 
 
 def test_apply_migration_is_backup_first_and_idempotent(tmp_path: Path) -> None:

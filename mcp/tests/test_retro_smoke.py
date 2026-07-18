@@ -110,6 +110,15 @@ def _write_feedback_log(plugin_root: Path, entries: list[dict]) -> Path:
     return log
 
 
+def test_stage_duration_accepts_mixed_naive_and_aware_timestamps() -> None:
+    durations = retro_aggregate._stage_durations_from_events([
+        {"stage": "build", "timestamp": "2026-07-18T00:00:00"},
+        {"stage": "build", "timestamp": "2026-07-18T00:00:01+00:00"},
+    ])
+
+    assert durations == {"build": 1000}
+
+
 # ── Behavior 1: per-run metric extraction ──────────────────────
 
 

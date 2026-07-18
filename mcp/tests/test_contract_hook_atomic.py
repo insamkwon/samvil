@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -36,9 +37,9 @@ def test_concurrent_hook_state_updates_preserve_every_key(tmp_path: Path) -> Non
     (project / "project.state.json").write_text("{}", encoding="utf-8")
     script = f"""
 set -e
-source {HELPERS!s}
+source {shlex.quote(str(HELPERS))}
 for i in $(seq 1 40); do
-  samvil_contract_update_state {project!s} key_$i value_$i &
+  samvil_contract_update_state {shlex.quote(str(project))} key_$i value_$i &
 done
 wait
 """
@@ -50,3 +51,20 @@ wait
 
     state = json.loads((project / "project.state.json").read_text(encoding="utf-8"))
     assert {f"key_{i}" for i in range(1, 41)} <= set(state)
+
+
+def test_corrupt_state_is_not_silently_replaced(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    state_path = project / "project.state.json"
+    state_path.write_text("{corrupt", encoding="utf-8")
+    script = (
+        f"source {shlex.quote(str(HELPERS))}; "
+        f"samvil_contract_update_state {shlex.quote(str(project))} key value"
+    )
+    env = os.environ.copy()
+    env["CLAUDE_PLUGIN_ROOT"] = str(REPO)
+
+    subprocess.run(["bash", "-c", script], check=True, env=env, cwd=project)
+
+    assert state_path.read_text(encoding="utf-8") == "{corrupt"

@@ -448,7 +448,7 @@ def test_mcp_qa_gate_uses_reported_test_counts(tmp_path: Path) -> None:
 
     assert result["verdict"] == "block"
     assert result["metrics"]["test_pass_rate"] == 0.75
-    assert result["metrics"]["runtime_verified"] is True
+    assert result["metrics"]["runtime_verified"] is False
     assert "test_pass_rate" in result["failed_checks"]
 
 

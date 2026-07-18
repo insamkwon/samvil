@@ -24,6 +24,8 @@ def _load_json(path: Path) -> dict:
 def _next_after_seed(tier: str, council_opt_in: bool = False) -> tuple[str, str]:
     if council_opt_in and tier != "minimal":
         return "samvil-council", f"{tier} tier explicitly enables council"
+    if council_opt_in:
+        return "samvil-design", "minimal tier skips council despite explicit opt-in"
     return "samvil-design", "council is default-off"
 
 
