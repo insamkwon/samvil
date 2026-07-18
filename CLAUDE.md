@@ -309,7 +309,9 @@ samvil-update    ← [v3.0.0] GitHub 업데이트 + --migrate 지원
 - **현재 (adopted role)**: 스킬의 인라인 행동 규칙이 실행됨. `agents/*.md`는 참조용.
 - **Council/Worker spawn 시**: `agents/*.md` 내용을 Agent tool prompt에 포함해서 전달.
 - **양쪽 다 개선해야 함**: 규칙 변경 시 스킬 인라인 + agent 파일 모두 업데이트.
-- 37개 에이전트, 4 Tier (minimal 10 / standard 20 / thorough 30 / full 36).
+- Agent persona files: **41**. 런타임 전용 identity 2개(`build-worker`,
+  `compressor`)는 파일 없이 등록된다. 4 Tier (minimal 10 / standard 20 /
+  thorough 30 / full 36).
 
 ## Key Rules
 

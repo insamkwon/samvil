@@ -22,6 +22,22 @@ QA Pass 2 — verifies each acceptance criterion from seed is actually implement
 4. **Common FAIL patterns**: component not rendered in any page, store function with no UI caller, form without onSubmit, API route with no frontend call, hardcoded data instead of store
 5. **Don't guess** (trace code paths), don't accept stubs (`// TODO` = FAIL), don't check quality (Pass 3), don't add new ACs, don't run the app, don't grade branch nodes — only leaves
 
+## Domain QA recipe
+
+The shared three-pass QA pipeline stays authoritative. Inject these checks for
+the selected `solution_type`; do not delegate to a separate domain QA persona.
+
+- `game`: runtime canvas dimensions, scene transition, keyboard/touch input,
+  score/game-over/restart flow, asset 404s, responsive scaling, and FPS evidence.
+- `mobile-app`: Expo export and web preview, route navigation, 44x44pt/48x48dp
+  touch targets, 375/390/414px layouts, accessibility roles/labels, and native
+  API web fallbacks.
+- `automation`: compile/typecheck, `--help`, isolated `--dry-run`, fixture output
+  comparison, non-zero error exits, retry/logging/config checks, and proof that
+  QA made no real external side effects.
+- A static fallback is `PARTIAL`, never runtime `PASS`; record the missing probe
+  and let the runtime-verification deployment gate decide.
+
 ## Output
 
 AC table (# | Leaf ID | Criterion | Verdict | Evidence with file:line). Summary (PASS/PARTIAL/UNIMPLEMENTED/FAIL counts at leaf granularity). Verdict: PASS (all PASS/PARTIAL) / REVISE (any UNIMPLEMENTED) / FAIL (any FAIL). Fix List for REVISE/FAIL. The main session aggregates branch verdicts via `aggregate_status` — do not output branch-level verdicts.

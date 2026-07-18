@@ -219,6 +219,18 @@ fi
 
 
 # ── Summary ─────────────────────────────────────────────────────────
+_section "12. Agent inventory consistency"
+
+if python3 scripts/check-agent-inventory.py >/tmp/samvil-agent-inventory.log 2>&1; then
+  summary=$(tail -1 /tmp/samvil-agent-inventory.log)
+  _ok "$summary"
+else
+  _fail "agent inventory drift:"
+  cat /tmp/samvil-agent-inventory.log | sed 's/^/      /'
+fi
+
+
+# ── Summary ─────────────────────────────────────────────────────────
 echo ""
 if [ "$FAILURES" -eq 0 ]; then
   echo "═══ pre-commit check: PASS ═══"

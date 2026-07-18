@@ -131,7 +131,7 @@ Used when calling `route_task`.
 | scaffold | scaffolder |
 | build | build-worker |
 | qa | qa-functional (Judge) |
-| deploy | deployer |
+| deploy | infra-dev |
 | retro | retro-analyst |
 | evolve | reflect-proposer |
 

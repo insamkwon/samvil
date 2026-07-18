@@ -13,7 +13,7 @@ Why a separate module:
     semantic layer: "what kind of agent is claimed_by/verified_by?".
     Sprint 3+ consumes this to route escalations (Generator failed →
     bump to a more capable generator, not to a judge).
-  * The 50 agents/*.md files need a programmatic inventory so retro can
+  * The agent persona files need a programmatic inventory so retro can
     audit role drift without scraping frontmatter live.
   * Keeping the mapping in code (as a frozen dict) means `validate_role_
     separation` can run without reading any YAML, which matters for
@@ -41,6 +41,11 @@ class ModelRole(str, Enum):
     COMPRESSOR = "compressor"
 
 
+# Runtime-only identities have no standalone persona file. They are named
+# explicitly so count/inventory CI can distinguish them from phantom agents.
+INLINE_IDENTITIES: frozenset[str] = frozenset({"build-worker", "compressor"})
+
+
 # Agents whose default role is explicit. Secondary roles are the contexts
 # in which they can legitimately be spawned: e.g. build-worker is a
 # Generator on first pass and a Repairer on rebuild.
@@ -63,12 +68,8 @@ DEFAULT_ROLES: dict[str, ModelRole] = {
     "infra-dev": ModelRole.GENERATOR,
     "test-writer": ModelRole.GENERATOR,
     "automation-engineer": ModelRole.GENERATOR,
-    "mobile-architect": ModelRole.GENERATOR,
-    "game-architect": ModelRole.GENERATOR,
-    "automation-architect": ModelRole.GENERATOR,
     "game-art-architect": ModelRole.GENERATOR,
     "seed-architect": ModelRole.GENERATOR,
-    "deployer": ModelRole.GENERATOR,
     # Reviewers
     "tech-lead": ModelRole.REVIEWER,
     "ui-designer": ModelRole.REVIEWER,
@@ -92,9 +93,6 @@ DEFAULT_ROLES: dict[str, ModelRole] = {
     "qa-functional": ModelRole.JUDGE,
     "qa-quality": ModelRole.JUDGE,
     "product-owner": ModelRole.JUDGE,
-    "automation-qa": ModelRole.JUDGE,
-    "game-qa": ModelRole.JUDGE,
-    "mobile-qa": ModelRole.JUDGE,
     # Repairer
     "error-handler": ModelRole.REPAIRER,
     # Researchers
@@ -127,8 +125,6 @@ OUT_OF_BAND: frozenset[str] = frozenset(
         "socratic-interviewer",
         "user-interviewer",
         "game-interviewer",
-        "mobile-interviewer",
-        "automation-interviewer",
         "orchestrator-agent",
     }
 )

@@ -197,7 +197,7 @@ samvil_contract_primary_agent() {
     scaffold)   echo "agent:scaffolder" ;;
     build)      echo "agent:build-worker" ;;
     qa)         echo "agent:qa-functional" ;;
-    deploy)     echo "agent:deployer" ;;
+    deploy)     echo "agent:infra-dev" ;;
     retro)      echo "agent:retro-analyst" ;;
     evolve)     echo "agent:reflect-proposer" ;;
     *)          echo "agent:orchestrator-agent" ;;

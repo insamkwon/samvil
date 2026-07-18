@@ -1,7 +1,9 @@
 # Agent Tier Definitions
 
 > Controls how many agents activate per SAMVIL run.
-> All 48 agents (36 base + 12 type-specialized) are always **defined** in `agents/`. Tier controls which are **activated**.
+> Agent persona files: **41**. Two runtime-only identities (`build-worker`,
+> `compressor`) are registered without persona files. Tier controls which
+> personas are **activated**.
 
 ## Tiers
 
@@ -43,34 +45,36 @@ full (36) = thorough + :
   Phase E: + growth-advisor                                  [+1 Evolve full]
 ```
 
-## Type-Specialized Agents (standard+, conditional activation)
+## Type-Specialized Workers and Recipes (standard+, conditional activation)
 
-These 12 agents activate ONLY when `solution_type` matches. They replace the corresponding generic agents for that phase.
+Domain architecture and QA are context recipes on shared personas. Only the
+specialized implementation worker (and the existing game interviewer) adds a
+separate persona.
 
 ```
 solution_type: automation (standard+):
-  Phase A: automation-interviewer    (replaces socratic-interviewer for automation)
-  Phase B: automation-architect      (extends design phase)
+  Phase A: socratic-interviewer      (+ Domain Pack: Automation question bank)
+  Phase B: tech-architect            (+ automation architecture recipe)
   Phase C: automation-engineer       (replaces frontend-dev/backend-dev for automation)
-  Phase D: automation-qa             (replaces qa-mechanical/qa-functional for automation)
+  Phase D: generic 3-pass QA         (+ automation QA recipe)
 
 solution_type: game (standard+):
   Phase A: game-interviewer          (replaces socratic-interviewer for games)
-  Phase B: game-architect            (extends design phase)
+  Phase B: tech-architect            (+ game architecture recipe)
   Phase C: game-developer            (replaces frontend-dev/backend-dev for games)
-  Phase D: game-qa                   (replaces qa-mechanical/qa-functional for games)
+  Phase D: generic 3-pass QA         (+ game QA recipe)
 
 solution_type: mobile-app (standard+):
-  Phase A: mobile-interviewer        (replaces socratic-interviewer for mobile)
-  Phase B: mobile-architect          (extends design phase)
+  Phase A: socratic-interviewer      (+ Domain Pack: Mobile question bank)
+  Phase B: tech-architect            (+ mobile architecture recipe)
   Phase C: mobile-developer          (replaces frontend-dev/backend-dev for mobile)
-  Phase D: mobile-qa                 (replaces qa-mechanical/qa-functional for mobile)
+  Phase D: generic 3-pass QA         (+ mobile QA recipe)
 
 Activation rules:
   - web-app: use existing agents (no type-specialized agents)
   - dashboard: use existing web-app agents (dashboard is a web-app subtype)
-  - When type-specialized agents activate, they SUPPLEMENT (not replace) shared agents like
-    seed-architect, tech-architect, scaffolder, orchestrator-agent, retro-analyst
+  - Specialized workers supplement shared personas such as seed-architect,
+    tech-architect, scaffolder, orchestrator-agent, qa-functional, and retro-analyst.
 ```
 
 ## Selection Logic

@@ -17,6 +17,7 @@ sys.path.insert(0, str(REPO / "mcp"))
 from samvil_mcp.model_role import (  # noqa: E402
     ALLOWED_SECONDARY,
     DEFAULT_ROLES,
+    INLINE_IDENTITIES,
     OUT_OF_BAND,
     agents_by_role,
 )
@@ -64,6 +65,18 @@ a `status: verified` row without the Judge identity set correctly.
 def render() -> str:
     rollup = agents_by_role()
     body_parts: list[str] = [HEADER]
+    persona_count = len(
+        [
+            path
+            for path in (REPO / "agents").glob("*.md")
+            if path.name != "ROLE-INVENTORY.md"
+        ]
+    )
+    body_parts.append(f"Agent persona files: **{persona_count}**\n\n")
+    body_parts.append(
+        f"Inline runtime identities: **{len(INLINE_IDENTITIES)}** "
+        f"({', '.join(f'`{name}`' for name in sorted(INLINE_IDENTITIES))})\n\n"
+    )
 
     # Summary counts
     counts = {role: len(items) for role, items in rollup.items()}

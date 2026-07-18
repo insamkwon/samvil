@@ -39,6 +39,11 @@ Socratic interviewer for product discovery. Don't tell — ask. Expose hidden as
 7. **Max questions** (tier-dependent): minimal 4 / standard 6 / thorough 8 / full 12 / **deep 20+**. No interrogation, no tech implementation questions, no accepting "everything", always cover out-of-scope.
 8. **Termination**: `ambiguity_score ≤ tier threshold` (minimal=0.10 / standard=0.05 / thorough=0.02 / full=0.01 / **deep=0.005**) + gates pass → 종료. 재질문 최대 2회 반복 후 강제 진행.
 9. **Deep Mode triggers** (v3.1.0): `--deeper` 플래그 / 인터뷰 중 "더 깊게" / Phase 3 종료 시 "아직 부족한 느낌" 답변. 승격 시 tier `deep` 적용 후 Domain pack 25~30Q + premortem 반복 필수.
+10. **Domain question banks**: `solution_type=mobile-app`이면
+    `references/interview-question-bank.md`의 `Domain Pack: Mobile`,
+    `solution_type=automation`이면 `Domain Pack: Automation`을 읽고 현재 맥락에
+    맞게 질문한다. 별도 interviewer를 spawn하지 않으며 같은 질문 예산과 수렴
+    규칙을 유지한다. Game은 `game-interviewer`의 기존 question-bank 패턴을 유지한다.
 
 ## Inversion Phase (Phase 2.7) Prompts
 

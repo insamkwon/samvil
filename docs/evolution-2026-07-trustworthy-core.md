@@ -541,7 +541,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `references/decision-boundaries.md:180`,
     `scripts/check-skill-wiring.py:379`, `scripts/check-skill-wiring.py:569`,
     `mcp/tests/test_skill_wiring.py:113`, `mcp/tests/test_skill_wiring.py:131`.
-- [ ] **4.2 contract layer의 hook 소유화 (스킬 프로즈에서 제거)**
+- [x] **4.2 contract layer의 hook 소유화 (스킬 프로즈에서 제거)**
   현상: pre/post 계약을 각 스킬 body가 손으로 재현 — QA만 완전, 나머지 제각각,
   "best-effort" 문구가 스킵 면허(skills 감사 Top1·Top3).
   설계: `contract-stage-start.sh`/`-end.sh`(이미 전 tool 발화, claim/gate 로직
@@ -562,6 +562,10 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   lifecycle이 생기기 전까지 artifact-backed gate는 스킬/MCP finalizer가 소유한다.
   start claim만 hook 소유로 유지하며 python 부재 표출·fresh interview root marker를
   보강한다.)
+  - 완료 증거: `60bed0d`; `references/contract-layer-protocol.md:16`,
+    `hooks/_contract-helpers.sh:54`, `hooks/_contract-helpers.sh:134`,
+    `hooks/contract-stage-start.sh:41`, `skills/samvil/SKILL.md:42`,
+    `mcp/tests/test_contract_hooks.py:62`.
 - [ ] **4.3 에이전트 50→~40 + 문서 일치**
   - phantom 2개(`build-worker`, `compressor` — ROLE-INVENTORY:27,83에만 존재)를
     `model_role.py`에서 제거.
@@ -575,6 +579,10 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   - glossary(:22)·CLAUDE.md(:312)의 "37 personas" → 실측치로 갱신,
     `render-role-inventory.py` 재실행. **agent 수 카운트를 CI에 추가**(문서 숫자
     ↔ 디스크 파일 수 일치).
+  (스코프 보정: `build-worker`는 build claim/routing의 실사용 identity이고
+  `compressor`는 inline summary role이라 제거하면 런타임 계약이 깨진다. 둘을
+  `INLINE_IDENTITIES`로 명시하고 파일 없는 역할임을 CI·문서에 드러낸다. 나머지
+  9개 중복/미배선 persona를 통합·삭제해 디스크 실측 41개로 맞춘다.)
 - [ ] **4.4 references 대청소 (65→~48)**
   orphan 27개 처분: 초소형 schema stub 8개 → `samvil-ssot-schema.md`로 통합,
   `migration-v2-to-v3` 아카이브, `gate-vs-degradation`→`graceful-degradation` 흡수,

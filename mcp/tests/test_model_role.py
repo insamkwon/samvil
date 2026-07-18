@@ -6,6 +6,7 @@ import pytest
 
 from samvil_mcp.model_role import (
     DEFAULT_ROLES,
+    INLINE_IDENTITIES,
     ModelRole,
     OUT_OF_BAND,
     agents_by_role,
@@ -24,6 +25,11 @@ def test_every_known_agent_has_a_role() -> None:
 
 def test_out_of_band_is_not_double_registered() -> None:
     assert not (OUT_OF_BAND & set(DEFAULT_ROLES.keys()))
+
+
+def test_inline_identities_are_explicitly_registered() -> None:
+    assert INLINE_IDENTITIES == frozenset({"build-worker", "compressor"})
+    assert INLINE_IDENTITIES <= set(DEFAULT_ROLES)
 
 
 def test_get_role_bare_name() -> None:
@@ -151,10 +157,9 @@ def test_agents_by_role_counts_make_sense() -> None:
         "compressor",
         "out_of_band",
     }
-    # Each role has at least one agent except compressor (inline
-    # function; one slot registered in DEFAULT_ROLES).
+    # Compressor is an inline identity; the other counts represent personas.
     assert len(rollup["generator"]) >= 5
     assert len(rollup["reviewer"]) >= 5
     assert len(rollup["judge"]) >= 4  # qa-* + product-owner
     assert rollup["repairer"] == ["error-handler"]
-    assert len(rollup["out_of_band"]) >= 5
+    assert len(rollup["out_of_band"]) == 4
