@@ -69,7 +69,7 @@ Print the detected `solution_type` plus `solution_type.matched` keywords. AskUse
 - `brownfield.can_resume` true with `state_present` → render `completed_stages` and `current_stage`; AskUserQuestion: 이어서 진행 vs 처음부터 다시. On resume, do NOT overwrite `project.state.json`; jump directly to `chain.next_skill`.
 - Neither → fresh greenfield: `mkdir -p ~/dev/<project_name>/.samvil`, write a default `project.state.json` (`session_id=null`, `current_stage="interview"`, `completed_stages=[]`, `samvil_tier=<chosen>`) and `project.config.json` (with `model_routing` defaults from `references/model_profiles.defaults.yaml`).
 
-`mcp__samvil_mcp__create_session(project_name="<slug>", samvil_tier="<tier>")` — best-effort. Parse `session_id`, write back to `project.state.json`.
+`mcp__samvil_mcp__create_session(project_name="<slug>", samvil_tier="<tier>", project_root="~/dev/<slug>")` — best-effort. Parse `session_id`, write back to `project.state.json`.
 
 ## Step 5 — Pipeline Tasks + Start Event
 

@@ -2,6 +2,7 @@
 
 import json
 import os
+import sqlite3
 import tempfile
 
 import pytest
@@ -46,6 +47,47 @@ async def test_find_session_by_project(store: EventStore):
 
     not_found = await store.find_session_by_project("app-three")
     assert not_found is None
+
+
+@pytest.mark.asyncio
+async def test_find_session_by_project_root_disambiguates_same_name(store: EventStore):
+    first = await store.create_session("same-app", "standard", "/tmp/team-a/same-app")
+    second = await store.create_session("same-app", "standard", "/tmp/team-b/same-app")
+
+    found_first = await store.find_session_by_project(
+        "same-app", "/tmp/team-a/same-app"
+    )
+    found_second = await store.find_session_by_project(
+        "same-app", "/tmp/team-b/same-app"
+    )
+
+    assert found_first is not None and found_first.id == first.id
+    assert found_second is not None and found_second.id == second.id
+    assert await store.find_session_by_project("same-app") is None
+
+
+@pytest.mark.asyncio
+async def test_initialize_adds_project_root_to_existing_sessions_table(tmp_path):
+    db_path = tmp_path / "legacy.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            """CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                project_name TEXT NOT NULL,
+                seed_version INTEGER DEFAULT 1,
+                current_stage TEXT DEFAULT 'interview',
+                samvil_tier TEXT DEFAULT 'standard',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"""
+        )
+
+    legacy_store = EventStore(str(db_path))
+    await legacy_store.initialize()
+
+    with sqlite3.connect(db_path) as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
+    assert "project_root" in columns
 
 
 @pytest.mark.asyncio

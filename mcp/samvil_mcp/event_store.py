@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import aiosqlite
 
@@ -14,6 +15,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     project_name TEXT NOT NULL,
+    project_root TEXT DEFAULT '',
     seed_version INTEGER DEFAULT 1,
     current_stage TEXT DEFAULT 'interview',
     samvil_tier TEXT DEFAULT 'standard',
@@ -63,6 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_seed_versions_session ON seed_versions(session_id
 _MIGRATIONS = [
     "ALTER TABLE events ADD COLUMN token_count INTEGER DEFAULT NULL",
     "ALTER TABLE sessions RENAME COLUMN agent_tier TO samvil_tier",  # glossary-allow: rename source
+    "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''",
 ]
 
 
@@ -92,10 +95,19 @@ class EventStore:
 
     # ── Sessions ──────────────────────────────────────────
 
-    async def create_session(self, project_name: str, samvil_tier: str = "standard") -> Session:
+    async def create_session(
+        self,
+        project_name: str,
+        samvil_tier: str = "standard",
+        project_root: str = "",
+    ) -> Session:
+        normalized_root = (
+            str(Path(project_root).expanduser().resolve()) if project_root else ""
+        )
         session = Session(
             id=_uuid(),
             project_name=project_name,
+            project_root=normalized_root,
             samvil_tier=samvil_tier,
             created_at=_now(),
             updated_at=_now(),
@@ -103,8 +115,8 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("BEGIN")
             await db.execute(
-                "INSERT INTO sessions (id, project_name, seed_version, current_stage, samvil_tier, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (session.id, session.project_name, session.seed_version, session.current_stage, session.samvil_tier, session.created_at, session.updated_at),
+                "INSERT INTO sessions (id, project_name, project_root, seed_version, current_stage, samvil_tier, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (session.id, session.project_name, session.project_root, session.seed_version, session.current_stage, session.samvil_tier, session.created_at, session.updated_at),
             )
             await db.commit()
         return session
@@ -119,6 +131,7 @@ class EventStore:
             return Session(
                 id=row["id"],
                 project_name=row["project_name"],
+                project_root=row["project_root"],
                 seed_version=row["seed_version"],
                 current_stage=Stage(row["current_stage"]),
                 samvil_tier=row["samvil_tier"],
@@ -126,19 +139,33 @@ class EventStore:
                 updated_at=row["updated_at"],
             )
 
-    async def find_session_by_project(self, project_name: str) -> Session | None:
+    async def find_session_by_project(
+        self,
+        project_name: str,
+        project_root: str | None = None,
+    ) -> Session | None:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT * FROM sessions WHERE project_name = ? ORDER BY updated_at DESC LIMIT 1",
-                (project_name,),
-            )
-            row = await cursor.fetchone()
+            if project_root:
+                normalized_root = str(Path(project_root).expanduser().resolve())
+                cursor = await db.execute(
+                    "SELECT * FROM sessions WHERE project_name = ? AND project_root = ? ORDER BY updated_at DESC LIMIT 1",
+                    (project_name, normalized_root),
+                )
+                row = await cursor.fetchone()
+            else:
+                cursor = await db.execute(
+                    "SELECT * FROM sessions WHERE project_name = ? ORDER BY updated_at DESC LIMIT 2",
+                    (project_name,),
+                )
+                rows = await cursor.fetchall()
+                row = rows[0] if len(rows) == 1 else None
             if not row:
                 return None
             return Session(
                 id=row["id"],
                 project_name=row["project_name"],
+                project_root=row["project_root"],
                 seed_version=row["seed_version"],
                 current_stage=Stage(row["current_stage"]),
                 samvil_tier=row["samvil_tier"],
@@ -157,6 +184,7 @@ class EventStore:
                 Session(
                     id=r["id"],
                     project_name=r["project_name"],
+                    project_root=r["project_root"],
                     seed_version=r["seed_version"],
                     current_stage=Stage(r["current_stage"]),
                     samvil_tier=r["samvil_tier"],

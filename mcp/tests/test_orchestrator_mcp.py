@@ -121,12 +121,11 @@ def test_save_event_writes_project_events_ssot(tmp_path, monkeypatch) -> None:
     project_root = tmp_path / "project"
     project_root.mkdir()
 
-    from samvil_mcp import server as srv
-
-    monkeypatch.setattr(srv, "_resolve_project_path", lambda _name: project_root)
-
     async def runner():
-        sess = json.loads(await create_session("events-ssot", "standard"))
+        sess = json.loads(await create_session(
+            "events-ssot", "standard", project_root=str(project_root)
+        ))
+        assert sess["project_root"] == str(project_root.resolve())
         result = json.loads(await save_event(
             sess["session_id"],
             "interview_complete",

@@ -79,6 +79,7 @@ class Event:
 class Session:
     id: str
     project_name: str
+    project_root: str = ""
     seed_version: int = 1
     current_stage: Stage = Stage.INTERVIEW
     samvil_tier: str = "standard"

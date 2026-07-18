@@ -63,7 +63,7 @@ After user approval:
 1. `project.seed.json` — atomic-write `result.seed` verbatim. If file already exists, AskUserQuestion `덮어쓸까요?` (백업 후 덮어쓰기 / 병합 / 취소). 백업: `cp project.seed.json project.seed.backup-<ts>.json`.
 2. `interview-summary.md` — Bash `cat >>` (never Write tool) a header `# 프로젝트 분석 요약 (Brownfield)` followed by bullets: `프레임워크`, `solution_type` + confidence, `추론된 기능` count, then each `summary_line`.
 3. `decisions.log` — append each `result.adrs[i]` as one JSON row (append-only array). `mcp__samvil_mcp__claim_post(...)` best-effort per row; MCP fail → decisions.log is fallback truth (P8/INV-5).
-4. If no `session_id` yet: `mcp__samvil_mcp__create_session(project_name="<seed.name>", samvil_tier="<config or 'standard'>")` and capture session_id.
+4. If no `session_id` yet: `mcp__samvil_mcp__create_session(project_name="<seed.name>", samvil_tier="<config or 'standard'>", project_root=".")` and capture session_id.
 5. `project.state.json` — init/merge with `session_id`, `current_stage: "analyze"`, `_analysis_source: "brownfield"`. Do not clobber existing fields.
 6. `mcp__samvil_mcp__save_event(session_id="<sid>", event_type="analyze_complete", stage="<next_stage>", data='{"framework":"<framework>","feature_count":<N>,"warnings":<len(warnings)>}')` and `mcp__samvil_mcp__save_seed_version(session_id="<sid>", version=1, seed_json='<JSON-escaped seed>', change_summary="Reverse-engineered from existing codebase")` — both best-effort.
 

@@ -378,7 +378,7 @@ Write this to `~/dev/<project-name>/.samvil/metrics.json`.
 **MCP (best-effort):** Create a SAMVIL session for event tracking:
 
 ```
-mcp__samvil_mcp__create_session(project_name="<project-name>", samvil_tier="<selected_tier>")
+mcp__samvil_mcp__create_session(project_name="<project-name>", samvil_tier="<selected_tier>", project_root="~/dev/<project-name>")
 ```
 
 Parse the returned `session_id` and update `project.state.json` → set `session_id` to the returned value.

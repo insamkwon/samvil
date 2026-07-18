@@ -353,6 +353,7 @@ async def create_session(
     project_name: str,
     samvil_tier: str = "standard",
     agent_tier: str | None = None,  # glossary-allow: deprecated alias, removed in v3.3
+    project_root: str = "",
 ) -> str:
     """Create a new SAMVIL session for a project. Returns session ID.
 
@@ -375,9 +376,23 @@ async def create_session(
         if detected:
             return json.dumps({"session_id": None, "error": f"Blocked patterns: {detected}"})
         project_name = sanitize_filename(project_name, max_len=100)
+        normalized_root = ""
+        if project_root:
+            normalized_root = str(Path(project_root).expanduser().resolve())
+        else:
+            inferred_root = _resolve_project_path(project_name)
+            if inferred_root is not None:
+                normalized_root = str(inferred_root.resolve())
         store = await get_store()
-        session = await store.create_session(project_name, samvil_tier)
-        return json.dumps({"session_id": session.id, "project_name": project_name, "tier": samvil_tier})
+        session = await store.create_session(
+            project_name, samvil_tier, project_root=normalized_root
+        )
+        return json.dumps({
+            "session_id": session.id,
+            "project_name": project_name,
+            "project_root": session.project_root,
+            "tier": samvil_tier,
+        })
     except Exception as e:
         _log_mcp_health("fail", "create_session", str(e))
         return json.dumps({"session_id": None, "error": str(e)})
@@ -393,6 +408,7 @@ async def get_session(session_id: str) -> str:
     return json.dumps({
         "id": session.id,
         "project_name": session.project_name,
+        "project_root": session.project_root,
         "current_stage": session.current_stage,
         "seed_version": session.seed_version,
         "samvil_tier": session.samvil_tier,
@@ -409,6 +425,7 @@ async def list_sessions(limit: int = 10) -> str:
     return json.dumps([{
         "id": s.id,
         "project_name": s.project_name,
+        "project_root": s.project_root,
         "current_stage": s.current_stage,
         "updated_at": s.updated_at,
     } for s in sessions])
@@ -513,6 +530,14 @@ def _resolve_project_path(project_name: str | None) -> "Path | None":
         return None
     guess = Path.home() / "dev" / project_name
     return guess if guess.exists() else None
+
+
+def _session_project_path(session: Session | None) -> Path | None:
+    """Prefer the persisted absolute root, then fall back to legacy inference."""
+    if session and session.project_root:
+        root = Path(session.project_root)
+        return root if root.exists() else None
+    return _resolve_project_path(session.project_name if session else None)
 
 
 # Map event_type → canonical stage name. The v3.1 skill convention is
@@ -635,7 +660,7 @@ async def _auto_post_claim_for_event(
         session = await store.get_session(session_id)
         if session is None:
             return
-        project_path = _resolve_project_path(session.project_name)
+        project_path = _session_project_path(session)
         if project_path is None:
             return
         ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
@@ -750,7 +775,7 @@ async def save_event(
             token_count=token_count,
         )
         session = await store.get_session(session_id)
-        project_path = _resolve_project_path(session.project_name) if session else None
+        project_path = _session_project_path(session)
         if project_path is None:
             _log_mcp_health(
                 "warn",

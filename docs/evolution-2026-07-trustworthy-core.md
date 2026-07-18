@@ -223,7 +223,7 @@ v4.31이 시작한 방향의 완성이다.
 > 처음으로 실전 작동하게 된다. **Wave 2(기계 증거)가 이 위에 선다** — 증거를
 > 기록할 저장소부터 신뢰 가능해야 한다.
 
-- [ ] **1.1 save_event 이중쓰기: 프로젝트 events.jsonl을 canonical로**
+- [x] **1.1 save_event 이중쓰기: 프로젝트 events.jsonl을 canonical로**
   설계:
   - `save_event`(server.py:695 부근)가 SQLite 기록과 **동시에** 해당 프로젝트의
     `.samvil/events.jsonl`에 append (필드: `timestamp`(0.2의 canonical), event_type,
@@ -235,6 +235,12 @@ v4.31이 시작한 방향의 완성이다.
     각주)에 명시.
   - 검증: dogfood 런(minimal tier, 3.5 참조) 후 프로젝트에 events.jsonl이 실제로
     쌓이고 stall_detector/retro가 그걸 읽는지 실측.
+  (스코프 보정: 1.1에서는 기존 `session.project_name → ~/dev/<name>` 해석을
+  재사용해 이중쓰기를 먼저 열었다. 절대경로 저장과 동명 프로젝트 분리는 1.2에서
+  이어서 적용하며, dogfood 실측은 Wave 1 완료 게이트에서 수행한다.)
+  - 완료 증거: `9d193ae`; `mcp/samvil_mcp/server.py:599`,
+    `mcp/samvil_mcp/server.py:752`, `mcp/tests/test_orchestrator_mcp.py:119`,
+    `mcp/tests/test_orchestrator_mcp.py:155`, `CLAUDE.md:301`.
 - [ ] **1.2 동명 프로젝트 세션 오염 수정**
   `event_store.py:129` `find_session_by_project`가 이름만 조회 → 같은 이름의 다른
   프로젝트 세션 오염. project_root 절대경로(또는 그 해시)를 세션 레코드에 저장하고
