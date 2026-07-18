@@ -788,7 +788,7 @@ async def save_event(
                     project_path,
                     timestamp=event.timestamp,
                     event_type=event_type,
-                    stage=stage_enum.value,
+                    stage=_canonical_stage_for_event(event_type, stage_enum.value),
                     session_id=session_id,
                     data=parsed_data,
                 )

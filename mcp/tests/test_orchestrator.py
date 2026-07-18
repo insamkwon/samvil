@@ -6,6 +6,7 @@ import pytest
 
 from samvil_mcp.orchestrator import (
     PIPELINE_STAGES,
+    SUCCESS_COMPLETE_EVENTS,
     StageEvent,
     OrchestratorError,
     complete_stage_plan,
@@ -35,6 +36,10 @@ def test_pipeline_stage_order_is_canonical() -> None:
 @pytest.mark.parametrize("tier", ["minimal", "standard", "thorough", "full"])
 def test_deploy_is_skipped_for_all_phase1_tiers(tier: str) -> None:
     assert should_skip_stage("deploy", tier) is True
+
+
+def test_opt_in_deploy_has_no_complete_stage_mapping() -> None:
+    assert "deploy" not in SUCCESS_COMPLETE_EVENTS
 
 
 def test_minimal_skips_council() -> None:

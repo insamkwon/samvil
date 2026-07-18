@@ -33,6 +33,7 @@ import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -663,6 +664,29 @@ def _qa_pass_rate_from_events(events: list[dict[str, Any]]) -> float | None:
     return round(passed / len(latest), 3)
 
 
+def _stage_durations_from_events(events: list[dict[str, Any]]) -> dict[str, int]:
+    """Derive per-stage wall time from the first and last canonical event."""
+    bounds: dict[str, list[datetime]] = {}
+    for event in events:
+        stage = str(event.get("stage") or "")
+        raw_ts = str(event.get("timestamp") or "")
+        if not stage or not raw_ts:
+            continue
+        try:
+            timestamp = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        bounds.setdefault(stage, []).append(timestamp)
+
+    durations: dict[str, int] = {}
+    for stage, timestamps in bounds.items():
+        if len(timestamps) < 2:
+            continue
+        elapsed_ms = int((max(timestamps) - min(timestamps)).total_seconds() * 1000)
+        durations[stage] = max(0, elapsed_ms)
+    return durations
+
+
 # ── Top-level aggregator ───────────────────────────────────────────────
 
 
@@ -721,6 +745,19 @@ def aggregate_retro_metrics(
     qa_results = _read_json(proj / ".samvil" / "qa-results.json")
 
     rm = extract_metrics(state, metrics, seed, interview_summary, qa_results=qa_results or None)
+
+    if not rm.stage_durations_ms:
+        derived_durations = _stage_durations_from_events(events)
+        if derived_durations:
+            rm.stage_durations_ms = derived_durations
+            rm.total_duration_ms = sum(derived_durations.values())
+            rm.bottleneck_stages = [
+                name
+                for name, duration in sorted(
+                    derived_durations.items(), key=lambda item: item[1], reverse=True
+                )[:2]
+                if rm.total_duration_ms and duration / rm.total_duration_ms >= 0.20
+            ]
 
     if rm.qa_pass_rate == 0.0:
         derived = _qa_pass_rate_from_events(events)

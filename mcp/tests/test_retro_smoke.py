@@ -439,6 +439,34 @@ def test_mcp_health_missing_log(tmp_path: Path) -> None:
     assert h["fail_rate"] == 0.0
 
 
+def test_stage_durations_fall_back_to_canonical_events(tmp_path: Path) -> None:
+    _write_seed(tmp_path)
+    _write_state(tmp_path)
+    _write_events(
+        tmp_path,
+        [
+            {
+                "event_type": "interview_start",
+                "stage": "interview",
+                "timestamp": "2026-07-18T00:00:00Z",
+                "data": {},
+            },
+            {
+                "event_type": "interview_complete",
+                "stage": "interview",
+                "timestamp": "2026-07-18T00:01:00Z",
+                "data": {},
+            },
+        ],
+    )
+
+    out = retro_aggregate.aggregate_retro_metrics(str(tmp_path))
+
+    assert out["metrics"]["stage_durations_ms"] == {"interview": 60_000}
+    assert out["metrics"]["total_duration_ms"] == 60_000
+    assert out["flow_compliance"]["source"] == "events"
+
+
 # ── Behavior 9: idempotency ────────────────────────────────────
 
 

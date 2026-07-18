@@ -72,7 +72,6 @@ SUCCESS_COMPLETE_EVENTS: dict[str, str] = {
     "scaffold": "scaffold_complete",
     "build": "build_stage_complete",
     "qa": "qa_pass",
-    "deploy": "deploy_complete",
     "retro": "retro_complete",
     "evolve": "evolve_converge",
     "complete": "stage_end",
@@ -122,6 +121,7 @@ def should_skip_stage(stage: str, samvil_tier: str) -> bool:
     if stage == "council" and samvil_tier == "minimal":
         return True
     if stage == "deploy":
+        # Deploy is opt-in and runs outside the automatic complete_stage flow.
         return True
     return False
 

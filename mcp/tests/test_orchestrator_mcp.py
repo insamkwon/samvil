@@ -142,7 +142,7 @@ def test_save_event_writes_project_events_ssot(tmp_path, monkeypatch) -> None:
     assert rows["entries"][0] == {
         "timestamp": rows["entries"][0]["timestamp"],
         "event_type": "interview_complete",
-        "stage": "seed",
+        "stage": "interview",
         "session_id": rows["entries"][0]["session_id"],
         "data": {
             "questions_asked": 4,

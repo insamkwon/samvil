@@ -266,17 +266,28 @@ v4.31이 시작한 방향의 완성이다.
     `mcp/samvil_mcp/self_correction.py:21`, `mcp/samvil_mcp/checkpoint.py:60`,
     `mcp/samvil_mcp/resume.py:107`, `mcp/tests/test_ssot_hardening.py:33`,
     `mcp/tests/test_ssot_hardening.py:82`, `mcp/tests/test_ssot_hardening.py:110`.
-- [ ] **1.4 hook의 state 파일 read-modify-write 원자화**
+- [x] **1.4 hook의 state 파일 read-modify-write 원자화**
   `hooks/_contract-helpers.sh:291-302`가 락 없이 별도 python 프로세스로
   read-modify-write. heredoc python에서 fcntl.flock + tmp/rename 적용.
   (hook은 여전히 best-effort exit 0 유지 — P8.)
+  - 완료 증거: `40c6784`; `hooks/_contract-helpers.sh:287`,
+    `hooks/_contract-helpers.sh:302`, `hooks/_contract-helpers.sh:315`,
+    `hooks/_contract-helpers.sh:335`, `hooks/_contract-helpers.sh:350`,
+    `hooks/_contract-helpers.sh:364`, `mcp/tests/test_contract_hook_atomic.py:21`,
+    `mcp/tests/test_contract_hook_atomic.py:33`.
 - [ ] **1.5 orchestrator deploy dead-mapping 정리**
   `orchestrator.py:124` deploy가 `should_skip_stage` 항상 True인데
   `SUCCESS_COMPLETE_EVENTS["deploy"]` 존재. 실제 의도(deploy는 opt-in 스테이지)에
   맞게 정리하고 죽은 매핑 제거.
+  (스코프 보정: Wave 1 완료 실측 전 retro를 확인한 결과 stage duration은 여전히
+  metrics.json 전용이고 canonical events의 stage도 일부 next-stage 의미였다.
+  deploy dead mapping 제거와 함께 1.1의 canonical stage 기록 및 events 기반 duration
+  fallback을 최소 보정해 Wave 1 완료 기준을 실제로 닫는다. `query_projection`은
+  CLAUDE.md의 정의대로 SQLite 보조 인덱스 검증으로 유지한다.)
 
 **Wave 1 완료 기준**: dogfood 1회에서 `.samvil/events.jsonl` 생성·성장 실측 +
-`query_projection`/stall/retro가 그 파일에서 실데이터를 읽는 것 확인 (증거 스샷/로그).
+stall/retro가 canonical 파일에서 실데이터를 읽고, `query_projection`은 동일 이벤트의
+SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
 
 ---
 
