@@ -1,4 +1,7 @@
-# Migration Guide: SAMVIL v2.x → v3.0
+# Archived Migration Guide: SAMVIL v2.x → v3.0
+
+> Historical migration reference. Current schema guidance lives in
+> `references/seed-schema.md` and `references/samvil-ssot-schema.md`.
 
 > v3.0.0 introduces the **AC Tree** — acceptance criteria are now tree nodes, and Build/QA iterate leaves instead of flat lists. This guide shows how to migrate an existing v2 project without manual edits.
 

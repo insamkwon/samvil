@@ -490,7 +490,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/tests/test_interview_engine.py:158`,
     `mcp/tests/test_interview_engine.py:192`, `mcp/tests/test_gates.py:75`,
     `mcp/tests/test_interview_smoke.py:436`,
-    `skills/samvil-interview/SKILL.md:89`, `references/interview-levels.md:19`.
+    `skills/samvil-interview/SKILL.md:89`, `references/interview-frameworks.md:194`.
 - [x] **3.5 council 운명 확정**
   현상: 제거 예고(samvil-council/SKILL.md:13-14 "--council opt-in, v3.3 제거") vs
   오케스트레이터 Step 5가 태스크 생성(samvil/SKILL.md:76) vs seed가 standard+에서
@@ -566,7 +566,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `hooks/_contract-helpers.sh:54`, `hooks/_contract-helpers.sh:134`,
     `hooks/contract-stage-start.sh:41`, `skills/samvil/SKILL.md:42`,
     `mcp/tests/test_contract_hooks.py:62`.
-- [ ] **4.3 에이전트 50→~40 + 문서 일치**
+- [x] **4.3 에이전트 50→~40 + 문서 일치**
   - phantom 2개(`build-worker`, `compressor` — ROLE-INVENTORY:27,83에만 존재)를
     `model_role.py`에서 제거.
   - `deployer.md` 삭제(어디서도 spawn 안 됨) 또는 samvil-deploy에 실배선 —
@@ -583,6 +583,10 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   `compressor`는 inline summary role이라 제거하면 런타임 계약이 깨진다. 둘을
   `INLINE_IDENTITIES`로 명시하고 파일 없는 역할임을 CI·문서에 드러낸다. 나머지
   9개 중복/미배선 persona를 통합·삭제해 디스크 실측 41개로 맞춘다.)
+  - 완료 증거: `b8f222d`; `mcp/samvil_mcp/model_role.py:46`,
+    `agents/tech-architect.md:29`, `agents/qa-functional.md:25`,
+    `agents/socratic-interviewer.md:42`, `scripts/check-agent-inventory.py:21`,
+    `scripts/pre-commit-check.sh:222`, `CLAUDE.md:312`.
 - [ ] **4.4 references 대청소 (65→~48)**
   orphan 27개 처분: 초소형 schema stub 8개 → `samvil-ssot-schema.md`로 통합,
   `migration-v2-to-v3` 아카이브, `gate-vs-degradation`→`graceful-degradation` 흡수,
@@ -590,6 +594,9 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   **규범적 orphan(decision-boundaries, reversibility-guide, model-routing-guide)은
   삭제 금지 — 해당 스킬에서 실제 링크**(4.1이 decision-boundaries를 살리는 것과
   정합).
+  (스코프 보정: 현행 `references/`는 감사 당시 65개가 아니라 57개이며, 통합 대상
+  schema redirect stub도 8개가 아니라 이미 통합된 4개뿐이다. 런타임이 소비하는
+  schema/host 문서는 보존하고, 명시된 중복 8개를 흡수·아카이브해 49개로 줄인다.)
 - [ ] **4.5 guard-destructive 강화 (speed-bump → 실가드)**
   현상: glob substring이라 공백 변형(`rm  -rf /`, `rm -fr /`)·변수(`rm -rf $X`)·
   `.next` 문자열 disarm 전부 우회, `git push -f` 미커버, SQL 대문자만.

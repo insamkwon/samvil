@@ -2,7 +2,7 @@
 
 ## project.seed.json (v3.3)
 
-> **Breaking change vs v2**: `acceptance_criteria` lives **inside each feature** as an AC tree. The root-level `acceptance_criteria` array is no longer required; v3 validation reads `features[i].acceptance_criteria` and counts tree leaves. Old v2 seeds are auto-migrated by `mcp__samvil_mcp__migrate_seed_file` (creates `project.v2.backup.json`). See `references/migration-v2-to-v3.md`.
+> **Breaking change vs v2**: `acceptance_criteria` lives **inside each feature** as an AC tree. The root-level `acceptance_criteria` array is no longer required; v3 validation reads `features[i].acceptance_criteria` and counts tree leaves. Old v2 seeds are auto-migrated by `mcp__samvil_mcp__migrate_seed_file` (creates `project.v2.backup.json`). Historical recovery details live in `docs/archive/migration-v2-to-v3.md`.
 
 ```jsonc
 {

@@ -10,7 +10,7 @@ Per HANDOFF-v3.2-DECISIONS.md §3.⑥ and §6.3:
   * The boundary between ⑥ and P8 Graceful Degradation: if the failure
     changes the truth of a claim, it's a gate failure. If it only slows down
     observation of a known-true claim, it's graceful degradation.
-    (See references/gate-vs-degradation.md.)
+    (See references/graceful-degradation.md.)
 
 `gate_check` is pure except for reading `gate_config.yaml`. `gate_override`
 is the explicit user-authorized exception: it appends an auditable claim.

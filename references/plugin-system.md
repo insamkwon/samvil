@@ -9,6 +9,32 @@
 
 **핵심 원칙: Plugin is best-effort.** 플러그인 실패는 하네스 실행에 영향 없음. 경고만 출력하고 계속 진행.
 
+## Plugin manifest (`plugin.json`)
+
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "Run tests after scaffold",
+  "hooks": {
+    "after_scaffold": {"command": "npm test"},
+    "after_build": {"command": "npm run lint && npm test"}
+  }
+}
+```
+
+| Field | Required | Contract |
+|---|:---:|---|
+| `name` | yes | letters, digits, and hyphens |
+| `version` | yes | semantic version |
+| `description` | no | human-readable purpose |
+| `hooks` | yes | at least one supported hook with a shell `command` |
+
+Commands run in independent processes, receive JSON on stdin, and use exit 0
+for success. The runtime sets `SAMVIL_PROJECT_DIR`, `SAMVIL_SEED_PATH`,
+`SAMVIL_HOOK`, and `SAMVIL_PLUGIN_NAME`. Keep commands under 60 seconds,
+independent of other plugins, and do not mutate seed or harness-owned files.
+
 ## Hook Points
 
 파이프라인의 6개 스테이지 전후에 hook 포인트가 존재한다:

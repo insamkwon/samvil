@@ -189,6 +189,37 @@ Tavily 실패 시:
 - **Zero-Question Mode는 Deep Mode와 상호 배타** — Zero는 preset 완전 의존, Deep은 그 반대.
 - **Framework 이름을 사용자에게 노출 금지** — "AARRR", "JTBD" 같은 용어 대신 평이한 한국어로 질문 표현.
 
+## 9. `interview_level` execution techniques
+
+`interview_level` is orthogonal to `samvil_tier`: tier controls the product
+rigor budget, while level selects interview techniques.
+
+| Level | Techniques |
+|---|---|
+| `quick` | T1 deterministic seed readiness |
+| `normal` (default) | T1 + T2 meta probe + T4 scenario simulation |
+| `deep` | normal + T3 user confidence marking |
+| `max` | deep + T5 different-provider adversarial review |
+| `auto` | T6 deterministic prompt heuristic selects quick-normal-deep-max |
+
+- **T1**: `score_ambiguity` derives readiness from persisted answers, actual
+  question count, tier, and explicit extensions. The LLM never supplies scores.
+- **T2**: once per phase, use `meta_probe_prompt` and `meta_probe_parse` to find
+  blind spots.
+- **T3**: confidence 1-5; a score at or below 2 asks for a concrete recent
+  example.
+- **T4**: simulate first arrival, happy path, edge case, and returning user;
+  report contradictions.
+- **T5**: use a different provider when configured; otherwise downgrade
+  `max` to `deep` with an explicit warning.
+- **T6**: auth/payments/compliance/offline-sync prompts choose deep (max on
+  thorough+); dashboard/workflow prompts choose normal; automation defaults to
+  quick and game to normal.
+
+Expected costs and routing remain defined in
+`references/model-routing-guide.md`. Question budgets and convergence floors
+remain defined only in `references/decision-boundaries.md`.
+
 ---
 
 ## 9. 관련 문서
@@ -201,4 +232,5 @@ Tavily 실패 시:
 
 ---
 
-_작성: 2026-04-21 · v3.1.0 Sprint 1 (Interview Renaissance)_
+_작성: 2026-04-21 · v3.1.0 Sprint 1 (Interview Renaissance); interview-level
+reference absorbed 2026-07-18._

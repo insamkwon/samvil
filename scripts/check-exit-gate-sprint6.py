@@ -39,11 +39,11 @@ PROMISED_DELIVERABLES = [
     "references/model-routing-guide.md",
     "references/model-profiles-schema.md",
     "references/troubleshooting-codex.md",
-    "references/interview-levels.md",
+    "references/interview-frameworks.md",
     "references/jurisdiction-boundary-cases.md",
     "references/migration-v3.1-to-v3.2.md",
     "references/glossary.md",
-    "references/gate-vs-degradation.md",
+    "references/graceful-degradation.md",
     "references/council-retirement-migration.md",
 ]
 
