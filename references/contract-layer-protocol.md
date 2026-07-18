@@ -94,6 +94,10 @@ before invoking the next skill via the chain pattern:
    → On verdict=pass: record gate_verdict claim (verified by Judge) and
      proceed to chain invoke the next skill.
    → On verdict=skip: record skip in state.json.completed_stages, proceed.
+   → A blocked gate has exactly one exception: AskUserQuestion obtains explicit
+     user approval, then `gate_override(project_root=".", gate="<gate>",
+     reason="<user-approved reason>", approved_by="user")` records a verified,
+     one-time `gate_override` claim. Unapproved `force_proceed` is forbidden.
 
 3. Stagnation sniff (optional; do on any non-pass)
    mcp__samvil_mcp__stagnation_evaluate(

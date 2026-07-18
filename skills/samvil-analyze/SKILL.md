@@ -1,6 +1,6 @@
 ---
 name: samvil-analyze
-description: "기존 프로젝트 코드 분석. 구조 파악 → 역방향 seed 생성 → gap 분석. Brownfield 모드의 첫 단계."
+description: "기존 프로젝트 코드 분석. 구조 파악 → 역방향 seed 생성 → gap 분석. Brownfield 모드의 첫 단계. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
 ---
 
 # samvil-analyze (ultra-thin)

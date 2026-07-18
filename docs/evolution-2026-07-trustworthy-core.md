@@ -327,7 +327,7 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
   - 완료 증거: `3f3a157`; `mcp/samvil_mcp/stage_evidence.py:15`,
     `mcp/samvil_mcp/stage_evidence.py:37`,
     `mcp/samvil_mcp/stage_evidence.py:70`,
-    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4721`,
+    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4745`,
     `mcp/samvil_mcp/test_deliverable.py:180`,
     `mcp/tests/test_stage_evidence.py:18`, `mcp/tests/test_stage_evidence.py:73`,
     `skills/samvil-build/SKILL.md:73`, `skills/samvil-qa/SKILL.md:61`.
@@ -344,7 +344,7 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
     `mcp/tests/test_gates.py:402`, `mcp/tests/test_gates.py:439`,
     `skills/samvil-build/SKILL.md:93`, `skills/samvil-build/SKILL.md:96`,
     `skills/samvil-qa/SKILL.md:80`, `skills/samvil-qa/SKILL.md:85`.
-- [ ] **2.3 QA verdict 등급 분리 — `PASS(runtime)` vs `PASS(static)`**
+- [x] **2.3 QA verdict 등급 분리 — `PASS(runtime)` vs `PASS(static)`**
   설계: `qa_finalize`/`qa_synthesis`의 verdict에 `verification_mode:
   "runtime"|"static"` 필드 추가. Playwright 폴백(samvil-qa/SKILL.md:31) 시
   static으로 강등 표기. **deploy 진입 게이트(qa_to_deploy)는
@@ -355,6 +355,12 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
   (스코프 보정: 감사 시점 코드에는 `gate_override`가 아직 없으므로 static block +
   AskUserQuestion payload는 2.3에서, 실제 override claim 기록 회귀는 도구를 신설하는
   2.4에서 구현·검증한다.)
+  - 완료 증거: `d50d376`; `mcp/samvil_mcp/qa_synthesis.py:41`,
+    `mcp/samvil_mcp/qa_synthesis.py:43`, `mcp/samvil_mcp/qa_synthesis.py:105`,
+    `mcp/samvil_mcp/qa_finalize.py:170`, `mcp/samvil_mcp/qa_finalize.py:383`,
+    `mcp/samvil_mcp/gates.py:428`, `mcp/tests/test_qa_synthesis.py:38`,
+    `mcp/tests/test_qa_smoke.py:613`, `mcp/tests/test_qa_smoke.py:629`,
+    `mcp/tests/test_gates.py:439`, `skills/samvil-qa/SKILL.md:85`.
 - [ ] **2.4 `force_proceed` 제도화 (게이트 우회의 공식 경로)**
   현재: 어떤 스킬 프로즈에도 정의 없이 LLM이 임의로 씀(zep-auto-test 실증).
   설계:

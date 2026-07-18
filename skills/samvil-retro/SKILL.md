@@ -1,6 +1,6 @@
 ---
 name: samvil-retro
-description: "Post-run retrospective. Analyze run metrics from files, suggest 3 harness improvements, append to feedback log."
+description: "Post-run retrospective. Analyze run metrics from files, suggest 3 harness improvements, append to feedback log. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
 ---
 
 # samvil-retro (ultra-thin)

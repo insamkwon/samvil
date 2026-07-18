@@ -1,6 +1,6 @@
 ---
 name: samvil-scaffold
-description: "CLI-based project scaffold. Supports Next.js, Vite+React, Astro, Phaser, Expo, python-script, node-script, cc-skill. No template folder dependency."
+description: "CLI-based project scaffold. Supports Next.js, Vite+React, Astro, Phaser, Expo, python-script, node-script, cc-skill. No template folder dependency. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
 ---
 
 # samvil-scaffold (ultra-thin)

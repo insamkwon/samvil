@@ -190,6 +190,8 @@ def check_boot_contract() -> bool:
             missing.append("save_event (stage entry)")
         if "SKILL.legacy.md" not in text and "P8" not in text:
             missing.append("P8/legacy fallback")
+        if "gate_override" not in text or "force_proceed" not in text:
+            missing.append("explicit gate override policy")
         if missing:
             _fail(f"boot-contract {skill}: missing {missing}")
             all_green = False

@@ -39,6 +39,7 @@ CLAIM_TYPES: tuple[str, ...] = (
     "seed_field_set",
     "ac_verdict",
     "gate_verdict",
+    "gate_override",
     "evolve_decision",
     "policy_adoption",
     "evidence_posted",
@@ -369,6 +370,43 @@ class ClaimLedger:
             )
             self._append(rejected)
         return rejected
+
+    def record_gate_override(
+        self,
+        *,
+        gate: str,
+        reason: str,
+        approved_by: str = "user",
+    ) -> Claim:
+        """Append a verified, user-authoritative one-time gate override."""
+        if approved_by not in {"user", "agent:user"}:
+            raise ClaimLedgerError("gate override requires explicit user approval.")
+        if not gate or not reason.strip():
+            raise ClaimLedgerError("gate and non-empty reason are required.")
+
+        with _locked(self.path):
+            ts = _now_iso()
+            existing = self._latest_by_id().keys()
+            seq = self._next_seq(existing, ts)
+            claim = Claim(
+                claim_id=_claim_id(ts, seq),
+                type="gate_override",
+                subject=gate,
+                statement=f"user approved gate override: {reason.strip()}",
+                authority_file=".samvil/claims.jsonl",
+                evidence=["user-approval"],
+                claimed_by="agent:orchestrator-agent",
+                verified_by="agent:user",
+                status="verified",
+                ts=ts,
+                meta={
+                    "overridden_by": "user",
+                    "reason": reason.strip(),
+                    "one_time": True,
+                },
+            )
+            self._append(claim)
+        return claim
 
     # ── Queries ────────────────────────────────────────────────────────
 

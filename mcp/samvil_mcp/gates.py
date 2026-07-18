@@ -12,8 +12,8 @@ Per HANDOFF-v3.2-DECISIONS.md §3.⑥ and §6.3:
     observation of a known-true claim, it's graceful degradation.
     (See references/gate-vs-degradation.md.)
 
-This module is intentionally pure: no I/O except reading `gate_config.yaml`.
-Skills import `gate_check(...)` and branch on the verdict.
+`gate_check` is pure except for reading `gate_config.yaml`. `gate_override`
+is the explicit user-authorized exception: it appends an auditable claim.
 """
 
 from __future__ import annotations
@@ -22,7 +22,10 @@ import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
+
+if TYPE_CHECKING:
+    from .claim_ledger import Claim, ClaimLedger
 
 try:
     import yaml  # optional runtime dep; fall back to embedded defaults if missing
@@ -431,6 +434,92 @@ def _required_action_for(
         type="ask_user",
         payload={"checks": failed, "metrics_snapshot": dict(metrics)},
     )
+
+
+# ── Explicit user override ───────────────────────────────────────────
+
+
+def _claim_order(claim: "Claim") -> tuple[str, str]:
+    return claim.ts, claim.claim_id
+
+
+def active_gate_override(ledger: "ClaimLedger", gate: str) -> "Claim | None":
+    """Return a fresh verified override created after the latest block.
+
+    A newer gate verdict consumes the override, making it one-time rather than
+    a permanent exemption for every future run of the same gate.
+    """
+    claims = ledger.query_by_subject(gate)
+    verdicts = [claim for claim in claims if claim.type == "gate_verdict"]
+    overrides = [
+        claim
+        for claim in claims
+        if claim.type == "gate_override"
+        and claim.status == "verified"
+        and claim.verified_by == "agent:user"
+        and claim.meta.get("overridden_by") == "user"
+    ]
+    if not verdicts or not overrides:
+        return None
+
+    latest_verdict = max(verdicts, key=_claim_order)
+    verdict_value = str(
+        latest_verdict.meta.get("verdict") or latest_verdict.statement
+    ).casefold()
+    if "block" not in verdict_value:
+        return None
+    latest_override = max(overrides, key=_claim_order)
+    return (
+        latest_override
+        if _claim_order(latest_override) > _claim_order(latest_verdict)
+        else None
+    )
+
+
+def gate_override(
+    project_root: str | Path,
+    *,
+    gate: str,
+    reason: str,
+    approved_by: str = "user",
+) -> dict[str, Any]:
+    """Record a one-time user-approved exception after a blocked gate."""
+    from .claim_ledger import ClaimLedger, ClaimLedgerError
+
+    if gate not in {item.value for item in GateName}:
+        raise ValueError(f"unknown gate: {gate!r}")
+    if approved_by not in {"user", "agent:user"}:
+        raise ValueError("gate override requires explicit user approval")
+    if not reason.strip():
+        raise ValueError("gate override reason is required")
+
+    ledger = ClaimLedger(Path(project_root) / ".samvil" / "claims.jsonl")
+    existing = ledger.query_by_subject(gate)
+    latest_verdicts = [claim for claim in existing if claim.type == "gate_verdict"]
+    if not latest_verdicts:
+        raise ValueError("gate override requires a recorded blocked gate verdict")
+    latest_verdict = max(latest_verdicts, key=_claim_order)
+    verdict_value = str(
+        latest_verdict.meta.get("verdict") or latest_verdict.statement
+    ).casefold()
+    if "block" not in verdict_value:
+        raise ValueError("gate override requires the latest gate verdict to be block")
+
+    try:
+        claim = ledger.record_gate_override(
+            gate=gate,
+            reason=reason,
+            approved_by=approved_by,
+        )
+    except ClaimLedgerError as exc:
+        raise ValueError(str(exc)) from exc
+    return {
+        "claim_id": claim.claim_id,
+        "status": claim.status,
+        "gate": gate,
+        "overridden_by": "user",
+        "reason": reason.strip(),
+    }
 
 
 # ── Escalation safety ─────────────────────────────────────────────────

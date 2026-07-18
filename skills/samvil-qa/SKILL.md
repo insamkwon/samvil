@@ -1,6 +1,6 @@
 ---
 name: samvil-qa
-description: "3-pass verification against seed acceptance criteria. Ralph loop for auto-fix. Verdict: PASS/REVISE/FAIL."
+description: "3-pass verification against seed acceptance criteria. Ralph loop for auto-fix. Verdict: PASS/REVISE/FAIL. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
 ---
 
 # samvil-qa (ultra-thin)
@@ -82,7 +82,7 @@ Apply in order (best-effort except the evidence-backed `gate_check`, INV-5):
 2. For each `claim_actions[i]`: `action=="verify"` → `claim_verify(claim_id=<i.claim_id>, verified_by=<i.verified_by>, evidence_json=<i.evidence_json>)`; `action=="reject"` → `claim_reject(claim_id=<i.claim_id>, verified_by=<i.verified_by>, reason=<i.reason>)`. PARTIAL leaves claim pending (retro decides).
 3. If `boot.resume_hint.stage_claims.qa`: `claim_verify(claim_id=<id>, verified_by="agent:product-owner")`.
 4. For each `consensus_triggers[i]`: `consensus_trigger(input_json=<i.input_json>)`. `should_invoke=true` → 2-round resolver (legacy "consensus" rules) → `consensus_verdict` claim → use as final answer for that AC.
-5. `gate_check(gate_name="qa_to_deploy", samvil_tier=<finalize.samvil_tier>, metrics_json=<finalize.gate_input.metrics>, project_root=".", evidence_mode="mechanical")`. This call is mandatory: unavailable/error/block → halt. For `verification_mode=static`, surface `required_action.payload.question` (runtime 검증 없는 배포 위험) and wait for the 2.4 approved override path; otherwise emit `required_action.type`. `verdict=pass` → record `gate_verdict` claim → proceed.
+5. `gate_check(gate_name="qa_to_deploy", samvil_tier=<finalize.samvil_tier>, metrics_json=<finalize.gate_input.metrics>, project_root=".", evidence_mode="mechanical")`. Mandatory: unavailable/error → halt. On block, record the `gate_verdict`, surface `required_action.payload.question`, and halt unless the user explicitly approves; only then call `gate_override(project_root=".", gate="qa_to_deploy", reason="<user-approved reason>", approved_by="user")` and proceed. `verdict=pass` → record `gate_verdict` → proceed.
 6. If convergence is `blocked`/`failed`: `materialize_qa_recovery_routing(project_root=".")` → writes `<paths.qa_routing>` + `<paths.next_skill_marker>` for host continuation.
 
 ### 5. Iterate or terminate

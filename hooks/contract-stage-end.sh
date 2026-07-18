@@ -62,7 +62,13 @@ sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
 
 try:
     from samvil_mcp.claim_ledger import ClaimLedger
-    from samvil_mcp.gates import GateName, Verdict, gate_check, load_config
+    from samvil_mcp.gates import (
+        GateName,
+        Verdict,
+        active_gate_override,
+        gate_check,
+        load_config,
+    )
 except Exception as e:
     sys.stderr.write(f"[samvil-contract-hook] gate import failed: {e}\n")
     sys.exit(0)
@@ -168,16 +174,22 @@ except Exception as e:
 from dataclasses import asdict
 
 ledger = ClaimLedger(project / ".samvil" / "claims.jsonl")
+override = active_gate_override(ledger, gate_name) if verdict.verdict == "block" else None
+effective_verdict = Verdict.PASS.value if override else verdict.verdict
 posted = True
 try:
+    verdict_meta = asdict(verdict)
+    verdict_meta["original_verdict"] = verdict.verdict
+    verdict_meta["verdict"] = effective_verdict
+    verdict_meta["override_claim_id"] = override.claim_id if override else ""
     ledger.post(
         type="gate_verdict",
         subject=gate_name,
-        statement=f"verdict={verdict.verdict}; metrics={metrics}",
+        statement=f"verdict={effective_verdict}; metrics={metrics}",
         authority_file="state.json",
         claimed_by="agent:orchestrator-agent",
         evidence=["project.state.json"],
-        meta=asdict(verdict),
+        meta=verdict_meta,
     )
 except Exception as e:
     posted = False
@@ -185,11 +197,14 @@ except Exception as e:
 
 # Print a short line so the user sees what happened.
 sys.stderr.write(
-    f"[samvil-contract] post-stage {stage} → {gate_name}={verdict.verdict} "
+    f"[samvil-contract] post-stage {stage} → {gate_name}={effective_verdict} "
     f"(tier={tier}, failed={verdict.failed_checks})\n"
 )
 # Sentinel for the bash wrapper's health logging (stdout, not stderr).
-print(f"gate={gate_name};verdict={verdict.verdict};posted={posted}")
+override_id = override.claim_id if override else "none"
+print(
+    f"gate={gate_name};verdict={effective_verdict};override={override_id};posted={posted}"
+)
 PY
 )"
 

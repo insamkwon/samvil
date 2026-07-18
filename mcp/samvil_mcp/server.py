@@ -2608,6 +2608,30 @@ async def gate_check(
 
 
 @mcp.tool()
+async def gate_override(
+    project_root: str,
+    gate: str,
+    reason: str,
+    approved_by: str = "user",
+) -> str:
+    """Record a one-time gate exception after explicit user approval."""
+    try:
+        from .gates import gate_override as _gate_override
+
+        result = _gate_override(
+            project_root,
+            gate=gate,
+            reason=reason,
+            approved_by=approved_by,
+        )
+        _log_mcp_health("ok", "gate_override")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "gate_override", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 async def gate_should_force_user(
     gate_name: str,
     subject: str,

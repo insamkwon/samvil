@@ -1,6 +1,6 @@
 ---
 name: samvil-deploy
-description: "Deploy built app to Vercel/Railway/Coolify. Post-QA, pre-retro chain step."
+description: "Deploy built app to Vercel/Railway/Coolify. Post-QA, pre-retro chain step. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
 ---
 
 # samvil-deploy (ultra-thin)

@@ -22,7 +22,7 @@ them so no two axes share a value name.
 | Agent persona identity | **`agent_persona`** | 37 personas across 4 tiers (minimal/standard/thorough/full) |
 | Agent model-responsibility layer (§3.⑤) | **`model_role`** | `generator`, `reviewer`, `judge`, `repairer`, `researcher`, `compressor` |
 | Contract ledger entry (§3.①) | **`claim`** | typed record with status `pending` / `verified` / `rejected` |
-| Typed subset of claim | **`claim.type`** | `seed_field_set`, `ac_verdict`, `gate_verdict`, `evolve_decision`, `policy_adoption`, `evidence_posted`, `claim_disputed`, `consensus_verdict`, `migration_applied`, `stagnation_declared` |
+| Typed subset of claim | **`claim.type`** | `seed_field_set`, `ac_verdict`, `gate_verdict`, `gate_override`, `evolve_decision`, `policy_adoption`, `evidence_posted`, `claim_disputed`, `consensus_verdict`, `migration_applied`, `stagnation_declared` |
 
 ## Banned or legacy names
 

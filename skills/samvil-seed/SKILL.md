@@ -1,6 +1,6 @@
 ---
 name: samvil-seed
-description: "MCP-driven seed stage: crystallize interview-summary.md into project.seed.json and chain portably."
+description: "MCP-driven seed stage: crystallize interview-summary.md into project.seed.json and chain portably. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
 ---
 
 # SAMVIL Seed - Thin Orchestrated Entry

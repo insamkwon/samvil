@@ -62,3 +62,13 @@ def test_save_event_examples_use_named_arguments() -> None:
         assert "event_type=" in text
         assert "stage=" in text
         assert "data=" in text
+
+
+def test_all_stage_skills_forbid_unapproved_force_proceed() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    wiring = _load_wiring_module()
+
+    for skill in wiring.BOOT_CONTRACT_SKILLS:
+        text = (repo / "skills" / skill / "SKILL.md").read_text()
+        assert "gate_override" in text, skill
+        assert "force_proceed" in text, skill

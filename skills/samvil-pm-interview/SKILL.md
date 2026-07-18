@@ -1,6 +1,6 @@
 ---
 name: samvil-pm-interview
-description: "PM-mode interview. Collect vision → users → metrics → epics → tasks → ACs, then convert to engineering seed."
+description: "PM-mode interview. Collect vision → users → metrics → epics → tasks → ACs, then convert to engineering seed. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
 ---
 
 # samvil-pm-interview (ultra-thin)
