@@ -42,17 +42,26 @@ def test_opt_in_deploy_has_no_complete_stage_mapping() -> None:
     assert "deploy" not in SUCCESS_COMPLETE_EVENTS
 
 
-def test_minimal_skips_council() -> None:
+def test_default_pipeline_skips_council() -> None:
+    for tier in ("minimal", "standard", "thorough", "full"):
+        assert should_skip_stage("council", tier) is True
+
+
+def test_minimal_skips_council_even_when_requested() -> None:
     assert should_skip_stage("council", "minimal") is True
 
 
 @pytest.mark.parametrize("tier", ["standard", "thorough", "full"])
-def test_non_minimal_keeps_council(tier: str) -> None:
-    assert should_skip_stage("council", tier) is False
+def test_non_minimal_keeps_opt_in_council(tier: str) -> None:
+    assert should_skip_stage("council", tier, council_opt_in=True) is False
 
 
-def test_get_next_stage_skips_minimal_council() -> None:
-    assert get_next_stage("seed", "minimal") == "design"
+def test_get_next_stage_skips_council_by_default() -> None:
+    assert get_next_stage("seed", "standard") == "design"
+
+
+def test_get_next_stage_keeps_explicit_council() -> None:
+    assert get_next_stage("seed", "standard", council_opt_in=True) == "council"
 
 
 def test_get_next_stage_skips_deploy() -> None:
@@ -104,6 +113,21 @@ def test_stage_can_proceed_skips_minimal_council_prereq() -> None:
     result = stage_can_proceed(session, events, "design")
 
     assert result["can_proceed"] is True
+
+
+def test_stage_can_proceed_skips_default_off_council_prereq() -> None:
+    session = {"current_stage": "design", "samvil_tier": "standard"}
+    events = [
+        StageEvent(event_type="interview_complete", stage="seed"),
+        StageEvent(event_type="seed_generated", stage="design"),
+    ]
+    assert stage_can_proceed(session, events, "design")["can_proceed"] is True
+    assert (
+        stage_can_proceed(
+            session, events, "design", council_opt_in=True
+        )["can_proceed"]
+        is False
+    )
 
 
 def test_stage_can_proceed_blocks_on_failed_prior_stage() -> None:
@@ -186,6 +210,16 @@ def test_complete_stage_plan_for_pass_verdict() -> None:
     assert plan["claim"]["subject"] == "gate:interview_exit"
     assert plan["claim"]["statement"] == "verdict=pass via complete_stage"
     assert plan["next_stage"] == "seed"
+
+
+def test_seed_completion_routes_to_design_unless_council_opted_in() -> None:
+    session = {"current_stage": "seed", "samvil_tier": "standard"}
+    default_plan = complete_stage_plan(session, "seed", "pass")
+    council_plan = complete_stage_plan(
+        session, "seed", "pass", council_opt_in=True
+    )
+    assert default_plan["next_stage"] == "design"
+    assert council_plan["next_stage"] == "council"
 
 
 def test_complete_stage_plan_for_complete_verdict() -> None:

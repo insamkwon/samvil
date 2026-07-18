@@ -97,3 +97,14 @@ def test_orchestrator_skips_only_resolved_entry_questions() -> None:
     assert "Skipping the L3 user confirmation on a high-confidence" not in thin
     assert 'errors[]' in thin
     assert '"brownfield:"' in thin
+
+
+def test_council_is_only_an_explicit_seed_opt_in() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    orchestrator = (repo / "skills" / "samvil" / "SKILL.md").read_text()
+    seed = (repo / "skills" / "samvil-seed" / "SKILL.md").read_text()
+
+    assert "Council (skip if minimal)" not in orchestrator
+    assert "--council" in seed
+    assert "default" in seed.lower()
+    assert "samvil-design" in seed

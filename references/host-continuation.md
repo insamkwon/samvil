@@ -11,7 +11,7 @@ SAMVIL hosts without native skill invocation continue through
   "chain_via": "file_marker",
   "host": "codex_cli",
   "next_skill": "samvil-design",
-  "reason": "minimal tier skips council",
+  "reason": "council is default-off",
   "from_stage": "seed",
   "created_by": "samvil-seed"
 }

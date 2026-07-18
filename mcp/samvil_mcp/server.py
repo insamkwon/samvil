@@ -882,10 +882,16 @@ async def _session_and_events(session_id: str) -> tuple[Session | None, list[_Or
 
 
 @mcp.tool()
-async def get_next_stage(current: str, samvil_tier: str) -> str:
+async def get_next_stage(
+    current: str,
+    samvil_tier: str,
+    council_opt_in: bool = False,
+) -> str:
     """Return the next non-skipped stage for a tier."""
     try:
-        next_stage = _orchestrator_get_next_stage(current, samvil_tier)
+        next_stage = _orchestrator_get_next_stage(
+            current, samvil_tier, council_opt_in=council_opt_in
+        )
         _log_mcp_health("ok", "get_next_stage")
         return json.dumps({"next_stage": next_stage})
     except OrchestratorError as e:
@@ -894,10 +900,16 @@ async def get_next_stage(current: str, samvil_tier: str) -> str:
 
 
 @mcp.tool()
-async def should_skip_stage(stage: str, samvil_tier: str) -> str:
+async def should_skip_stage(
+    stage: str,
+    samvil_tier: str,
+    council_opt_in: bool = False,
+) -> str:
     """Return whether a stage should be skipped for a tier."""
     try:
-        skip = _orchestrator_should_skip_stage(stage, samvil_tier)
+        skip = _orchestrator_should_skip_stage(
+            stage, samvil_tier, council_opt_in=council_opt_in
+        )
         _log_mcp_health("ok", "should_skip_stage")
         return json.dumps({"skip": skip})
     except OrchestratorError as e:
@@ -906,7 +918,11 @@ async def should_skip_stage(stage: str, samvil_tier: str) -> str:
 
 
 @mcp.tool()
-async def stage_can_proceed(session_id: str, target_stage: str) -> str:
+async def stage_can_proceed(
+    session_id: str,
+    target_stage: str,
+    council_opt_in: bool = False,
+) -> str:
     """Return whether target_stage can proceed for a session."""
     try:
         session, events = await _session_and_events(session_id)
@@ -915,7 +931,9 @@ async def stage_can_proceed(session_id: str, target_stage: str) -> str:
                 "can_proceed": False,
                 "blockers": [f"session {session_id} not found"],
             })
-        result = _orchestrator_stage_can_proceed(session, events, target_stage)
+        result = _orchestrator_stage_can_proceed(
+            session, events, target_stage, council_opt_in=council_opt_in
+        )
         _log_mcp_health("ok", "stage_can_proceed")
         return json.dumps(result)
     except OrchestratorError as e:
@@ -924,13 +942,18 @@ async def stage_can_proceed(session_id: str, target_stage: str) -> str:
 
 
 @mcp.tool()
-async def get_orchestration_state(session_id: str) -> str:
+async def get_orchestration_state(
+    session_id: str,
+    council_opt_in: bool = False,
+) -> str:
     """Return event-derived orchestration progress for a session."""
     try:
         session, events = await _session_and_events(session_id)
         if session is None:
             return json.dumps({"error": f"session {session_id} not found"})
-        state = _orchestrator_get_state(session, events)
+        state = _orchestrator_get_state(
+            session, events, council_opt_in=council_opt_in
+        )
         _log_mcp_health("ok", "get_orchestration_state")
         return json.dumps(state)
     except OrchestratorError as e:
@@ -939,7 +962,12 @@ async def get_orchestration_state(session_id: str) -> str:
 
 
 @mcp.tool()
-async def complete_stage(session_id: str, stage: str, verdict: str) -> str:
+async def complete_stage(
+    session_id: str,
+    stage: str,
+    verdict: str,
+    council_opt_in: bool = False,
+) -> str:
     """Complete a stage by emitting an event and posting a gate claim."""
     try:
         store = await get_store()
@@ -947,7 +975,9 @@ async def complete_stage(session_id: str, stage: str, verdict: str) -> str:
         if session is None:
             return json.dumps({"status": "error", "error": f"session {session_id} not found"})
 
-        plan = _complete_stage_plan(session, stage, verdict)
+        plan = _complete_stage_plan(
+            session, stage, verdict, council_opt_in=council_opt_in
+        )
         event_data = dict(plan["event_data"])
         try:
             event_type_enum = EventType(plan["event_type"])
@@ -4025,6 +4055,7 @@ async def aggregate_orchestrator_state(
     cli_tier: str = "",
     mode_hint: str = "",
     host_name: str = "",
+    council_opt_in: bool = False,
 ) -> str:
     """Boot-time aggregator for the samvil orchestrator skill (T4.5 ultra-thin).
 
@@ -4039,6 +4070,7 @@ async def aggregate_orchestrator_state(
         (web-app | automation | game | mobile-app | dashboard).
         Layer-3 user confirmation still happens in the skill body.
       - is_pm_mode: true when the prompt contains PM-mode signals.
+      - council_opt_in: true only for an explicit argument or persisted flag.
       - brownfield: artifact + state-based detection of resume / brownfield mode.
       - chain: which skill the orchestrator should invoke first
         (samvil-analyze | samvil-interview | samvil-pm-interview | resume target).
@@ -4056,6 +4088,7 @@ async def aggregate_orchestrator_state(
             cli_tier=cli_tier or "",
             mode_hint=mode_hint or "",
             host_name=host_name or "",
+            council_opt_in=council_opt_in,
         )
         _log_mcp_health("ok", "aggregate_orchestrator_state")
         return json.dumps(result)

@@ -22,13 +22,13 @@ You are the SAMVIL orchestrator. Take the user's one-line app idea and guide it 
 ## Pipeline
 
 ```
-[1] Interview → [2] Seed → [Gate A] Council → [Design] Blueprint → [3] Scaffold → [4] Build → [5] QA → [6] Deploy → [Evolve] → [Auto] Retro
-                              ↑ Council skip if minimal    ↑ Gate B if thorough+    ↑ parallel if standard+  ↑ QA PASS시  ↑ optional
+[1] Interview → [2] Seed → [Design] Blueprint → [3] Scaffold → [4] Build → [5] QA → [6] Deploy → [Evolve] → [Auto] Retro
+                    └─ `--council` opt-in only        ↑ Gate B if thorough+    ↑ parallel if standard+  ↑ QA PASS시  ↑ optional
 ```
 
 ## Chain Policy (v3.1.0, v3-019)
 
-**Auto-chain is the default.** Once interview and seed are confirmed by the user, all subsequent stages (council → design → scaffold → build → qa → deploy → retro) run without re-asking "go". The main session invokes each next skill directly via the Skill tool.
+**Auto-chain is the default.** Once interview and seed are confirmed by the user, all subsequent default stages (design → scaffold → build → qa → deploy → retro) run without re-asking "go". Council runs only when the exact `--council` flag was persisted.
 
 - User approval is **only** required at:
   - Interview end (summary verification)
@@ -488,7 +488,7 @@ Resume이 확정되면:
 
 **파이프라인 스테이지 순서** (체인 복구용):
 ```
-interview → seed → council → design → scaffold → build → qa → deploy → evolve → retro
+interview → seed → design → scaffold → build → qa → deploy → evolve → retro
 ```
 
 `completed_stages`의 마지막 스테이지 다음 순서의 스킬을 invoke.
@@ -507,7 +507,7 @@ options:
   - label: "빠르게 (minimal)"
     description: "<이전 실적 있으면: 'todo 앱 92% 성공, ~3분' / 없으면: '질문 적게, Council 없이 바로 빌드. 프로토타입용.'>"
   - label: "일반 (standard)"  
-    description: "<이전 실적 있으면: 'kanban 앱 100% 성공' / 없으면: '기본 검증 + Council 토론. 대부분의 프로젝트에 추천.'>"
+    description: "<이전 실적 있으면: 'kanban 앱 100% 성공' / 없으면: '기본 검증. 대부분의 프로젝트에 추천.'>"
   - label: "꼼꼼하게 (thorough)"
     description: "깊은 인터뷰 + 디자인 리뷰. 품질 중요할 때."
   - label: "풀옵션 (full)"
@@ -577,7 +577,6 @@ mcp__samvil_mcp__check_jurisdiction(
 ```
 TaskCreate: "Interview — 요구사항 인터뷰"
 TaskCreate: "Seed — 설계서 생성"
-TaskCreate: "Council — 설계 검토" (minimal이면 생략)
 TaskCreate: "Design — 아키텍처 결정"
 TaskCreate: "Scaffold — 프로젝트 뼈대 생성"
 TaskCreate: "Build — 기능 구현"

@@ -31,13 +31,19 @@ def _isolated_server(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_get_next_stage_tool_returns_next_stage() -> None:
-    out = _run(get_next_stage("seed", "minimal"))
+    out = _run(get_next_stage("seed", "standard"))
     data = json.loads(out)
     assert data == {"next_stage": "design"}
 
 
+def test_get_next_stage_tool_allows_explicit_council() -> None:
+    out = _run(get_next_stage("seed", "standard", council_opt_in=True))
+    data = json.loads(out)
+    assert data == {"next_stage": "council"}
+
+
 def test_should_skip_stage_tool_returns_bool() -> None:
-    out = _run(should_skip_stage("council", "minimal"))
+    out = _run(should_skip_stage("council", "standard"))
     data = json.loads(out)
     assert data == {"skip": True}
 

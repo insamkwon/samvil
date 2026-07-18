@@ -21,5 +21,5 @@ Ensure `.samvil/interview-summary.md` exists.
 
 ## Chain
 
-After completing: read `.samvil/next-skill.json` for the next stage (samvil-council).
+After completing: read `.samvil/next-skill.json`; default next stage is `samvil-design`, while explicit `--council` on standard+ routes to `samvil-council`.
 Tell the user the next command to run.

@@ -237,6 +237,34 @@ def test_aggregate_resume_state_present(tmp_path: Path) -> None:
     assert result["chain"]["next_skill"] == "samvil-build"
 
 
+def test_resume_after_seed_skips_default_off_council(tmp_path: Path) -> None:
+    _write_state(
+        tmp_path,
+        completed_stages=["interview", "seed"],
+        current_stage="seed",
+        samvil_tier="standard",
+    )
+    result = aggregate_orchestrator_state(tmp_path, prompt="todo app")
+    assert result["council_opt_in"] is False
+    assert result["chain"]["next_skill"] == "samvil-design"
+
+
+def test_resume_after_seed_honors_persisted_council_flag(tmp_path: Path) -> None:
+    _write_state(
+        tmp_path,
+        completed_stages=["interview", "seed"],
+        current_stage="seed",
+        samvil_tier="standard",
+    )
+    (tmp_path / "project.config.json").write_text(
+        json.dumps({"samvil_tier": "standard", "flags": ["--council"]}),
+        encoding="utf-8",
+    )
+    result = aggregate_orchestrator_state(tmp_path, prompt="todo app")
+    assert result["council_opt_in"] is True
+    assert result["chain"]["next_skill"] == "samvil-council"
+
+
 # ── Chain / first-skill selection ─────────────────────────────
 
 

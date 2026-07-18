@@ -45,7 +45,7 @@ prose, Health Check details, project init schema, and Gate A protocol in
    Node.js MISSING → halt with install instructions. All others degrade gracefully.
 2. Files are SSOT — never trust conversation history for tier or stage. Inputs come from the aggregator, not memory.
 3. `mcp__samvil_mcp__check_jurisdiction(action_description="SAMVIL pipeline start: <prompt> at tier=<tier>", command="", filenames_json='["project.seed.json","project.state.json","project.config.json"]', diff_text="")` — once at boot. `user` jurisdiction → confirm explicitly (`ㄱ`/`고`/`yes`); `external` → resolve dependency then `claim_post(type="evidence_posted")`; `ai` → continue silently.
-4. `mcp__samvil_mcp__aggregate_orchestrator_state(project_root="<cwd or ~/dev/<slug>>", prompt="<one-line>", cli_tier="<--tier flag or empty>", mode_hint="<brownfield|greenfield|empty>", host_name="<claude_code|codex_cli|opencode|generic>")` → returns `tier.{samvil_tier,source,aliased_from}`, `solution_type.{solution_type,layer,matched,confidence}`, `is_pm_mode`, `brownfield.{is_brownfield,can_resume,artifacts,state_present,current_stage,completed_stages}`, `chain.{next_skill,reason,resume_point}`, `errors[]`. On error: fall back to manual reads from `SKILL.legacy.md` (P8).
+4. `mcp__samvil_mcp__aggregate_orchestrator_state(project_root="<cwd or ~/dev/<slug>>", prompt="<one-line>", cli_tier="<--tier flag or empty>", mode_hint="<brownfield|greenfield|empty>", host_name="<claude_code|codex_cli|opencode|generic>", council_opt_in=<--council present>)` → returns `tier.{samvil_tier,source,aliased_from}`, `solution_type.{solution_type,layer,matched,confidence}`, `is_pm_mode`, `council_opt_in`, `brownfield.{is_brownfield,can_resume,artifacts,state_present,current_stage,completed_stages}`, `chain.{next_skill,reason,resume_point}`, `errors[]`. Persist explicit `--council` in `project.config.json.flags`; absent means default-off. On error: fall back to manual reads from `SKILL.legacy.md` (P8).
 
 ## Step 1 — Health Check + Project Mode
 
@@ -73,7 +73,7 @@ If `solution_type.confidence == "high"`, print `ℹ️ 프로젝트 타입: <typ
 
 ## Step 5 — Pipeline Tasks + Start Event
 
-`TaskCreate` for each pipeline stage so the user sees progress: Interview, Seed, Council (skip if minimal), Design, Scaffold, Build, QA, Deploy, Retro. Each downstream skill flips its task to `in_progress` / `completed`.
+`TaskCreate` for each default pipeline stage so the user sees progress: Interview, Seed, Design, Scaffold, Build, QA, Deploy, Retro. Council is not a default task; explicit `--council` is routed by `samvil-seed`. Each downstream skill flips its task to `in_progress` / `completed`.
 
 ```
 mcp__samvil_mcp__save_event(session_id="<sid>", event_type="stage_change", stage="interview", data='{"app":"<prompt>","tier":"<tier>","solution_type":"<type>"}')

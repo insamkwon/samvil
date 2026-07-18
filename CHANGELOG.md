@@ -11,6 +11,8 @@ All notable changes to SAMVIL are documented here.
 - Unified interview readiness under the deterministic 10-dimension ambiguity
   engine, removed LLM-assigned readiness scores, and added Korean vague-text
   detection with Hangul-aware length floors.
+- Made Council default-off across task creation, seed chaining, resume, and
+  complete-stage routing; only an explicit persisted `--council` opts in.
 
 ---
 

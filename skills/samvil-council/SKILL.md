@@ -10,8 +10,8 @@ research + Round 2 review) stays here — Agent tool calls are CC-only.
 What moves to MCP is the BEFORE (Round-1 → Round-2 debate-point
 extraction) and AFTER (per-section consensus aggregation, dissent
 preservation, overall verdict) logic, via
-`mcp__samvil_mcp__synthesize_council_verdicts`. v3.2 status: opt-in
-behind `--council` flag, removed in v3.3 (see
+`mcp__samvil_mcp__synthesize_council_verdicts`. Current status: default-off
+compatibility stage behind the exact `--council` flag (see
 `references/council-retirement-migration.md`). Full Korean prose,
 verbose synthesis examples, decisions.log shapes in `SKILL.legacy.md`.
 

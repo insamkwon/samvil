@@ -9,9 +9,12 @@
    - Marker exists → read `next_skill` and jump directly to that stage file.
    - No marker → fresh start; continue to step 4.
 4. Run MCP tool `aggregate_orchestrator_state(project_root="${PWD}",
-   prompt="<user's one-line idea>", host_name="codex_cli")`.
+   prompt="<user's one-line idea>", host_name="codex_cli",
+   council_opt_in=<exact --council flag present>)`.
    - Captures: `tier.samvil_tier`, `solution_type.solution_type`,
-     `brownfield.is_brownfield`, `chain.next_skill`.
+     `brownfield.is_brownfield`, `council_opt_in`, `chain.next_skill`.
+   - Persist an explicit `--council` token in `project.config.json.flags`;
+     absent means Council is default-off.
    - On MCP error: default to `samvil_tier="standard"`, ask user for
      `solution_type` manually (web/automation/game/mobile/dashboard).
 5. **Tier selection** — if `tier.source == "default"` (user didn't pass `--tier`):

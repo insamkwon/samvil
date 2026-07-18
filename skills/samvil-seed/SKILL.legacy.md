@@ -319,16 +319,16 @@ mcp__samvil_mcp__save_seed_version(session_id="<session_id>", version=1, seed_js
 
 Read `project.config.json` → `selected_tier` to determine next step:
 
-**If tier is `"minimal"` (no council):**
+**Default (all tiers, no explicit `--council`):**
 
 **MCP (best-effort):** Update stage:
 ```
-mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="design", data='{"skipped":"council","reason":"minimal tier"}')
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="stage_change", stage="design", data='{"skipped":"council","reason":"default off"}')
 ```
 
 ```
 [SAMVIL] Stage 2/5: Seed ✓
-[SAMVIL] Council: skipped (minimal tier)
+[SAMVIL] Council: skipped (default; use --council to opt in)
 ```
 
 ### Handoff Write
@@ -348,7 +348,7 @@ state.json과 project.seed.json 디스크 기록 완료 후 handoff.md append.
 
 Invoke the Skill tool with skill: `samvil-design`
 
-**If tier is `"standard"` or higher (council runs):**
+**If exact `--council` flag is present and tier is `"standard"` or higher:**
 
 **MCP (best-effort):** Update stage:
 ```
@@ -505,8 +505,8 @@ No extra fields beyond the schema. No comments in JSON.
 ## Chain (Runtime-specific)
 
 ### Claude Code
-- If minimal tier: Invoke the Skill tool with skill: `samvil-design`
-- If standard+ tier: Invoke the Skill tool with skill: `samvil-council`
+- Default for every tier: invoke the Skill tool with skill: `samvil-design`
+- Exact `--council` on standard+: invoke the Skill tool with skill: `samvil-council`
 
 ### Codex CLI (future)
 Read the next skill's SKILL.md based on tier and follow its instructions.

@@ -475,7 +475,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `skills/samvil/SKILL.legacy.md:287`,
     `mcp/samvil_mcp/orchestrator.py:589`,
     `mcp/tests/test_skill_wiring.py:88`.
-- [ ] **3.4 ambiguity 스코어러 정리 + 한국어 대응**
+- [x] **3.4 ambiguity 스코어러 정리 + 한국어 대응**
   - 중복 스코어러 2개(interview_engine.score_ambiguity 10-dim vs
     interview_v3_2.compute_seed_readiness 5-dim — 후자는 LLM이 점수를 직접 매기게
     지시) 중 **engine 쪽으로 단일화**. compute_seed_readiness의 LLM 자가 채점은
@@ -483,6 +483,14 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   - vague 휴리스틱에 한국어 패턴 추가: "좋은/좋게", "빠른/빠르게", "간단한",
     "예쁘게", "직관적", target_user "누구나/모두/사람들". 길이 임계도 한국어 밀도
     보정(한글은 10자→6자 수준). 테스트: 한국어 vague 입력 fixture.
+  - 완료 증거: `bdc8712`; `mcp/samvil_mcp/interview_engine.py:82`,
+    `mcp/samvil_mcp/interview_engine.py:88`,
+    `mcp/samvil_mcp/interview_engine.py:209`,
+    `mcp/samvil_mcp/interview_engine.py:350`, `mcp/samvil_mcp/gates.py:108`,
+    `mcp/tests/test_interview_engine.py:158`,
+    `mcp/tests/test_interview_engine.py:192`, `mcp/tests/test_gates.py:75`,
+    `mcp/tests/test_interview_smoke.py:436`,
+    `skills/samvil-interview/SKILL.md:89`, `references/interview-levels.md:19`.
 - [ ] **3.5 council 운명 확정**
   현상: 제거 예고(samvil-council/SKILL.md:13-14 "--council opt-in, v3.3 제거") vs
   오케스트레이터 Step 5가 태스크 생성(samvil/SKILL.md:76) vs seed가 standard+에서
@@ -490,6 +498,9 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   **기본 결정(사용자 재가 전 default): 체인에서 완전 제거** — 오케스트레이터
   태스크 목록·seed 체인에서 빼고, `--council` 플래그 시에만 seed가 직접 라우팅.
   회귀: 오케스트레이터가 council 태스크를 만들지 않는지.
+  (스코프 보정: 스킬 문구뿐 아니라 현재 `get_next_stage`도 standard+에서
+  Council을 기본 반환했다. resume·complete-stage가 우회하지 않도록 코어
+  오케스트레이터에도 명시적 `council_opt_in` 계약을 적용한다.)
 - [ ] **3.6 dogfood 터치포인트 실측**
   Wave 3 완료 후 standard tier 웹앱 1회 dogfood — AskUserQuestion 횟수를 세서
   이 문서 G5에 실측치 기록. 12회 초과 시 초과 원인 항목화(다음 wave 재료).

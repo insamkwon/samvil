@@ -382,14 +382,17 @@ evolve
 complete
 ```
 
-### Tier skip policy
+### Default skip policy
 
 Phase 1 uses a conservative skip policy:
 
 | Stage | minimal | standard | thorough | full |
 |---|---:|---:|---:|---:|
-| `council` | skip | run | run | run |
+| `council` | skip | skip | skip | skip |
 | `deploy` | skip | skip | skip | skip |
+
+Exact `--council` opt-in changes Council to `run` for standard/thorough/full;
+minimal still skips it.
 
 `deploy` remains skipped until a later host/project capability layer
 can prove that deployment is configured and reversible enough to run
@@ -420,7 +423,7 @@ then passes.
 
 ### Proceed rule
 
-`stage_can_proceed(session_id, target_stage)` returns `can_proceed=true`
+`stage_can_proceed(session_id, target_stage, council_opt_in=false)` returns `can_proceed=true`
 only when every prior non-skipped stage is complete.
 
 Blocked examples:
@@ -430,12 +433,13 @@ Blocked examples:
 - target stage itself is skipped by tier
 - target stage is unknown
 
-Skipped stages do not block. For example, `minimal` can proceed from
-`seed` to `design` without running `council`.
+Skipped stages do not block. By default every tier proceeds from `seed` to
+`design`; explicit Council opt-in restores the Council prerequisite for
+standard+ tiers.
 
 ### Complete-stage rule
 
-`complete_stage(session_id, stage, verdict)` is the only mutating
+`complete_stage(session_id, stage, verdict, council_opt_in=false)` is the only mutating
 orchestrator tool. It writes:
 
 1. one event row in the MCP event store
@@ -453,11 +457,11 @@ Verdict mapping:
 
 ### MCP tools
 
-- `get_next_stage(current, samvil_tier)`
-- `should_skip_stage(stage, samvil_tier)`
-- `stage_can_proceed(session_id, target_stage)`
-- `complete_stage(session_id, stage, verdict)`
-- `get_orchestration_state(session_id)`
+- `get_next_stage(current, samvil_tier, council_opt_in=false)`
+- `should_skip_stage(stage, samvil_tier, council_opt_in=false)`
+- `stage_can_proceed(session_id, target_stage, council_opt_in=false)`
+- `complete_stage(session_id, stage, verdict, council_opt_in=false)`
+- `get_orchestration_state(session_id, council_opt_in=false)`
 
 The `get_*` tools are read-only. `complete_stage` is the only mutating
 tool.
@@ -524,8 +528,8 @@ Example marker:
   "schema_version": "1.0",
   "chain_via": "file_marker",
   "host": "codex_cli",
-  "next_skill": "samvil-council",
-  "reason": "council required for selected tier",
+  "next_skill": "samvil-design",
+  "reason": "council is default-off",
   "from_stage": "seed",
   "created_by": "samvil-seed"
 }
