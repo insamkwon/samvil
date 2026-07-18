@@ -586,7 +586,8 @@ def aggregate_orchestrator_state(
 
     The skill body still does:
       - Health Check shell calls (Node/Python/uv/gh/MCP).
-      - AskUserQuestion checkpoints (mode + tier + L3 confirm + resume).
+      - Conditional AskUserQuestion checkpoints (unresolved mode + tier +
+        medium/low-confidence L3 confirm + resume).
       - Chain dispatch via HostCapability (skill_tool / file_marker).
 
     Returns a dict with:

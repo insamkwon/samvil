@@ -4,8 +4,8 @@ The samvil orchestrator skill is the `/samvil` entry point. It keeps the
 bits that need a real shell / user interaction:
 
 - Health Check shell calls (Node/Python/uv/gh/MCP discovery).
-- AskUserQuestion checkpoints (project mode, tier, L3 solution_type
-  confirmation, resume vs fresh start).
+- AskUserQuestion checkpoints (unresolved project mode, tier, medium/low
+  confidence L3 solution_type confirmation, resume vs fresh start).
 - Chain dispatch (Skill tool when claude_code, file marker otherwise).
 
 What CAN be machine-pinned, and is pinned here, is the new
@@ -14,7 +14,7 @@ What CAN be machine-pinned, and is pinned here, is the new
 - Tier resolution with precedence cli > state > config > default
   (deprecated v3.1 'deep' alias mapped to 'full' with `aliased_from`).
 - 3-layer solution_type detection (L1 keyword + L2 context, web-app fallback).
-  Layer-3 user confirmation still happens in the skill body.
+  Layer-3 confirmation remains host-bound; high confidence is notification-only.
 - PM-mode detection from the one-line prompt.
 - Brownfield + resume detection from filesystem artifacts + state.
 - First-skill selection (analyze / interview / pm-interview / resume target).

@@ -83,3 +83,17 @@ def test_interview_batches_only_independent_questions() -> None:
         assert "독립 질문 2~3개" in text
         assert "의존 질문" in text
     assert "Asking 2+ questions in a single AskUserQuestion" not in thin
+
+
+def test_orchestrator_skips_only_resolved_entry_questions() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    thin = (repo / "skills" / "samvil" / "SKILL.md").read_text()
+    legacy = (repo / "skills" / "samvil" / "SKILL.legacy.md").read_text()
+
+    for text in (thin, legacy):
+        assert 'solution_type.confidence == "high"' in text
+        assert "ℹ️" in text
+        assert "저신뢰" in text
+    assert "Skipping the L3 user confirmation on a high-confidence" not in thin
+    assert 'errors[]' in thin
+    assert '"brownfield:"' in thin

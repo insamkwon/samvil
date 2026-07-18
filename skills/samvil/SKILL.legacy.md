@@ -182,7 +182,7 @@ mcp__samvil_mcp__update_progress(
 
 ### Step 1: Project Mode Selection
 
-Health Check 후 AskUserQuestion으로 프로젝트 모드 선택:
+Health Check 후 artifact scan이 분명하면 ℹ️ 알림만 표시하고 감지된 모드로 진행한다. 전역 `errors[]`에 `"brownfield:"` 접두 오류가 있거나 상태·artifact 충돌로 모드가 해결되지 않을 때만 AskUserQuestion으로 프로젝트 모드 선택:
 
 ```
 question: "어떤 작업을 할까요?"
@@ -284,7 +284,7 @@ If L1 is inconclusive or ambiguous, analyze the sentence meaning:
 
 **L3: Interview Verification (Confirmation)**
 
-As the **first question** of the interview, confirm the detected type:
+`solution_type.confidence == "high"`이면 `ℹ️ 프로젝트 타입: <detected_type>` 알림만 표시하고 검증 질문을 생략한다. 중·저신뢰(`medium|low`)일 때만 인터뷰의 **첫 질문**으로 감지 타입을 확인한다:
 
 ```
 [SAMVIL] 프로젝트 타입 감지: <detected_type>

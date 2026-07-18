@@ -451,9 +451,14 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/tests/test_interview_smoke.py:143`,
     `references/decision-boundaries.md:33`, `skills/samvil-interview/SKILL.md:65`,
     `skills/samvil-interview/SKILL.md:69`, `CHANGELOG.md:7`.
-- [ ] **3.2 배치 질문 (왕복 절반화)**
+- [x] **3.2 배치 질문 (왕복 절반화)**
   같은 Phase 내 독립 질문 2-3개를 AskUserQuestion 1회의 다중 질문(questions
   배열)으로 묶는 규약을 interview SKILL에 명문화. 서로 의존하는 질문만 순차.
+  - 완료 증거: `d1dba7f`; `skills/samvil-interview/SKILL.md:57`,
+    `skills/samvil-interview/SKILL.md:115`,
+    `skills/samvil-interview/SKILL.legacy.md:302`,
+    `skills/samvil-interview/SKILL.legacy.md:321`,
+    `mcp/tests/test_skill_wiring.py:77`.
 - [ ] **3.3 오케스트레이터 시작 질문 3→1**
   - L3 solution_type 확인(samvil/SKILL.md:62-64): `confidence == high`면 확인
     생략하고 진행 알림만(ℹ️ 아이콘, P7) — anti-pattern 2(:109)를 "저신뢰일 때만
@@ -461,6 +466,9 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     description 영역이다.
   - 모드 질문(:54): brownfield 아티팩트 감지가 명확하면 생략.
   - tier 질문(:58)만 유지 (이게 진짜 사용자 결정).
+  (스코프 보정: aggregator는 `brownfield.errors` 하위 필드가 아니라
+  전역 `errors[]`에 `brownfield:` 접두 오류를 반환한다. 스킬 분기는 현재
+  코드 스키마를 기준으로 오류·충돌 시에만 모드를 다시 묻는다.)
 - [ ] **3.4 ambiguity 스코어러 정리 + 한국어 대응**
   - 중복 스코어러 2개(interview_engine.score_ambiguity 10-dim vs
     interview_v3_2.compute_seed_readiness 5-dim — 후자는 LLM이 점수를 직접 매기게

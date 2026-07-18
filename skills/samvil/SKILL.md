@@ -10,7 +10,7 @@ Adopt the **SAMVIL Orchestrator** role. Tier resolution, 3-layer
 brownfield/resume detection from filesystem artifacts + `project.state.json`,
 and first-skill selection are aggregated by
 `mcp__samvil_mcp__aggregate_orchestrator_state`. Health Check shell calls,
-AskUserQuestion checkpoints (mode + tier + L3 confirmation + resume), and
+AskUserQuestion checkpoints (unresolved mode + tier + low-confidence L3 + resume), and
 chain dispatch via HostCapability stay here (host-bound + LLM judgement).
 Existing MCP tools cover orchestration state / stage gating /
 jurisdiction / chain strategy — the skill just wires them. Full Korean
@@ -51,7 +51,7 @@ prose, Health Check details, project init schema, and Gate A protocol in
 
 Render the Health Check table (Node / Python / uv / gh / SAMVIL version / MCP). Auto-install Node/Python/uv via `brew` when missing on macOS; Node failure halts (only true requirement). All other gaps degrade gracefully.
 
-If no `--mode` flag and `brownfield.is_brownfield` is unset, AskUserQuestion → "어떤 작업을 할까요?" with options `새 프로젝트` / `기존 프로젝트 개선` / `단일 단계만 실행`. Selection re-runs the aggregator with `mode_hint` if it changed the answer.
+If no `--mode` flag and `errors[]` has no entry prefixed `"brownfield:"`, accept a decisive artifact scan: `brownfield.is_brownfield == true` → print `ℹ️ 기존 프로젝트 감지`; false with no resume artifacts → print `ℹ️ 새 프로젝트로 시작`. AskUserQuestion → "어떤 작업을 할까요?" only when the scan has errors or conflicting artifacts, with options `새 프로젝트` / `기존 프로젝트 개선` / `단일 단계만 실행`. Selection re-runs the aggregator with `mode_hint`.
 
 ## Step 2 — Tier Confirmation
 
@@ -61,7 +61,7 @@ If `tier.aliased_from` is non-empty, mention the v3.1 → v3.2 alias mapping onc
 
 ## Step 3 — solution_type L3 Confirmation
 
-Print the detected `solution_type` plus `solution_type.matched` keywords. AskUserQuestion: "이 프로젝트는 <type>인가요?" with the 5 canonical options. Persist the final answer (which may differ from the L1/L2 hint) to `project.state.json`.
+If `solution_type.confidence == "high"`, print `ℹ️ 프로젝트 타입: <type> (감지 근거: <matched>)`, skip confirmation, and persist the detected type. 중·저신뢰(`medium|low`)에서만 AskUserQuestion: "이 프로젝트는 <type>인가요?" with the 5 canonical options, then persist the final answer to `project.state.json`.
 
 ## Step 4 — Brownfield + Resume Routing
 
@@ -106,7 +106,7 @@ This skill owns chain entry only. Per `references/contract-layer-protocol.md`, e
 ## Anti-Patterns
 
 1. Initializing a fresh `project.state.json` on top of a resume scenario (overwrites prior progress).
-2. Skipping the L3 user confirmation on a high-confidence L1 match (P2 — user owns prescription).
+2. Skipping L3 confirmation at 중·저신뢰; high-confidence keyword classification is descriptive and uses an ℹ️ notice.
 3. Hard-coding `chain.next_skill` instead of using the aggregator output (regresses brownfield + resume routing).
 4. Calling Council/Design tools from the orchestrator — those belong to their own thin skills.
 5. Mutating `samvil_tier` after Step 2 confirmation without re-asking the user.
