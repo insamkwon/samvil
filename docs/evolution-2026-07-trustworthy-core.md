@@ -143,12 +143,16 @@ v4.31이 시작한 방향의 완성이다.
   fixture로 0이 아닌 값 나오는지).
   - 완료 증거: `8416132`; `mcp/samvil_mcp/evolve_aggregate.py:73`,
     `mcp/samvil_mcp/evolve_aggregate.py:201`, `mcp/tests/test_evolve_smoke.py:291`.
-- [ ] **0.2 events.jsonl 필드명 `ts` vs `timestamp` 통일**
+- [x] **0.2 events.jsonl 필드명 `ts` vs `timestamp` 통일**
   쓰기: `qa_synthesis.py:485`가 `"ts"`. 읽기: `stall_detector.py:68`,
   `event_store_reader.py:108`이 `timestamp`. → QA-stage hang이 스톨 감지에 안 보임.
   `progress_panel.py:129`는 이미 `ev.get("ts") or ev.get("timestamp")`로 우회 중.
   수정: canonical을 `timestamp`로 확정, 쓰기 측 수정 + 읽기 측은 양쪽 수용(하위호환)
   + 회귀 테스트.
+  - 완료 증거: `6dfd4b2`; `mcp/samvil_mcp/qa_synthesis.py:486`,
+    `mcp/samvil_mcp/stall_detector.py:69`, `mcp/samvil_mcp/event_store_reader.py:51`,
+    `mcp/tests/test_qa_synthesis.py:168`, `mcp/tests/test_stall_detector.py:41`,
+    `mcp/tests/test_event_store_reader.py:78`.
 - [ ] **0.3 `needs_review or True` 버그**
   `migrate_v3_2.py:159-160` — 기존값 read가 dead read, 리뷰 완료 leaf(False)를
   마이그레이션마다 강제 True로 되돌림. 수정 + 테스트.

@@ -155,9 +155,12 @@ def _backfill_tree(
                 changes.append(
                     f"{feature_name}:{node.get('id','?')}: added {name}"
                 )
-        # Flag for review.
-        needs_review = bool(node.get("needs_review"))
-        node["needs_review"] = needs_review or True
+        # Flag newly inferred leaves for review without reopening completed reviews.
+        if "needs_review" not in node:
+            node["needs_review"] = True
+            changes.append(
+                f"{feature_name}:{node.get('id','?')}: added needs_review"
+            )
 
 
 # ── Retro suggestions_v2 → observations[] ────────────────────────────

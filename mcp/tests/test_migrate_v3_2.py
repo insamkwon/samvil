@@ -104,6 +104,17 @@ def test_apply_is_idempotent(tmp_path: Path) -> None:
     assert before == after
 
 
+def test_migrate_preserves_reviewed_leaf_needs_review_false() -> None:
+    seed = _v3_1_seed()
+    leaf = seed["features"][0]["acceptance_criteria"][0]
+    leaf["needs_review"] = False
+
+    migrated, _ = _migrate_seed_dict(seed)
+
+    migrated_leaf = migrated["features"][0]["acceptance_criteria"][0]
+    assert migrated_leaf["needs_review"] is False
+
+
 def test_dry_run_makes_no_changes(tmp_path: Path) -> None:
     seed = _v3_1_seed()
     _write_json(tmp_path / "project.seed.json", seed)
