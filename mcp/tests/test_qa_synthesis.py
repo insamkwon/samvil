@@ -165,6 +165,8 @@ def test_materialize_qa_synthesis_writes_report_results_events_and_state(tmp_pat
     ]
     assert [event["event_type"] for event in events] == ["qa_unimplemented", "qa_verdict"]
     assert events[0]["session_id"] == "s1"
+    assert events[0]["timestamp"]
+    assert "ts" not in events[0]
     state = json.loads((tmp_path / "project.state.json").read_text(encoding="utf-8"))
     assert state["last_qa_verdict"] == "REVISE"
     assert state["last_qa_convergence"]["verdict"] == "continue"

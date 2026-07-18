@@ -66,7 +66,7 @@ def detect_stall(
                 continue
             try:
                 evt = json.loads(line)
-                ts = evt.get("timestamp", "")
+                ts = evt.get("timestamp") or evt.get("ts", "")
                 if ts:
                     last_ts = _parse_ts(ts)
                     last_type = evt.get("event_type", "")

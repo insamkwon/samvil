@@ -483,7 +483,7 @@ def _append_event_drafts(root: Path, events: list[dict[str, Any]]) -> int:
     with path.open("a", encoding="utf-8") as handle:
         for event in events:
             row = {
-                "ts": now,
+                "timestamp": now,
                 "session_id": session_id,
                 "event_type": event.get("event_type"),
                 "stage": event.get("stage") or "qa",

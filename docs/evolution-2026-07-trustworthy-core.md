@@ -135,12 +135,14 @@ v4.31이 시작한 방향의 완성이다.
 
 > 목적: 아래 Wave들이 딛고 설 땅을 고친다. 전부 감사에서 file:line로 확정된 실버그.
 
-- [ ] **0.1 evolve의 QA counts 대소문자 버그**
+- [x] **0.1 evolve의 QA counts 대소문자 버그**
   `qa_synthesis.py:88`은 `synthesis.pass2.counts`를 대문자 키(`PASS/FAIL/PARTIAL`)로
   쓰는데 `evolve_aggregate.py:202-204`는 소문자로 읽어 ac_pass/fail/partial_count가
   **항상 0**. QA가 8개 실패해도 Wonder/Reflect가 0을 본다.
   수정: 읽기 측을 대소문자 무관으로 정규화(단일 헬퍼) + 회귀 테스트(대문자 counts
   fixture로 0이 아닌 값 나오는지).
+  - 완료 증거: `8416132`; `mcp/samvil_mcp/evolve_aggregate.py:73`,
+    `mcp/samvil_mcp/evolve_aggregate.py:201`, `mcp/tests/test_evolve_smoke.py:291`.
 - [ ] **0.2 events.jsonl 필드명 `ts` vs `timestamp` 통일**
   쓰기: `qa_synthesis.py:485`가 `"ts"`. 읽기: `stall_detector.py:68`,
   `event_store_reader.py:108`이 `timestamp`. → QA-stage hang이 스톨 감지에 안 보임.

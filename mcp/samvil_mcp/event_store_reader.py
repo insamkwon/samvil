@@ -48,6 +48,11 @@ def _project_paths(project_root: str | Path) -> tuple[Path, Path]:
     )
 
 
+def _event_timestamp(entry: dict) -> str:
+    """Read the canonical timestamp while accepting legacy ``ts`` rows."""
+    return entry.get("timestamp") or entry.get("ts", "")
+
+
 def read_events(project_root: str | Path) -> dict:
     """Read `.samvil/events.jsonl` and return entries + summary.
 
@@ -105,7 +110,7 @@ def read_events(project_root: str | Path) -> dict:
             result["by_session"].setdefault(session_id, []).append(entry)
 
     if result["entries"]:
-        timestamps = [e.get("timestamp", "") for e in result["entries"] if e.get("timestamp")]
+        timestamps = [timestamp for e in result["entries"] if (timestamp := _event_timestamp(e))]
         if timestamps:
             timestamps.sort()
             result["first_ts"] = timestamps[0]
@@ -187,7 +192,7 @@ def list_in_flight_sessions(project_root: str | Path) -> dict:
         if not entries:
             continue
         # Sort by timestamp to find last event
-        sorted_entries = sorted(entries, key=lambda e: e.get("timestamp", ""))
+        sorted_entries = sorted(entries, key=_event_timestamp)
         last = sorted_entries[-1]
         last_event_type = last.get("event_type", "")
         last_stage = last.get("stage", "")
@@ -206,7 +211,7 @@ def list_in_flight_sessions(project_root: str | Path) -> dict:
             "session_id": session_id,
             "current_stage": last_stage,
             "last_event_type": last_event_type,
-            "last_event_ts": last.get("timestamp", ""),
+            "last_event_ts": _event_timestamp(last),
             "event_count": len(entries),
             "stages_touched": stages,
         })

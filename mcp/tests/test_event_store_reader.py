@@ -75,6 +75,18 @@ def test_read_events_happy(project_root: Path) -> None:
     assert result["last_ts"] == "2026-05-16T11:00:00Z"
 
 
+def test_read_events_accepts_legacy_ts(project_root: Path) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "qa_start", "stage": "qa",
+         "ts": "2026-05-16T10:00:00Z"},
+    ])
+
+    result = read_events(project_root=str(project_root))
+
+    assert result["first_ts"] == "2026-05-16T10:00:00Z"
+    assert result["last_ts"] == "2026-05-16T10:00:00Z"
+
+
 def test_read_events_skips_malformed(project_root: Path) -> None:
     samvil = project_root / ".samvil"
     samvil.mkdir()
@@ -155,6 +167,18 @@ def test_list_in_flight_detected(project_root: Path) -> None:
     assert s["event_count"] == 2
     assert "interview" in s["stages_touched"]
     assert "build" in s["stages_touched"]
+
+
+def test_list_in_flight_accepts_legacy_ts(project_root: Path) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "qa_start", "stage": "qa",
+         "ts": "2026-05-16T11:00:00Z"},
+    ])
+    _seed_state(project_root, {"current_stage": "qa", "session_id": "s1"})
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["in_flight_sessions"][0]["last_event_ts"] == "2026-05-16T11:00:00Z"
 
 
 def test_list_terminal_session_excluded(project_root: Path) -> None:

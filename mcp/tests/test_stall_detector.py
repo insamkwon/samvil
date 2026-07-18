@@ -38,6 +38,20 @@ def test_recent_event_not_stalled(tmp_path):
     assert status.last_event_type == "build_feature_start"
 
 
+def test_recent_legacy_ts_event_not_stalled(tmp_path):
+    p = tmp_path / "events.jsonl"
+    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    p.write_text(json.dumps({
+        "event_type": "qa_start",
+        "ts": ts,
+    }) + "\n")
+
+    status = detect_stall(str(p), timeout=300.0)
+
+    assert not status.is_stalled
+    assert status.last_event_type == "qa_start"
+
+
 def test_old_event_is_stalled(tmp_path):
     p = tmp_path / "events.jsonl"
     # 10 minutes ago
