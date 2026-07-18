@@ -327,11 +327,11 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
   - 완료 증거: `3f3a157`; `mcp/samvil_mcp/stage_evidence.py:15`,
     `mcp/samvil_mcp/stage_evidence.py:37`,
     `mcp/samvil_mcp/stage_evidence.py:70`,
-    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4716`,
+    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4721`,
     `mcp/samvil_mcp/test_deliverable.py:180`,
     `mcp/tests/test_stage_evidence.py:18`, `mcp/tests/test_stage_evidence.py:73`,
     `skills/samvil-build/SKILL.md:73`, `skills/samvil-qa/SKILL.md:61`.
-- [ ] **2.2 gate_check의 기계 metrics 모드**
+- [x] **2.2 gate_check의 기계 metrics 모드**
   설계: `gate_check`에 `evidence_mode` 추가 — build/qa 게이트의 핵심 metrics
   (build_ok, test_pass_rate, runtime_verified)는 **호출자가 준 값이 있어도
   `collect_stage_evidence` 결과로 덮어쓴다**(LLM 공급값은 참고 필드로 보존해
@@ -339,6 +339,11 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
   스킬 배선: samvil-build Phase Z(:96)와 samvil-qa(:85)의 gate_check 호출을
   evidence_mode로 전환. **"best-effort" 문구에서 gate_check는 제외** —
   build/qa 게이트 실패 시 스킬은 진행 불가(3.3의 override 경로만 예외).
+  - 완료 증거: `c663ed0`; `mcp/samvil_mcp/server.py:2479`,
+    `mcp/samvil_mcp/server.py:2519`, `mcp/tests/test_gates.py:362`,
+    `mcp/tests/test_gates.py:402`, `mcp/tests/test_gates.py:439`,
+    `skills/samvil-build/SKILL.md:93`, `skills/samvil-build/SKILL.md:96`,
+    `skills/samvil-qa/SKILL.md:80`, `skills/samvil-qa/SKILL.md:85`.
 - [ ] **2.3 QA verdict 등급 분리 — `PASS(runtime)` vs `PASS(static)`**
   설계: `qa_finalize`/`qa_synthesis`의 verdict에 `verification_mode:
   "runtime"|"static"` 필드 추가. Playwright 폴백(samvil-qa/SKILL.md:31) 시
@@ -347,6 +352,9 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
   "runtime 검증 없이 배포하시겠어요? (위험: ...)" AskUserQuestion (3.3 경로).
   회귀 테스트: static PASS가 deploy 게이트에서 막히는지, override 시 claim에
   기록되는지.
+  (스코프 보정: 감사 시점 코드에는 `gate_override`가 아직 없으므로 static block +
+  AskUserQuestion payload는 2.3에서, 실제 override claim 기록 회귀는 도구를 신설하는
+  2.4에서 구현·검증한다.)
 - [ ] **2.4 `force_proceed` 제도화 (게이트 우회의 공식 경로)**
   현재: 어떤 스킬 프로즈에도 정의 없이 LLM이 임의로 씀(zep-auto-test 실증).
   설계:

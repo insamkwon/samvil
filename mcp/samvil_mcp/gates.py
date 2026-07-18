@@ -418,6 +418,15 @@ def _required_action_for(
             type="fix_schema",
             payload={"reason": "Seed/blueprint schema invalid", "checks": failed},
         )
+    if "runtime_verified" in failed or "verification_mode" in failed:
+        return RequiredAction(
+            type="ask_user",
+            payload={
+                "question": "runtime 검증 없이 배포하시겠어요?",
+                "risk": "실제 브라우저 실행 증거 없이 static 분석 결과만으로 배포됩니다.",
+                "checks": failed,
+            },
+        )
     return RequiredAction(
         type="ask_user",
         payload={"checks": failed, "metrics_snapshot": dict(metrics)},

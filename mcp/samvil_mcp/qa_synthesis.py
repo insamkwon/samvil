@@ -40,6 +40,11 @@ def qa_events_path(project_root: Path | str) -> Path:
 
 def synthesize_qa_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
     """Return the central QA verdict from independently collected evidence."""
+    verification_mode = (
+        "runtime"
+        if str(evidence.get("verification_mode") or "").casefold() == "runtime"
+        else "static"
+    )
     pass1 = _normalize_pass1(evidence.get("pass1") or {})
     pass2_items = [_normalize_pass2_item(item) for item in evidence.get("pass2", {}).get("items", [])]
     pass3 = _normalize_pass3(evidence.get("pass3") or {})
@@ -70,6 +75,7 @@ def synthesize_qa_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
             "pass1": pass1["status"],
             "pass2": _pass2_status(counts),
             "pass3": pass3["verdict"],
+            "verification_mode": verification_mode,
         },
     })
 
@@ -77,6 +83,7 @@ def synthesize_qa_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
         "schema_version": QA_SYNTHESIS_SCHEMA_VERSION,
         "gate": "qa_synthesis",
         "verdict": verdict,
+        "verification_mode": verification_mode,
         "reason": reason,
         "next_action": next_action,
         "issue_ids": _issue_ids(pass1=pass1, pass2_items=pass2_items, pass3=pass3, ownership=ownership),
@@ -97,10 +104,15 @@ def synthesize_qa_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
 
 def render_qa_synthesis(synthesis: dict[str, Any]) -> str:
     """Render a concise markdown QA synthesis report."""
+    verdict = synthesis.get("verdict") or "?"
+    verification_mode = synthesis.get("verification_mode") or "static"
+    verdict_label = (
+        f"{verdict}({verification_mode})" if verdict == "PASS" else str(verdict)
+    )
     lines = [
         "# QA Synthesis",
         "",
-        f"- Verdict: {synthesis.get('verdict') or '?'}",
+        f"- Verdict: {verdict_label}",
         f"- Reason: {synthesis.get('reason') or '?'}",
         f"- Next action: {synthesis.get('next_action') or '?'}",
         f"- Iteration: {synthesis.get('iteration')}/{synthesis.get('max_iterations')}",
@@ -167,6 +179,7 @@ def materialize_qa_synthesis(project_root: Path | str, synthesis: dict[str, Any]
         "events_appended": event_count,
         "state_path": str(state_path) if state_path else "",
         "verdict": synthesis.get("verdict"),
+        "verification_mode": synthesis.get("verification_mode") or "static",
         "next_action": synthesis.get("next_action"),
         "convergence": convergence,
     }
@@ -183,6 +196,7 @@ def qa_summary(project_root: Path | str) -> dict[str, Any]:
     return {
         "present": bool(results),
         "verdict": synthesis.get("verdict"),
+        "verification_mode": synthesis.get("verification_mode") or "static",
         "reason": synthesis.get("reason"),
         "next_action": synthesis.get("next_action"),
         "convergence": results.get("convergence") or synthesis.get("convergence") or {},
@@ -507,6 +521,7 @@ def _update_project_state(root: Path, synthesis: dict[str, Any], convergence: di
     history.append({
         "iteration": synthesis.get("iteration"),
         "verdict": synthesis.get("verdict"),
+        "verification_mode": synthesis.get("verification_mode") or "static",
         "reason": synthesis.get("reason"),
         "next_action": synthesis.get("next_action"),
         "issue_ids": synthesis.get("issue_ids") or convergence.get("issue_ids") or [],
@@ -517,6 +532,9 @@ def _update_project_state(root: Path, synthesis: dict[str, Any], convergence: di
     })
     state["qa_history"] = history
     state["last_qa_verdict"] = synthesis.get("verdict")
+    state["last_qa_verification_mode"] = (
+        synthesis.get("verification_mode") or "static"
+    )
     state["last_qa_next_action"] = synthesis.get("next_action")
     state["last_qa_convergence"] = convergence
     state["last_qa_at"] = _now_iso()

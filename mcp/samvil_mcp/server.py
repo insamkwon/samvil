@@ -2501,8 +2501,13 @@ def _mechanical_gate_evidence(
             {
                 "test_pass_rate": round(pass_rate, 6),
                 "runtime_verified": runtime_verified,
+                "verification_mode": "runtime" if runtime_verified else "static",
             },
-            {"test_pass_rate": 1.0, "runtime_verified": True},
+            {
+                "test_pass_rate": 1.0,
+                "runtime_verified": True,
+                "verification_mode": "runtime",
+            },
             evidence,
         )
     raise ValueError(

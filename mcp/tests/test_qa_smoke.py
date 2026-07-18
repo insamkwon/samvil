@@ -610,6 +610,35 @@ class TestQAFinalize:
         assert result["gate_input"]["metrics"]["three_pass_pass"] is False
         assert result["gate_input"]["metrics"]["fail_count"] >= 1
 
+    def test_cl_5c_finalize_derives_runtime_mode_from_artifacts(self, tmp_path: Path) -> None:
+        _write(tmp_path / "project.state.json", _state())
+        _write(tmp_path / ".samvil" / "qa.log", "SAMVIL_EXIT:0\n")
+        _write(
+            tmp_path / ".samvil" / "test-results.json",
+            {"stats": {"expected": 1, "unexpected": 0, "skipped": 0}},
+        )
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path, evidence=_make_evidence()
+        )
+
+        assert result["synthesis"]["verification_mode"] == "runtime"
+        assert result["gate_input"]["metrics"]["verification_mode"] == "runtime"
+        assert result["stage_evidence"]["qa"]["runtime_verified"] is True
+
+    def test_cl_5d_finalize_fails_closed_to_static_mode(self, tmp_path: Path) -> None:
+        _write(tmp_path / "project.state.json", _state())
+        evidence = _make_evidence()
+        evidence["verification_mode"] = "runtime"
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path, evidence=evidence
+        )
+
+        assert result["synthesis"]["verification_mode"] == "static"
+        assert result["gate_input"]["metrics"]["verification_mode"] == "static"
+        assert "PASS(static)" in result["handoff_block"]
+
     def test_cl_6_blocked_detection_carried_in_handoff(self, tmp_path: Path) -> None:
         history = [
             {"iteration": 1, "issue_ids": ["x", "y"]},

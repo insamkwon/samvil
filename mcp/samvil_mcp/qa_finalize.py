@@ -192,6 +192,7 @@ def _build_gate_input(
             "zero_stubs": zero_stubs,
             "fail_count": fail,
             "unimplemented_count": unimplemented,
+            "verification_mode": synthesis.get("verification_mode") or "static",
         },
     }
 
@@ -274,6 +275,10 @@ def _render_handoff_block(
 ) -> str:
     """Render the QA section of `.samvil/handoff.md` (Korean, INV-1)."""
     verdict = synthesis.get("verdict") or "?"
+    verification_mode = synthesis.get("verification_mode") or "static"
+    verdict_label = (
+        f"{verdict}({verification_mode})" if verdict == "PASS" else str(verdict)
+    )
     iteration = synthesis.get("iteration") or 1
     counts = (synthesis.get("pass2") or {}).get("counts") or {}
     pass_n = counts.get("PASS", 0)
@@ -285,7 +290,7 @@ def _render_handoff_block(
     lines = [
         "",
         "## QA",
-        f"- Verdict: {verdict}",
+        f"- Verdict: {verdict_label}",
         f"- Iterations: {iteration}",
         f"- Pass 1 (Mechanical): {(synthesis.get('pass1') or {}).get('status') or '?'}",
         f"- Pass 2 (Functional): PASS={pass_n} / PARTIAL={partial_n} / "
@@ -316,6 +321,7 @@ class QAFinalizeReport:
     claim_actions: list[dict[str, Any]] = field(default_factory=list)
     consensus_triggers: list[dict[str, Any]] = field(default_factory=list)
     gate_input: dict[str, Any] = field(default_factory=dict)
+    stage_evidence: dict[str, Any] = field(default_factory=dict)
     blocked: dict[str, Any] = field(default_factory=dict)
     next_skill_decision: dict[str, Any] = field(default_factory=dict)
     handoff_block: str = ""
@@ -332,6 +338,7 @@ class QAFinalizeReport:
             "claim_actions": self.claim_actions,
             "consensus_triggers": self.consensus_triggers,
             "gate_input": self.gate_input,
+            "stage_evidence": self.stage_evidence,
             "blocked": self.blocked,
             "next_skill_decision": self.next_skill_decision,
             "handoff_block": self.handoff_block,
@@ -371,9 +378,27 @@ def finalize_qa_verdict(
     qa_history = state.get("qa_history") or []
     report.samvil_tier = _resolve_tier(state, config)
 
+    # Mechanical verification mode. Missing/invalid runtime artifacts fail closed.
+    try:
+        from .stage_evidence import collect_stage_evidence
+
+        report.stage_evidence = collect_stage_evidence(root, "qa")
+    except Exception as e:  # pragma: no cover - collector is deliberately defensive
+        report.errors.append(f"collect_stage_evidence failed: {e}")
+        report.stage_evidence = {}
+    npm_test = ((report.stage_evidence.get("qa") or {}).get("npm_test") or {})
+    runtime_verified = bool(
+        (report.stage_evidence.get("qa") or {}).get("runtime_verified")
+        and npm_test.get("exit_code") is not None
+    )
+    evidence_for_synthesis = dict(evidence)
+    evidence_for_synthesis["verification_mode"] = (
+        "runtime" if runtime_verified else "static"
+    )
+
     # Synthesis.
     try:
-        synthesis = synthesize_qa_evidence(evidence)
+        synthesis = synthesize_qa_evidence(evidence_for_synthesis)
     except Exception as e:  # pragma: no cover — synthesize is robust
         report.errors.append(f"synthesize_qa_evidence failed: {e}")
         synthesis = {
@@ -385,6 +410,7 @@ def finalize_qa_verdict(
             "pass2": {"items": [], "counts": {}},
             "pass3": evidence.get("pass3") or {},
             "events": [],
+            "verification_mode": "static",
         }
     report.synthesis = synthesis
 
@@ -429,5 +455,7 @@ def finalize_qa_verdict(
         )
     if not report.gate_input["metrics"]["three_pass_pass"]:
         report.notes.append("qa_to_deploy gate input: three_pass_pass=False (gate may block)")
+    if synthesis.get("verification_mode") != "runtime":
+        report.notes.append("qa_to_deploy gate input: verification_mode=static (gate must block)")
 
     return report.to_dict()

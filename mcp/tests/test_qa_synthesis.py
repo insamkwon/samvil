@@ -35,6 +35,23 @@ def test_synthesis_passes_with_partial_functional_evidence():
     assert any(event["event_type"] == "qa_partial" for event in result["events"])
 
 
+def test_synthesis_labels_pass_by_verification_mode() -> None:
+    static = synthesize_qa_evidence(_base([
+        {"id": "AC-1", "criterion": "Create task", "verdict": "PASS"},
+    ]))
+    runtime_input = _base([
+        {"id": "AC-1", "criterion": "Create task", "verdict": "PASS"},
+    ])
+    runtime_input["verification_mode"] = "runtime"
+    runtime = synthesize_qa_evidence(runtime_input)
+
+    assert static["verdict"] == "PASS"
+    assert static["verification_mode"] == "static"
+    assert runtime["verification_mode"] == "runtime"
+    assert "PASS(static)" in render_qa_synthesis(static)
+    assert "PASS(runtime)" in render_qa_synthesis(runtime)
+
+
 def test_synthesis_revises_on_unimplemented_non_core_ac():
     result = synthesize_qa_evidence(_base([
         {"id": "AC-1", "criterion": "AI summary", "verdict": "UNIMPLEMENTED", "reason": "stub"},
@@ -169,6 +186,7 @@ def test_materialize_qa_synthesis_writes_report_results_events_and_state(tmp_pat
     assert "ts" not in events[0]
     state = json.loads((tmp_path / "project.state.json").read_text(encoding="utf-8"))
     assert state["last_qa_verdict"] == "REVISE"
+    assert state["last_qa_verification_mode"] == "static"
     assert state["last_qa_convergence"]["verdict"] == "continue"
     assert state["qa_history"][0]["issue_ids"] == ["pass2:AC-1:UNIMPLEMENTED"]
     assert state["qa_history"][0]["pass2_counts"]["UNIMPLEMENTED"] == 1
