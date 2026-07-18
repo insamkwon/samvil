@@ -158,7 +158,7 @@ v4.31이 시작한 방향의 완성이다.
   마이그레이션마다 강제 True로 되돌림. 수정 + 테스트.
   - 완료 증거: `7b9c009`; `mcp/samvil_mcp/migrate_v3_2.py:158`,
     `mcp/tests/test_migrate_v3_2.py:107`.
-- [ ] **0.4 팬텀/오류 도구 참조 3건 교정**
+- [x] **0.4 팬텀/오류 도구 참조 3건 교정**
   (a) `skills/samvil-qa/SKILL.md:71` `claim_query_by_subject` → 실제 도구명
   (`query_by_subject`, server.py에서 실명 확인 후 교체).
   (b) `references/contract-layer-protocol.md:91,93` `route_task(attempts=1)` →
@@ -171,12 +171,20 @@ v4.31이 시작한 방향의 완성이다.
   `.samvil/claims.jsonl` 직접 필터로 교정한다. 또한 공개 `route_task` 래퍼는
   `server.py`에서 실제로 `attempts`를 받고 내부 `routing.route_task`에만
   `escalation_depth`가 있으므로 (b)는 현행 예시가 맞아 변경하지 않는다.)
+  - 완료 증거: `3a156ae`; `scripts/check-skill-wiring.py:344`,
+    `scripts/check-skill-wiring.py:521`, `mcp/tests/test_skill_wiring.py:18`,
+    `skills/samvil-qa/SKILL.md:71`, `references/contract-layer-protocol.md:92`,
+    `references/contract-layer-protocol.md:151`.
 - [ ] **0.5 인터뷰 질문 수 thin↔legacy 모순 해소**
   thin(`skills/samvil-interview/SKILL.md:69`) 5/10/20/30/40 vs
   legacy(`SKILL.legacy.md:268-270`) 3-4/5-6/6-8. **Wave 3의 질문 예산제를 선반영해
   양쪽 모두 "min은 참고치, max가 강제"로 통일하되, 수치의 단일 소스는
   `references/decision-boundaries.md`로 옮기고 두 파일은 그걸 인용**하게 바꾼다.
   (수치 자체는 Wave 3.1에서 확정 — 여기서는 모순 제거 + 단일 소스화만.)
+  (스코프 보정: 현재 `decision-boundaries.md`에는 이미 provisional max가 있고,
+  런타임은 `interview_engine.MIN_QUESTIONS`만 강제한다. 이 항목에서는 현행 min과
+  provisional max를 한 표에 정직하게 모으고, 존재하지 않는
+  `resolve_max_questions` 구현 표기는 제거하며, max 런타임 강제는 3.1로 남긴다.)
 - [ ] **0.6 `~/.samvil/mcp-health.jsonl` 무한 성장 + 테스트 오염**
   실측 24MB, 그중 pytest의 `atomic_test_tool` 항목 153,600줄 — 사용자 글로벌 헬스
   로그를 테스트가 오염시키고 health_check의 `hook_failures_24h` 표시를 왜곡.

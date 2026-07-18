@@ -261,15 +261,11 @@ MCP 호출 실패하면:
 
 ## Step 2: Tier 기반 인터뷰 깊이 (v3.1.0 확장, v3-022)
 
-`selected_tier`에 따라 질문 수, 모호도 목표, 필수 Phase 세트를 결정.
-
-| Tier | 질문 수 | 모호도 목표 | 필수 Phase |
-|------|--------|-----------|-----------|
-| minimal | 3-4개 | ≤ 0.10 | Core(1) + Scope(2) |
-| standard | 5-6개 | ≤ 0.05 | Core + Scope + **Lifecycle(2.9, 8Q)** |
-| thorough | 6-8개 | ≤ 0.02 | + Unknown(2.5) + **Non-func(2.6, 3Q)** + **Inversion(2.7)** |
-| full | 8개 + | ≤ 0.01 | + **Stakeholder/JTBD(2.8)** + PATH 4 Research |
-| **deep** | **10개 +** | **≤ 0.005** | full + **Domain pack 25~30Q 심화** + premortem 반복 |
+`selected_tier`에 따른 모호도 목표와 질문 경계 수치는
+`references/decision-boundaries.md`의 Interview termination 표만 사용한다.
+`min_questions_reference`는 현재 수렴 참고치, `max_questions`는 Wave 3.1에서
+강제될 질문 예산이다. 이 legacy body에 별도 질문 수 표를 복제하지 않는다.
+필수 Phase 세트는 아래 Tier → Phase 매핑과 MCP 결과를 따른다.
 
 **Deep Mode 활성화 경로** (v3-022 fix f):
 - `/samvil:interview --deeper` 플래그가 있으면 tier를 `deep`로 승격

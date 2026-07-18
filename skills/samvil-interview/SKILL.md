@@ -66,8 +66,7 @@ Track `questions_asked` (increment per user question). Re-score after each Phase
 `mcp__samvil_mcp__score_ambiguity(interview_state='<json>', tier="<tier>", questions_asked=<N>)`.
 Render milestone + `floor_violations` + `missing_items` + `min_questions_met` + `dimension_scores`.
 
-**Convergence** = `ambiguity ≤ target` + `floors_passed` + `min_questions_met` (minimal 5 / standard 10 / thorough 20 / full 30 / deep 40).
-No phase reprompt cap — loop until all 3 hold. Check `dimension_scores`: highest-scoring dimension's Phase is the next loop target.
+**Convergence** = `ambiguity ≤ target` + `floors_passed` + `min_questions_met`. Read all tier numbers only from `references/decision-boundaries.md`: `min_questions_reference` is the current convergence floor; `max_questions` is the provisional forced budget activated by Wave 3.1. Until then, loop until all 3 current conditions hold and never invent a numeric override. Check `dimension_scores`: highest-scoring dimension's Phase is the next loop target.
 
 **AC Testability Gate (PHI-06)**: vague AC ("좋은", "빠른", "직관적인", "smooth"…) → AskUserQuestion to rewrite. Never accept vague AC silently.
 

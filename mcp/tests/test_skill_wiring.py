@@ -34,3 +34,17 @@ def test_reference_tool_check_rejects_unregistered_tool(tmp_path: Path) -> None:
     unresolved = wiring.find_unresolved_reference_tools(tmp_path)
 
     assert unresolved == {"budget_status": ["references/protocol.md:1"]}
+
+
+def test_interview_question_limits_use_decision_boundaries_ssot() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    thin = (repo / "skills" / "samvil-interview" / "SKILL.md").read_text()
+    legacy = (repo / "skills" / "samvil-interview" / "SKILL.legacy.md").read_text()
+    boundaries = (repo / "references" / "decision-boundaries.md").read_text()
+
+    assert "references/decision-boundaries.md" in thin
+    assert "references/decision-boundaries.md" in legacy
+    assert "minimal 5 / standard 10 / thorough 20 / full 30 / deep 40" not in thin
+    assert "| minimal | 3-4개 |" not in legacy
+    assert "`min_questions_reference`" in boundaries
+    assert "`max_questions`" in boundaries
