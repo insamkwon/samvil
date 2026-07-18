@@ -250,7 +250,7 @@ v4.31이 시작한 방향의 완성이다.
     `mcp/samvil_mcp/event_store.py:142`, `mcp/samvil_mcp/server.py:352`,
     `mcp/samvil_mcp/server.py:535`, `mcp/tests/test_event_store.py:53`,
     `mcp/tests/test_event_store.py:70`.
-- [ ] **1.3 SSOT writer 전체에 락+원자쓰기 적용**
+- [x] **1.3 SSOT writer 전체에 락+원자쓰기 적용**
   기존 헬퍼(`claim_ledger._locked` + tmp/rename 패턴, 이미 background_jobs.py:39가
   모듈 경계 넘어 import 중)를 다음에 적용:
   - `stall_detector.py:138` (state.json — **최우선, CRITICAL**)
@@ -261,6 +261,11 @@ v4.31이 시작한 방향의 완성이다.
   - `resume.py:106` (leaf checkpoint)
   각각 crash-mid-write 시뮬 테스트(부분 쓰기 파일 만들어 reader가 살아남는지) 1개
   이상.
+  - 완료 증거: `9bcb821`; `mcp/samvil_mcp/ssot_io.py:24`,
+    `mcp/samvil_mcp/stall_detector.py:135`, `mcp/samvil_mcp/chain_markers.py:55`,
+    `mcp/samvil_mcp/self_correction.py:21`, `mcp/samvil_mcp/checkpoint.py:60`,
+    `mcp/samvil_mcp/resume.py:107`, `mcp/tests/test_ssot_hardening.py:33`,
+    `mcp/tests/test_ssot_hardening.py:82`, `mcp/tests/test_ssot_hardening.py:110`.
 - [ ] **1.4 hook의 state 파일 read-modify-write 원자화**
   `hooks/_contract-helpers.sh:291-302`가 락 없이 별도 python 프로세스로
   read-modify-write. heredoc python에서 fcntl.flock + tmp/rename 적용.

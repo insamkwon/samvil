@@ -285,18 +285,38 @@ samvil_contract_update_state() {
   [ -z "$root" ] && return 0
 
   "$SAMVIL_PY" - "$root" "$key" "$value" <<'PY' 2>/dev/null
-import json, sys, os
+import json, os, sys
+from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 root, key, value = sys.argv[1:4]
-path = os.path.join(root, "project.state.json")
+path = Path(root) / "project.state.json"
+lock_path = path.with_suffix(path.suffix + ".lock")
+tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}")
 try:
-    with open(path) as f:
-        state = json.load(f)
-except Exception:
-    state = {}
-state[key] = value
-try:
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as lock_handle:
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                state = {}
+            state[key] = value
+            with tmp.open("w", encoding="utf-8") as handle:
+                json.dump(state, handle, indent=2, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+            if fcntl is not None:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 except Exception as e:
     sys.stderr.write(f"[samvil-contract-hook] update_state failed: {e}\n")
 PY
@@ -313,19 +333,39 @@ samvil_contract_append_stage_claim_to_state() {
   [ -z "$claim_id" ] && return 0
 
   "$SAMVIL_PY" - "$root" "$stage" "$claim_id" <<'PY' 2>/dev/null
-import json, sys, os
+import json, os, sys
+from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 root, stage, claim_id = sys.argv[1:4]
-path = os.path.join(root, "project.state.json")
+path = Path(root) / "project.state.json"
+lock_path = path.with_suffix(path.suffix + ".lock")
+tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}")
 try:
-    with open(path) as f:
-        state = json.load(f)
-except Exception:
-    state = {}
-sc = state.setdefault("stage_claims", {})
-sc[stage] = claim_id
-try:
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as lock_handle:
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                state = {}
+            stage_claims = state.setdefault("stage_claims", {})
+            stage_claims[stage] = claim_id
+            with tmp.open("w", encoding="utf-8") as handle:
+                json.dump(state, handle, indent=2, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+            if fcntl is not None:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 except Exception as e:
     sys.stderr.write(f"[samvil-contract-hook] stage_claims failed: {e}\n")
 PY
