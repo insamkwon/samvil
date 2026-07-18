@@ -16,6 +16,14 @@ All notable changes to SAMVIL are documented here.
 - Prevented premature contract gates by disabling the invalid automatic
   PostToolUse stage-end hook, while surfacing no-Python degradation and seeding
   fresh-interview project roots for the start hook.
+- Made QA/deploy trust mechanical: project-local events feed retro durations,
+  reporter artifacts override self-reported metrics, static-only evidence blocks
+  deploy, and user gate overrides leave an auditable claim.
+- Reduced happy-path user checkpoints to 12, made Council explicit opt-in, and
+  verified both standard dashboard and standard automation scenarios.
+- Consolidated agent personas and references, hardened destructive-command
+  blocking, labeled untested host execution honestly, and extracted benchmark
+  MCP tools from the monolithic server without changing the 202-tool registry.
 
 ---
 

@@ -625,7 +625,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `scripts/check-host-parity.py:286`, `scripts/check-host-parity.py:291`,
     `scripts/check-host-parity.py:295`, `scripts/check-host-parity.py:299`,
     `scripts/pre-commit-check.sh:203`, `mcp/tests/test_host_parity.py:45`.
-- [ ] **4.7 server.py 도메인 분할 계속 (기계적 반복)**
+- [x] **4.7 server.py 도메인 분할 계속 (기계적 반복)**
   기확립 패턴(`tools_jobs.py` + `register_*_tools`) 그대로: 한 커밋당 한 도메인
   (tools_qa, tools_evolve, tools_session, tools_release...), 매 커밋 도구 수 불변
   assert. 5,696 LOC → 도메인당 수백 LOC 라우터로.
@@ -633,6 +633,10 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   상위 §2-1의 "항목 1개 = 커밋 1개"와 본문 "도메인당 한 커밋"이 충돌한다.
   가장 독립적인 benchmark 도메인 4개 도구를 `tools_benchmark.py`로 한 번 완전
   추출하고, registry 202개 불변 테스트로 반복 패턴을 고정한다.)
+  - 완료 증거: `02c8036`; `mcp/samvil_mcp/tools_benchmark.py:9`,
+    `mcp/samvil_mcp/tools_benchmark.py:16`, `mcp/samvil_mcp/server.py:5905`,
+    `mcp/samvil_mcp/server.py:5908`, `mcp/tests/test_server_domain_split.py:23`,
+    `mcp/tests/test_server_domain_split.py:26`.
 
 ---
 
@@ -679,6 +683,18 @@ Wave 5 (선택) ── 사용자 재가 후
    - QA 숫자가 test-results.json과 일치, 파괴 주입 시 게이트 실차단 (G1·G2)
    - 사용자 터치포인트 ≤ 12 (G5)
 4. CHANGELOG 항목 작성(사용자 관점 서술), 버전 bump는 사용자 결정 대기.
+
+### 완료 실측
+
+- web standard: dashboard dogfood는 AskUserQuestion 12회, ambiguity 0.006,
+  `converged=true` (`docs/evidence/evolution-2026-07-wave3-dogfood.md`).
+- arbitrary solution type: standard automation dogfood는 canonical events에서
+  interview 1000ms를 복원하고, raw test 3 = QA report 3을 확인했으며, 실패 주입 시
+  deploy gate block, destructive command block, AskUserQuestion 12회,
+  `converged=true`를 확인했다
+  (`docs/evidence/evolution-2026-07-wave4-automation-dogfood.md`).
+- `CHANGELOG.md`의 Unreleased에 사용자 관점 변경을 기록했고 version bump/push는
+  요청대로 수행하지 않는다.
 
 ---
 
