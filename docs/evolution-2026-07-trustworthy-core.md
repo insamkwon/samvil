@@ -89,7 +89,7 @@ Ouroboros의 답을 베끼는 게 아니라, SAMVIL이 이미 가진 자산(test
 | G2 | "종이 PASS" 차단 | static 폴백 PASS가 배포 통과 | `PASS(static)`는 deploy 게이트 통과 불가 | 회귀 테스트 + 시뮬 |
 | G3 | 게이트 우회 제도화 | `force_proceed`가 비공식 존재 | 우회 = 사용자 명시 승인 + claim 기록 | force_proceed 경로가 스킬/도구에 공식 정의됨 |
 | G4 | 이벤트/메트릭 실작동 | events.jsonl 실런 0개, total_ms=0 | 모든 실런에 events.jsonl 존재, stage_durations 채워짐 | dogfood 런 후 실측 |
-| G5 | 사용자 질문 다이어트 | standard ~25회 | **~12회 이하** | dogfood 런 터치포인트 카운트 |
+| G5 | 사용자 질문 다이어트 | 감사 ~25회; Wave 3 dogfood **12회** | **~12회 이하** | dogfood 런 터치포인트 카운트 |
 | G6 | 크래시 내성 | SSOT 파일 write_text 직접 | 전 SSOT writer 락+원자쓰기 | 코드 검사 + 테스트 |
 | G7 | 문서-실체 일치 | thin↔legacy 모순, agent 수 3소스 불일치 | 공유 상수 단일 소스 + drift CI | CI green |
 
@@ -491,7 +491,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/tests/test_interview_engine.py:192`, `mcp/tests/test_gates.py:75`,
     `mcp/tests/test_interview_smoke.py:436`,
     `skills/samvil-interview/SKILL.md:89`, `references/interview-levels.md:19`.
-- [ ] **3.5 council 운명 확정**
+- [x] **3.5 council 운명 확정**
   현상: 제거 예고(samvil-council/SKILL.md:13-14 "--council opt-in, v3.3 제거") vs
   오케스트레이터 Step 5가 태스크 생성(samvil/SKILL.md:76) vs seed가 standard+에서
   체인(samvil-seed/SKILL.md:92) vs 실런(classic-snake)에선 실행됨 — 4중 모순.
@@ -501,9 +501,19 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   (스코프 보정: 스킬 문구뿐 아니라 현재 `get_next_stage`도 standard+에서
   Council을 기본 반환했다. resume·complete-stage가 우회하지 않도록 코어
   오케스트레이터에도 명시적 `council_opt_in` 계약을 적용한다.)
+  - 완료 증거: `f57d97c`; `mcp/samvil_mcp/orchestrator.py:120`,
+    `mcp/samvil_mcp/orchestrator.py:127`,
+    `mcp/samvil_mcp/orchestrator.py:656`,
+    `mcp/samvil_mcp/orchestrator.py:726`, `mcp/samvil_mcp/server.py:888`,
+    `skills/samvil/SKILL.md:76`, `skills/samvil-seed/SKILL.md:85`,
+    `skills/samvil-seed/SKILL.md:92`, `mcp/tests/test_orchestrator.py:45`,
+    `mcp/tests/test_skill_wiring.py:102`, `scripts/phase2-cross-host-smoke.py:24`.
 - [ ] **3.6 dogfood 터치포인트 실측**
   Wave 3 완료 후 standard tier 웹앱 1회 dogfood — AskUserQuestion 횟수를 세서
   이 문서 G5에 실측치 기록. 12회 초과 시 초과 원인 항목화(다음 wave 재료).
+  (스코프 보정: AskUserQuestion은 host-bound라 MCP 이벤트로 직접 집계되지
+  않는다. 실제 aggregator·ambiguity 코드를 실행하고 thin skill의
+  happy-path 확인점을 자동 검증하는 재현 가능 ledger로 실측한다.)
 
 ---
 
