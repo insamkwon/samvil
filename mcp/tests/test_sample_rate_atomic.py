@@ -6,21 +6,39 @@ the time on Python 3.12 (the actual race window is small but real).
 """
 from __future__ import annotations
 
+import os
 import threading
+from pathlib import Path
 
 from samvil_mcp import server
 
 
-def test_health_counter_is_atomic_under_concurrency(monkeypatch, tmp_path) -> None:
-    # Redirect the health file to a tmp path so we don't pollute ~/.samvil.
+def test_health_log_path_uses_test_override(monkeypatch, tmp_path: Path) -> None:
+    target = tmp_path / "isolated-health.jsonl"
+    monkeypatch.setenv("SAMVIL_MCP_HEALTH_PATH", str(target))
+
+    assert server._health_log_path() == target
+
+
+def test_health_log_rotates_one_generation(monkeypatch, tmp_path: Path) -> None:
     log_path = tmp_path / "mcp-health.jsonl"
+    old_payload = b"x" * 129
+    log_path.write_bytes(old_payload)
+    monkeypatch.setattr(server, "_HEALTH_LOG_MAX_BYTES", 128)
 
-    def _fake_home() -> object:
-        class H:
-            def __truediv__(self, other):
-                return log_path.parent if other == ".samvil" else log_path.parent / other
-        return H()
+    server._rotate_health_log(log_path)
 
+    assert not log_path.exists()
+    assert (tmp_path / "mcp-health.jsonl.1").read_bytes() == old_payload
+
+
+def test_pytest_health_log_is_isolated_from_user_home() -> None:
+    configured = Path(os.environ["SAMVIL_MCP_HEALTH_PATH"])
+    assert configured.name == "mcp-health.jsonl"
+    assert configured != Path.home() / ".samvil" / "mcp-health.jsonl"
+
+
+def test_health_counter_is_atomic_under_concurrency(monkeypatch, tmp_path) -> None:
     # Reset counters
     server._HEALTH_OK_COUNTS.clear()
 

@@ -14,6 +14,7 @@ Graceful Degradation (INV-7):
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -282,6 +283,28 @@ _HEALTH_OK_COUNTS: dict[str, int] = {}
 _HEALTH_OK_COUNTS_LOCK = threading.Lock()
 # Sample 1-in-N successful calls per tool. `fail` is always logged.
 _HEALTH_OK_SAMPLE_RATE = 10
+_HEALTH_LOG_MAX_BYTES = 10 * 1024 * 1024
+_HEALTH_LOG_LOCK = threading.Lock()
+
+
+def _health_log_path() -> Path:
+    """Resolve the health log path, allowing test/process isolation."""
+    override = os.environ.get("SAMVIL_MCP_HEALTH_PATH")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".samvil" / "mcp-health.jsonl"
+
+
+def _rotate_health_log(path: Path) -> None:
+    """Keep one rotated generation when the active health log reaches its cap."""
+    try:
+        if not path.exists() or path.stat().st_size < _HEALTH_LOG_MAX_BYTES:
+            return
+        generation = Path(f"{path}.1")
+        generation.unlink(missing_ok=True)
+        path.replace(generation)
+    except OSError:
+        return
 
 
 def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
@@ -304,8 +327,6 @@ def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
         if total_calls % _HEALTH_OK_SAMPLE_RATE != 0:
             return  # sampled out
 
-    health_path = Path.home() / ".samvil" / "mcp-health.jsonl"
-    health_path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "status": status,
         "tool": tool,
@@ -315,8 +336,12 @@ def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
     if total_calls is not None:
         entry["ok_total_so_far"] = total_calls
         entry["sample_rate"] = _HEALTH_OK_SAMPLE_RATE
-    with open(health_path, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    health_path = _health_log_path()
+    with _HEALTH_LOG_LOCK:
+        health_path.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_health_log(health_path)
+        with open(health_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
 
 
 # ── Session tools ─────────────────────────────────────────────

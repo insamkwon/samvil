@@ -175,7 +175,7 @@ v4.31이 시작한 방향의 완성이다.
     `scripts/check-skill-wiring.py:521`, `mcp/tests/test_skill_wiring.py:18`,
     `skills/samvil-qa/SKILL.md:71`, `references/contract-layer-protocol.md:92`,
     `references/contract-layer-protocol.md:151`.
-- [ ] **0.5 인터뷰 질문 수 thin↔legacy 모순 해소**
+- [x] **0.5 인터뷰 질문 수 thin↔legacy 모순 해소**
   thin(`skills/samvil-interview/SKILL.md:69`) 5/10/20/30/40 vs
   legacy(`SKILL.legacy.md:268-270`) 3-4/5-6/6-8. **Wave 3의 질문 예산제를 선반영해
   양쪽 모두 "min은 참고치, max가 강제"로 통일하되, 수치의 단일 소스는
@@ -185,6 +185,10 @@ v4.31이 시작한 방향의 완성이다.
   런타임은 `interview_engine.MIN_QUESTIONS`만 강제한다. 이 항목에서는 현행 min과
   provisional max를 한 표에 정직하게 모으고, 존재하지 않는
   `resolve_max_questions` 구현 표기는 제거하며, max 런타임 강제는 3.1로 남긴다.)
+  - 완료 증거: `232fa76`; `references/decision-boundaries.md:28`,
+    `references/decision-boundaries.md:43`, `skills/samvil-interview/SKILL.md:69`,
+    `skills/samvil-interview/SKILL.legacy.md:264`,
+    `mcp/tests/test_skill_wiring.py:39`.
 - [ ] **0.6 `~/.samvil/mcp-health.jsonl` 무한 성장 + 테스트 오염**
   실측 24MB, 그중 pytest의 `atomic_test_tool` 항목 153,600줄 — 사용자 글로벌 헬스
   로그를 테스트가 오염시키고 health_check의 `hook_failures_24h` 표시를 왜곡.
