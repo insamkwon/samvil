@@ -77,12 +77,12 @@ mcp__samvil_mcp__finalize_qa_verdict(project_path=".",
 
 Returns `synthesis`, `convergence`, `claim_actions[]`, `consensus_triggers[]`, `gate_input` (qa_to_deploy), `blocked {detected, persistent_issue_ids}`, `next_skill_decision {verdict, suggested, reason, user_options}`, `handoff_block`, `samvil_tier`, `notes[]`, `errors[]`.
 
-Apply in order (each best-effort, INV-5):
+Apply in order (best-effort except the evidence-backed `gate_check`, INV-5):
 1. `materialize_qa_synthesis(project_root=".", synthesis_json=<finalize.synthesis>)` → writes qa-results.json, qa-report.md, events.jsonl, project.state.json.
 2. For each `claim_actions[i]`: `action=="verify"` → `claim_verify(claim_id=<i.claim_id>, verified_by=<i.verified_by>, evidence_json=<i.evidence_json>)`; `action=="reject"` → `claim_reject(claim_id=<i.claim_id>, verified_by=<i.verified_by>, reason=<i.reason>)`. PARTIAL leaves claim pending (retro decides).
 3. If `boot.resume_hint.stage_claims.qa`: `claim_verify(claim_id=<id>, verified_by="agent:product-owner")`.
 4. For each `consensus_triggers[i]`: `consensus_trigger(input_json=<i.input_json>)`. `should_invoke=true` → 2-round resolver (legacy "consensus" rules) → `consensus_verdict` claim → use as final answer for that AC.
-5. `gate_check(gate_name="qa_to_deploy", samvil_tier=<finalize.samvil_tier>, metrics_json=<finalize.gate_input.metrics>, project_root=".")`. `verdict=block` → REVISE (or FAIL if Ralph exhausted), emit `required_action.type`. `verdict=pass` → record `gate_verdict` claim → proceed.
+5. `gate_check(gate_name="qa_to_deploy", samvil_tier=<finalize.samvil_tier>, metrics_json=<finalize.gate_input.metrics>, project_root=".", evidence_mode="mechanical")`. This call is mandatory: unavailable/error/block → REVISE (or FAIL if Ralph exhausted), emit `required_action.type`. `verdict=pass` → record `gate_verdict` claim → proceed.
 6. If convergence is `blocked`/`failed`: `materialize_qa_recovery_routing(project_root=".")` → writes `<paths.qa_routing>` + `<paths.next_skill_marker>` for host continuation.
 
 ### 5. Iterate or terminate

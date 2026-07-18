@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -2475,6 +2476,40 @@ def _config_path_for(project_root: str) -> str | None:
     return str(repo_default) if repo_default.exists() else None
 
 
+def _mechanical_gate_evidence(
+    project_root: str, gate_name: str
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Return mechanical metrics, required thresholds, and source evidence."""
+    from .stage_evidence import collect_stage_evidence as _collect
+
+    if gate_name == "build_to_qa":
+        evidence = _collect(project_root, "build")
+        return (
+            {"build_ok": evidence["build"]["exit_code"] == 0},
+            {"build_ok": True},
+            evidence,
+        )
+    if gate_name == "qa_to_deploy":
+        evidence = _collect(project_root, "qa")
+        npm_test = evidence["qa"]["npm_test"]
+        decided = npm_test["passed"] + npm_test["failed"]
+        pass_rate = npm_test["passed"] / decided if decided else 0.0
+        runtime_verified = bool(
+            evidence["qa"]["runtime_verified"] and npm_test["exit_code"] is not None
+        )
+        return (
+            {
+                "test_pass_rate": round(pass_rate, 6),
+                "runtime_verified": runtime_verified,
+            },
+            {"test_pass_rate": 1.0, "runtime_verified": True},
+            evidence,
+        )
+    raise ValueError(
+        f"evidence_mode='mechanical' is unsupported for gate {gate_name!r}"
+    )
+
+
 @mcp.tool()
 async def gate_check(
     gate_name: str,
@@ -2483,6 +2518,7 @@ async def gate_check(
     project_root: str = ".",
     subject: str = "",
     allow_warn: bool = False,
+    evidence_mode: str = "",
 ) -> str:
     """Evaluate a stage gate. Returns the verdict as JSON.
 
@@ -2500,19 +2536,67 @@ async def gate_check(
     try:
         from dataclasses import asdict
 
-        metrics = json.loads(metrics_json or "{}")
+        reported_metrics = json.loads(metrics_json or "{}")
+        if not isinstance(reported_metrics, dict):
+            raise ValueError("metrics_json must decode to an object")
+        metrics = dict(reported_metrics)
         cfg_path = _config_path_for(project_root)
         cfg = _load_gate_config(cfg_path) if cfg_path else _load_gate_config(None)
+        mechanical_metrics: dict[str, Any] = {}
+        metric_mismatches: list[dict[str, Any]] = []
+        stage_evidence: dict[str, Any] = {}
+        if evidence_mode:
+            if evidence_mode != "mechanical":
+                raise ValueError("evidence_mode must be empty or 'mechanical'")
+            mechanical_metrics, mechanical_thresholds, stage_evidence = (
+                _mechanical_gate_evidence(project_root, gate_name)
+            )
+            for key, mechanical in mechanical_metrics.items():
+                if key in reported_metrics and reported_metrics[key] != mechanical:
+                    metric_mismatches.append(
+                        {
+                            "metric": key,
+                            "reported": reported_metrics[key],
+                            "mechanical": mechanical,
+                        }
+                    )
+                metrics[key] = mechanical
+            tier_thresholds = (
+                cfg.setdefault("gates", {})
+                .setdefault(gate_name, {})
+                .setdefault("thresholds", {})
+                .setdefault(samvil_tier, {})
+            )
+            tier_thresholds.update(mechanical_thresholds)
         verdict = _gate_check_core(
             gate_name,
             samvil_tier=samvil_tier,
             metrics=metrics,
             subject=subject,
             config=cfg,
-            allow_warn=allow_warn,
+            allow_warn=allow_warn and evidence_mode != "mechanical",
         )
+        result = asdict(verdict)
+        if evidence_mode == "mechanical":
+            result.update(
+                {
+                    "evidence_mode": evidence_mode,
+                    "metrics": metrics,
+                    "reported_metrics": reported_metrics,
+                    "mechanical_metrics": mechanical_metrics,
+                    "metric_mismatches": metric_mismatches,
+                    "stage_evidence": stage_evidence,
+                    "allow_warn_ignored": bool(allow_warn),
+                }
+            )
+            if metric_mismatches:
+                _log_mcp_health(
+                    "warn",
+                    "gate_check.metric_mismatch",
+                    json.dumps(metric_mismatches, ensure_ascii=False),
+                )
         _log_mcp_health("ok", "gate_check")
-        return json.dumps(asdict(verdict))
+        return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "gate_check", str(e))
         return json.dumps({"error": str(e)})

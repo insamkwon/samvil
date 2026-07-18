@@ -302,7 +302,7 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
 > 옮긴다. Ouroboros의 transcript-grounding 원칙을, SAMVIL이 이미 가진
 > tests-as-deliverable(v4.31) 자산으로 싸게 구현한다.
 
-- [ ] **2.1 `collect_stage_evidence` MCP 도구 신설 (기계 증거 수집기)**
+- [x] **2.1 `collect_stage_evidence` MCP 도구 신설 (기계 증거 수집기)**
   설계: `mcp/samvil_mcp/stage_evidence.py` 신설.
   ```
   collect_stage_evidence(project_root, stage) → {
@@ -324,6 +324,13 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
     파싱. 파일이 없으면 `ran: false` — 좋게 추정하지 않는다 (fail-closed).
   - 단위 테스트: 조작된 로그/리포트 fixture로 파싱 정확성 + 파일 부재 시
     fail-closed 확인.
+  - 완료 증거: `3f3a157`; `mcp/samvil_mcp/stage_evidence.py:15`,
+    `mcp/samvil_mcp/stage_evidence.py:37`,
+    `mcp/samvil_mcp/stage_evidence.py:70`,
+    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4716`,
+    `mcp/samvil_mcp/test_deliverable.py:180`,
+    `mcp/tests/test_stage_evidence.py:18`, `mcp/tests/test_stage_evidence.py:73`,
+    `skills/samvil-build/SKILL.md:73`, `skills/samvil-qa/SKILL.md:61`.
 - [ ] **2.2 gate_check의 기계 metrics 모드**
   설계: `gate_check`에 `evidence_mode` 추가 — build/qa 게이트의 핵심 metrics
   (build_ok, test_pass_rate, runtime_verified)는 **호출자가 준 값이 있어도
