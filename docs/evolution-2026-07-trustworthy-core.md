@@ -613,17 +613,26 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `hooks/guard-destructive.sh:51`, `hooks/guard-destructive.sh:89`,
     `hooks/guard-destructive.sh:117`, `mcp/tests/test_guard_destructive.py:43`,
     `mcp/tests/test_guard_destructive.py:60`.
-- [ ] **4.6 멀티호스트 정직화**
+- [x] **4.6 멀티호스트 정직화**
   **기본 결정: 문서 정직화 경로.** README·CLAUDE.md·glossary에서 현 상태를
   "Claude Code 네이티브 + Codex는 모델 라우팅 통합(네이티브 실행 아님) + Gemini
   실험적 stub"으로 명시. `check-host-parity.py`의 공허 통과(QA parity 양쪽 빈
   집합 :57,71, Gemini 미검사 :39-41)를 "미검사 항목은 red가 아니라 UNTESTED로
   표기"하도록 수정 — green 착시 제거. (네이티브 parity 실구현은 이번 범위 밖 —
   Mountain MA2/MA3로 유지.)
+  - 완료 증거: `5c80e0b`; `README.md:87`, `CLAUDE.md:248`,
+    `references/glossary.md:24`, `references/host-continuation.md:7`,
+    `scripts/check-host-parity.py:286`, `scripts/check-host-parity.py:291`,
+    `scripts/check-host-parity.py:295`, `scripts/check-host-parity.py:299`,
+    `scripts/pre-commit-check.sh:203`, `mcp/tests/test_host_parity.py:45`.
 - [ ] **4.7 server.py 도메인 분할 계속 (기계적 반복)**
   기확립 패턴(`tools_jobs.py` + `register_*_tools`) 그대로: 한 커밋당 한 도메인
   (tools_qa, tools_evolve, tools_session, tools_release...), 매 커밋 도구 수 불변
   assert. 5,696 LOC → 도메인당 수백 LOC 라우터로.
+  (스코프 보정: 현행 `server.py`는 감사 시점 5,696줄이 아니라 6,001줄이고,
+  상위 §2-1의 "항목 1개 = 커밋 1개"와 본문 "도메인당 한 커밋"이 충돌한다.
+  가장 독립적인 benchmark 도메인 4개 도구를 `tools_benchmark.py`로 한 번 완전
+  추출하고, registry 202개 불변 테스트로 반복 패턴을 고정한다.)
 
 ---
 
