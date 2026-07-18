@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "samvil://seed-schema/v3",
+  "$id": "samvil://seed-schema/v3.3",
   "title": "SAMVIL Seed Schema",
-  "description": "Immutable specification for SAMVIL project generation. v3.0.0 introduces AC Tree structure; root-level acceptance_criteria is optional when schema_version starts with \"3.\" — tree leaves inside features[] satisfy the \"at least 1 AC\" guarantee.",
+  "description": "Immutable specification for SAMVIL project generation. v3.3 adds optional AC verify contracts; root-level acceptance_criteria remains optional when schema_version starts with \"3.\".",
   "type": "object",
   "required": ["name", "description", "solution_type", "tech_stack", "core_experience", "features", "constraints", "out_of_scope", "version"],
   "additionalProperties": true,
@@ -172,6 +172,9 @@
             "type": "string",
             "minLength": 5,
             "description": "Human-readable feature description"
+          },
+          "acceptance_criteria": {
+            "$ref": "#/properties/acceptance_criteria"
           }
         }
       },
@@ -188,7 +191,17 @@
             "properties": {
               "criterion": { "type": "string", "minLength": 10, "description": "Testable statement that defines done" },
               "vague_words": { "type": "array", "items": { "type": "string" }, "description": "Words flagged as ambiguous during interview" },
-              "rewrite_hint": { "type": "string", "description": "Suggested rewrite to remove ambiguity" }
+              "rewrite_hint": { "type": "string", "description": "Suggested rewrite to remove ambiguity" },
+              "verify": {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "properties": {
+                  "command": { "type": "string", "minLength": 1 },
+                  "artifacts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                  "assertion": { "type": "string", "minLength": 1 }
+                }
+              }
             }
           },
           {
@@ -211,6 +224,16 @@
               "evidence": {
                 "type": "array",
                 "items": { "type": "string", "description": "file:line reference" }
+              },
+              "verify": {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "properties": {
+                  "command": { "type": "string", "minLength": 1 },
+                  "artifacts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                  "assertion": { "type": "string", "minLength": 1 }
+                }
               }
             }
           }

@@ -49,7 +49,7 @@ Returns `pass1`, `pass1b`, `should_proceed_to_pass2`, `verdict_reason`, `events[
 For each Pass 2 leaf (legacy `### Pass 2 Tree Setup (v3.0.0+)`):
 1. `tree_json = parse_ac_tree(ac_data_json=<feature.acceptance_criteria>)`.
 2. Drive Playwright runtime per legacy `### Runtime Verification with Playwright MCP` (or static fallback per `### Fallback to Static Analysis`). **While driving, record each action as a step** (`{action:goto|click|fill|press|reload|expect_text|expect_visible|expect_no_console_errors, role/name or selector, contains/equals/value/key/url}`) keyed by leaf — this becomes the deliverable spec (B).
-3. **Pass 2.5 Reward Hacking detection** per leaf evidence:
+3. **Mechanical AC contract + Pass 2.5 Reward Hacking detection**: when a leaf has `verify`, call `mcp__samvil_mcp__collect_ac_verification(project_root=".", ac_id=<id>, verify_json=<verify>)` first and include `{verify, mechanical_verification:<result>}` in its Pass 2 item; command exit/assertion/artifacts are the primary verdict evidence and file:line is secondary. Then per leaf evidence:
    - `validate_evidence(evidences_json=<["src/file:line",...]>, project_root=".")` — `all_valid=false` or `valid_count<1` → downgrade to FAIL (P1, E1).
    - `semantic_check(code=<snippet ±3 lines>, context_hint=<AC>)` — `risk_level=HIGH` → downgrade PASS/PARTIAL → FAIL; MEDIUM → PASS → PARTIAL with Socratic Questions surfaced.
 4. **Module Boundary validation (M1)**: if `.samvil/modules/` exists, run `validate_contract(project_root=".", module_name="<module>")` per relevant module. `valid=false` → surface contract errors as FAIL evidence.

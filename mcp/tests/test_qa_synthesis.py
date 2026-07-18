@@ -52,6 +52,40 @@ def test_synthesis_labels_pass_by_verification_mode() -> None:
     assert "PASS(runtime)" in render_qa_synthesis(runtime)
 
 
+def test_verify_contract_result_overrides_narrative_pass() -> None:
+    result = synthesize_qa_evidence(_base([
+        {
+            "id": "AC-1",
+            "criterion": "Create task",
+            "verdict": "PASS",
+            "verify": {"command": "npm test"},
+            "mechanical_verification": {
+                "ran": True,
+                "passed": False,
+                "log_file": ".samvil/ac-evidence/AC-1.log",
+            },
+        },
+    ]))
+
+    assert result["verdict"] == "REVISE"
+    assert result["pass2"]["items"][0]["verdict"] == "FAIL"
+    assert result["pass2"]["items"][0]["method"] == "verify.command"
+
+
+def test_verify_contract_missing_execution_fails_closed() -> None:
+    result = synthesize_qa_evidence(_base([
+        {
+            "id": "AC-1",
+            "criterion": "Create task",
+            "verdict": "PASS",
+            "verify": {"command": "npm test"},
+        },
+    ]))
+
+    assert result["pass2"]["items"][0]["verdict"] == "FAIL"
+    assert "missing" in result["pass2"]["items"][0]["reason"]
+
+
 def test_synthesis_revises_on_unimplemented_non_core_ac():
     result = synthesize_qa_evidence(_base([
         {"id": "AC-1", "criterion": "AI summary", "verdict": "UNIMPLEMENTED", "reason": "stub"},

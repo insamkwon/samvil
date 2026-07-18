@@ -1306,6 +1306,20 @@ async def validate_seed(seed_json: str) -> str:
     return json.dumps(result)
 
 
+@mcp.tool()
+async def prepare_seed_verify_contracts(seed_json: str) -> str:
+    """Fill browser AC verify commands and propose automation candidates."""
+    try:
+        from .ac_verification import prepare_seed_verify_contracts as _prepare
+
+        result = _prepare(json.loads(seed_json))
+        _log_mcp_health("ok", "prepare_seed_verify_contracts")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "prepare_seed_verify_contracts", str(e))
+        return json.dumps({"error": str(e)})
+
+
 # ── Phase 3: QA Enhancement tools (v2.5.0) ────────────────────
 
 
@@ -3061,6 +3075,20 @@ async def migrate_apply(project_root: str = ".", dry_run: bool = False) -> str:
         return json.dumps({"error": str(e)})
 
 
+@mcp.tool()
+async def migrate_seed_v3_3(project_root: str = ".") -> str:
+    """Migrate a v3.2 seed to v3.3 AC verify contracts."""
+    try:
+        from .migrate_v3_3 import apply_migration
+
+        result = apply_migration(project_root)
+        _log_mcp_health("ok", "migrate_seed_v3_3")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "migrate_seed_v3_3", str(e))
+        return json.dumps({"error": str(e)})
+
+
 # ── Codebase Manifest (v3.3) ──────────────────────────────────────────
 
 
@@ -4753,6 +4781,31 @@ async def collect_stage_evidence(project_root: str, stage: str) -> str:
     except Exception as e:
         _log_mcp_health("fail", "collect_stage_evidence", str(e))
         return json.dumps({"status": "error", "error": str(e)})
+
+
+@mcp.tool()
+async def collect_ac_verification(
+    project_root: str,
+    ac_id: str,
+    verify_json: str,
+    timeout_seconds: float = 120,
+) -> str:
+    """Execute an AC verify contract and return mechanical evidence."""
+    try:
+        from .ac_verification import run_ac_verification
+
+        result = run_ac_verification(
+            project_root,
+            ac_id,
+            json.loads(verify_json),
+            timeout_seconds=timeout_seconds,
+        )
+        status = "ok" if result.get("passed") else "warn"
+        _log_mcp_health(status, "collect_ac_verification")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "collect_ac_verification", str(e))
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()

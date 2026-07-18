@@ -327,7 +327,7 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
   - 완료 증거: `3f3a157`; `mcp/samvil_mcp/stage_evidence.py:15`,
     `mcp/samvil_mcp/stage_evidence.py:37`,
     `mcp/samvil_mcp/stage_evidence.py:70`,
-    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4745`,
+    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4773`,
     `mcp/samvil_mcp/test_deliverable.py:180`,
     `mcp/tests/test_stage_evidence.py:18`, `mcp/tests/test_stage_evidence.py:73`,
     `skills/samvil-build/SKILL.md:73`, `skills/samvil-qa/SKILL.md:61`.
@@ -339,8 +339,8 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
   스킬 배선: samvil-build Phase Z(:96)와 samvil-qa(:85)의 gate_check 호출을
   evidence_mode로 전환. **"best-effort" 문구에서 gate_check는 제외** —
   build/qa 게이트 실패 시 스킬은 진행 불가(3.3의 override 경로만 예외).
-  - 완료 증거: `c663ed0`; `mcp/samvil_mcp/server.py:2479`,
-    `mcp/samvil_mcp/server.py:2519`, `mcp/tests/test_gates.py:362`,
+  - 완료 증거: `c663ed0`; `mcp/samvil_mcp/server.py:2493`,
+    `mcp/samvil_mcp/server.py:2533`, `mcp/tests/test_gates.py:362`,
     `mcp/tests/test_gates.py:402`, `mcp/tests/test_gates.py:439`,
     `skills/samvil-build/SKILL.md:93`, `skills/samvil-build/SKILL.md:96`,
     `skills/samvil-qa/SKILL.md:80`, `skills/samvil-qa/SKILL.md:85`.
@@ -361,7 +361,7 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
     `mcp/samvil_mcp/gates.py:428`, `mcp/tests/test_qa_synthesis.py:38`,
     `mcp/tests/test_qa_smoke.py:613`, `mcp/tests/test_qa_smoke.py:629`,
     `mcp/tests/test_gates.py:439`, `skills/samvil-qa/SKILL.md:85`.
-- [ ] **2.4 `force_proceed` 제도화 (게이트 우회의 공식 경로)**
+- [x] **2.4 `force_proceed` 제도화 (게이트 우회의 공식 경로)**
   현재: 어떤 스킬 프로즈에도 정의 없이 LLM이 임의로 씀(zep-auto-test 실증).
   설계:
   - gates.py에 `gate_override(gate, reason, approved_by="user")` 도구 신설 —
@@ -371,6 +371,13 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
     force_proceed는 anti-pattern으로 전 스킬에 명문화.**
   - `contract-stage-end.sh`의 게이트 판정부가 override claim 존재를 인지하도록
     갱신.
+  - 완료 증거: `e823462`; `mcp/samvil_mcp/claim_ledger.py:374`,
+    `mcp/samvil_mcp/gates.py:446`, `mcp/samvil_mcp/gates.py:479`,
+    `mcp/samvil_mcp/server.py:2625`, `hooks/contract-stage-end.sh:177`,
+    `hooks/contract-stage-end.sh:204`, `mcp/tests/test_gate_override.py:29`,
+    `mcp/tests/test_gate_override.py:91`, `mcp/tests/test_skill_wiring.py:67`,
+    `scripts/check-skill-wiring.py:194`, `skills/samvil-build/SKILL.md:96`,
+    `skills/samvil-qa/SKILL.md:85`.
 - [ ] **2.5 AC 성공 계약 (경량판 AcceptanceCriterionSpec)**
   설계: seed 스키마의 AC에 선택 필드 추가 —
   `verify: { command?: string, artifacts?: [path], assertion?: string }`.

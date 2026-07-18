@@ -289,14 +289,34 @@ def _normalize_pass2_item(data: dict[str, Any]) -> dict[str, Any]:
     evidence = data.get("evidence") or []
     if isinstance(evidence, str):
         evidence = [evidence]
+    reason = str(data.get("reason") or data.get("notes") or "")
+    method = str(data.get("method") or "independent")
+    mechanical = data.get("mechanical_verification")
+    if isinstance(data.get("verify"), dict):
+        method = "verify.command"
+        if not isinstance(mechanical, dict) or not mechanical.get("ran"):
+            verdict = "FAIL"
+            reason = "verify.command execution result is missing"
+        else:
+            verdict = "PASS" if mechanical.get("passed") is True else "FAIL"
+            if verdict == "FAIL":
+                reason = str(
+                    mechanical.get("error")
+                    or "; ".join(mechanical.get("errors") or [])
+                    or "verify.command mechanical evidence failed"
+                )
+            log_file = str(mechanical.get("log_file") or "")
+            if log_file and log_file not in evidence:
+                evidence = [log_file, *evidence]
     return {
         "id": str(data.get("id") or data.get("ac_id") or "?"),
         "criterion": str(data.get("criterion") or data.get("description") or ""),
         "verdict": verdict,
-        "method": str(data.get("method") or "independent"),
+        "method": method,
         "evidence": list(evidence),
-        "reason": str(data.get("reason") or data.get("notes") or ""),
+        "reason": reason,
         "is_core_experience": bool(data.get("is_core_experience", False)),
+        "mechanical_verification": mechanical if isinstance(mechanical, dict) else {},
     }
 
 

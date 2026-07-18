@@ -129,6 +129,76 @@ def test_depends_on_nonexistent_feature():
     assert any("non-existent" in e for e in result["errors"])
 
 
+def test_v3_3_seed_accepts_verify_contract() -> None:
+    seed = {
+        "schema_version": "3.3",
+        "name": "my-app",
+        "description": "A mechanically verifiable task application",
+        "solution_type": "web-app",
+        "tech_stack": {"framework": "nextjs"},
+        "core_experience": {
+            "description": "User creates a task and sees it immediately",
+            "primary_screen": "TaskList",
+            "key_interactions": ["create-task"],
+        },
+        "features": [{
+            "name": "task-list",
+            "priority": 1,
+            "acceptance_criteria": [{
+                "id": "F1.AC1",
+                "description": "task appears after creation",
+                "verify": {
+                    "command": "npx playwright test tests/e2e/task-list.spec.ts",
+                    "artifacts": ["playwright-report/index.html"],
+                    "assertion": "1 passed",
+                },
+            }],
+        }],
+        "constraints": ["Must work offline"],
+        "out_of_scope": ["Authentication"],
+        "version": 1,
+    }
+
+    assert validate_seed(seed) == {"valid": True, "errors": []}
+
+    import jsonschema
+    from samvil_mcp.seed_manager import _load_schema
+
+    jsonschema.validate(seed, _load_schema("seed-schema.json"))
+
+
+def test_verify_contract_rejects_unknown_fields() -> None:
+    seed = {
+        "schema_version": "3.3",
+        "name": "my-app",
+        "description": "A mechanically verifiable task application",
+        "solution_type": "web-app",
+        "tech_stack": {"framework": "nextjs"},
+        "core_experience": {
+            "description": "User creates a task and sees it immediately",
+            "primary_screen": "TaskList",
+            "key_interactions": ["create-task"],
+        },
+        "features": [{
+            "name": "task-list",
+            "priority": 1,
+            "acceptance_criteria": [{
+                "id": "F1.AC1",
+                "description": "task appears after creation",
+                "verify": {"magic_pass": True},
+            }],
+        }],
+        "constraints": ["Must work offline"],
+        "out_of_scope": ["Authentication"],
+        "version": 1,
+    }
+
+    result = validate_seed(seed)
+
+    assert result["valid"] is False
+    assert any("verify" in error for error in result["errors"])
+
+
 # ── validate_state ──────────────────────────────────────────────
 
 

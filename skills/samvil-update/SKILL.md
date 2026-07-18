@@ -80,8 +80,7 @@ mcp__samvil_mcp__migrate_apply(project_root=".", dry_run=false)
 ```
 Render `seed_changes` / `files_created` / `backups` from the plan.
 Apply writes a rollback snapshot at `.samvil/rollback/v3_2_0/manifest.json`.
-Manual rollback only until v3.3. Detail in
-`references/migration-v3.1-to-v3.2.md`.
+Manual rollback only until v3.3. Detail in `references/migration-v3.1-to-v3.2.md`. For v3.2 → v3.3 AC verify contracts, preview the seed diff, obtain approval, then call `mcp__samvil_mcp__migrate_seed_v3_3(project_root=".")`; it writes `project.v3-2.backup.json` before the atomic seed update.
 
 Best-effort observability after success:
 ```
@@ -101,7 +100,7 @@ Host-bound failure (no `gh`, network error, rsync failure):
 
 Seed-migration failure: surface the MCP `error` payload, leave the
 backup intact, tell the user to retry or restore from
-`.v2.backup.json` / `.v3-1.backup.json`.
+`.v2.backup.json` / `.v3-1.backup.json` / `.v3-2.backup.json`.
 
 ## Output + Anti-Patterns
 

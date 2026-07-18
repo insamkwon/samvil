@@ -77,7 +77,7 @@ If `stage_can_proceed.can_proceed` is false, show blockers and stop.
 
 In both paths: validate against `references/seed-schema.json`, present, and ask approval. If edits are requested, revise and re-present.
 
-**Concrete behavior confirmation (A2)**: 추상 AC 텍스트만 보여주지 말 것 — 핵심 feature마다 AC(네거티브 포함)를 **실제 동작 시퀀스**로 풀어서 제시한다. 예: `"AC 통과" 대신 "증가 버튼 클릭 → 숫자 0→1 → 자동 저장 → 새로고침해도 1 유지 / 빈 값 추가 시도 → 거부 + 안내"`. 그 다음 `AskUserQuestion(["이렇게 동작하면 맞나요?"], [네 맞아요 / 다르게 동작해야 해요])`. "다르게" → 어느 동작이 어떻게 달라야 하는지 받아 AC 수정 후 재표시. 목적: "QA는 PASS인데 내 의도와 다름"을 빌드 전에 잡는다 (spec↔intent 격차).
+**Concrete behavior confirmation (A2)**: 추상 AC 텍스트만 보여주지 말 것 — 핵심 feature마다 AC(네거티브 포함)를 **실제 동작 시퀀스**로 풀어서 제시한다. 예: `"AC 통과" 대신 "증가 버튼 클릭 → 숫자 0→1 → 자동 저장 → 새로고침해도 1 유지 / 빈 값 추가 시도 → 거부 + 안내"`. Then call `mcp__samvil_mcp__prepare_seed_verify_contracts(seed_json=<draft>)`: browser `verify.command` values reuse per-feature Playwright specs; automation candidates are applied only after the user confirms the concrete command/output sequence. `AskUserQuestion(["이렇게 동작하면 맞나요?"], [네 맞아요 / 다르게 동작해야 해요])`; on change, revise AC/verify and re-present. Write schema_version `3.3` after approval.
 
 ## After Approval
 
