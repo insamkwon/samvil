@@ -25,6 +25,7 @@ prose, Health Check details, project init schema, and Gate A protocol in
    - Bash: `node --version 2>/dev/null && echo OK || echo MISSING`
    - Bash: `uv --version 2>/dev/null || echo MISSING`
    - Bash: `gh --version 2>/dev/null | head -1 || echo MISSING`
+   - Bash: `command -v python3 >/dev/null 2>&1 && echo HEALTHY || echo 'DEGRADED(no python)'` → Contract status
 
    Render as a table **before** asking any question:
    ```
@@ -38,6 +39,7 @@ prose, Health Check details, project init schema, and Gate A protocol in
    | MCP 도구     | ✅ <tool_count>개                 |
    | DB           | ✅/❌                             |
    | Hooks        | ✅ / ⚠️ <hook_failures_24h> fail(24h) |
+   | Contract     | ✅ HEALTHY / ⚠️ DEGRADED(no python)  |
    | Health Tier  | ✅/⚠️/🔴 <HEALTHY/DEGRADED/CRITICAL> |
    ```
    `hook_failures_24h > 0` → table 아래에 `last_hook_failure.error` 한 줄 출력

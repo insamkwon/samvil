@@ -12,6 +12,14 @@ points per stage:
 pre_stage  →  [stage body unchanged]  →  post_stage
 ```
 
+**Lifecycle correction (trustworthy-core Wave 4.2):** Claude Code's
+`PostToolUse(Skill)` fires after the Skill prompt is loaded, not after the stage
+body finishes. Therefore only the start claim may be automatic. The plugin no
+longer registers `contract-stage-end.sh` as a PostToolUse hook; artifact-backed
+post-stage gates remain in the stage skill/MCP finalizer until the host exposes
+an explicit stage-complete lifecycle signal. Running the end hook manually is
+diagnostic only. This prevents a pre-execution gate from producing a false PASS.
+
 Each skill references this protocol by name; the minimal per-stage
 addition is the **domain-specific** call (e.g. `score_ambiguity`
 at the end of interview because only interview has those dimensions).
@@ -169,6 +177,11 @@ a contract-layer call returns `{"error": ...}`:
   can audit drift.
 
 Never fake a `gate_verdict=pass` when the check couldn't run.
+
+If Python is unavailable, the boot health table must show
+`Contract: DEGRADED(no python)`. Fresh interview entry passes `project_root` in
+the Skill input; the start hook writes `.samvil/contract-project-root` before
+`project.state.json` or `project.seed.json` exists.
 
 ## Quick-reference checklist for skill authors
 

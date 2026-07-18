@@ -13,6 +13,9 @@ All notable changes to SAMVIL are documented here.
   detection with Hangul-aware length floors.
 - Made Council default-off across task creation, seed chaining, resume, and
   complete-stage routing; only an explicit persisted `--council` opts in.
+- Prevented premature contract gates by disabling the invalid automatic
+  PostToolUse stage-end hook, while surfacing no-Python degradation and seeding
+  fresh-interview project roots for the start hook.
 
 ---
 

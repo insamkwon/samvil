@@ -56,14 +56,6 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/log-build-result.sh \"$TOOL_INPUT\" \"$TOOL_EXIT_CODE\""
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/contract-stage-end.sh \"$TOOL_INPUT\" \"$TOOL_EXIT_CODE\""
-          }
-        ]
       }
     ]
   }

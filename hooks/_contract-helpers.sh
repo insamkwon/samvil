@@ -36,11 +36,28 @@ SAMVIL_PLUGIN_ROOT="$(_samvil_resolve_plugin_root)"
 # SessionStart hook has run. If the venv hasn't been created yet, the
 # Python calls fall through to the system `python3` (best-effort mode —
 # the hook is allowed to no-op silently until the venv is in place).
-if [ -x "$SAMVIL_PLUGIN_ROOT/mcp/.venv/bin/python" ]; then
+if [ "${SAMVIL_FORCE_NO_PYTHON:-0}" = "1" ]; then
+  SAMVIL_PY=""
+  SAMVIL_PY_AVAILABLE=0
+elif [ -x "$SAMVIL_PLUGIN_ROOT/mcp/.venv/bin/python" ]; then
   SAMVIL_PY="$SAMVIL_PLUGIN_ROOT/mcp/.venv/bin/python"
+  SAMVIL_PY_AVAILABLE=1
+elif command -v python3 >/dev/null 2>&1; then
+  SAMVIL_PY="$(command -v python3)"
+  SAMVIL_PY_AVAILABLE=1
 else
-  SAMVIL_PY="$(command -v python3 || echo python3)"
+  SAMVIL_PY=""
+  SAMVIL_PY_AVAILABLE=0
 fi
+export SAMVIL_PY_AVAILABLE
+
+samvil_contract_python_status() {
+  if [ "$SAMVIL_PY_AVAILABLE" = "1" ]; then
+    echo "HEALTHY"
+  else
+    echo "DEGRADED(no python)"
+  fi
+}
 
 # Export the MCP package dir so the inline Python heredocs below can
 # resolve imports without hard-coding paths.
@@ -114,6 +131,29 @@ print(skill.strip())
 PY
 }
 
+samvil_contract_extract_project_root() {
+  local raw="$1"
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || { echo ""; return 1; }
+  "$SAMVIL_PY" - "$raw" <<'PY' 2>/dev/null
+import json, sys
+try:
+    data = json.loads(sys.argv[1] if len(sys.argv) > 1 else "")
+except Exception:
+    data = {}
+print(str(data.get("project_root") or data.get("cwd") or "").strip())
+PY
+}
+
+samvil_contract_write_project_root_marker() {
+  local root="$1"
+  [ -n "$root" ] || return 1
+  local absolute
+  absolute="$(cd "$root" 2>/dev/null && pwd -P)" || return 1
+  mkdir -p "$absolute/.samvil" || return 1
+  printf '%s\n' "$absolute" > "$absolute/.samvil/contract-project-root"
+  echo "$absolute"
+}
+
 # samvil_contract_is_stage_skill <skill_name>
 #   Returns 0 if the skill is one we want to emit stage claims for, 1 otherwise.
 samvil_contract_is_stage_skill() {
@@ -168,8 +208,20 @@ samvil_contract_primary_agent() {
 #   Return the nearest ancestor of CWD that contains project.state.json
 #   (or equivalent). Empty string means "not a SAMVIL project context".
 samvil_contract_find_project_root() {
+  if [ -n "${SAMVIL_PROJECT_ROOT:-}" ] && [ -d "$SAMVIL_PROJECT_ROOT" ]; then
+    (cd "$SAMVIL_PROJECT_ROOT" && pwd -P)
+    return 0
+  fi
   local dir="$PWD"
   while [ "$dir" != "/" ] && [ -n "$dir" ]; do
+    if [ -f "$dir/.samvil/contract-project-root" ]; then
+      local marked
+      marked="$(head -n 1 "$dir/.samvil/contract-project-root" 2>/dev/null)"
+      if [ -n "$marked" ] && [ -d "$marked" ]; then
+        echo "$marked"
+        return 0
+      fi
+    fi
     if [ -f "$dir/project.state.json" ] || [ -f "$dir/project.seed.json" ]; then
       echo "$dir"
       return 0

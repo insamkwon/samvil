@@ -527,7 +527,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 
 > 목적: 드리프트가 재발할 수 없는 구조. 삭제가 기능이다.
 
-- [ ] **4.1 thin↔legacy 공유 상수의 단일 소스화 + drift CI**
+- [x] **4.1 thin↔legacy 공유 상수의 단일 소스화 + drift CI**
   임계값·MAX_RETRIES·tier 테이블·게이트 이름 등 두 파일에 모두 나타나는 상수를
   `references/decision-boundaries.md`(기존 SSOT 선언 활용)에만 정의하고
   thin/legacy는 인용. `check-skill-wiring.py`에 "thin과 legacy에 동시에 등장하는
@@ -537,6 +537,10 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   오탐이 폭발한다. CI는 실제 공유 계약인 uppercase named numeric
   constant만 비교하고, 양쪽이 모두 `decision-boundaries.md`를 인용하는지
   강제한다.)
+  - 완료 증거: `ada195e`; `references/decision-boundaries.md:173`,
+    `references/decision-boundaries.md:180`,
+    `scripts/check-skill-wiring.py:379`, `scripts/check-skill-wiring.py:569`,
+    `mcp/tests/test_skill_wiring.py:113`, `mcp/tests/test_skill_wiring.py:131`.
 - [ ] **4.2 contract layer의 hook 소유화 (스킬 프로즈에서 제거)**
   현상: pre/post 계약을 각 스킬 body가 손으로 재현 — QA만 완전, 나머지 제각각,
   "best-effort" 문구가 스킵 면허(skills 감사 Top1·Top3).
@@ -551,6 +555,13 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   마커 파일로 선주입.
   ⚠️ 대수술이므로 **스테이지 1개(qa→retro 전이)로 파일럿 → 검증 → 나머지 확산**
   순서로. 각 단계 독립 커밋.
+  (스코프 보정: 실제 Claude Code `PostToolUse(Skill)`은 스테이지 본문
+  완료 후가 아니라 Skill 프롬프트 로드 직후 발화한다. QA 파일럿에서 end
+  hook 소유화를 강행하면 런타임 증거 생성 전에 gate가 평가되어 Wave 2를
+  회귀시킨다. 따라서 자동 end hook을 비활성화하고, 명시적 stage-complete
+  lifecycle이 생기기 전까지 artifact-backed gate는 스킬/MCP finalizer가 소유한다.
+  start claim만 hook 소유로 유지하며 python 부재 표출·fresh interview root marker를
+  보강한다.)
 - [ ] **4.3 에이전트 50→~40 + 문서 일치**
   - phantom 2개(`build-worker`, `compressor` — ROLE-INVENTORY:27,83에만 존재)를
     `model_role.py`에서 제거.

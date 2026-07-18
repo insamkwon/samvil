@@ -37,8 +37,12 @@ SKILL_NAME="$(samvil_contract_extract_skill_name "$TOOL_INPUT")"
 # 2. Only stage skills produce claims.
 samvil_contract_is_stage_skill "$SKILL_NAME" || exit 0
 
-# 3. Find the project root. No root → we're not in a SAMVIL project context.
-PROJECT_ROOT="$(samvil_contract_find_project_root)"
+# 3. Seed the root marker from explicit input before interview creates state/seed.
+INPUT_PROJECT_ROOT="$(samvil_contract_extract_project_root "$TOOL_INPUT")"
+if [ -n "$INPUT_PROJECT_ROOT" ]; then
+  PROJECT_ROOT="$(samvil_contract_write_project_root_marker "$INPUT_PROJECT_ROOT")"
+fi
+PROJECT_ROOT="${PROJECT_ROOT:-$(samvil_contract_find_project_root)}"
 [ -z "$PROJECT_ROOT" ] && exit 0
 
 # 4. Ensure .samvil/ baseline is in place.
