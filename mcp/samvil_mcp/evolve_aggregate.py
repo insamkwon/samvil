@@ -70,6 +70,13 @@ def _read_text(path: Path, *, max_bytes: int = 4000) -> str:
         return ""
 
 
+def _normalize_count_keys(counts: Any) -> dict[str, Any]:
+    """Return QA count keys in a case-insensitive canonical form."""
+    if not isinstance(counts, dict):
+        return {}
+    return {str(key).casefold(): value for key, value in counts.items()}
+
+
 def _extract_core_problem(interview_md: str) -> str:
     """Pull the '핵심 문제' / 'Core problem' line(s) from interview summary.
 
@@ -191,7 +198,7 @@ def _four_dim_baseline(
     """
     synthesis = qa_results.get("synthesis") or {}
     pass2 = synthesis.get("pass2") or {}
-    counts = pass2.get("counts") or {}
+    counts = _normalize_count_keys(pass2.get("counts"))
     return {
         "core_problem_excerpt": _extract_core_problem(interview_text),
         "seed_description": (seed.get("description") or "")[:320],
