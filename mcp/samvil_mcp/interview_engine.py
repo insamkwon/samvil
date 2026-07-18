@@ -68,6 +68,17 @@ MIN_QUESTIONS = {
     "deep":     40,
 }
 
+# Forced question budgets. Reaching the cap offers draft-or-extend; it never
+# silently loops. Each explicit user extension adds five questions.
+MAX_QUESTIONS = {
+    "minimal": 6,
+    "standard": 12,
+    "thorough": 20,
+    "full": 30,
+    "deep": 40,
+}
+QUESTION_EXTENSION = 5
+
 # Required interview phases per tier (v3.1.0, Sprint 1)
 TIER_REQUIRED_PHASES = {
     "minimal":  {"core", "scope"},
@@ -88,6 +99,7 @@ def score_ambiguity(
     tier: str = "standard",
     questions_asked: int = 0,
     pre_filled_dimensions: list[str] | None = None,
+    question_extensions: int = 0,
 ) -> dict:
     """Score ambiguity of an interview state across 10 dimensions.
 
@@ -109,6 +121,9 @@ def score_ambiguity(
     """
     target = TIER_TARGETS.get(tier, 0.05)
     base_min_q = MIN_QUESTIONS.get(tier, 10)
+    max_q = MAX_QUESTIONS.get(tier, 12)
+    extensions = max(0, int(question_extensions or 0))
+    effective_max_q = max_q + extensions * QUESTION_EXTENSION
     pre_filled = set(pre_filled_dimensions or [])
 
     # Reduce MIN_QUESTIONS by one per pre-filled dimension (floor 2)
@@ -159,6 +174,15 @@ def score_ambiguity(
 
     min_questions_met = questions_asked >= min_q
     converged = overall <= target and floors_passed and min_questions_met
+    questions_remaining = max(0, effective_max_q - questions_asked)
+    budget_exhausted = questions_asked >= effective_max_q and not converged
+    if converged:
+        budget_action = "converged"
+    elif budget_exhausted:
+        budget_action = "offer_draft_or_extend"
+    else:
+        budget_action = "continue"
+    next_question_number = min(questions_asked + 1, effective_max_q)
 
     return {
         # Core dimension clarities (backward-compatible) ──────────
@@ -178,6 +202,14 @@ def score_ambiguity(
         "questions_asked":      questions_asked,
         "min_questions_required": min_q,
         "min_questions_met":    min_questions_met,
+        "max_questions":        max_q,
+        "effective_max_questions": effective_max_q,
+        "question_extensions":  extensions,
+        "extension_questions":  QUESTION_EXTENSION,
+        "questions_remaining":  questions_remaining,
+        "budget_exhausted":     budget_exhausted,
+        "budget_action":        budget_action,
+        "next_question_prefix": f"[질문 {next_question_number}/{effective_max_q}]",
         "pre_filled_dimensions": sorted(pre_filled),
         "dimension_scores": {
             "goal":           round(goal_score, 3),

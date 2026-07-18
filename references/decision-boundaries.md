@@ -25,24 +25,21 @@ the implementations cited under each section.
 
 ## Interview termination
 
-**Current rule (before Wave 3.1):** Interview converges when
-`ambiguity_score` ≤ tier threshold, component floors pass, and the current
-`min_questions_reference` is met. **Budget contract (Wave 3.1):**
-`max_questions` becomes the forced cap; reaching it must offer draft-or-extend
-instead of silently looping. Until that runtime change lands, max values are
-provisional and MUST NOT be restated in skill files.
+Interview converges when `ambiguity_score` ≤ tier threshold, component floors
+pass, and `min_questions_reference` is met. `max_questions` is a forced cap:
+reaching it before convergence must offer draft-or-extend instead of silently
+looping. Explicit extension adds 5 questions.
 
-| `samvil_tier` | `ambiguity_score` 임계값 | `min_questions_reference` | `max_questions` (provisional) |
+| `samvil_tier` | `ambiguity_score` 임계값 | `min_questions_reference` | `max_questions` |
 |---|---|---|---|
-| `minimal` | 0.10 | 5 | 8 |
-| `standard` | 0.05 | 10 | 16 |
-| `thorough` | 0.02 | 20 | 24 |
-| `full` | 0.01 | 30 | 32 |
+| `minimal` | 0.10 | 5 | 6 |
+| `standard` | 0.05 | 10 | 12 |
+| `thorough` | 0.02 | 20 | 20 |
+| `full` | 0.01 | 30 | 30 |
 | `deep` | 0.005 | 40 | 40 |
 
 **Current implementation:** `mcp/samvil_mcp/interview_engine.py`
-(`TIER_TARGETS`, `MIN_QUESTIONS`, `score_ambiguity`). Max-budget enforcement
-has no runtime implementation yet and belongs to Wave 3.1.
+(`TIER_TARGETS`, `MIN_QUESTIONS`, `MAX_QUESTIONS`, `score_ambiguity`).
 `mcp/samvil_mcp/interview_v3_2.py` owns `interview_level`-aware
 (quick/normal/deep/max/auto) selection.
 

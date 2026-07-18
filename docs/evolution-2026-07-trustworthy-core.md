@@ -327,7 +327,7 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
   - 완료 증거: `3f3a157`; `mcp/samvil_mcp/stage_evidence.py:15`,
     `mcp/samvil_mcp/stage_evidence.py:37`,
     `mcp/samvil_mcp/stage_evidence.py:70`,
-    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4785`,
+    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4792`,
     `mcp/samvil_mcp/test_deliverable.py:180`,
     `mcp/tests/test_stage_evidence.py:18`, `mcp/tests/test_stage_evidence.py:73`,
     `skills/samvil-build/SKILL.md:73`, `skills/samvil-qa/SKILL.md:61`.
@@ -339,8 +339,8 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
   스킬 배선: samvil-build Phase Z(:96)와 samvil-qa(:85)의 gate_check 호출을
   evidence_mode로 전환. **"best-effort" 문구에서 gate_check는 제외** —
   build/qa 게이트 실패 시 스킬은 진행 불가(3.3의 override 경로만 예외).
-  - 완료 증거: `c663ed0`; `mcp/samvil_mcp/server.py:2505`,
-    `mcp/samvil_mcp/server.py:2545`, `mcp/tests/test_gates.py:362`,
+  - 완료 증거: `c663ed0`; `mcp/samvil_mcp/server.py:2512`,
+    `mcp/samvil_mcp/server.py:2552`, `mcp/tests/test_gates.py:362`,
     `mcp/tests/test_gates.py:402`, `mcp/tests/test_gates.py:439`,
     `skills/samvil-build/SKILL.md:93`, `skills/samvil-build/SKILL.md:96`,
     `skills/samvil-qa/SKILL.md:80`, `skills/samvil-qa/SKILL.md:85`.
@@ -373,7 +373,7 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
     갱신.
   - 완료 증거: `e823462`; `mcp/samvil_mcp/claim_ledger.py:374`,
     `mcp/samvil_mcp/gates.py:446`, `mcp/samvil_mcp/gates.py:479`,
-    `mcp/samvil_mcp/server.py:2637`, `hooks/contract-stage-end.sh:177`,
+    `mcp/samvil_mcp/server.py:2644`, `hooks/contract-stage-end.sh:177`,
     `hooks/contract-stage-end.sh:204`, `mcp/tests/test_gate_override.py:29`,
     `mcp/tests/test_gate_override.py:91`, `mcp/tests/test_skill_wiring.py:67`,
     `scripts/check-skill-wiring.py:194`, `skills/samvil-build/SKILL.md:96`,
@@ -402,16 +402,27 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
     `mcp/tests/test_qa_synthesis.py:55`, `references/seed-schema.json:1`,
     `skills/samvil-seed/SKILL.md:80`, `skills/samvil-qa/SKILL.md:52`,
     `skills/samvil-update/SKILL.md:83`.
-- [ ] **2.6 리워드 해킹 결정론 검사 1건 추가 (Ouroboros 차용, 최소판)**
+- [x] **2.6 리워드 해킹 결정론 검사 1건 추가 (Ouroboros 차용, 최소판)**
   `semantic_checker.py`에 셸 시맨틱 검사 추가: 테스트 명령이 `| tail`/`| grep`류
   파이프 뒤에서만 성공 판정되는 로그 형태면(exit code 마커 부재) 증거로 인정하지
   않음(EVIDENCE_FORM_MISMATCH 류 사유 반환). 2.1의 `SAMVIL_EXIT:` 마커 표준이
   있으므로 검사가 단순해진다.
+  - 완료 증거: `ad5b853`; `mcp/samvil_mcp/semantic_checker.py:71`,
+    `mcp/samvil_mcp/semantic_checker.py:94`,
+    `mcp/samvil_mcp/ac_verification.py:156`,
+    `mcp/tests/test_semantic_checker.py:119`,
+    `mcp/tests/test_semantic_checker.py:130`,
+    `mcp/tests/test_ac_verification.py:124`, `mcp/tests/test_wave2_dogfood.py:26`,
+    `docs/evidence/evolution-2026-07-wave2-dogfood.md:9`.
 
 **Wave 2 완료 기준**: dogfood(web 계열 1개)에서 (a) QA 리포트의 pass 숫자가
 `.samvil/test-results.json`과 byte-일치, (b) 의도적으로 테스트 1개를 깨뜨렸을 때
 gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가 막히고 override
 경로가 claim에 남는 것 — 3가지 실측 증거.
+
+- Wave 2 실측 증거: `docs/evidence/evolution-2026-07-wave2-dogfood.md:9`,
+  `docs/evidence/evolution-2026-07-wave2-dogfood.md:16`,
+  `docs/evidence/evolution-2026-07-wave2-dogfood.md:20`.
 
 ---
 
@@ -427,6 +438,9 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   초안을 만들까요, 몇 가지 더 물을까요?"** 강제 오퍼(사용자가 연장 선택 시 +5).
   "No phase reprompt cap"(SKILL.md:70) 문구 제거. 진행률 표시: 매 질문에
   `[질문 7/12]` 프리픽스.
+  (스코프 보정: 현재 thin SKILL에는 감사 당시의 `No phase reprompt cap` 문구가 이미
+  없고, legacy의 vague-AC 최대 2회 보정은 국소 안전장치다. 이를 제거하지 않고 전역
+  `max_questions`/사용자 +5 연장 계약이 상위 경계로 강제되도록 구현한다.)
 - [ ] **3.2 배치 질문 (왕복 절반화)**
   같은 Phase 내 독립 질문 2-3개를 AskUserQuestion 1회의 다중 질문(questions
   배열)으로 묶는 규약을 interview SKILL에 명문화. 서로 의존하는 질문만 순차.

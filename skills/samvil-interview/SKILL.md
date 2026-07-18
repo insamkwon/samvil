@@ -54,7 +54,7 @@ Per question: `route_question(question, manifest_facts, force_user=(streak>=3))`
 
 ## Step 2 — Phase Loop (Korean, host-bound)
 
-Run **only the phases in `aggregate.required_phases`**. **한 번에 하나씩** AskUserQuestion (객관식 + Other), preset-aware options. Adaptive follow-up (short→expand, long→structure, vague→choose). Framework names (AARRR/JTBD/HEART) never exposed to user.
+Run **only the phases in `aggregate.required_phases`**. **한 번에 하나씩** AskUserQuestion (객관식 + Other), preset-aware options. Prefix every prompt with the latest `score_ambiguity.next_question_prefix` (`[질문 N/max]`). Adaptive follow-up (short→expand, long→structure, vague→choose). Framework names (AARRR/JTBD/HEART) never exposed to user.
 
 Per-`solution_type` question bodies + Phase id/trigger/body 매핑 표: `SKILL.legacy.md` §"Phase id / Trigger / Body 매핑 표".
 
@@ -62,11 +62,11 @@ Per-`solution_type` question bodies + Phase id/trigger/body 매핑 표: `SKILL.l
 
 ## Step 3 — Convergence Check
 
-Track `questions_asked` (increment per user question). Re-score after each Phase:
-`mcp__samvil_mcp__score_ambiguity(interview_state='<json>', tier="<tier>", questions_asked=<N>)`.
+Track `questions_asked` (increment per user question) and `question_extensions` (starts 0). Re-score after each Phase:
+`mcp__samvil_mcp__score_ambiguity(interview_state='<json>', tier="<tier>", questions_asked=<N>, question_extensions=<E>)`.
 Render milestone + `floor_violations` + `missing_items` + `min_questions_met` + `dimension_scores`.
 
-**Convergence** = `ambiguity ≤ target` + `floors_passed` + `min_questions_met`. Read all tier numbers only from `references/decision-boundaries.md`: `min_questions_reference` is the current convergence floor; `max_questions` is the provisional forced budget activated by Wave 3.1. Until then, loop until all 3 current conditions hold and never invent a numeric override. Check `dimension_scores`: highest-scoring dimension's Phase is the next loop target.
+**Convergence** = `ambiguity ≤ target` + `floors_passed` + `min_questions_met`. Read all tier numbers only from `references/decision-boundaries.md`. If `budget_action="offer_draft_or_extend"`, AskUserQuestion: `지금까지로 seed 초안을 만들까요, 질문을 5개 더 이어갈까요?` → draft routes to Step 4; extend increments `question_extensions` once and resumes. Otherwise use the highest `dimension_scores` Phase next; never loop past the effective max without this user choice.
 
 **AC Testability Gate (PHI-06)**: vague AC ("좋은", "빠른", "직관적인", "smooth"…) → AskUserQuestion to rewrite. Never accept vague AC silently.
 

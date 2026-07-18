@@ -43,6 +43,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .interview_engine import MAX_QUESTIONS, QUESTION_EXTENSION
+
 INTERVIEW_AGGREGATE_SCHEMA_VERSION = "1.0"
 
 # Tier ladder for interview (full + v3.1 deep). Pipeline-side `samvil_tier`
@@ -393,6 +395,10 @@ def aggregate_interview_state(
         "current_stage": current_stage,
         "tier": tier_block,
         "ambiguity_target": ambiguity_target,
+        "question_budget": {
+            "max_questions": MAX_QUESTIONS.get(chosen_tier, 12),
+            "extension_questions": QUESTION_EXTENSION,
+        },
         "required_phases": required_phases,
         "mode": mode_block,
         "preset": preset_block,

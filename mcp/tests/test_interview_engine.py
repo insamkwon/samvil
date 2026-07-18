@@ -1,7 +1,7 @@
 """Tests for SAMVIL Interview Ambiguity Scoring (v2.5.0 — 10 dimensions)."""
 
 import pytest
-from samvil_mcp.interview_engine import score_ambiguity, MIN_QUESTIONS
+from samvil_mcp.interview_engine import MAX_QUESTIONS, MIN_QUESTIONS, score_ambiguity
 
 
 # ── Comprehensive state fixture ─────────────────────────────────
@@ -74,6 +74,47 @@ class TestConvergence:
         assert MIN_QUESTIONS["full"]     == 30
         assert MIN_QUESTIONS["deep"]     == 40
 
+    def test_max_questions_per_tier(self):
+        assert MAX_QUESTIONS == {
+            "minimal": 6,
+            "standard": 12,
+            "thorough": 20,
+            "full": 30,
+            "deep": 40,
+        }
+
+    def test_budget_forces_draft_or_extend_offer(self):
+        result = score_ambiguity({}, tier="standard", questions_asked=12)
+
+        assert result["converged"] is False
+        assert result["budget_exhausted"] is True
+        assert result["budget_action"] == "offer_draft_or_extend"
+        assert result["max_questions"] == 12
+        assert result["questions_remaining"] == 0
+
+    def test_question_extension_adds_five(self):
+        result = score_ambiguity(
+            {},
+            tier="standard",
+            questions_asked=12,
+            question_extensions=1,
+        )
+
+        assert result["effective_max_questions"] == 17
+        assert result["budget_exhausted"] is False
+        assert result["questions_remaining"] == 5
+        assert result["next_question_prefix"] == "[질문 13/17]"
+
+    def test_converged_state_does_not_offer_extension(self):
+        result = score_ambiguity(
+            _comprehensive_state(),
+            tier="standard",
+            questions_asked=12,
+        )
+
+        assert result["converged"] is True
+        assert result["budget_action"] == "converged"
+
 
 # ── Result schema tests ─────────────────────────────────────────
 
@@ -86,6 +127,8 @@ class TestResultSchema:
             "ambiguity", "converged", "target", "tier",
             "milestone", "floors_passed", "floor_violations", "missing_items",
             "questions_asked", "min_questions_required", "min_questions_met",
+            "max_questions", "effective_max_questions", "questions_remaining",
+            "budget_exhausted", "budget_action", "next_question_prefix",
             "dimension_scores",
         ]
         for field in required:

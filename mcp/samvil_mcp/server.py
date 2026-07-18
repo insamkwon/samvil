@@ -1105,6 +1105,7 @@ async def score_ambiguity(
     tier: str = "standard",
     questions_asked: int = 0,
     pre_filled_dimensions: str = "",
+    question_extensions: int = 0,
 ) -> str:
     """Score interview ambiguity across 10 dimensions (v2.6.0).
     interview_state: JSON with keys target_user, core_problem, core_experience,
@@ -1121,7 +1122,13 @@ async def score_ambiguity(
     from .interview_engine import score_ambiguity as _score
     state = json.loads(interview_state)
     pre_filled = [d.strip() for d in pre_filled_dimensions.split(",") if d.strip()] if pre_filled_dimensions else []
-    result = _score(state, tier=tier, questions_asked=questions_asked, pre_filled_dimensions=pre_filled)
+    result = _score(
+        state,
+        tier=tier,
+        questions_asked=questions_asked,
+        pre_filled_dimensions=pre_filled,
+        question_extensions=question_extensions,
+    )
     return json.dumps(result)
 
 

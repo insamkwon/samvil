@@ -4,6 +4,13 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## Unreleased
+
+- Added enforced per-tier interview question budgets, `[질문 N/max]` progress,
+  and an explicit draft-or-extend-by-5 choice at the cap.
+
+---
+
 ## v4.32.1 — 2026-06-14
 
 **README body reflects tests-as-deliverable (PATCH)**

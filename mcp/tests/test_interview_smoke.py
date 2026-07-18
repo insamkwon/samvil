@@ -29,6 +29,7 @@ validated by interactive `/samvil:samvil-interview` runs.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -137,6 +138,34 @@ def test_ambiguity_target_matches_engine_for_all_tiers():
         assert TIER_AMBIGUITY_TARGETS[tier] == TIER_TARGETS[tier], (
             f"{tier}: aggregate target diverges from engine"
         )
+
+
+def test_aggregate_exposes_question_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAMVIL_PRESET_DIR", str(tmp_path / "presets-empty"))
+    result = aggregate_interview_state(tmp_path, prompt="todo app")
+
+    assert result["question_budget"] == {
+        "max_questions": 12,
+        "extension_questions": 5,
+    }
+
+
+def test_score_ambiguity_mcp_applies_extension() -> None:
+    from samvil_mcp.server import score_ambiguity
+
+    result = json.loads(
+        asyncio.run(
+            score_ambiguity(
+                interview_state="{}",
+                tier="minimal",
+                questions_asked=6,
+                question_extensions=1,
+            )
+        )
+    )
+
+    assert result["effective_max_questions"] == 11
+    assert result["budget_exhausted"] is False
 
 
 def test_required_phases_mirror_engine_for_all_tiers():
