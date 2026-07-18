@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .ssot_io import atomic_write_text
+
 _LEAF_CHECKPOINT_FILENAME = "leaf-checkpoint.json"
 _SAMVIL_DIR = ".samvil"
 
@@ -103,8 +105,9 @@ def write_leaf_checkpoint(
         "leaf_description": leaf_description,
         "written_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
-    (d / _LEAF_CHECKPOINT_FILENAME).write_text(
-        json.dumps(checkpoint, ensure_ascii=False, indent=2), encoding="utf-8"
+    atomic_write_text(
+        d / _LEAF_CHECKPOINT_FILENAME,
+        json.dumps(checkpoint, ensure_ascii=False, indent=2),
     )
     return checkpoint
 

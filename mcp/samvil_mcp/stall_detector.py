@@ -22,6 +22,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .claim_ledger import _locked
+from .ssot_io import atomic_write_text_unlocked
+
 STALL_TIMEOUT_SECONDS = 300.0
 MAX_STALL_RETRIES = 2
 
@@ -129,15 +132,18 @@ def heartbeat_state(state_path: str, now_iso: str | None = None) -> dict:
     """
     p = Path(state_path)
     now_iso = now_iso or _now_iso_v3()
-    state: dict = {}
-    if p.exists():
-        try:
-            state = json.loads(p.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            state = {}
-    state["last_progress_at"] = now_iso
-    state.setdefault("stall_recovery_count", 0)
-    p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    with _locked(p):
+        state: dict = {}
+        if p.exists():
+            try:
+                state = json.loads(p.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                state = {}
+        state["last_progress_at"] = now_iso
+        state.setdefault("stall_recovery_count", 0)
+        atomic_write_text_unlocked(
+            p, json.dumps(state, ensure_ascii=False, indent=2)
+        )
     return state
 
 
@@ -204,14 +210,17 @@ def build_reawake_message(stage: str, detail: dict, count: int) -> str:
 def increment_stall_recovery_count(state_path: str) -> int:
     """Bump ``stall_recovery_count`` on state.json. Returns new value."""
     p = Path(state_path)
-    state: dict = {}
-    if p.exists():
-        try:
-            state = json.loads(p.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            state = {}
-    state["stall_recovery_count"] = int(state.get("stall_recovery_count", 0)) + 1
-    p.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    with _locked(p):
+        state: dict = {}
+        if p.exists():
+            try:
+                state = json.loads(p.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                state = {}
+        state["stall_recovery_count"] = int(state.get("stall_recovery_count", 0)) + 1
+        atomic_write_text_unlocked(
+            p, json.dumps(state, ensure_ascii=False, indent=2)
+        )
     return int(state["stall_recovery_count"])
 
 

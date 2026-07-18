@@ -22,7 +22,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .claim_ledger import _locked
 from .host_adapters import get_chain_continuation as _get_chain_continuation
+from .ssot_io import atomic_write_text
 
 MARKER_FILENAME = "next-skill.json"
 SAMVIL_DIR = ".samvil"
@@ -52,7 +54,7 @@ def write_chain_marker(
     }
 
     marker_path = samvil_dir / MARKER_FILENAME
-    marker_path.write_text(json.dumps(marker, indent=2))
+    atomic_write_text(marker_path, json.dumps(marker, indent=2))
 
     return marker
 
@@ -83,9 +85,10 @@ def clear_chain_marker(
     Returns True if marker was removed, False if it didn't exist.
     """
     marker_path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
-    if marker_path.exists():
-        marker_path.unlink()
-        return True
+    with _locked(marker_path):
+        if marker_path.exists():
+            marker_path.unlink()
+            return True
     return False
 
 

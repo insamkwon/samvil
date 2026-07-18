@@ -241,10 +241,15 @@ v4.31이 시작한 방향의 완성이다.
   - 완료 증거: `9d193ae`; `mcp/samvil_mcp/server.py:599`,
     `mcp/samvil_mcp/server.py:752`, `mcp/tests/test_orchestrator_mcp.py:119`,
     `mcp/tests/test_orchestrator_mcp.py:155`, `CLAUDE.md:301`.
-- [ ] **1.2 동명 프로젝트 세션 오염 수정**
+- [x] **1.2 동명 프로젝트 세션 오염 수정**
   `event_store.py:129` `find_session_by_project`가 이름만 조회 → 같은 이름의 다른
   프로젝트 세션 오염. project_root 절대경로(또는 그 해시)를 세션 레코드에 저장하고
   조회 키에 포함.
+  - 완료 증거: `9c4be56`; `mcp/samvil_mcp/models.py:82`,
+    `mcp/samvil_mcp/event_store.py:18`, `mcp/samvil_mcp/event_store.py:68`,
+    `mcp/samvil_mcp/event_store.py:142`, `mcp/samvil_mcp/server.py:352`,
+    `mcp/samvil_mcp/server.py:535`, `mcp/tests/test_event_store.py:53`,
+    `mcp/tests/test_event_store.py:70`.
 - [ ] **1.3 SSOT writer 전체에 락+원자쓰기 적용**
   기존 헬퍼(`claim_ledger._locked` + tmp/rename 패턴, 이미 background_jobs.py:39가
   모듈 경계 넘어 import 중)를 다음에 적용:
