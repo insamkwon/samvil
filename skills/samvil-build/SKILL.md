@@ -31,7 +31,7 @@ Read `recipe_path`. Build core_experience per legacy `### solution_type: "<type>
 
 **Module Boundary pre-check (M1)**: if `.samvil/modules/` exists, run `enforce_boundary(project_root="~/dev/<seed.name>", module_name="<feature>")` for the feature's module. If `violation_count > 0`, surface violations in worker prompt so it avoids cross-module imports.
 
-**Circuit Breaker (MAX_RETRIES=2)**:
+**Circuit Breaker (`MAX_RETRIES`)** — value and semantics are defined only in `references/decision-boundaries.md`:
 - PASS → `save_event(event_type="build_pass", data='{"attempt":N,"scope":"core"}')`. Per-feature passes use `"scope":"feature:<name>"`; Step 4 integration build uses `"scope":"integration"`.
 - FAIL → 먼저 `mcp__samvil_mcp__classify_build_failure(project_root=".", log_path="<log_path>", attempt=N)` — `transient`이면 `sleep <backoff_seconds>` 후 같은 명령 1회 재시도 (breaker 카운트 미소모, `build_fail` 이벤트에 `"transient_retry":true`); 재시도도 실패하거나 `permanent`이면 `tail -30 <log_path>` → fix → retry. Append `[core] <error> → <fix>` to `<paths.fix_log>`. Emit `event_type="build_fail"` with `"error_signature"`, `"error_category"` (one of `` `import_error` ``, `` `type_error` ``, `` `config_error` ``, `` `runtime_error` ``, `` `dependency_error` ``, `` `unknown` ``), and `"touched_files"` (legacy §"Structured Build Event Schema"); emit `event_type="fix_applied"` per fix.
 - 2 fails → AskUserQuestion "Adaptive Tier 제안" (legacy Phase A circuit-breaker block). Approve → upgrade `config.selected_tier`, set `state.current_stage="council"`, re-invoke `samvil-council`. Decline → STOP, report user (P10).
@@ -109,7 +109,7 @@ Apply in order (best-effort except the evidence-backed `gate_check`, INV-5):
 3. NO dumping build logs into conversation — write to `.samvil/build.log`, only `tail -30` on failure.
 4. NO skipping integration build (Step 4) — per-leaf `tsc --noEmit` does not catch cross-feature regressions.
 5. NO adding features outside `seed.features` (Zero-Refactor Rule, P5). NO `@latest`, NO testing frameworks, NO premature `memo`/lazy, NO new README.md.
-6. NO auto-retry past `MAX_RETRIES=2` (Circuit Breaker; P10). 7. **`AskUserQuestion` 호출 포맷**: `questions=["<질문>"]` 배열만 허용; 문자열 직접 전달 시 `InputValidationError`.
+6. NO auto-retry past the `MAX_RETRIES` boundary in `references/decision-boundaries.md` (P10). 7. **`AskUserQuestion` 호출 포맷**: `questions=["<질문>"]` 배열만 허용; 문자열 직접 전달 시 `InputValidationError`.
 
 ## Code Quality (pointers to legacy)
 - Web (Next.js + shadcn/ui): legacy §"Code Quality Rules" #1-11, 14-16 (`'use client'`, TS strict, PascalCase one-per-file, `@/components/ui/` shadcn-first, `cn()`, `@/` aliases, real content, empty states, hydration `mounted`, localStorage try-catch, Korean UX writing, 첫 30초 가치, premium gate).

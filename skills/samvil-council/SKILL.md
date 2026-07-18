@@ -34,7 +34,7 @@ Apply `selected_tier` (full matrix in `SKILL.legacy.md`):
 ## Step 2 — Round 1 (Research, parallel spawn) — skip if tier < thorough
 
 1. Print `[SAMVIL] Spawning N agents for Council Round 1 (Research) | MAX_PARALLEL=<N>` then `mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")`.
-2. Determine `MAX_PARALLEL`: `config.max_parallel` if set else CPU/memory heuristic (`SKILL.legacy.md` Step 2b — CPU≤4→1, ≥8→3, mem>80% → -1).
+2. Determine `MAX_PARALLEL`: `config.max_parallel` if set else the CPU/memory watermarks in `references/decision-boundaries.md` (`SKILL.legacy.md` Step 2b).
 3. **Compose prompts (MCP-owned, W3.2)**: `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["<r1 names>"]', project_root=".", header="You are {name} for SAMVIL Council Gate A, Round 1.", context_files_json='["project.seed.json","interview-summary.md"]', task='Return JSON: {"agent":"<name>","topics":[{"topic":"<short>","stance":"<one-liner>","is_blind_spot":bool}]}\nUnder 500 words.')` → `prompts.<name>`. `missing_agents` 비어있지 않으면 해당 agent만 legacy 방식(`<paste agents/<name>.md>` 직접 조립)으로 폴백 (P8).
    Split agents into chunks of `MAX_PARALLEL`. **Spawn each chunk in ONE message** (Agent tool, parallel):
    ```
@@ -43,7 +43,7 @@ Apply `selected_tier` (full matrix in `SKILL.legacy.md`):
          prompt: <prompts.<name> from compose_agent_prompt>,
          subagent_type: "general-purpose")
    ```
-4. Between chunks: `is_state_stalled` → if stalled, `increment_stall_recovery_count` + `build_reawake_message`, print, continue. Cap at 3 reawakes (then surface skip/abort/retry AskUserQuestion).
+4. Between chunks: `is_state_stalled` → if stalled, `increment_stall_recovery_count` + `build_reawake_message`, print, continue. Cap at `MAX_REAWAKES` from `references/decision-boundaries.md` (then surface skip/abort/retry AskUserQuestion).
 5. Collect verdicts as `round1_verdicts` (list of `{agent, topics:[]}`).
 
 ## Step 3 — Synthesize Round 1 → Round 2 Injection

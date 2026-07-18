@@ -310,7 +310,7 @@ Between batches, check whether the session has stalled:
 ```
 verdict = mcp__samvil_mcp__is_state_stalled(
     state_path="project.state.json",
-    threshold_seconds=300,
+    threshold_seconds=STALL_TIMEOUT_SECONDS,  # references/decision-boundaries.md
 )
 if verdict["stalled"]:
     count = mcp__samvil_mcp__increment_stall_recovery_count(state_path="project.state.json")
@@ -318,7 +318,7 @@ if verdict["stalled"]:
     # Print the reawake message AND continue the next batch — don't block.
 ```
 
-If the reawake count reaches `MAX_REAWAKES` (3), stop spawning and surface the escalation message to the user with a skip/abort/retry AskUserQuestion.
+If the reawake count reaches `MAX_REAWAKES`, stop spawning and surface the escalation message to the user with a skip/abort/retry AskUserQuestion. The value lives in `references/decision-boundaries.md`.
 
 ### Gate B Synthesis
 

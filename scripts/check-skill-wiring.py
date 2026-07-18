@@ -31,6 +31,10 @@ REFERENCE_TOOL_CALL_RE = re.compile(
 REFERENCE_TOOL_LABEL_RE = re.compile(
     r"`((?:claim|gate|route|rate_budget|budget)_[a-z0-9_]+)`\s+tool\b"
 )
+NAMED_NUMERIC_CONSTANT_RE = re.compile(
+    r"\b([A-Z][A-Z0-9_]{2,})\s*(?:=|:)\s*(\d+(?:\.\d+)?)\b"
+)
+DECISION_BOUNDARIES_REF = "references/decision-boundaries.md"
 
 CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
     # (skill_name, skill_path, required substrings)
@@ -372,6 +376,40 @@ def find_unresolved_reference_tools(repo: Path = REPO) -> dict[str, list[str]]:
     return unresolved
 
 
+def find_skill_numeric_drift(repo: Path = REPO) -> list[str]:
+    """Detect named numeric constants that drift across thin/legacy pairs."""
+    issues: list[str] = []
+    skills_dir = repo / "skills"
+    if not skills_dir.exists():
+        return issues
+    for skill_dir in sorted(path for path in skills_dir.iterdir() if path.is_dir()):
+        thin_path = skill_dir / "SKILL.md"
+        legacy_path = skill_dir / "SKILL.legacy.md"
+        if not thin_path.exists() or not legacy_path.exists():
+            continue
+        thin = thin_path.read_text(errors="ignore")
+        legacy = legacy_path.read_text(errors="ignore")
+        thin_values: dict[str, set[str]] = {}
+        legacy_values: dict[str, set[str]] = {}
+        for name, value in NAMED_NUMERIC_CONSTANT_RE.findall(thin):
+            thin_values.setdefault(name, set()).add(value)
+        for name, value in NAMED_NUMERIC_CONSTANT_RE.findall(legacy):
+            legacy_values.setdefault(name, set()).add(value)
+        for name in sorted(thin_values.keys() & legacy_values.keys()):
+            left = sorted(thin_values[name])
+            right = sorted(legacy_values[name])
+            if left != right:
+                issues.append(
+                    f"{skill_dir.name}: {name} thin={left} legacy={right}"
+                )
+                continue
+            if DECISION_BOUNDARIES_REF not in thin or DECISION_BOUNDARIES_REF not in legacy:
+                issues.append(
+                    f"{skill_dir.name}: {name} shared without decision-boundaries SSOT citation"
+                )
+    return issues
+
+
 def _collect_legacy_text() -> str:
     """Concatenate all SKILL.legacy.md files (P8 fallback bodies)."""
     parts: list[str] = []
@@ -526,6 +564,15 @@ def main() -> int:
         all_green = False
     else:
         _ok("all MCP-like references resolve to registered tools")
+
+    print()
+    print("Numeric drift: thin/legacy named constants stay aligned with SSOT ...")
+    numeric_drift = find_skill_numeric_drift()
+    if numeric_drift:
+        _fail(f"numeric constant drift: {numeric_drift}")
+        all_green = False
+    else:
+        _ok("named numeric constants aligned and decision-boundaries cited")
 
     print()
     print("Summary:", "PASS" if all_green else "FAIL")

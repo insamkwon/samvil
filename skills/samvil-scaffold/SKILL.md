@@ -80,7 +80,7 @@ pin matches `package.json`; on mismatch `npm install <pkg>@<exact>`
 **PASS**: print `[SAMVIL] Stage 3/5: Scaffold ✓` with project path,
 framework label, build status.
 
-**FAIL — MAX_RETRIES=2**: `tail -30 <build_log_path>`, apply per-stack
+**FAIL — `MAX_RETRIES` from `references/decision-boundaries.md`**: `tail -30 <build_log_path>`, apply per-stack
 recovery (`SKILL.legacy.md` §"Step 4"), append fix to `.samvil/fix-log.md`,
 retry. Two failures → STOP, report user (P10).
 
@@ -108,7 +108,7 @@ Browser solution_types (`web-app`/`dashboard`/`game`): `mcp__samvil_mcp__scaffol
 2. Skipping Tailwind overwrite re-write after `shadcn init` (QA "no colors").
 3. Hardcoding external-API model ID (`game-asset-gen` Gemini-404).
 4. Business logic in scaffold — components/`src/` skeleton only.
-5. Auto-retry past `MAX_RETRIES=2` (Circuit Breaker; P10).
+5. Auto-retry past the `MAX_RETRIES` boundary in `references/decision-boundaries.md` (P10).
 6. Hard-coding next chain target — always invoke `samvil-build`. 7. **`AskUserQuestion` 호출 포맷**: `questions=["<질문>"]` 배열만 허용; 문자열 직접 전달 시 `InputValidationError`.
 
 ## Legacy reference

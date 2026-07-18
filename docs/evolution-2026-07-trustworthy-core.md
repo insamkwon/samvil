@@ -508,12 +508,18 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `skills/samvil/SKILL.md:76`, `skills/samvil-seed/SKILL.md:85`,
     `skills/samvil-seed/SKILL.md:92`, `mcp/tests/test_orchestrator.py:45`,
     `mcp/tests/test_skill_wiring.py:102`, `scripts/phase2-cross-host-smoke.py:24`.
-- [ ] **3.6 dogfood 터치포인트 실측**
+- [x] **3.6 dogfood 터치포인트 실측**
   Wave 3 완료 후 standard tier 웹앱 1회 dogfood — AskUserQuestion 횟수를 세서
   이 문서 G5에 실측치 기록. 12회 초과 시 초과 원인 항목화(다음 wave 재료).
   (스코프 보정: AskUserQuestion은 host-bound라 MCP 이벤트로 직접 집계되지
   않는다. 실제 aggregator·ambiguity 코드를 실행하고 thin skill의
   happy-path 확인점을 자동 검증하는 재현 가능 ledger로 실측한다.)
+  - 완료 증거: `b9a6448`; `scripts/wave3-touchpoint-dogfood.py:68`,
+    `scripts/wave3-touchpoint-dogfood.py:85`,
+    `scripts/wave3-touchpoint-dogfood.py:115`,
+    `mcp/tests/test_wave3_touchpoint_dogfood.py:22`,
+    `mcp/tests/test_wave3_touchpoint_dogfood.py:31`,
+    `docs/evidence/evolution-2026-07-wave3-dogfood.md:13`.
 
 ---
 
@@ -527,6 +533,10 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   thin/legacy는 인용. `check-skill-wiring.py`에 "thin과 legacy에 동시에 등장하는
   수치 상수 불일치" 검출 추가. (0.5에서 인터뷰 건은 선행 처리됨 — 여기서 전 스킬
   일반화.)
+  (스코프 보정: step 번호·스키마 버전 같은 모든 숫자 토큰을 비교하면
+  오탐이 폭발한다. CI는 실제 공유 계약인 uppercase named numeric
+  constant만 비교하고, 양쪽이 모두 `decision-boundaries.md`를 인용하는지
+  강제한다.)
 - [ ] **4.2 contract layer의 hook 소유화 (스킬 프로즈에서 제거)**
   현상: pre/post 계약을 각 스킬 body가 손으로 재현 — QA만 완전, 나머지 제각각,
   "best-effort" 문구가 스킵 면허(skills 감사 Top1·Top3).

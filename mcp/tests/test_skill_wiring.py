@@ -108,3 +108,35 @@ def test_council_is_only_an_explicit_seed_opt_in() -> None:
     assert "--council" in seed
     assert "default" in seed.lower()
     assert "samvil-design" in seed
+
+
+def test_numeric_drift_check_rejects_mismatched_named_constants(tmp_path: Path) -> None:
+    wiring = _load_wiring_module()
+    skill = tmp_path / "skills" / "samvil-build"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "references/decision-boundaries.md\nMAX_RETRIES=2\n",
+        encoding="utf-8",
+    )
+    (skill / "SKILL.legacy.md").write_text(
+        "references/decision-boundaries.md\nMAX_RETRIES=3\n",
+        encoding="utf-8",
+    )
+
+    issues = wiring.find_skill_numeric_drift(tmp_path)
+
+    assert issues == ["samvil-build: MAX_RETRIES thin=['2'] legacy=['3']"]
+
+
+def test_numeric_drift_check_requires_ssot_citation(tmp_path: Path) -> None:
+    wiring = _load_wiring_module()
+    skill = tmp_path / "skills" / "samvil-build"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("MAX_RETRIES=2\n", encoding="utf-8")
+    (skill / "SKILL.legacy.md").write_text("MAX_RETRIES=2\n", encoding="utf-8")
+
+    issues = wiring.find_skill_numeric_drift(tmp_path)
+
+    assert issues == [
+        "samvil-build: MAX_RETRIES shared without decision-boundaries SSOT citation"
+    ]

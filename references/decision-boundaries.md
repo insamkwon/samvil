@@ -170,6 +170,46 @@ defaults in `references/performance_budget.defaults.yaml`.
 
 ---
 
+## Shared runtime controls
+
+These values are referenced by thin and legacy skills; this table is their
+only numeric definition.
+
+| Constant | Value | Applies to |
+|---|---:|---|
+| `MAX_RETRIES` | 2 | build/scaffold/QA-fix identical-cause circuit breaker |
+| `MAX_REAWAKES` | 3 | council/design/build stalled-agent recovery |
+| `STALL_TIMEOUT_SECONDS` | 300 | no-progress stall detection |
+| `QA_MAX_ITERATIONS` | 3 | QA revise loop |
+| `RUNTIME_PROBE_RETRIES` | 2 | QA Playwright/runtime probe fallback |
+| `CPU_LOW_WATERMARK` | 4 | dynamic parallelism chooses 1 worker at or below |
+| `CPU_HIGH_WATERMARK` | 8 | dynamic parallelism chooses 3 workers at or above |
+| `DEFAULT_MAX_PARALLEL` | 2 | dynamic parallelism between CPU watermarks |
+| `MEMORY_PRESSURE_PERCENT` | 80 | reduce max parallelism by 1 above this value |
+
+Skill prose may describe the behavior but MUST cite this file instead of
+redeclaring a named constant with a numeric value.
+
+## Canonical stage gates
+
+The ordered gate names are:
+
+1. `interview_to_seed`
+2. `seed_to_council` (historical name; also protects direct Seed → Design)
+3. `council_to_design` (only for explicit Council opt-in)
+4. `design_to_scaffold`
+5. `scaffold_to_build`
+6. `build_to_qa`
+7. `qa_to_deploy`
+8. `any_to_retro`
+
+## Council compatibility matrix
+
+Council is default-off for every tier. Exact `--council` opt-in enables it for
+`standard`, `thorough`, and `full`; `minimal` always skips it.
+
+---
+
 ## Compliance
 
 If you change any number in this file, also:

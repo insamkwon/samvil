@@ -28,7 +28,7 @@ Adopt the **QA Judge** role. Boot pre-flight, Pass 1/1b digest, and Phase Z (syn
 
 Shell `boot.pass1.command` (web-app/dashboard `npm run build`; game `npx tsc --noEmit && npm run build`; mobile-app `npx expo export --platform web`; automation `python -m py_compile` / `npx tsc --noEmit`). Capture exit code.
 
-If `boot.pass1.smoke` is `playwright`/`-canvas`/`-mobile`: drive Playwright MCP per legacy `## Pass 1b: Playwright Smoke Run` for the matching solution_type — `browser_navigate` → `browser_console_messages(level="error")` → `browser_evaluate(...body length)` → `browser_take_screenshot` per route. Collect `{method, console_errors[], empty_routes[], screenshots[], fallback_reason}`. **Fallback**: 2 retries fail → `method="static"` + `fallback_reason="Playwright unavailable after 2 retries"` (P8). For automation: dry-run per legacy `### automation`, set `smoke_result=None`.
+If `boot.pass1.smoke` is `playwright`/`-canvas`/`-mobile`: drive Playwright MCP per legacy `## Pass 1b: Playwright Smoke Run` for the matching solution_type — `browser_navigate` → `browser_console_messages(level="error")` → `browser_evaluate(...body length)` → `browser_take_screenshot` per route. Collect `{method, console_errors[], empty_routes[], screenshots[], fallback_reason}`. **Fallback**: `RUNTIME_PROBE_RETRIES` from `references/decision-boundaries.md` exhausted → `method="static"` + an honest fallback reason (P8). For automation: dry-run per legacy `### automation`, set `smoke_result=None`.
 
 ```
 mcp__samvil_mcp__dispatch_qa_pass1_batch(project_path=".",
