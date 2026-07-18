@@ -623,6 +623,7 @@ class TestQAFinalize:
         )
 
         assert result["synthesis"]["verification_mode"] == "runtime"
+        assert result["synthesis"]["runtime_evidence"]["passed"] == 1
         assert result["gate_input"]["metrics"]["verification_mode"] == "runtime"
         assert result["stage_evidence"]["qa"]["runtime_verified"] is True
 

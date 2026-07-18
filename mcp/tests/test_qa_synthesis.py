@@ -192,6 +192,24 @@ def test_render_qa_synthesis_includes_verdict_and_counts():
     assert "PASS=1" in rendered
 
 
+def test_render_qa_synthesis_includes_runtime_test_counts() -> None:
+    result = synthesize_qa_evidence(_base([
+        {"id": "AC-1", "criterion": "Create task", "verdict": "PASS"},
+    ]))
+    result["runtime_evidence"] = {
+        "ran": True,
+        "passed": 3,
+        "failed": 1,
+        "skipped": 2,
+        "from": ".samvil/test-results.json",
+    }
+
+    rendered = render_qa_synthesis(result)
+
+    assert "Runtime tests: passed=3, failed=1, skipped=2" in rendered
+    assert ".samvil/test-results.json" in rendered
+
+
 def test_materialize_qa_synthesis_writes_report_results_events_and_state(tmp_path):
     (tmp_path / "project.state.json").write_text(
         json.dumps({"session_id": "s1", "current_stage": "qa", "qa_history": []}),

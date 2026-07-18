@@ -412,6 +412,7 @@ def finalize_qa_verdict(
             "events": [],
             "verification_mode": "static",
         }
+    synthesis["runtime_evidence"] = dict(npm_test)
     report.synthesis = synthesis
 
     # Convergence (preview — actual write happens in materialize_qa_synthesis).

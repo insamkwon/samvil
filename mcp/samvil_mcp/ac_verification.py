@@ -153,9 +153,8 @@ def run_ac_verification(
     timed_out = False
     try:
         completed = subprocess.run(
-            command,
+            ["bash", "-o", "pipefail", "-c", command],
             cwd=root,
-            shell=True,
             text=True,
             capture_output=True,
             timeout=max(0.01, timeout_seconds),

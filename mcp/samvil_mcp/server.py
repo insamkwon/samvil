@@ -1598,7 +1598,12 @@ async def validate_evidence(evidences_json: str, project_root: str) -> str:
 
 
 @mcp.tool()
-async def semantic_check(code: str, context_hint: str = "") -> str:
+async def semantic_check(
+    code: str,
+    context_hint: str = "",
+    shell_command: str = "",
+    execution_log: str = "",
+) -> str:
     """Detect reward hacking signals in a code snippet.
 
     Args:
@@ -1609,7 +1614,14 @@ async def semantic_check(code: str, context_hint: str = "") -> str:
     """
     try:
         from .semantic_checker import analyze_code_snippet
-        return json.dumps(analyze_code_snippet(code, context_hint))
+        return json.dumps(
+            analyze_code_snippet(
+                code,
+                context_hint,
+                shell_command=shell_command,
+                execution_log=execution_log,
+            )
+        )
     except Exception as e:
         _log_mcp_health("fail", "semantic_check", str(e))
         return json.dumps({"risk_level": "LOW", "error": str(e)})

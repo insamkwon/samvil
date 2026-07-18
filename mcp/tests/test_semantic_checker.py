@@ -1,9 +1,13 @@
 """Tests for semantic_checker.py (v2.5.0, Phase 3)."""
 
+import asyncio
+import json
+
 import pytest
 
 from samvil_mcp.semantic_checker import (
     analyze_code_snippet,
+    analyze_shell_evidence,
     downgrade_on_high_risk,
 )
 
@@ -110,3 +114,54 @@ def test_downgrade_low_risk_unchanged():
 def test_downgrade_fail_unchanged():
     verdict, rationale = downgrade_on_high_risk("FAIL", "HIGH")
     assert verdict == "FAIL"
+
+
+def test_piped_test_log_without_exit_marker_is_rejected() -> None:
+    result = analyze_shell_evidence(
+        "npm test | tail -20",
+        "Tests: 1 failed, 9 passed\n",
+    )
+
+    assert result["accepted"] is False
+    assert result["risk_level"] == "HIGH"
+    assert result["findings"][0]["code"] == "EVIDENCE_FORM_MISMATCH"
+
+
+def test_piped_test_log_with_exit_marker_is_accepted() -> None:
+    result = analyze_shell_evidence(
+        "npm test | grep FAIL",
+        "1 failed\nSAMVIL_EXIT:1\n",
+    )
+
+    assert result["accepted"] is True
+    assert result["risk_level"] == "LOW"
+
+
+def test_semantic_analysis_merges_shell_evidence_finding() -> None:
+    result = analyze_code_snippet(
+        "const value = await run();",
+        shell_command="npm test | tail -20",
+        execution_log="1 failed\n",
+    )
+
+    assert result["risk_level"] == "HIGH"
+    assert any(
+        finding["pattern"] == "evidence_form_mismatch"
+        for finding in result["findings"]
+    )
+
+
+def test_semantic_check_mcp_accepts_shell_evidence() -> None:
+    from samvil_mcp.server import semantic_check
+
+    result = json.loads(
+        asyncio.run(
+            semantic_check(
+                code="const value = await run();",
+                shell_command="npm test | tail -20",
+                execution_log="1 failed\n",
+            )
+        )
+    )
+
+    assert result["risk_level"] == "HIGH"

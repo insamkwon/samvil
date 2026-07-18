@@ -121,6 +121,19 @@ def test_failed_assertion_fails_closed(tmp_path: Path) -> None:
     assert result["passed"] is False
 
 
+def test_pipeline_cannot_hide_failing_test_command(tmp_path: Path) -> None:
+    python = shlex.quote(sys.executable)
+
+    result = run_ac_verification(
+        tmp_path,
+        "F1.AC-pipe",
+        {"command": f"{python} -c \"raise SystemExit(7)\" | tail -1"},
+    )
+
+    assert result["exit_code"] == 7
+    assert result["passed"] is False
+
+
 def test_ac_verification_mcp_tool(tmp_path: Path) -> None:
     from samvil_mcp.server import collect_ac_verification
 

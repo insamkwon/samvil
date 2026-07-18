@@ -68,6 +68,9 @@ SAMPLE_DATA = re.compile(
     re.IGNORECASE,
 )
 
+PIPE_FILTER = re.compile(r"\|\s*(?:tail|grep)\b", re.IGNORECASE)
+EXIT_MARKER = re.compile(r"^SAMVIL_EXIT:-?\d+\s*$", re.MULTILINE)
+
 
 @dataclass
 class SemanticFinding:
@@ -88,7 +91,35 @@ class SemanticFinding:
         }
 
 
-def analyze_code_snippet(code: str, context_hint: str = "") -> dict:
+def analyze_shell_evidence(command: str, execution_log: str) -> dict:
+    """Reject filter-pipeline test evidence without a canonical exit marker."""
+    mismatch = bool(PIPE_FILTER.search(command) and not EXIT_MARKER.search(execution_log))
+    findings = []
+    if mismatch:
+        findings.append(
+            {
+                "code": "EVIDENCE_FORM_MISMATCH",
+                "pattern": "evidence_form_mismatch",
+                "severity": "HIGH",
+                "explanation": (
+                    "test output is filtered through tail/grep without a "
+                    "SAMVIL_EXIT marker"
+                ),
+            }
+        )
+    return {
+        "accepted": not mismatch,
+        "risk_level": "HIGH" if mismatch else "LOW",
+        "findings": findings,
+    }
+
+
+def analyze_code_snippet(
+    code: str,
+    context_hint: str = "",
+    shell_command: str = "",
+    execution_log: str = "",
+) -> dict:
     """Analyze a code snippet for reward hacking signals.
 
     Args:
@@ -180,6 +211,19 @@ def analyze_code_snippet(code: str, context_hint: str = "") -> dict:
                 code_excerpt=stripped[:120],
                 explanation="Sample/mock/dummy data constant detected",
             ))
+
+    if shell_command:
+        shell_result = analyze_shell_evidence(shell_command, execution_log)
+        if not shell_result["accepted"]:
+            findings.append(
+                SemanticFinding(
+                    pattern="evidence_form_mismatch",
+                    severity="HIGH",
+                    line_number=0,
+                    code_excerpt=shell_command[:120],
+                    explanation=shell_result["findings"][0]["explanation"],
+                )
+            )
 
     # Aggregate risk level
     risk_level: Risk = "LOW"

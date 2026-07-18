@@ -116,12 +116,23 @@ def render_qa_synthesis(synthesis: dict[str, Any]) -> str:
         f"- Reason: {synthesis.get('reason') or '?'}",
         f"- Next action: {synthesis.get('next_action') or '?'}",
         f"- Iteration: {synthesis.get('iteration')}/{synthesis.get('max_iterations')}",
+    ]
+    runtime = synthesis.get("runtime_evidence") or {}
+    if runtime:
+        lines.append(
+            "- Runtime tests: "
+            f"passed={runtime.get('passed', 0)}, "
+            f"failed={runtime.get('failed', 0)}, "
+            f"skipped={runtime.get('skipped', 0)} "
+            f"(from {runtime.get('from') or '?'})"
+        )
+    lines.extend([
         "",
         "## Pass 1",
         f"- Mechanical: {(synthesis.get('pass1') or {}).get('status') or '?'}",
         "",
         "## Pass 2",
-    ]
+    ])
     counts = (synthesis.get("pass2") or {}).get("counts") or {}
     lines.append(
         "- Functional: "
