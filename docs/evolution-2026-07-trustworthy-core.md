@@ -275,7 +275,7 @@ v4.31이 시작한 방향의 완성이다.
     `hooks/_contract-helpers.sh:335`, `hooks/_contract-helpers.sh:350`,
     `hooks/_contract-helpers.sh:364`, `mcp/tests/test_contract_hook_atomic.py:21`,
     `mcp/tests/test_contract_hook_atomic.py:33`.
-- [ ] **1.5 orchestrator deploy dead-mapping 정리**
+- [x] **1.5 orchestrator deploy dead-mapping 정리**
   `orchestrator.py:124` deploy가 `should_skip_stage` 항상 True인데
   `SUCCESS_COMPLETE_EVENTS["deploy"]` 존재. 실제 의도(deploy는 opt-in 스테이지)에
   맞게 정리하고 죽은 매핑 제거.
@@ -284,6 +284,11 @@ v4.31이 시작한 방향의 완성이다.
   deploy dead mapping 제거와 함께 1.1의 canonical stage 기록 및 events 기반 duration
   fallback을 최소 보정해 Wave 1 완료 기준을 실제로 닫는다. `query_projection`은
   CLAUDE.md의 정의대로 SQLite 보조 인덱스 검증으로 유지한다.)
+  - 완료 증거: `80e5443`; `mcp/samvil_mcp/orchestrator.py:67`,
+    `mcp/samvil_mcp/orchestrator.py:123`, `mcp/samvil_mcp/server.py:791`,
+    `mcp/samvil_mcp/retro_aggregate.py:667`,
+    `docs/evidence/evolution-2026-07-wave1-dogfood.md:12`,
+    `docs/evidence/evolution-2026-07-wave1-dogfood.md:28`.
 
 **Wave 1 완료 기준**: dogfood 1회에서 `.samvil/events.jsonl` 생성·성장 실측 +
 stall/retro가 canonical 파일에서 실데이터를 읽고, `query_projection`은 동일 이벤트의

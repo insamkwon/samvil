@@ -120,6 +120,7 @@ def test_config_and_filename() -> None:
     cfg = playwright_config("http://localhost:4173")
     assert "testDir: './tests/e2e'" in cfg
     assert "npm run build && npm run preview" in cfg
+    assert "['json', { outputFile: '.samvil/test-results.json' }]" in cfg
     assert feature_spec_filename("Todo List!") == "tests/e2e/todo-list.spec.ts"
 
 

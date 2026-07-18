@@ -4629,6 +4629,20 @@ async def scaffold_test_harness(
 
 
 @mcp.tool()
+async def collect_stage_evidence(project_root: str, stage: str) -> str:
+    """Collect build/QA evidence only from persisted runtime artifacts."""
+    try:
+        from .stage_evidence import collect_stage_evidence as _collect
+
+        result = _collect(project_root, stage)
+        _log_mcp_health("ok", "collect_stage_evidence")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "collect_stage_evidence", str(e))
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+@mcp.tool()
 async def emit_adversarial_spec(
     project_root: str,
     buttons_json: str = "[]",

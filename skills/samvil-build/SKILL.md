@@ -70,7 +70,7 @@ For each feature in `seed.features` not in `resume_hint.completed_features`:
 
 ### Step 4 — Integration build per feature
 
-After loop ends (success or breaker), run `npm run build > .samvil/build.log 2>&1` **once per feature** (per-leaf workers only ran `tsc --noEmit`). Cross-feature integration regressions caught here. Mandatory; do NOT skip.
+After loop ends (success or breaker), run `npm run build > .samvil/build.log 2>&1; build_exit=$?; echo "SAMVIL_EXIT:${build_exit}" >> .samvil/build.log; test "$build_exit" -eq 0` **once per feature** (per-leaf workers only ran `tsc --noEmit`). Cross-feature integration regressions caught here. Mandatory; do NOT skip. Then call `mcp__samvil_mcp__collect_stage_evidence(project_root=".", stage="build")`; its artifact-derived result is the build evidence passed into Phase Z.
 
 ### Step 5 — Persist tree into seed
 

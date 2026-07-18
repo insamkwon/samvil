@@ -177,7 +177,7 @@ export default defineConfig({{
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: 'list',
+  reporter: [['list'], ['json', {{ outputFile: '.samvil/test-results.json' }}]],
   use: {{
     baseURL: {_js(base_url)},
     trace: 'on-first-retry',
