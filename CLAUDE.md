@@ -298,7 +298,7 @@ samvil-update    ← [v3.0.0] GitHub 업데이트 + --migrate 지원
 
 ## Architectural Invariants (절대 규칙)
 
-1. **INV-1: File is SSOT** — seed.json + state.json + handoff.md + qa-results.json + events.jsonl 5개 파일이 truth. 대화 컨텍스트 의존 금지. (Claim ledger `.samvil/claims.jsonl`은 v3.2에서 첫 번째 SSOT 파일로 추가됨.)
+1. **INV-1: File is SSOT** — seed.json + state.json + handoff.md + qa-results.json + events.jsonl 5개 파일이 truth. 대화 컨텍스트 의존 금지. 프로젝트 `.samvil/events.jsonl`이 이벤트 canonical이고, 전역 SQLite는 크로스 프로젝트 조회용 보조 인덱스다. (Claim ledger `.samvil/claims.jsonl`은 v3.2에서 첫 번째 SSOT 파일로 추가됨.)
 2. **INV-2: Build logs to files** — `npm run build > .samvil/build.log 2>&1`. 에러 시에만 읽기.
 3. **INV-3: Interview to file** — interview-summary.md로 저장. seed가 파일에서 읽음.
 4. **INV-4: Chain pattern** — 각 스킬이 다음 스킬을 Skill tool로 invoke. state.json으로 복구 가능. (v3.3부터는 `HostCapability` 통해 host-agnostic chain.)

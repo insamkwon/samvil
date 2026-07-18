@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from samvil_mcp.claim_ledger import ClaimLedger
+from samvil_mcp.event_store_reader import read_events
 from samvil_mcp.server import (
     complete_stage,
     create_session,
@@ -113,3 +114,69 @@ def test_complete_stage_tool_returns_error_for_missing_session(tmp_path, monkeyp
     data = json.loads(out)
     assert data["status"] == "error"
     assert "not found" in data["error"]
+
+
+def test_save_event_writes_project_events_ssot(tmp_path, monkeypatch) -> None:
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    from samvil_mcp import server as srv
+
+    monkeypatch.setattr(srv, "_resolve_project_path", lambda _name: project_root)
+
+    async def runner():
+        sess = json.loads(await create_session("events-ssot", "standard"))
+        result = json.loads(await save_event(
+            sess["session_id"],
+            "interview_complete",
+            "seed",
+            '{"questions_asked": 4}',
+        ))
+        assert result["saved"] is True
+
+    _run(runner())
+
+    rows = read_events(project_root)
+    assert rows["ok"] is True
+    assert len(rows["entries"]) == 1
+    assert rows["entries"][0] == {
+        "timestamp": rows["entries"][0]["timestamp"],
+        "event_type": "interview_complete",
+        "stage": "seed",
+        "session_id": rows["entries"][0]["session_id"],
+        "data": {
+            "questions_asked": 4,
+            "event_type_raw": "interview_complete",
+        },
+    }
+
+
+def test_save_event_warns_when_project_root_cannot_be_resolved(
+    tmp_path,
+    monkeypatch,
+    isolate_mcp_health_log: Path,
+) -> None:
+    _isolated_server(monkeypatch, tmp_path)
+
+    from samvil_mcp import server as srv
+
+    monkeypatch.setattr(srv, "_resolve_project_path", lambda _name: None)
+
+    async def runner():
+        sess = json.loads(await create_session("missing-events-root", "standard"))
+        result = json.loads(await save_event(
+            sess["session_id"], "interview_complete", "seed", "{}"
+        ))
+        assert result["saved"] is True
+
+    _run(runner())
+
+    health_rows = [
+        json.loads(line)
+        for line in isolate_mcp_health_log.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(
+        row["status"] == "warn" and row["tool"] == "save_event.events_ssot"
+        for row in health_rows
+    )

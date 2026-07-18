@@ -205,10 +205,12 @@ v4.31이 시작한 방향의 완성이다.
   - 완료 증거: `5a845f0`; `mcp/samvil_mcp/rate_budget.py:32`,
     `mcp/samvil_mcp/rate_budget.py:68`, `mcp/samvil_mcp/rate_budget.py:93`,
     `mcp/tests/test_rate_budget.py:26`, `mcp/tests/test_rate_budget.py:41`.
-- [ ] **0.8 positional `save_event` 예시 교정**
+- [x] **0.8 positional `save_event` 예시 교정**
   `samvil-pm-interview/SKILL.md:67-68`, `samvil-update/SKILL.md:88`이 positional
   호출 예시 — 나머지 전부 keyword-only라 LLM이 복사하면 InputValidationError.
   keyword 형태로 통일.
+  - 완료 증거: `a2784f0`; `skills/samvil-pm-interview/SKILL.md:67`,
+    `skills/samvil-update/SKILL.md:88`, `mcp/tests/test_skill_wiring.py:53`.
 
 **Wave 0 완료 기준**: pre-commit green + 신규 회귀 테스트 전부 포함 + 위 8건 각각
 독립 커밋.

@@ -25,7 +25,7 @@ from .ac_leaf_schema import (
     compute_parallel_safety as _compute_parallel_safety,
     validate_leaf as _validate_leaf_core,
 )
-from .claim_ledger import ClaimLedger, ClaimLedgerError
+from .claim_ledger import ClaimLedger, ClaimLedgerError, _locked as _file_locked
 from .decision_log import (
     DecisionADR,
     DecisionLogError,
@@ -596,6 +596,31 @@ def _canonical_stage_for_event(event_type_raw: str, fallback_stage: str) -> str:
     return (fallback_stage or "unknown").lower()
 
 
+def _append_project_event(
+    project_root: Path,
+    *,
+    timestamp: str,
+    event_type: str,
+    stage: str,
+    session_id: str,
+    data: dict,
+) -> Path:
+    """Append one canonical project event under an advisory file lock."""
+    path = project_root / ".samvil" / "events.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "timestamp": timestamp,
+        "event_type": event_type,
+        "stage": stage,
+        "session_id": session_id,
+        "data": data,
+    }
+    with _file_locked(path):
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return path
+
+
 async def _auto_post_claim_for_event(
     session_id: str,
     event_type_raw: str,
@@ -724,6 +749,26 @@ async def save_event(
             data=parsed_data,
             token_count=token_count,
         )
+        session = await store.get_session(session_id)
+        project_path = _resolve_project_path(session.project_name) if session else None
+        if project_path is None:
+            _log_mcp_health(
+                "warn",
+                "save_event.events_ssot",
+                f"project root unresolved for session {session_id}",
+            )
+        else:
+            try:
+                _append_project_event(
+                    project_path,
+                    timestamp=event.timestamp,
+                    event_type=event_type,
+                    stage=stage_enum.value,
+                    session_id=session_id,
+                    data=parsed_data,
+                )
+            except OSError as exc:
+                _log_mcp_health("fail", "save_event.events_ssot", str(exc))
         # Update session's current stage
         await store.update_session_stage(session_id, stage_enum)
 
