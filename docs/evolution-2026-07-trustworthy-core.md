@@ -587,7 +587,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `agents/tech-architect.md:29`, `agents/qa-functional.md:25`,
     `agents/socratic-interviewer.md:42`, `scripts/check-agent-inventory.py:21`,
     `scripts/pre-commit-check.sh:222`, `CLAUDE.md:312`.
-- [ ] **4.4 references 대청소 (65→~48)**
+- [x] **4.4 references 대청소 (65→~48)**
   orphan 27개 처분: 초소형 schema stub 8개 → `samvil-ssot-schema.md`로 통합,
   `migration-v2-to-v3` 아카이브, `gate-vs-degradation`→`graceful-degradation` 흡수,
   `plugin-api`+`plugin-system` 병합, `interview-levels`→`interview-frameworks` 흡수.
@@ -597,6 +597,11 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   (스코프 보정: 현행 `references/`는 감사 당시 65개가 아니라 57개이며, 통합 대상
   schema redirect stub도 8개가 아니라 이미 통합된 4개뿐이다. 런타임이 소비하는
   schema/host 문서는 보존하고, 명시된 중복 8개를 흡수·아카이브해 49개로 줄인다.)
+  - 완료 증거: `176b3a1`; `references/graceful-degradation.md:7`,
+    `references/interview-frameworks.md:194`, `references/plugin-system.md:12`,
+    `docs/archive/migration-v2-to-v3.md:3`,
+    `mcp/tests/test_reference_consolidation.py:10`,
+    `mcp/tests/test_reference_consolidation.py:23`.
 - [ ] **4.5 guard-destructive 강화 (speed-bump → 실가드)**
   현상: glob substring이라 공백 변형(`rm  -rf /`, `rm -fr /`)·변수(`rm -rf $X`)·
   `.next` 문자열 disarm 전부 우회, `git push -f` 미커버, SQL 대문자만.
