@@ -29,6 +29,7 @@ except ImportError:  # pragma: no cover — Windows fallback
     _HAS_FLOCK = False
 
 Kind = Literal["acquire", "release"]
+ACQUIRE_TTL_SECONDS = 30 * 60
 
 
 @contextmanager
@@ -64,12 +65,18 @@ def _append_locked(path: Path, kind: Kind, worker_id: str) -> None:
         }) + "\n")
 
 
-def _replay(path: Path) -> tuple[set[str], list[dict]]:
-    """Return (active_workers, all_events). Caller holds the file lock."""
+def _replay(
+    path: Path,
+    *,
+    now: float | None = None,
+    ttl_seconds: float = ACQUIRE_TTL_SECONDS,
+) -> tuple[set[str], list[dict]]:
+    """Return active workers and events, expiring stale acquire records."""
     events: list[dict] = []
     if not path.exists():
         return set(), events
-    active: set[str] = set()
+    current_time = time.time() if now is None else now
+    active: dict[str, float] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -84,10 +91,17 @@ def _replay(path: Path) -> tuple[set[str], list[dict]]:
         if not wid:
             continue
         if kind == "acquire":
-            active.add(wid)
+            try:
+                acquired_at = float(ev.get("ts"))
+            except (TypeError, ValueError):
+                acquired_at = current_time
+            if current_time - acquired_at <= ttl_seconds:
+                active[wid] = acquired_at
+            else:
+                active.pop(wid, None)
         elif kind == "release":
-            active.discard(wid)
-    return active, events
+            active.pop(wid, None)
+    return set(active), events
 
 
 def acquire(budget_path: str, worker_id: str, max_concurrent: int) -> dict:

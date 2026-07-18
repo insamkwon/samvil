@@ -189,11 +189,15 @@ v4.31이 시작한 방향의 완성이다.
     `references/decision-boundaries.md:43`, `skills/samvil-interview/SKILL.md:69`,
     `skills/samvil-interview/SKILL.legacy.md:264`,
     `mcp/tests/test_skill_wiring.py:39`.
-- [ ] **0.6 `~/.samvil/mcp-health.jsonl` 무한 성장 + 테스트 오염**
+- [x] **0.6 `~/.samvil/mcp-health.jsonl` 무한 성장 + 테스트 오염**
   실측 24MB, 그중 pytest의 `atomic_test_tool` 항목 153,600줄 — 사용자 글로벌 헬스
   로그를 테스트가 오염시키고 health_check의 `hook_failures_24h` 표시를 왜곡.
   수정: (a) 사이즈 rotate(10MB cap, 1세대 보관), (b) pytest는 tmp 경로로 격리
   (conftest에서 env/monkeypatch로 헬스 로그 경로 재지정).
+  - 완료 증거: `5e53943`; `mcp/samvil_mcp/server.py:286`,
+    `mcp/samvil_mcp/server.py:290`, `mcp/samvil_mcp/server.py:298`,
+    `mcp/samvil_mcp/server.py:339`, `mcp/tests/conftest.py:10`,
+    `mcp/tests/test_sample_rate_atomic.py:16`.
 - [ ] **0.7 rate_budget 크래시 워커 slot 영구 누수**
   `rate_budget.py:93` `_replay`가 TTL/heartbeat 없이 acquire/release 쌍으로만
   재구성 → 크래시한 워커의 slot이 영원히 점유. 수정: acquire 레코드에 timestamp

@@ -1,5 +1,7 @@
 """Tests for v3.0.0 T3 shared rate budget."""
 
+import json
+import time
 from pathlib import Path
 
 from samvil_mcp.rate_budget import acquire, release, reset, stats
@@ -19,6 +21,35 @@ def test_acquire_blocked_at_max(tmp_path: Path):
     r = acquire(str(p), "w3", max_concurrent=2)
     assert r["acquired"] is False
     assert r["current"] == 2
+
+
+def test_expired_acquire_does_not_consume_slot(tmp_path: Path):
+    p = tmp_path / "rb.jsonl"
+    p.write_text(json.dumps({
+        "ts": time.time() - (30 * 60 + 1),
+        "worker_id": "crashed-worker",
+        "kind": "acquire",
+    }) + "\n")
+
+    r = acquire(str(p), "replacement-worker", max_concurrent=1)
+
+    assert r["acquired"] is True
+    assert r["current"] == 1
+    assert stats(str(p))["active_workers"] == ["replacement-worker"]
+
+
+def test_recent_acquire_still_consumes_slot(tmp_path: Path):
+    p = tmp_path / "rb.jsonl"
+    p.write_text(json.dumps({
+        "ts": time.time() - (30 * 60 - 1),
+        "worker_id": "live-worker",
+        "kind": "acquire",
+    }) + "\n")
+
+    r = acquire(str(p), "replacement-worker", max_concurrent=1)
+
+    assert r["acquired"] is False
+    assert r["current"] == 1
 
 
 def test_release_opens_slot(tmp_path: Path):
