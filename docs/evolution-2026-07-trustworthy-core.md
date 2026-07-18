@@ -602,13 +602,17 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `docs/archive/migration-v2-to-v3.md:3`,
     `mcp/tests/test_reference_consolidation.py:10`,
     `mcp/tests/test_reference_consolidation.py:23`.
-- [ ] **4.5 guard-destructive 강화 (speed-bump → 실가드)**
+- [x] **4.5 guard-destructive 강화 (speed-bump → 실가드)**
   현상: glob substring이라 공백 변형(`rm  -rf /`, `rm -fr /`)·변수(`rm -rf $X`)·
   `.next` 문자열 disarm 전부 우회, `git push -f` 미커버, SQL 대문자만.
   수정: `$TOOL_INPUT` JSON에서 command 필드를 추출해 정규화(연속 공백 축약,
   소문자화) 후 정규식 매칭. 커버 추가: `git push -f|--force`(force-with-lease
   제외), `rm -fr`, 옵션 순서 무관, SQL 대소문자 무관. 우회 시나리오를 테스트
   fixture로.
+  - 완료 증거: `8621f1f`; `hooks/guard-destructive.sh:23`,
+    `hooks/guard-destructive.sh:51`, `hooks/guard-destructive.sh:89`,
+    `hooks/guard-destructive.sh:117`, `mcp/tests/test_guard_destructive.py:43`,
+    `mcp/tests/test_guard_destructive.py:60`.
 - [ ] **4.6 멀티호스트 정직화**
   **기본 결정: 문서 정직화 경로.** README·CLAUDE.md·glossary에서 현 상태를
   "Claude Code 네이티브 + Codex는 모델 라우팅 통합(네이티브 실행 아님) + Gemini

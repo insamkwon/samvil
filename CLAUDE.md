@@ -244,8 +244,11 @@ Single source of truth: `references/glossary.md`. Enforced in CI via
 
 ## 🏛️ 4-Layer Architecture (v3.3)
 
-v3.3 separates SAMVIL into four layers so the same project can run across
-Claude Code, Codex CLI, OpenCode, or a generic host.
+v3.3 separates SAMVIL into four layers so project state can continue across
+hosts. Current support is intentionally asymmetric: Claude Code is the native
+execution host; Codex integrates model routing, MCP, and file-marker
+continuation but has no verified native stage parity; Gemini remains an
+experimental stub.
 
 | Layer | Owns | v3.3 files |
 |---|---|---|
@@ -256,8 +259,8 @@ Claude Code, Codex CLI, OpenCode, or a generic host.
 
 Rules:
 - Skills ask MCP for state instead of inferring stage flow from prompt text.
-- Host-specific chaining goes through `HostCapability`; do not assume the
-  Claude Code Skill tool exists.
+- Host-specific continuation goes through `HostCapability`. This preserves
+  state portability; it does not claim native execution parity.
 - `.samvil/*` files remain the recovery boundary when MCP or host features
   degrade.
 

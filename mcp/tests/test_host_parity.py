@@ -39,10 +39,14 @@ def test_script_exists_and_executable() -> None:
 
 
 def test_current_repo_state_has_parity() -> None:
-    """The committed repo must always pass parity in --strict mode."""
+    """Structural parity passes while untested execution surfaces stay visible."""
     result = _run("--strict")
     assert result.returncode == 0, f"\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    assert "✓ host parity" in result.stdout
+    assert "✓ structural host parity" in result.stdout
+    assert "UNTESTED" in result.stdout
+    assert "samvil-qa" in result.stdout
+    assert "Codex native stage execution" in result.stdout
+    assert "Gemini native execution parity" in result.stdout
 
 
 def test_detects_missing_auto_proceed_heading(tmp_path: Path) -> None:

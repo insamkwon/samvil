@@ -197,8 +197,10 @@ fi
 _section "10. Host parity (CC ↔ Codex)"
 
 if python3 scripts/check-host-parity.py --strict >/tmp/samvil-hostparity.log 2>&1; then
-  summary=$(tail -1 /tmp/samvil-hostparity.log | sed -E 's/^[[:space:]]*✓[[:space:]]*//')
+  summary=$(grep '^✓ structural host parity:' /tmp/samvil-hostparity.log | sed -E 's/^[[:space:]]*✓[[:space:]]*//')
+  untested=$(grep -c '^UNTESTED:' /tmp/samvil-hostparity.log)
   _ok "$summary"
+  echo "  ! UNTESTED: $untested host execution surface(s); see scripts/check-host-parity.py"
 else
   _fail "host parity drift:"
   cat /tmp/samvil-hostparity.log | sed 's/^/      /'

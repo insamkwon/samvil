@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SAMVIL host parity check (Phase A.2).
+"""SAMVIL structural host parity check (Phase A.2).
 
 Verifies that every CC skill (`skills/<name>/SKILL.md`) has a matching
 Codex command (`references/codex-commands/<name>.md`) and that the two
@@ -15,6 +15,10 @@ agree on the things a user would notice when switching hosts:
    SKILL.md is implicit via the Skill tool.
 
 Intentional divergences are listed in `references/host-parity-allowlist.yaml`.
+
+This is a document/wiring check. It does not execute stages natively on Codex
+or Gemini, and it reports those surfaces as UNTESTED instead of implying green
+runtime parity.
 
 Usage:
     python3 scripts/check-host-parity.py            # report mode
@@ -233,6 +237,16 @@ def discover_pairs() -> tuple[list[str], list[str], list[str]]:
     return matched, cc_only, codex_only
 
 
+def untested_core_contracts(matched: Iterable[str]) -> list[str]:
+    """Pairs with no curated MCP core-tool assertion on either host."""
+    return sorted(
+        name
+        for name in matched
+        if not CORE_TOOLS_CC.get(name, set())
+        and not CORE_TOOLS_CODEX.get(name, set())
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     parser.add_argument(
@@ -269,8 +283,21 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1 if args.strict else 0
     print(
-        f"✓ host parity: {len(matched)} skill pair(s) consistent "
-        f"(CC ↔ Codex)"
+        f"✓ structural host parity: {len(matched)} paired command documents "
+        "passed existence/core/chain checks"
+    )
+    untested = untested_core_contracts(matched)
+    print(
+        f"UNTESTED: {len(untested)} pair(s) have no curated MCP core-tool "
+        f"contract: {', '.join(untested)}"
+    )
+    print(
+        "UNTESTED: Codex native stage execution; this check covers command "
+        "documents and model-routing wiring only"
+    )
+    print(
+        "UNTESTED: Gemini native execution parity; no Gemini command corpus "
+        "is checked"
     )
     return 0
 
