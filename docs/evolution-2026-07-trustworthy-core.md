@@ -364,13 +364,16 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
 - [x] **2.4 `force_proceed` 제도화 (게이트 우회의 공식 경로)**
   현재: 어떤 스킬 프로즈에도 정의 없이 LLM이 임의로 씀(zep-auto-test 실증).
   설계:
-  - gates.py에 `gate_override(gate, reason, approved_by="user")` 도구 신설 —
-    claim ledger에 `type="gate_override", overridden_by="user", reason` 기록.
+  - gates.py에 `gate_override(gate, reason, approval_claim_id)` 도구 신설 —
+    호스트가 기록한 불변 `type="user_approval"` claim을 원자적으로 소비한 뒤
+    `type="gate_override", reason, approval_claim_id`를 기록.
   - 스킬 규약: 게이트 block 시 유일한 진행 경로는 AskUserQuestion으로 사용자
     명시 승인 → `gate_override` 호출 → 진행. **승인 없이 진행하는
     force_proceed는 anti-pattern으로 전 스킬에 명문화.**
   - `contract-stage-end.sh`의 게이트 판정부가 override claim 존재를 인지하도록
     갱신.
+  - 스코프 보정(2026-07-19): 모델이 `approved_by="user"` 문자열을 위조할 수 있는
+    구현 충돌을 확인해, 호스트 발급 승인 claim 없이는 우회가 불가능하도록 강화했다.
   - 완료 증거: `e823462`; `mcp/samvil_mcp/claim_ledger.py:374`,
     `mcp/samvil_mcp/gates.py:446`, `mcp/samvil_mcp/gates.py:479`,
     `mcp/samvil_mcp/server.py:2644`, `hooks/contract-stage-end.sh:177`,
@@ -637,6 +640,27 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/samvil_mcp/tools_benchmark.py:16`, `mcp/samvil_mcp/server.py:5905`,
     `mcp/samvil_mcp/server.py:5908`, `mcp/tests/test_server_domain_split.py:23`,
     `mcp/tests/test_server_domain_split.py:26`.
+- [x] **4.8 독립 재검수에서 확인된 신뢰 경계·실행 안정성 결함 보강**
+  Wave 0~4 완료 후 직접 재현과 독립 리뷰에서 확인된 우회 가능성을 닫았다.
+  파괴 명령 가드는 argv 기반 fail-closed 파서로 교체하고, runtime PASS는 성공 exit와
+  실제 통과 테스트를 함께 요구한다. 게이트 override는 호스트 발급 승인 claim을
+  원자적으로 한 번만 소비하며, 필터 파이프 증거는 신뢰된 runner exit가 없으면
+  거부한다. 훅의 무-Python/손상 JSON 경로, SQLite 스키마 마이그레이션, AC timeout
+  프로세스 그룹, mixed timestamp, 문서 배선·호스트 UNTESTED 집계도 회귀 테스트로
+  고정했다. 도그푸드는 고정 숫자 fixture 대신 실제 recorder 호출 trace를 사용한다.
+  - 완료 증거: `e7de43f`; `hooks/guard_destructive.py:179`,
+    `mcp/samvil_mcp/stage_evidence.py:110`,
+    `mcp/samvil_mcp/claim_ledger.py:418`,
+    `mcp/samvil_mcp/semantic_checker.py:98`,
+    `hooks/_contract-helpers.sh:372`, `mcp/samvil_mcp/event_store.py:73`,
+    `mcp/samvil_mcp/dogfood_interactions.py:52`,
+    `scripts/check-skill-wiring.py:366`, `scripts/pre-commit-check.sh:201`,
+    `mcp/tests/test_guard_destructive.py:53`,
+    `mcp/tests/test_gate_override.py:61`,
+    `mcp/tests/test_contract_hook_atomic.py:56`,
+    `mcp/tests/test_ac_verification.py:154`,
+    `mcp/tests/test_stage_evidence.py:36`,
+    `mcp/tests/test_semantic_checker.py:141`.
 
 ---
 
