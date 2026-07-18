@@ -198,10 +198,13 @@ v4.31이 시작한 방향의 완성이다.
     `mcp/samvil_mcp/server.py:290`, `mcp/samvil_mcp/server.py:298`,
     `mcp/samvil_mcp/server.py:339`, `mcp/tests/conftest.py:10`,
     `mcp/tests/test_sample_rate_atomic.py:16`.
-- [ ] **0.7 rate_budget 크래시 워커 slot 영구 누수**
+- [x] **0.7 rate_budget 크래시 워커 slot 영구 누수**
   `rate_budget.py:93` `_replay`가 TTL/heartbeat 없이 acquire/release 쌍으로만
   재구성 → 크래시한 워커의 slot이 영원히 점유. 수정: acquire 레코드에 timestamp
   기반 TTL(기본 30분) 추가, replay 시 만료 acquire 무시 + 테스트.
+  - 완료 증거: `5a845f0`; `mcp/samvil_mcp/rate_budget.py:32`,
+    `mcp/samvil_mcp/rate_budget.py:68`, `mcp/samvil_mcp/rate_budget.py:93`,
+    `mcp/tests/test_rate_budget.py:26`, `mcp/tests/test_rate_budget.py:41`.
 - [ ] **0.8 positional `save_event` 예시 교정**
   `samvil-pm-interview/SKILL.md:67-68`, `samvil-update/SKILL.md:88`이 positional
   호출 예시 — 나머지 전부 keyword-only라 LLM이 복사하면 InputValidationError.

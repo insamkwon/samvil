@@ -85,7 +85,7 @@ Manual rollback only until v3.3. Detail in
 
 Best-effort observability after success:
 ```
-mcp__samvil_mcp__save_event("update_complete", '{"from":"<CURRENT>","to":"<LATEST>"}')
+mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="update_complete", stage="complete", data='{"from":"<CURRENT>","to":"<LATEST>"}')
 ```
 
 One-shot — no automatic chain.

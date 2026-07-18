@@ -64,8 +64,8 @@ AC is a leaf `{id, description, children: []}` — vague words ("빠르게",
 
 4. Best-effort events (P8 — file write is the source of truth):
    ```
-   mcp__samvil_mcp__save_event("pm_seed_complete", '{"epics":N,"tasks":M}')
-   mcp__samvil_mcp__save_event("pm_seed_converted", '{"features":N}')
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="pm_seed_complete", stage="seed", data='{"epics":N,"tasks":M}')
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="pm_seed_converted", stage="seed", data='{"features":N}')
    ```
 
 ## Chain to next skill (INV-4)

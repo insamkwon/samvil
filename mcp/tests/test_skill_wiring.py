@@ -48,3 +48,17 @@ def test_interview_question_limits_use_decision_boundaries_ssot() -> None:
     assert "| minimal | 3-4개 |" not in legacy
     assert "`min_questions_reference`" in boundaries
     assert "`max_questions`" in boundaries
+
+
+def test_save_event_examples_use_named_arguments() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    for relative in (
+        "skills/samvil-pm-interview/SKILL.md",
+        "skills/samvil-update/SKILL.md",
+    ):
+        text = (repo / relative).read_text()
+        assert 'mcp__samvil_mcp__save_event("' not in text
+        assert "session_id=" in text
+        assert "event_type=" in text
+        assert "stage=" in text
+        assert "data=" in text
