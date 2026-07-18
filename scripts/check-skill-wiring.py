@@ -19,10 +19,18 @@ Not checked here (runtime):
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+
+REFERENCE_TOOL_CALL_RE = re.compile(
+    r"`((?:claim|gate|route|rate_budget|budget)_[a-z0-9_]+)\([^`]*\)`"
+)
+REFERENCE_TOOL_LABEL_RE = re.compile(
+    r"`((?:claim|gate|route|rate_budget|budget)_[a-z0-9_]+)`\s+tool\b"
+)
 
 CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
     # (skill_name, skill_path, required substrings)
@@ -68,6 +76,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "route_task",
             "validate_role_separation",
             "claim_verify",
+            ".samvil/claims.jsonl",
             "consensus_trigger",
             "qa_to_deploy",
             "render_pattern_context",
@@ -332,6 +341,36 @@ def _collect_mcp_tools() -> list[str]:
     return names
 
 
+def find_unresolved_reference_tools(repo: Path = REPO) -> dict[str, list[str]]:
+    """Find MCP-like tool references in ``references/`` with no registration."""
+    server = repo / "mcp" / "samvil_mcp" / "server.py"
+    sources = [server] + sorted(server.parent.glob("tools_*.py"))
+    registered: set[str] = set()
+    for source in sources:
+        if not source.exists():
+            continue
+        registered.update(
+            re.findall(
+                r"@mcp\.tool\(\)\s*\n\s*(?:async )?def (\w+)",
+                source.read_text(errors="ignore"),
+            )
+        )
+
+    unresolved: dict[str, list[str]] = {}
+    references = repo / "references"
+    if not references.exists():
+        return unresolved
+    for path in sorted(references.rglob("*.md")):
+        for lineno, line in enumerate(path.read_text(errors="ignore").splitlines(), start=1):
+            candidates = set(REFERENCE_TOOL_CALL_RE.findall(line))
+            candidates.update(REFERENCE_TOOL_LABEL_RE.findall(line))
+            for name in sorted(candidates - registered):
+                unresolved.setdefault(name, []).append(
+                    f"{path.relative_to(repo)}:{lineno}"
+                )
+    return unresolved
+
+
 def _collect_legacy_text() -> str:
     """Concatenate all SKILL.legacy.md files (P8 fallback bodies)."""
     parts: list[str] = []
@@ -477,6 +516,15 @@ def main() -> int:
     else:
         allowlisted = [t for t in mcp_tools if t not in skill_text and t in REVERSE_CHECK_ALLOWLIST]
         _ok(f"all non-allowlisted @mcp.tool() functions referenced ({len(allowlisted)} allowlisted pending-wiring tools skipped)")
+
+    print()
+    print("Reference check: MCP-like tool names in references/ resolve ...")
+    unresolved_references = find_unresolved_reference_tools()
+    if unresolved_references:
+        _fail(f"unregistered reference tool(s): {unresolved_references}")
+        all_green = False
+    else:
+        _ok("all MCP-like references resolve to registered tools")
 
     print()
     print("Summary:", "PASS" if all_green else "FAIL")

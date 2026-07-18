@@ -4190,7 +4190,7 @@ async def finalize_qa_verdict(
         project_path: Repo root.
         evidence_json: Same shape `synthesize_qa_evidence` consumes.
         pending_ac_claims_json: JSON array of pending build-stage
-            ac_verdict claims (e.g., from `claim_query_by_subject`).
+            ac_verdict claims loaded from `.samvil/claims.jsonl`.
 
     Returns: JSON with `synthesis`, `convergence`, `claim_actions[]`,
     `consensus_triggers[]`, `gate_input`, `blocked

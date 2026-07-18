@@ -352,7 +352,7 @@ def finalize_qa_verdict(
         project_path: Repo root.
         evidence: JSON shape consumed by `synthesize_qa_evidence`.
         pending_ac_claims: List of pending build-stage `ac_verdict`
-            claims (e.g., output of `claim_query_by_subject`). When
+            claims loaded from `.samvil/claims.jsonl`. When
             None or empty, `claim_actions` and `consensus_triggers`
             return empty.
 

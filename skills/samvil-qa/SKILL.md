@@ -68,7 +68,7 @@ After all leaves: `print(json.loads(render_ac_tree_hud(ac_tree_json=tree_json))[
 
 ### 4. Phase Z — synthesis + contract finalize
 
-Build `evidence = {iteration, max_iterations, pass1{status,issues}, pass2{items[{id,criterion,verdict,evidence,method,reason}],counts}, pass3, agent_writes:[]}`. Query pending build claims via `claim_query_by_subject(project_root=".", subject_glob="<seed leaf id glob>")` (best-effort).
+Build `evidence = {iteration, max_iterations, pass1{status,issues}, pass2{items[{id,criterion,verdict,evidence,method,reason}],counts}, pass3, agent_writes:[]}`. Load `.samvil/claims.jsonl` (best-effort) and select rows with `type="ac_verdict"`, `status="pending"`, and `subject` matching a current seed leaf id; pass that list as the pending build claims.
 
 ```
 mcp__samvil_mcp__finalize_qa_verdict(project_path=".",

@@ -153,9 +153,11 @@ v4.31이 시작한 방향의 완성이다.
     `mcp/samvil_mcp/stall_detector.py:69`, `mcp/samvil_mcp/event_store_reader.py:51`,
     `mcp/tests/test_qa_synthesis.py:168`, `mcp/tests/test_stall_detector.py:41`,
     `mcp/tests/test_event_store_reader.py:78`.
-- [ ] **0.3 `needs_review or True` 버그**
+- [x] **0.3 `needs_review or True` 버그**
   `migrate_v3_2.py:159-160` — 기존값 read가 dead read, 리뷰 완료 leaf(False)를
   마이그레이션마다 강제 True로 되돌림. 수정 + 테스트.
+  - 완료 증거: `7b9c009`; `mcp/samvil_mcp/migrate_v3_2.py:158`,
+    `mcp/tests/test_migrate_v3_2.py:107`.
 - [ ] **0.4 팬텀/오류 도구 참조 3건 교정**
   (a) `skills/samvil-qa/SKILL.md:71` `claim_query_by_subject` → 실제 도구명
   (`query_by_subject`, server.py에서 실명 확인 후 교체).
@@ -165,6 +167,10 @@ v4.31이 시작한 방향의 완성이다.
   `rate_budget_*` 도구명으로 교정.
   + `check-skill-wiring.py`가 references/의 도구 참조도 검사하도록 확장
   (스킬만 검사해서 이번 팬텀들이 살아남았다).
+  (스코프 보정: 현재 공개 MCP에는 `query_by_subject`도 등록돼 있지 않아 (a)는
+  `.samvil/claims.jsonl` 직접 필터로 교정한다. 또한 공개 `route_task` 래퍼는
+  `server.py`에서 실제로 `attempts`를 받고 내부 `routing.route_task`에만
+  `escalation_depth`가 있으므로 (b)는 현행 예시가 맞아 변경하지 않는다.)
 - [ ] **0.5 인터뷰 질문 수 thin↔legacy 모순 해소**
   thin(`skills/samvil-interview/SKILL.md:69`) 5/10/20/30/40 vs
   legacy(`SKILL.legacy.md:268-270`) 3-4/5-6/6-8. **Wave 3의 질문 예산제를 선반영해

@@ -148,9 +148,9 @@ Used when calling `gate_check` at post_stage.
   just pass `task_role`.
 - **Threshold arithmetic.** `gate_check` reads `gate_config.yaml` and
   applies per-tier floors.
-- **Performance budget bookkeeping.** Sprint 6 `budget_status` tool
-  consumes consumption numbers; skills pass their observed values and
-  honor hard_stop.
+- **Concurrency budget bookkeeping.** Sprint 6 `rate_budget_acquire`,
+  `rate_budget_release`, and `rate_budget_stats` tools manage worker slots;
+  skills pass the budget path/worker id and honor `acquired=false`.
 
 ## Failure / degradation
 
