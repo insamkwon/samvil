@@ -114,6 +114,14 @@ def test_complete_stage_tool_emits_event_and_claim(tmp_path, monkeypatch) -> Non
     assert len(posted) == 1
     assert posted[0].statement == "verdict=pass via complete_stage"
 
+    rows = read_events(project_root)
+    assert rows["ok"] is True
+    assert len(rows["entries"]) == 1
+    assert rows["entries"][0]["event_type"] == "interview_complete"
+    assert rows["entries"][0]["stage"] == "interview"
+    assert rows["entries"][0]["session_id"]
+    assert rows["entries"][0]["data"]["verdict"] == "pass"
+
 
 def test_save_event_file_lock_work_is_offloaded(tmp_path, monkeypatch) -> None:
     from samvil_mcp import server as srv

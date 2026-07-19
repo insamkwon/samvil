@@ -999,6 +999,21 @@ async def complete_stage(
         claim_id = None
         project_path = _session_project_path(session)
         if project_path is not None:
+            try:
+                await asyncio.to_thread(
+                    _append_project_event,
+                    project_path,
+                    timestamp=event.timestamp,
+                    event_type=plan["event_type"],
+                    stage=_canonical_stage_for_event(
+                        plan["event_type"], stage_enum.value
+                    ),
+                    session_id=session_id,
+                    data=event_data,
+                )
+            except OSError as exc:
+                _log_mcp_health("fail", "complete_stage.events_ssot", str(exc))
+
             claim_data = plan["claim"]
             ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
             claim = ledger.post(
