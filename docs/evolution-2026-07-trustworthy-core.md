@@ -661,6 +661,23 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/tests/test_ac_verification.py:154`,
     `mcp/tests/test_stage_evidence.py:36`,
     `mcp/tests/test_semantic_checker.py:141`.
+- [x] **4.9 R3 pre-PR 리뷰에서 재현된 잔여 우회 경로 전부 차단**
+  142파일/8,402 LOC diff를 교차 엔진 + 독립 finder 5개 + finding별 verifier
+  2표로 재검수해 확정된 P1/P2를 닫았다. 파괴 명령 가드는 줄바꿈·parent escape·
+  wrapper/subshell을 재귀 분석하고, generic claim API는 host-only 승인/override를
+  게시·검증할 수 없다. override 소비 시 실제 host approval의 consumed provenance를
+  다시 검증한다. `complete_stage`는 persisted project root를 사용하고, AC 검증은
+  event loop 밖에서 실행한다. deploy gate는 runtime 증거를 필수로 하며 `deep` tier는
+  전 파이프라인에서 독립된 최상위 엄격도로 유지한다.
+  - 완료 증거: `f5104fb`; `hooks/guard_destructive.py:71`,
+    `hooks/guard_destructive.py:233`, `mcp/samvil_mcp/claim_ledger.py:54`,
+    `mcp/samvil_mcp/claim_ledger.py:582`, `mcp/samvil_mcp/server.py:999`,
+    `mcp/samvil_mcp/server.py:4830`, `mcp/samvil_mcp/gates.py:170`,
+    `mcp/samvil_mcp/orchestrator.py:31`,
+    `mcp/tests/test_guard_destructive.py:65`,
+    `mcp/tests/test_gate_override.py:75`, `mcp/tests/test_gate_override.py:138`,
+    `mcp/tests/test_gates.py:75`, `mcp/tests/test_server_domain_split.py:54`,
+    `mcp/tests/test_samvil_smoke.py:173`.
 
 ---
 
