@@ -3132,9 +3132,9 @@ async def migrate_apply(project_root: str = ".", dry_run: bool = False) -> str:
 async def migrate_seed_v3_3(project_root: str = ".") -> str:
     """Migrate a v3.2 seed to v3.3 AC verify contracts."""
     try:
-        from .migrate_v3_3 import apply_migration
+        from . import migrate_v3_3 as _migrate_v3_3
 
-        result = apply_migration(project_root)
+        result = await asyncio.to_thread(_migrate_v3_3.apply_migration, project_root)
         _log_mcp_health("ok", "migrate_seed_v3_3")
         return json.dumps(result)
     except Exception as e:

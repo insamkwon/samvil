@@ -88,3 +88,15 @@ def test_finalize_qa_verdict_file_work_is_offloaded(monkeypatch) -> None:
         )
     )
     assert delay < 0.1
+
+
+def test_seed_v3_3_migration_is_offloaded(monkeypatch) -> None:
+    from samvil_mcp import migrate_v3_3
+
+    def slow_apply(project_root: str):
+        time.sleep(0.2)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(migrate_v3_3, "apply_migration", slow_apply)
+    delay = asyncio.run(_ticker_delay(server.migrate_seed_v3_3(".")))
+    assert delay < 0.1
