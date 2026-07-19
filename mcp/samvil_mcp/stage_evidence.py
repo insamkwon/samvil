@@ -12,6 +12,10 @@ from typing import Any
 _EXIT_MARKER = re.compile(r"^SAMVIL_EXIT:(-?\d+)\s*$", re.MULTILINE)
 _MAX_LOG_BYTES = 2_000_000
 _MAX_REPORT_BYTES = 10_000_000
+_BUILD_TRUST_REASON = (
+    "artifact-only build evidence is model-writable; a trusted host receipt "
+    "is required before runtime_verified can be true"
+)
 
 
 def _read_tail(path: Path, limit: int = _MAX_LOG_BYTES) -> str:
@@ -61,6 +65,10 @@ def _collect_build(root: Path) -> tuple[dict[str, Any], list[str], list[str]]:
                 "from": f"{relative} last execution block",
                 "typecheck_ok": False,
                 "warnings_count": 0,
+                "artifact_build_passed": False,
+                "runtime_verified": False,
+                "static_only": True,
+                "trust_reason": _BUILD_TRUST_REASON,
             },
             [],
             [relative],
@@ -78,6 +86,10 @@ def _collect_build(root: Path) -> tuple[dict[str, Any], list[str], list[str]]:
             "from": f"{relative} last execution block",
             "typecheck_ok": exit_code == 0,
             "warnings_count": warnings_count,
+            "artifact_build_passed": exit_code == 0,
+            "runtime_verified": False,
+            "static_only": True,
+            "trust_reason": _BUILD_TRUST_REASON,
         },
         [relative],
         [] if exit_code is not None else [relative],
@@ -158,9 +170,9 @@ def collect_stage_evidence(project_root: str | Path, stage: str) -> dict[str, An
     """Return artifact-derived observations for ``build`` or ``qa``.
 
     Missing or malformed artifacts are reported explicitly and never inferred as
-    successful from caller-provided prose or metrics. QA artifacts remain
-    untrusted because the model can write them; only a future trusted host
-    receipt may set ``runtime_verified``.
+    successful from caller-provided prose or metrics. Build and QA artifacts
+    remain untrusted because the model can write them; only a future trusted
+    host receipt may set ``runtime_verified``.
     """
 
     normalized_stage = stage.strip().casefold()

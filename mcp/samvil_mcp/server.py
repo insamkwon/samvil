@@ -2551,7 +2551,12 @@ def _mechanical_gate_evidence(
     if gate_name == "build_to_qa":
         evidence = _collect(project_root, "build")
         return (
-            {"build_ok": evidence["build"]["exit_code"] == 0},
+            {
+                "build_ok": bool(
+                    evidence["build"]["runtime_verified"]
+                    and evidence["build"]["exit_code"] == 0
+                )
+            },
             {"build_ok": True},
             evidence,
         )

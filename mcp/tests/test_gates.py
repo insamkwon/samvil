@@ -436,6 +436,35 @@ def test_mcp_build_gate_overwrites_reported_build_ok(tmp_path: Path, monkeypatch
     assert any(item[:2] == ("warn", "gate_check.metric_mismatch") for item in health)
 
 
+def test_mcp_build_gate_rejects_model_writable_success_log(tmp_path: Path) -> None:
+    from samvil_mcp.server import gate_check as gate_check_tool
+
+    samvil = tmp_path / ".samvil"
+    samvil.mkdir()
+    (samvil / "build.log").write_text("compiled\nSAMVIL_EXIT:0\n")
+
+    result = json.loads(
+        asyncio.run(
+            gate_check_tool(
+                gate_name="build_to_qa",
+                samvil_tier="standard",
+                metrics_json=json.dumps(
+                    {"implementation_rate": 1.0, "build_ok": True}
+                ),
+                project_root=str(tmp_path),
+                evidence_mode="mechanical",
+            )
+        )
+    )
+
+    assert result["verdict"] == "block"
+    assert result["metrics"]["build_ok"] is False
+    assert result["mechanical_metrics"] == {"build_ok": False}
+    assert result["stage_evidence"]["build"]["artifact_build_passed"] is True
+    assert result["stage_evidence"]["build"]["runtime_verified"] is False
+    assert "build_ok" in result["failed_checks"]
+
+
 def test_mcp_qa_gate_uses_reported_test_counts(tmp_path: Path) -> None:
     from samvil_mcp.server import gate_check as gate_check_tool
 

@@ -28,6 +28,13 @@ def test_build_uses_last_exit_marker_and_execution_block(tmp_path: Path) -> None
         "from": ".samvil/build.log last execution block",
         "typecheck_ok": True,
         "warnings_count": 1,
+        "artifact_build_passed": True,
+        "runtime_verified": False,
+        "static_only": True,
+        "trust_reason": (
+            "artifact-only build evidence is model-writable; a trusted host "
+            "receipt is required before runtime_verified can be true"
+        ),
     }
     assert result["evidence_files"] == [".samvil/build.log"]
     assert result["missing"] == []
@@ -135,6 +142,9 @@ def test_missing_evidence_fails_closed(tmp_path: Path) -> None:
 
     assert build["build"]["exit_code"] is None
     assert build["build"]["typecheck_ok"] is False
+    assert build["build"]["artifact_build_passed"] is False
+    assert build["build"]["runtime_verified"] is False
+    assert build["build"]["static_only"] is True
     assert build["missing"] == [".samvil/build.log"]
     assert qa["qa"]["npm_test"]["ran"] is False
     assert qa["qa"]["npm_test"]["exit_code"] is None
@@ -175,4 +185,5 @@ def test_mcp_tool_returns_collected_evidence(tmp_path: Path) -> None:
     result = json.loads(asyncio.run(collect_tool(str(tmp_path), "build")))
 
     assert result["build"]["exit_code"] == 0
+    assert result["build"]["runtime_verified"] is False
     assert result["missing"] == []
