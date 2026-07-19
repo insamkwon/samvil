@@ -70,3 +70,21 @@ def test_chain_marker_write_is_offloaded(monkeypatch) -> None:
         )
     )
     assert delay < 0.1
+
+
+def test_finalize_qa_verdict_file_work_is_offloaded(monkeypatch) -> None:
+    def slow_finalize(*args, **kwargs):
+        time.sleep(0.2)
+        return {"next_skill_decision": {"suggested": "samvil-retro"}}
+
+    monkeypatch.setattr(server, "_finalize_qa_verdict", slow_finalize)
+    delay = asyncio.run(
+        _ticker_delay(
+            server.finalize_qa_verdict(
+                project_path=".",
+                evidence_json="{}",
+                pending_ac_claims_json="[]",
+            )
+        )
+    )
+    assert delay < 0.1

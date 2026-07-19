@@ -4493,7 +4493,8 @@ async def finalize_qa_verdict(
     try:
         evidence = json.loads(evidence_json) if evidence_json else {}
         pending = json.loads(pending_ac_claims_json) if pending_ac_claims_json else []
-        result = _finalize_qa_verdict(
+        result = await asyncio.to_thread(
+            _finalize_qa_verdict,
             project_path or ".",
             evidence=evidence,
             pending_ac_claims=pending,
