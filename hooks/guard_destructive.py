@@ -13,7 +13,18 @@ from typing import Any
 
 SQL_CLIENTS = {"mariadb", "mysql", "psql", "sqlite3", "sqlcmd"}
 SHELLS = {"bash", "dash", "sh", "zsh"}
-CHAIN_TOKENS = {";", "&&", "||", "|", "&"}
+CHAIN_TOKENS = {";", "&&", "||", "|", "&", "\n", "(", ")", "{", "}"}
+SIMPLE_WRAPPERS = {"command", "exec", "nohup"}
+DETECTABLE_EXECUTABLES = SQL_CLIENTS | SHELLS | {
+    "git",
+    "rm",
+    "timeout",
+    "nohup",
+    "nice",
+    "command",
+    "exec",
+    "xargs",
+}
 GIT_GLOBAL_WITH_VALUE = {
     "-c",
     "-C",
@@ -58,7 +69,8 @@ def _executable(token: str) -> str:
 
 
 def _segments(command: str) -> list[list[str]]:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n{}")
+    lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     lexer.commenters = ""
     segments: list[list[str]] = [[]]
@@ -154,10 +166,13 @@ def _rm_reason(args: list[str]) -> str | None:
         return None
     targets = [token for token in args if not token.startswith("-")]
     for target in targets:
-        allowed_cache = target == ".next" or target.startswith(".next/")
-        allowed_state = target == ".samvil" or target.startswith(".samvil/")
+        normalized = os.path.normpath(target)
+        allowed_cache = normalized == ".next" or normalized.startswith(".next/")
+        allowed_state = normalized == ".samvil" or normalized.startswith(".samvil/")
+        parent_escape = normalized == ".." or normalized.startswith("../")
         dangerous = (
-            target in {"/", "~", ".", "./", "..", "../", "*", "./*"}
+            normalized in {"/", "~", ".", "*"}
+            or parent_escape
             or target.startswith("/")
             or target.startswith("~/")
             or target.startswith("$")
@@ -176,6 +191,45 @@ def _sql_reason(executable: str, args: list[str]) -> str | None:
     return None
 
 
+def _skip_options(args: list[str], *, with_value: set[str] | None = None) -> int:
+    value_options = with_value or set()
+    index = 0
+    while index < len(args) and args[index].startswith("-"):
+        token = args[index]
+        key = token.split("=", 1)[0]
+        index += 1
+        if key in value_options and "=" not in token and index < len(args):
+            index += 1
+    return index
+
+
+def _wrapped_tokens(executable: str, args: list[str]) -> list[str] | None:
+    if executable in SIMPLE_WRAPPERS:
+        return args[_skip_options(args) :]
+    if executable == "nice":
+        index = _skip_options(args, with_value={"-n", "--adjustment"})
+        return args[index:]
+    if executable == "timeout":
+        index = _skip_options(
+            args,
+            with_value={"-k", "--kill-after", "-s", "--signal"},
+        )
+        return args[index + 1 :] if index < len(args) else []
+    if executable == "xargs":
+        for index, token in enumerate(args):
+            if _executable(token) in DETECTABLE_EXECUTABLES:
+                return args[index:]
+        return []
+    return None
+
+
+def _shell_command(args: list[str]) -> str | None:
+    for index, token in enumerate(args):
+        if token.startswith("-") and "c" in token[1:] and index + 1 < len(args):
+            return args[index + 1]
+    return None
+
+
 def analyze_command(command: str) -> str | None:
     for tokens in _segments(command):
         start = _command_start(tokens)
@@ -183,10 +237,15 @@ def analyze_command(command: str) -> str | None:
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
-        if executable in SHELLS and "-c" in args:
-            command_index = args.index("-c") + 1
-            if command_index < len(args):
-                nested = analyze_command(args[command_index])
+        wrapped = _wrapped_tokens(executable, args)
+        if wrapped:
+            nested = analyze_command(shlex.join(wrapped))
+            if nested:
+                return nested
+        if executable in SHELLS:
+            shell_command = _shell_command(args)
+            if shell_command:
+                nested = analyze_command(shell_command)
                 if nested:
                     return nested
         if executable == "git":

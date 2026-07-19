@@ -31,3 +31,10 @@ def test_standard_dashboard_dogfood_stays_within_twelve_touchpoints() -> None:
     assert result["ask_user_question_calls"] == 12
     assert result["within_goal"] is True
     assert result["council_opt_in"] is False
+
+
+def test_dogfood_interaction_harness_is_not_shipped_in_runtime_package() -> None:
+    repo = Path(__file__).resolve().parents[2]
+
+    assert not (repo / "mcp" / "samvil_mcp" / "dogfood_interactions.py").exists()
+    assert (repo / "scripts" / "dogfood_interactions.py").is_file()

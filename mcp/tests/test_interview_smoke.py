@@ -7,7 +7,7 @@ skill's purpose — but every machine-checkable contract the skill relies
 on lives below:
 
 - `aggregate_interview_state` MCP wrapper resolves tier (state > config
-  > default) including the v3.1 `deep` alias which interview keeps.
+  > default), including the canonical strictest `deep` tier.
 - Built-in preset matching for each major solution_type keyword set.
 - Custom-preset scan honors `~/.samvil/presets/*.json` (or
   `$SAMVIL_PRESET_DIR`) and beats built-ins on overlapping keywords.

@@ -334,7 +334,7 @@ samvil-update    ← [v3.0.0] GitHub 업데이트 + --migrate 지원
 
 | 단계 | 종료 조건 |
 |------|----------|
-| Interview | `ambiguity_score ≤ samvil_tier 임계값` (minimal 0.10 / standard 0.05 / thorough 0.02 / full 0.01 / deep 0.01) |
+| Interview | `ambiguity_score ≤ samvil_tier 임계값` (minimal 0.10 / standard 0.05 / thorough 0.02 / full 0.01 / deep 0.005) |
 | Build | `npm run build` 성공 + typecheck 통과 |
 | QA | 3-pass 모두 PASS + 모든 leaf에 file:line evidence |
 | Evolve 수렴 | `similarity ≥ 0.95` + `regression == 0` + 5 evolve_checks 통과 |

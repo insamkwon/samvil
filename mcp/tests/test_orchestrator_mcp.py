@@ -87,12 +87,14 @@ def test_complete_stage_tool_emits_event_and_claim(tmp_path, monkeypatch) -> Non
     project_root = tmp_path / "project"
     project_root.mkdir()
 
-    from samvil_mcp import server as srv
-
-    monkeypatch.setattr(srv, "_resolve_project_path", lambda _name: project_root)
-
     async def runner():
-        sess = json.loads(await create_session("orch-complete", "standard"))
+        sess = json.loads(
+            await create_session(
+                "orch-complete",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
         sid = sess["session_id"]
 
         result = json.loads(await complete_stage(sid, "interview", "pass"))

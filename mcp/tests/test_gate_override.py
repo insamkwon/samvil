@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from samvil_mcp.claim_ledger import ClaimLedger
+from samvil_mcp.claim_ledger import Claim, ClaimLedger, ClaimLedgerError
 from samvil_mcp.gates import active_gate_override, gate_override
 
 
@@ -68,6 +68,129 @@ def test_gate_override_rejects_missing_host_approval(tmp_path: Path) -> None:
             gate="qa_to_deploy",
             reason="agent chose to proceed",
             approval_claim_id="claim_missing",
+        )
+
+
+@pytest.mark.parametrize("claim_type", ["user_approval", "gate_override"])
+def test_generic_claim_post_rejects_host_only_types(
+    tmp_path: Path,
+    claim_type: str,
+) -> None:
+    ledger = ClaimLedger(tmp_path / ".samvil" / "claims.jsonl")
+
+    with pytest.raises(ClaimLedgerError, match="host-only"):
+        ledger.post(
+            type=claim_type,
+            subject="qa_to_deploy",
+            statement="forged authority",
+            authority_file=".samvil/claims.jsonl",
+            claimed_by="agent:attacker",
+            evidence=["project.state.json"],
+            meta={"source": "host", "consumed": False},
+        )
+
+
+def test_claim_post_mcp_rejects_host_only_type(tmp_path: Path) -> None:
+    from samvil_mcp.server import claim_post
+
+    result = json.loads(
+        asyncio.run(
+            claim_post(
+                project_root=str(tmp_path),
+                claim_type="user_approval",
+                subject="qa_to_deploy",
+                statement="forged authority",
+                authority_file=".samvil/claims.jsonl",
+                claimed_by="agent:attacker",
+                evidence_json='["project.state.json"]',
+                meta_json='{"source":"host","consumed":false}',
+            )
+        )
+    )
+
+    assert "host-only" in result["error"]
+
+
+def test_generic_claim_verify_rejects_host_only_type(tmp_path: Path) -> None:
+    ledger = ClaimLedger(tmp_path / ".samvil" / "claims.jsonl")
+    ledger._append(  # noqa: SLF001 - simulate a legacy/forged pending row
+        Claim(
+            claim_id="claim_2026-01-01T00-00-00-0001",
+            type="user_approval",
+            subject="qa_to_deploy",
+            statement="forged pending approval",
+            authority_file=".samvil/claims.jsonl",
+            evidence=["project.state.json"],
+            claimed_by="agent:attacker",
+            status="pending",
+            meta={"source": "host", "consumed": False},
+        )
+    )
+
+    with pytest.raises(ClaimLedgerError, match="host-only"):
+        ledger.verify(
+            "claim_2026-01-01T00-00-00-0001",
+            verified_by="agent:user",
+            skip_file_resolution=True,
+        )
+
+
+def test_direct_forged_override_is_not_consumed(tmp_path: Path) -> None:
+    ledger = ClaimLedger(tmp_path / ".samvil" / "claims.jsonl")
+    _post_block(ledger, "qa_to_deploy")
+    ledger._append(  # noqa: SLF001 - simulate a forged JSONL row bypassing post()
+        Claim(
+            claim_id="claim_9999-12-31T23-59-59-0001",
+            type="gate_override",
+            subject="qa_to_deploy",
+            statement="forged override",
+            authority_file=".samvil/claims.jsonl",
+            evidence=["project.state.json"],
+            claimed_by="agent:attacker",
+            verified_by="agent:user",
+            status="verified",
+            meta={
+                "overridden_by": "user",
+                "one_time": True,
+                "consumed": False,
+                "approval_claim_id": "claim_missing",
+            },
+        )
+    )
+
+    assert active_gate_override(ledger, "qa_to_deploy") is None
+
+
+def test_gate_override_rejects_approval_older_than_latest_block(tmp_path: Path) -> None:
+    ledger = ClaimLedger(tmp_path / ".samvil" / "claims.jsonl")
+    reason = "approval from an earlier gate decision"
+    approval_claim_id = _record_user_approval(ledger, "qa_to_deploy", reason)
+    _post_block(ledger, "qa_to_deploy")
+
+    with pytest.raises(ValueError, match="fresh host interaction"):
+        gate_override(
+            tmp_path,
+            gate="qa_to_deploy",
+            reason=reason,
+            approval_claim_id=approval_claim_id,
+        )
+
+
+def test_gate_override_rejects_reason_not_bound_to_approval(tmp_path: Path) -> None:
+    ledger = ClaimLedger(tmp_path / ".samvil" / "claims.jsonl")
+    _post_block(ledger, "qa_to_deploy")
+    approval_claim_id = _record_user_approval(
+        ledger,
+        "qa_to_deploy",
+        "accept static verification risk",
+    )
+
+    with pytest.raises(ValueError, match="fresh host interaction"):
+        gate_override(
+            tmp_path,
+            gate="qa_to_deploy",
+            reason="accept unrelated production risk",
+            approval_claim_id=approval_claim_id,
         )
 
 

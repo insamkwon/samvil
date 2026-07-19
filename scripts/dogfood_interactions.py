@@ -1,10 +1,4 @@
-"""Deterministic interaction harness for end-to-end workflow dogfoods.
-
-The harness executes the real orchestrator and interview scorer while routing
-every simulated user boundary through one recorder.  Dogfoods therefore report
-calls that actually occurred, rather than returning a precomputed touchpoint
-list that can stay green after workflow control flow changes.
-"""
+"""Deterministic interaction harness for end-to-end workflow dogfoods."""
 
 from __future__ import annotations
 
@@ -12,8 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .interview_engine import score_ambiguity
-from .orchestrator import aggregate_orchestrator_state
+from samvil_mcp.interview_engine import score_ambiguity
+from samvil_mcp.orchestrator import aggregate_orchestrator_state
 
 
 @dataclass

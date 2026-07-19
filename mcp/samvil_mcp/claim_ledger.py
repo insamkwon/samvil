@@ -51,6 +51,9 @@ CLAIM_TYPES: tuple[str, ...] = (
 )
 
 CLAIM_STATUSES: tuple[str, ...] = ("pending", "verified", "rejected")
+HOST_ONLY_CLAIM_TYPES: frozenset[str] = frozenset(
+    {"user_approval", "gate_override"}
+)
 
 # Evidence format: "path/to/file.ext:line_no" or bare "path/to/file.ext".
 # We accept both but require at least one element on verify.
@@ -218,6 +221,11 @@ class ClaimLedger:
                 f"claim type {type!r} not in whitelist {CLAIM_TYPES}. "
                 "Use events.jsonl for non-contract records."
             )
+        if type in HOST_ONLY_CLAIM_TYPES:
+            raise ClaimLedgerError(
+                f"claim type {type!r} is host-only and cannot be posted "
+                "through the generic claim API."
+            )
         if not claimed_by:
             raise ClaimLedgerError("claimed_by is required (Generator identity).")
         if not subject or not statement:
@@ -266,6 +274,11 @@ class ClaimLedger:
             current = self._latest_by_id().get(claim_id)
             if current is None:
                 raise ClaimLedgerError(f"claim {claim_id!r} does not exist.")
+            if current.type in HOST_ONLY_CLAIM_TYPES:
+                raise ClaimLedgerError(
+                    f"claim type {current.type!r} is host-only and cannot be "
+                    "verified through the generic claim API."
+                )
             if current.status == "verified":
                 return current  # idempotent
             if current.status == "rejected":
@@ -537,6 +550,11 @@ class ClaimLedger:
                 and claim.meta.get("overridden_by") == "user"
                 and claim.meta.get("consumed") is False
                 and claim.claim_id > latest_verdict.claim_id
+                and self._override_has_host_approval(
+                    claim,
+                    latest=latest,
+                    latest_verdict=latest_verdict,
+                )
             ]
             if not overrides:
                 return None
@@ -558,7 +576,28 @@ class ClaimLedger:
                     meta=consumed_meta,
                 )
             )
-            return override
+        return override
+
+    @staticmethod
+    def _override_has_host_approval(
+        override: Claim,
+        *,
+        latest: dict[str, Claim],
+        latest_verdict: Claim,
+    ) -> bool:
+        approval_id = str(override.meta.get("approval_claim_id") or "")
+        approval = latest.get(approval_id)
+        return bool(
+            approval
+            and approval.type == "user_approval"
+            and approval.subject == override.subject
+            and approval.status == "verified"
+            and approval.verified_by == "agent:user"
+            and approval.meta.get("source") == "host"
+            and approval.meta.get("consumed") is True
+            and approval.meta.get("consumed_by") == override.claim_id
+            and latest_verdict.claim_id < approval.claim_id < override.claim_id
+        )
 
     # ── Queries ────────────────────────────────────────────────────────
 

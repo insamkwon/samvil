@@ -653,7 +653,7 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/samvil_mcp/claim_ledger.py:418`,
     `mcp/samvil_mcp/semantic_checker.py:98`,
     `hooks/_contract-helpers.sh:372`, `mcp/samvil_mcp/event_store.py:73`,
-    `mcp/samvil_mcp/dogfood_interactions.py:52`,
+    `scripts/dogfood_interactions.py:46`,
     `scripts/check-skill-wiring.py:366`, `scripts/pre-commit-check.sh:201`,
     `mcp/tests/test_guard_destructive.py:53`,
     `mcp/tests/test_gate_override.py:61`,

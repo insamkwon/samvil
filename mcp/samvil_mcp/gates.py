@@ -167,11 +167,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "qa_to_deploy": {
             "policy": "hard",
             "thresholds": {
-                "minimal": {"three_pass_pass": True, "zero_stubs": True},
-                "standard": {"three_pass_pass": True, "zero_stubs": True},
-                "thorough": {"three_pass_pass": True, "zero_stubs": True},
-                "full": {"three_pass_pass": True, "zero_stubs": True},
-                "deep": {"three_pass_pass": True, "zero_stubs": True},
+                "minimal": {"three_pass_pass": True, "zero_stubs": True, "runtime_verified": True},
+                "standard": {"three_pass_pass": True, "zero_stubs": True, "runtime_verified": True},
+                "thorough": {"three_pass_pass": True, "zero_stubs": True, "runtime_verified": True},
+                "full": {"three_pass_pass": True, "zero_stubs": True, "runtime_verified": True},
+                "deep": {"three_pass_pass": True, "zero_stubs": True, "runtime_verified": True},
             },
         },
         "qa_to_evolve": {

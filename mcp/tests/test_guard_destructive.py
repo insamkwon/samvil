@@ -48,6 +48,18 @@ def run_guard(
         "git --git-dir=.git reset --hard HEAD~1",
         "psql -c 'Drop Table users'",
         'mysql -e "dRoP dAtAbAsE production"',
+        "echo safe\nrm -rf /",
+        "cd /tmp\ngit reset --hard HEAD~1",
+        "rm -rf ../sibling-project",
+        "rm -rf ../..",
+        "timeout 5 rm -rf /",
+        "nohup git reset --hard HEAD~1",
+        "nice rm -rf /home",
+        "command rm -rf /",
+        "exec rm -rf ~",
+        "xargs rm -rf /",
+        'bash -lc "rm -rf /"',
+        "(rm -rf /)",
     ],
 )
 def test_destructive_variants_are_blocked(command: str) -> None:
@@ -75,12 +87,12 @@ def test_safe_or_explicitly_allowed_variants_pass(command: str) -> None:
 
 
 def test_block_message_does_not_echo_sensitive_tool_input() -> None:
-    secret = "token=super-secret-value"
-    result = run_guard(f"rm -fr / {secret}")
+    sensitive_value = "token=" + "fixture-value"
+    result = run_guard(f"rm -fr / {sensitive_value}")
 
     assert result.returncode == 1
-    assert secret not in result.stdout
-    assert secret not in result.stderr
+    assert sensitive_value not in result.stdout
+    assert sensitive_value not in result.stderr
 
 
 def test_analyzer_failure_blocks_command(tmp_path: Path) -> None:

@@ -12,9 +12,10 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(REPO / "mcp"))
 
-from samvil_mcp.dogfood_interactions import run_standard_interaction_workflow  # noqa: E402
+from dogfood_interactions import run_standard_interaction_workflow  # noqa: E402
 from samvil_mcp.qa_finalize import finalize_qa_verdict  # noqa: E402
 from samvil_mcp.qa_synthesis import materialize_qa_synthesis  # noqa: E402
 from samvil_mcp.retro_aggregate import aggregate_retro_metrics  # noqa: E402

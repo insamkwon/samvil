@@ -57,9 +57,7 @@ If no `--mode` flag and `errors[]` has no entry prefixed `"brownfield:"`, accept
 
 ## Step 2 — Tier Confirmation
 
-If `tier.source == "default"` or the user passed no `--tier` flag, AskUserQuestion → "어떤 수준으로 만들까요?" with `minimal` / `standard` / `thorough` / `full`. If `harness-feedback.log` has prior runs of the same `solution_type`, append the historical pass-rate per tier. Persist the chosen tier to `project.config.json` (`samvil_tier` + `selected_tier` for legacy compatibility).
-
-If `tier.aliased_from` is non-empty, mention the v3.1 → v3.2 alias mapping once (`deep` → `full`).
+If `tier.source == "default"` or the user passed no `--tier` flag, AskUserQuestion → "어떤 수준으로 만들까요?" with `minimal` / `standard` / `thorough` / `full` / `deep`. If `harness-feedback.log` has prior runs of the same `solution_type`, append the historical pass-rate per tier. Persist the chosen tier to `project.config.json` (`samvil_tier` + `selected_tier` for legacy compatibility).
 
 ## Step 3 — solution_type L3 Confirmation
 

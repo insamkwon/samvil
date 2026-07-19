@@ -72,6 +72,27 @@ def test_deep_tier_has_higher_floor() -> None:
     assert v.verdict == Verdict.BLOCK.value
 
 
+def test_qa_to_deploy_requires_runtime_verification() -> None:
+    blocked = gate_check(
+        GateName.QA_TO_DEPLOY.value,
+        samvil_tier="standard",
+        metrics={"three_pass_pass": True, "zero_stubs": True},
+    )
+    passed = gate_check(
+        GateName.QA_TO_DEPLOY.value,
+        samvil_tier="standard",
+        metrics={
+            "three_pass_pass": True,
+            "zero_stubs": True,
+            "runtime_verified": True,
+        },
+    )
+
+    assert blocked.verdict == Verdict.BLOCK.value
+    assert "runtime_verified" in blocked.failed_checks
+    assert passed.verdict == Verdict.PASS.value
+
+
 def test_interview_gate_requires_engine_convergence() -> None:
     blocked = gate_check(
         GateName.INTERVIEW_TO_SEED.value,

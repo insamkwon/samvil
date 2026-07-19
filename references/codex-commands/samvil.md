@@ -18,7 +18,7 @@
    - On MCP error: default to `samvil_tier="standard"`, ask user for
      `solution_type` manually (web/automation/game/mobile/dashboard).
 5. **Tier selection** — if `tier.source == "default"` (user didn't pass `--tier`):
-   Ask: "어떤 수준으로 만들까요? minimal / standard / thorough / full"
+   Ask: "어떤 수준으로 만들까요? minimal / standard / thorough / full / deep"
    Persist chosen tier to `.samvil/project.config.json` field `samvil_tier`.
 6. **Mode** — if `brownfield.is_brownfield` is true: jump to
    `samvil-analyze.md`. Otherwise proceed as greenfield.

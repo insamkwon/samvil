@@ -9,9 +9,10 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(REPO / "mcp"))
 
-from samvil_mcp.dogfood_interactions import run_standard_interaction_workflow  # noqa: E402
+from dogfood_interactions import run_standard_interaction_workflow  # noqa: E402
 
 
 def _require_skill_contracts() -> None:

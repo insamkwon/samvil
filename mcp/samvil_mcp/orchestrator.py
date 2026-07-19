@@ -28,7 +28,13 @@ PIPELINE_STAGES: tuple[str, ...] = (
     "complete",
 )
 
-SAMVIL_TIERS: tuple[str, ...] = ("minimal", "standard", "thorough", "full")
+SAMVIL_TIERS: tuple[str, ...] = (
+    "minimal",
+    "standard",
+    "thorough",
+    "full",
+    "deep",
+)
 
 SUCCESS_EVENT_TO_STAGE: dict[str, str] = {
     "interview_complete": "interview",
@@ -479,7 +485,7 @@ def _resolve_tier(
         if isinstance(config, dict)
         else ""
     )
-    valid = set(SAMVIL_TIERS) | {"deep"}  # accept v3.1 deep alias
+    valid = set(SAMVIL_TIERS)
     chosen = ""
     source = "default"
     for candidate, src in (
@@ -494,11 +500,7 @@ def _resolve_tier(
     if not chosen:
         chosen = "standard"
         source = "default"
-    # Map deprecated v3.1 alias if seen.
     aliased_from = ""
-    if chosen == "deep":
-        aliased_from = "deep"
-        chosen = "full"
     return {
         "samvil_tier": chosen,
         "source": source,

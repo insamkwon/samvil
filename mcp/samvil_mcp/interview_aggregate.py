@@ -9,9 +9,8 @@ Specifically:
 
   1. **tier** — resolves `samvil_tier` from project.config.json /
      project.state.json with the same precedence the orchestrator uses
-     (state > config > default), preserving the v3.1 `deep` alias only
-     for interview's own threshold logic (interview supports 5 tiers
-     including `deep`; pipeline routes through `full` post-interview).
+     (state > config > default), including the canonical strictest `deep`
+     tier used throughout the pipeline.
   2. **phases** — resolved required interview phases for the chosen
      tier (`tier_phases` mirror) + ambiguity target threshold.
   3. **mode** — Zero-Question vs Normal mode detection from the
@@ -143,10 +142,8 @@ def _read_json(path: Path) -> dict[str, Any]:
 def _resolve_tier(state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     """Resolve interview tier with precedence state > config > default.
 
-    Recognises both `samvil_tier` (v3.2) and legacy `selected_tier`. Maps
-    no v3.1 alias here — interview is the one place `deep` survives as a
-    real tier (stricter ambiguity target). Pipeline-side normalisation is
-    the orchestrator's job.
+    Recognises both `samvil_tier` (v3.2) and legacy `selected_tier`.
+    `deep` remains a real tier with the strictest ambiguity target.
     """
     valid = set(INTERVIEW_TIERS)
     chosen = ""

@@ -24,6 +24,9 @@ All notable changes to SAMVIL are documented here.
 - Consolidated agent personas and references, hardened destructive-command
   blocking, labeled untested host execution honestly, and extracted benchmark
   MCP tools from the monolithic server without changing the 202-tool registry.
+- Closed follow-up review gaps in destructive-command parsing, host-only gate
+  approvals, persisted project-root routing, runtime deploy gating, async AC
+  verification, and canonical `deep` tier propagation.
 
 ---
 

@@ -13,6 +13,7 @@ Graceful Degradation (INV-7):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -995,7 +996,7 @@ async def complete_stage(
         await store.update_session_stage(session_id, stage_enum)
 
         claim_id = None
-        project_path = _resolve_project_path(session.project_name)
+        project_path = _session_project_path(session)
         if project_path is not None:
             claim_data = plan["claim"]
             ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
@@ -4066,8 +4067,8 @@ async def aggregate_orchestrator_state(
       - filesystem artifacts (`project.seed.json`, `package.json`, `src/`)
 
     Returns a JSON string with:
-      - tier: resolved samvil_tier with precedence cli > state > config > default
-        (deprecated v3.1 'deep' alias is mapped to 'full' with `aliased_from`).
+      - tier: resolved samvil_tier with precedence cli > state > config > default,
+        preserving the canonical strictest `deep` tier.
       - solution_type: 3-layer keyword/context detection
         (web-app | automation | game | mobile-app | dashboard).
         Layer-3 user confirmation still happens in the skill body.
@@ -4826,7 +4827,8 @@ async def collect_ac_verification(
     try:
         from .ac_verification import run_ac_verification
 
-        result = run_ac_verification(
+        result = await asyncio.to_thread(
+            run_ac_verification,
             project_root,
             ac_id,
             json.loads(verify_json),

@@ -73,11 +73,11 @@ gates:
   qa_to_deploy:
     policy: hard
     thresholds:
-      minimal:  { three_pass_pass: true, zero_stubs: true }
-      standard: { three_pass_pass: true, zero_stubs: true }
-      thorough: { three_pass_pass: true, zero_stubs: true }
-      full:     { three_pass_pass: true, zero_stubs: true }
-      deep:     { three_pass_pass: true, zero_stubs: true }
+      minimal:  { three_pass_pass: true, zero_stubs: true, runtime_verified: true }
+      standard: { three_pass_pass: true, zero_stubs: true, runtime_verified: true }
+      thorough: { three_pass_pass: true, zero_stubs: true, runtime_verified: true }
+      full:     { three_pass_pass: true, zero_stubs: true, runtime_verified: true }
+      deep:     { three_pass_pass: true, zero_stubs: true, runtime_verified: true }
 
   qa_to_evolve:
     policy: hard
