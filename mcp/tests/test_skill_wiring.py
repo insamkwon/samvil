@@ -209,6 +209,20 @@ def test_codex_design_council_input_is_optional_and_gate_is_correct() -> None:
     assert "project.blueprint.json" in design
 
 
+def test_design_stage_preserves_explicit_council_opt_in() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    thin = (repo / "skills" / "samvil-design" / "SKILL.md").read_text()
+    codex = (
+        repo / "references" / "codex-commands" / "samvil-design.md"
+    ).read_text()
+
+    for text in (thin, codex):
+        assert "--council" in text
+        assert "council_opt_in" in text
+        assert "get_orchestration_state" in text
+        assert "stage_can_proceed" in text
+
+
 def test_numeric_drift_check_rejects_mismatched_named_constants(tmp_path: Path) -> None:
     wiring = _load_wiring_module()
     skill = tmp_path / "skills" / "samvil-build"
