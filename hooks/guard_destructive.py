@@ -41,6 +41,7 @@ SUDO_OPTIONS_WITH_VALUE = {
     "--group", "--host", "--prompt", "--user",
 }
 ENV_OPTIONS_WITH_VALUE = {"-C", "-S", "-u", "--chdir", "--split-string", "--unset"}
+EXEC_OPTIONS_WITH_VALUE = {"-a"}
 
 
 def _find_command(value: Any) -> str | None:
@@ -251,8 +252,10 @@ def _skip_options(args: list[str], *, with_value: set[str] | None = None) -> int
 
 
 def _wrapped_tokens(executable: str, args: list[str]) -> list[str] | None:
-    if executable in SIMPLE_WRAPPERS:
+    if executable in SIMPLE_WRAPPERS - {"exec"}:
         return args[_skip_options(args) :]
+    if executable == "exec":
+        return args[_skip_options(args, with_value=EXEC_OPTIONS_WITH_VALUE) :]
     if executable == "nice":
         index = _skip_options(args, with_value={"-n", "--adjustment"})
         return args[index:]

@@ -60,6 +60,8 @@ def run_guard(
         "nice rm -rf /home",
         "command rm -rf /",
         "exec rm -rf ~",
+        "exec -a fake rm -rf .",
+        "exec -cl -a fake rm -rf /",
         "xargs rm -rf /",
         'bash -lc "rm -rf /"',
         "(rm -rf /)",
