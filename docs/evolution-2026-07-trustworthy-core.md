@@ -678,6 +678,33 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/tests/test_gate_override.py:75`, `mcp/tests/test_gate_override.py:138`,
     `mcp/tests/test_gates.py:75`, `mcp/tests/test_server_domain_split.py:54`,
     `mcp/tests/test_samvil_smoke.py:173`.
+- [x] **4.10 R4 최종 pre-PR 검수에서 신뢰 불가능한 경계를 fail-closed로 정직화**
+  (스코프 보정: 4.8~4.9의 호스트 event id 기반 승인 claim과 모델 작성
+  `qa.log`/`test-results.json` 기반 runtime PASS는 실제 호스트 보안 경계가 아니었다.
+  현행 멀티호스트에는 모델이 호출할 수 없는 승인 attestation과 portable process
+  sandbox가 없으므로, 이를 계속 "trusted"라고 부르는 대신 override·AC command
+  execution·deploy runtime 승인을 모두 fail-closed로 전환한다. QA→Evolve/Retro는
+  별도 게이트로 정직하게 라우팅하고, trusted runner가 생기기 전 verify leaf는
+  누락·무-ID까지 합성 단계에서 FAIL한다.) 파괴 명령 wrapper 옵션, async file lock,
+  canonical deep tier, Council opt-in, Codex root SSOT, dynamic marker command와
+  Deploy→Retro 호스트 parity도 함께 고정했다.
+  - 완료 증거: `887cc61`; `mcp/samvil_mcp/ac_verification.py:20`,
+    `mcp/samvil_mcp/ac_verification.py:126`,
+    `mcp/samvil_mcp/ac_verification.py:164`,
+    `mcp/samvil_mcp/qa_finalize.py:81`,
+    `mcp/samvil_mcp/qa_finalize.py:116`,
+    `mcp/samvil_mcp/claim_ledger.py:388`,
+    `mcp/samvil_mcp/stage_evidence.py:127`,
+    `mcp/samvil_mcp/deploy_targets.py:308`,
+    `mcp/samvil_mcp/chain_markers.py:51`,
+    `hooks/guard_destructive.py:102`,
+    `references/codex-commands/samvil-qa.md:17`,
+    `references/codex-commands/samvil-deploy.md:19`,
+    `mcp/tests/test_qa_smoke.py:437`,
+    `mcp/tests/test_qa_smoke.py:459`,
+    `mcp/tests/test_qa_smoke.py:478`,
+    `mcp/tests/test_async_file_offload.py:23`,
+    `mcp/tests/test_async_file_offload.py:56`.
 
 ---
 
