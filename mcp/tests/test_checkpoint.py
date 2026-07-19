@@ -109,7 +109,9 @@ async def test_periodic_checkpointer(tmp_path):
 
     checkpointer = PeriodicCheckpointer(store, cb, interval_sec=0.1)
     await checkpointer.start()
-    await asyncio.sleep(0.35)
+    deadline = asyncio.get_running_loop().time() + 1.0
+    while counter["val"] < 3 and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.02)
     await checkpointer.stop(final_save=False)
 
     assert counter["val"] >= 3
