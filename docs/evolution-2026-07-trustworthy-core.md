@@ -705,6 +705,35 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/tests/test_qa_smoke.py:478`,
     `mcp/tests/test_async_file_offload.py:23`,
     `mcp/tests/test_async_file_offload.py:56`.
+- [x] **4.11 R5 재검수에서 남은 trust/core 안정성 결함 전부 보강**
+  (스코프 보정: 4.10은 QA/deploy runtime 경계를 fail-closed로 정직화했지만,
+  build→QA 게이트는 여전히 모델 작성 `.samvil/build.log`의 `SAMVIL_EXIT:0`을
+  hard gate 통과 근거로 삼고 있었다. 현행 멀티호스트에는 모델이 쓸 수 없는
+  trusted build receipt가 없으므로 build artifact도 QA artifact와 같은 경계로
+  보고 fail-closed 처리한다.) 파괴 명령 가드는 셸 틸드 확장과 `exec -a`
+  argv0 우회를 차단하고, `complete_stage`는 프로젝트 events SSOT에 단계 완료를
+  기록한다. QA finalize와 seed migration의 동기 파일 작업은 MCP event loop 밖으로
+  옮겼고, Design 진입은 명시적 `--council` opt-in을 orchestrator 게이트에 전달한다.
+  pre-commit full suite에서 드러난 주기 checkpoint 타이밍 흔들림도 별도 테스트
+  안정화 커밋으로 닫았다.
+  - 완료 증거: `444988f`; `hooks/guard_destructive.py:225`,
+    `mcp/tests/test_guard_destructive.py:41`.
+  - 완료 증거: `d943eb1`; `mcp/tests/test_checkpoint.py:112`.
+  - 완료 증거: `c19d3f5`; `hooks/guard_destructive.py:44`,
+    `hooks/guard_destructive.py:257`, `mcp/tests/test_guard_destructive.py:63`.
+  - 완료 증거: `44dcf85`; `mcp/samvil_mcp/stage_evidence.py:15`,
+    `mcp/samvil_mcp/stage_evidence.py:89`, `mcp/samvil_mcp/server.py:2570`,
+    `mcp/tests/test_gates.py:439`, `skills/samvil-build/SKILL.md:96`.
+  - 완료 증거: `235a5e7`; `mcp/samvil_mcp/server.py:1004`,
+    `mcp/samvil_mcp/server.py:1015`, `mcp/tests/test_orchestrator_mcp.py:85`.
+  - 완료 증거: `25724a4`; `mcp/samvil_mcp/server.py:4496`,
+    `mcp/tests/test_async_file_offload.py:75`.
+  - 완료 증거: `f367ead`; `mcp/samvil_mcp/server.py:3137`,
+    `mcp/tests/test_async_file_offload.py:93`.
+  - 완료 증거: `0acaecf`; `skills/samvil-design/SKILL.md:16`,
+    `skills/samvil-design/SKILL.md:27`,
+    `references/codex-commands/samvil-design.md:14`,
+    `mcp/tests/test_skill_wiring.py:212`.
 
 ---
 
