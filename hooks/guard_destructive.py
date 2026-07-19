@@ -221,7 +221,7 @@ def _rm_reason(args: list[str]) -> str | None:
             normalized in {"/", "~", ".", "*"}
             or parent_escape
             or target.startswith("/")
-            or target.startswith("~/")
+            or target.startswith("~")
             or target.startswith("$")
             or "${" in target
         )
