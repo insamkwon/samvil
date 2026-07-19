@@ -107,6 +107,11 @@ class TestGetChainContinuation:
         assert result["next_skill"] == "samvil-qa"
         assert result["chain_via"] == "skill_tool"
 
+    def test_deploy_chains_to_retro_on_every_host(self):
+        for host in ("claude_code", "codex_cli", "opencode", "gemini_cli"):
+            result = get_chain_continuation(host, "samvil-deploy")
+            assert result["next_skill"] == "samvil-retro"
+
     def test_last_skill_empty_next(self):
         result = get_chain_continuation("claude_code", "samvil-retro")
         assert result["next_skill"] == ""
@@ -127,7 +132,7 @@ class TestGetChainContinuation:
 
     def test_generic_host(self):
         result = get_chain_continuation("generic", "samvil-seed")
-        assert result["next_skill"] == "samvil-council"
+        assert result["next_skill"] == "samvil-design"
         assert result["chain_via"] == "file_marker"
 
     def test_host_name_in_result(self):

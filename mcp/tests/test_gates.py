@@ -509,7 +509,7 @@ def test_mcp_qa_gate_fails_closed_when_artifacts_are_missing(tmp_path: Path) -> 
     ]
 
 
-def test_mcp_qa_gate_passes_runtime_evidence(tmp_path: Path) -> None:
+def test_mcp_qa_gate_rejects_model_writable_runtime_evidence(tmp_path: Path) -> None:
     from samvil_mcp.server import gate_check as gate_check_tool
 
     samvil = tmp_path / ".samvil"
@@ -533,6 +533,8 @@ def test_mcp_qa_gate_passes_runtime_evidence(tmp_path: Path) -> None:
         )
     )
 
-    assert result["verdict"] == "pass"
+    assert result["verdict"] == "block"
     assert result["metrics"]["test_pass_rate"] == 1.0
-    assert result["metrics"]["verification_mode"] == "runtime"
+    assert result["metrics"]["runtime_verified"] is False
+    assert result["metrics"]["verification_mode"] == "static"
+    assert result["stage_evidence"]["qa"]["artifact_runtime_passed"] is True

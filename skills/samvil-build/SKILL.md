@@ -1,6 +1,6 @@
 ---
 name: samvil-build
-description: "Build core experience + features from seed. Circuit breaker per feature. Context Kernel sync on every step. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
+description: "Build core experience + features from seed. Circuit breaker per feature. Context Kernel sync on every step. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-build (ultra-thin)
@@ -93,7 +93,7 @@ Returns `samvil_tier`, `metrics {features_total/passed/failed, implementation_ra
 Apply in order (best-effort except the evidence-backed `gate_check`, INV-5):
 1. For each `ac_verdict_claims` entry: `mcp__samvil_mcp__claim_post(**entry)` — leaves stay `pending` until QA's Judge verifies.
 2. If `stage_claim_id`: `mcp__samvil_mcp__claim_verify(claim_id=<id>, verified_by="agent:user")`.
-3. `mcp__samvil_mcp__gate_check(gate_name="build_to_qa", samvil_tier=<tier>, metrics_json=<gate_input>, project_root=".", evidence_mode="mechanical")`. Mandatory: unavailable/error → halt. On block, record the `gate_verdict`, AskUserQuestion, and halt unless the user explicitly approves. Proceed only when the host supplies an immutable `user_approval` claim ID; then call `mcp__samvil_mcp__gate_override(project_root=".", gate="build_to_qa", reason="<exact user-approved reason>", approval_claim_id="<host-issued claim ID>")`. If the host cannot issue that claim, halt. `verdict=pass` → record `gate_verdict` + proceed.
+3. `mcp__samvil_mcp__gate_check(gate_name="build_to_qa", samvil_tier=<tier>, metrics_json=<gate_input>, project_root=".", evidence_mode="mechanical")`. Mandatory: unavailable/error → halt. On block, record the `gate_verdict`, surface the reason, and halt. `gate_override` is unavailable until a trusted host approval adapter exists, and unapproved `force_proceed` is forbidden. `verdict=pass` → record `gate_verdict` + proceed.
 4. If `stagnation_hint.evaluate == true` (2nd+ build pass with errors): `mcp__samvil_mcp__stagnation_evaluate(input_json=<stagnation_hint.payload>)`. `severity=HIGH` → halt build, invoke `lateral_propose` for the failure signature; do NOT chain to QA until clears.
 
 ## Chain to QA (INV-4)

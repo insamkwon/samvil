@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shlex
-import sys
-import time
 from pathlib import Path
 
 from samvil_mcp.ac_verification import (
@@ -62,7 +59,7 @@ def test_existing_verify_contract_is_preserved() -> None:
     assert prepared["seed"]["features"][0]["acceptance_criteria"][0]["verify"] == existing
 
 
-def test_automation_candidate_requires_explicit_confirmed_command() -> None:
+def test_automation_candidate_omits_unsupported_arbitrary_script() -> None:
     seed = _seed("automation")
     leaf = seed["features"][0]["acceptance_criteria"][0]
     leaf["verification"] = "Run `python main.py --dry-run`; output contains DRY RUN OK"
@@ -71,16 +68,7 @@ def test_automation_candidate_requires_explicit_confirmed_command() -> None:
     prepared = prepare_seed_verify_contracts(seed)
 
     assert "verify" not in prepared["seed"]["features"][0]["acceptance_criteria"][0]
-    assert prepared["automation_candidates"] == [
-        {
-            "ac_id": "F1.AC1",
-            "feature": "task-list",
-            "verify": {
-                "command": "python main.py --dry-run",
-                "assertion": "DRY RUN OK",
-            },
-        }
-    ]
+    assert prepared["automation_candidates"] == []
 
 
 def test_verify_contract_requires_executable_command() -> None:
@@ -89,100 +77,136 @@ def test_verify_contract_requires_executable_command() -> None:
     assert errors == ["verify.command is required"]
 
 
-def test_command_exit_assertion_and_artifact_are_primary_evidence(tmp_path: Path) -> None:
-    python = shlex.quote(sys.executable)
-    command = (
-        f"{python} -c \"from pathlib import Path; "
-        "Path('result.txt').write_text('ok'); print('READY')\""
+def test_allowed_contract_is_validated_but_not_executed_without_trusted_runner(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "test_sample.py").write_text(
+        "import unittest\n"
+        "class Sample(unittest.TestCase):\n"
+        "    def test_ready(self):\n"
+        "        print('READY')\n"
+        "        self.assertTrue(True)\n",
+        encoding="utf-8",
     )
 
     result = run_ac_verification(
         tmp_path,
         "F1.AC1",
         {
-            "command": command,
-            "artifacts": ["result.txt"],
+            "command": "python -m unittest test_sample.py",
             "assertion": "READY",
         },
     )
 
-    assert result["ran"] is True
-    assert result["exit_code"] == 0
-    assert result["assertion_matched"] is True
-    assert result["artifacts"]["missing"] == []
-    assert result["passed"] is True
-    assert result["primary_evidence"] is True
-    assert (tmp_path / result["log_file"]).read_text().endswith("SAMVIL_EXIT:0\n")
+    assert result["ran"] is False
+    assert result["exit_code"] is None
+    assert result["assertion_matched"] is False
+    assert result["passed"] is False
+    assert result["primary_evidence"] is False
+    assert "trusted AC command runner unavailable" in result["errors"][0]
 
 
 def test_failed_assertion_fails_closed(tmp_path: Path) -> None:
-    python = shlex.quote(sys.executable)
+    (tmp_path / "test_sample.py").write_text(
+        "import unittest\n"
+        "class Sample(unittest.TestCase):\n"
+        "    def test_actual(self): print('actual')\n",
+        encoding="utf-8",
+    )
 
     result = run_ac_verification(
         tmp_path,
         "F1.AC2",
-        {"command": f"{python} -c \"print('actual')\"", "assertion": "expected"},
+        {"command": "python -m unittest test_sample.py", "assertion": "expected"},
     )
 
-    assert result["exit_code"] == 0
+    assert result["exit_code"] is None
     assert result["assertion_matched"] is False
     assert result["passed"] is False
 
 
-def test_pipeline_cannot_hide_failing_test_command(tmp_path: Path) -> None:
-    python = shlex.quote(sys.executable)
+def test_shell_pipeline_is_rejected_instead_of_executed(tmp_path: Path) -> None:
 
     result = run_ac_verification(
         tmp_path,
         "F1.AC-pipe",
-        {"command": f"{python} -c \"raise SystemExit(7)\" | tail -1"},
+        {"command": "python -m unittest | tail -1"},
     )
 
-    assert result["exit_code"] == 7
+    assert result["ran"] is False
+    assert "shell syntax" in result["errors"][0]
     assert result["passed"] is False
 
 
-def test_normalized_ac_ids_cannot_collide_on_log_path(tmp_path: Path) -> None:
-    first = run_ac_verification(tmp_path, "AC/1", {"command": "printf first"})
-    second = run_ac_verification(tmp_path, "AC?1", {"command": "printf second"})
-
-    assert first["log_file"] != second["log_file"]
-    assert (tmp_path / first["log_file"]).read_text().startswith("first")
-    assert (tmp_path / second["log_file"]).read_text().startswith("second")
-
-
-def test_timeout_terminates_entire_process_group(tmp_path: Path) -> None:
+def test_untrusted_runner_never_starts_process_or_detached_child(tmp_path: Path) -> None:
+    (tmp_path / "test_slow.py").write_text(
+        "import subprocess, sys, time, unittest\n"
+        "class Slow(unittest.TestCase):\n"
+        "    def test_slow(self):\n"
+        "        subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(0.4); open(\\\"escaped.txt\\\", \\\"w\\\").close()'], "
+        "start_new_session=True)\n"
+        "        time.sleep(1)\n",
+        encoding="utf-8",
+    )
     result = run_ac_verification(
         tmp_path,
         "AC-timeout",
-        {"command": "(sleep 0.4; touch escaped.txt) & wait"},
+        {"command": "python -m unittest test_slow.py"},
         timeout_seconds=0.05,
     )
 
-    time.sleep(0.6)
-
-    assert result["timed_out"] is True
-    assert result["exit_code"] == 124
+    assert result["ran"] is False
+    assert result["timed_out"] is False
+    assert result["exit_code"] is None
     assert not (tmp_path / "escaped.txt").exists()
 
 
 def test_ac_verification_mcp_tool(tmp_path: Path) -> None:
     from samvil_mcp.server import collect_ac_verification
 
-    python = shlex.quote(sys.executable)
+    (tmp_path / "test_sample.py").write_text(
+        "import unittest\n"
+        "class Sample(unittest.TestCase):\n"
+        "    def test_ok(self): print('OK')\n",
+        encoding="utf-8",
+    )
     result = json.loads(
         asyncio.run(
             collect_ac_verification(
                 project_root=str(tmp_path),
                 ac_id="F1.AC3",
                 verify_json=json.dumps(
-                    {"command": f"{python} -c \"print('OK')\"", "assertion": "OK"}
+                    {"command": "python -m unittest test_sample.py", "assertion": "OK"}
                 ),
             )
         )
     )
 
-    assert result["passed"] is True
+    assert result["ran"] is False
+    assert result["passed"] is False
+    assert "trusted AC command runner unavailable" in result["errors"][0]
+
+
+def test_arbitrary_python_and_destructive_commands_are_rejected(tmp_path: Path) -> None:
+    for command in (
+        "python -c 'print(1)'",
+        "python main.py --dry-run",
+        "./pytest",
+        "/tmp/pytest",
+        "npm test",
+        "npm run test:unit",
+        "PYTEST",
+        "Python -m unittest",
+        "NPX playwright test tests/e2e/demo.spec.ts",
+        "GRADLE TEST",
+        "rm -rf .samvil",
+        "sudo -u root rm -rf /",
+    ):
+        result = run_ac_verification(tmp_path, "AC-denied", {"command": command})
+        assert result["ran"] is False
+        assert result["passed"] is False
+        assert result["errors"]
 
 
 def test_prepare_seed_verify_contracts_mcp_tool() -> None:

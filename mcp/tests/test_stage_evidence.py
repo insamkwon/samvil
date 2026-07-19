@@ -60,8 +60,13 @@ def test_failed_playwright_report_is_not_runtime_verified(tmp_path: Path) -> Non
             "skipped": 3,
             "from": ".samvil/test-results.json",
         },
+        "artifact_runtime_passed": False,
         "runtime_verified": False,
         "static_only": True,
+        "trust_reason": (
+            "artifact-only QA evidence is model-writable; a trusted host receipt "
+            "is required before runtime_verified can be true"
+        ),
     }
     assert result["evidence_files"] == [
         ".samvil/qa.log",
@@ -70,7 +75,9 @@ def test_failed_playwright_report_is_not_runtime_verified(tmp_path: Path) -> Non
     assert result["missing"] == []
 
 
-def test_successful_playwright_report_is_runtime_verified(tmp_path: Path) -> None:
+def test_successful_but_model_writable_report_is_not_trusted_runtime(
+    tmp_path: Path,
+) -> None:
     _write(tmp_path / ".samvil" / "qa.log", "SAMVIL_EXIT:0\n")
     _write(
         tmp_path / ".samvil" / "test-results.json",
@@ -79,8 +86,10 @@ def test_successful_playwright_report_is_runtime_verified(tmp_path: Path) -> Non
 
     result = collect_stage_evidence(tmp_path, "qa")
 
-    assert result["qa"]["runtime_verified"] is True
-    assert result["qa"]["static_only"] is False
+    assert result["qa"]["artifact_runtime_passed"] is True
+    assert result["qa"]["runtime_verified"] is False
+    assert result["qa"]["static_only"] is True
+    assert "trusted host receipt" in result["qa"]["trust_reason"]
 
 
 def test_nonzero_exit_is_not_runtime_verified_even_when_report_passes(

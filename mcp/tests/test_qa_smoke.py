@@ -434,6 +434,65 @@ class TestQAFinalize:
         result = qa_finalize.finalize_qa_verdict(tmp_path, evidence=evidence)
         assert result["synthesis"]["verdict"] == "PASS"
 
+    def test_verify_contract_cannot_pass_without_trusted_runner(
+        self, tmp_path: Path
+    ) -> None:
+        seed = _seed()
+        leaf = seed["features"][0]["acceptance_criteria"][0]
+        leaf["verify"] = {
+            "command": "npx playwright test tests/e2e/feature-0.spec.ts"
+        }
+        _write(tmp_path / "project.seed.json", seed)
+        _write(tmp_path / "project.state.json", _state())
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path,
+            evidence=_make_evidence(),
+        )
+
+        assert result["synthesis"]["verdict"] != "PASS"
+        item = result["synthesis"]["pass2"]["items"][0]
+        assert item["verdict"] == "FAIL"
+        assert item["mechanical_verification"]["ran"] is False
+        assert any("trusted AC command runner unavailable" in note for note in result["notes"])
+
+    def test_missing_verify_leaf_is_synthesized_as_fail(self, tmp_path: Path) -> None:
+        seed = _seed(features_count=2)
+        missing = seed["features"][1]["acceptance_criteria"][0]
+        missing["verify"] = {
+            "command": "npx playwright test tests/e2e/feature-1.spec.ts"
+        }
+        _write(tmp_path / "project.seed.json", seed)
+        _write(tmp_path / "project.state.json", _state())
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path,
+            evidence=_make_evidence(),
+        )
+
+        by_id = {
+            item["id"]: item for item in result["synthesis"]["pass2"]["items"]
+        }
+        assert by_id["feature_1.ac.1"]["verdict"] == "FAIL"
+
+    def test_verify_leaf_without_id_is_synthesized_as_fail(self, tmp_path: Path) -> None:
+        seed = _seed()
+        leaf = seed["features"][0]["acceptance_criteria"][0]
+        leaf.pop("id")
+        leaf["verify"] = {"command": "python -m unittest"}
+        _write(tmp_path / "project.seed.json", seed)
+        _write(tmp_path / "project.state.json", _state())
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path,
+            evidence=_make_evidence(),
+        )
+
+        by_id = {
+            item["id"]: item for item in result["synthesis"]["pass2"]["items"]
+        }
+        assert by_id["__verify_missing_id_1"]["verdict"] == "FAIL"
+
     def test_at_2_one_fail_synthesis_revise(self, tmp_path: Path) -> None:
         _write(tmp_path / "project.state.json", _state())
         evidence = _make_evidence(
@@ -610,7 +669,9 @@ class TestQAFinalize:
         assert result["gate_input"]["metrics"]["three_pass_pass"] is False
         assert result["gate_input"]["metrics"]["fail_count"] >= 1
 
-    def test_cl_5c_finalize_derives_runtime_mode_from_artifacts(self, tmp_path: Path) -> None:
+    def test_cl_5c_finalize_does_not_trust_model_writable_runtime_artifacts(
+        self, tmp_path: Path
+    ) -> None:
         _write(tmp_path / "project.state.json", _state())
         _write(tmp_path / ".samvil" / "qa.log", "SAMVIL_EXIT:0\n")
         _write(
@@ -622,10 +683,11 @@ class TestQAFinalize:
             tmp_path, evidence=_make_evidence()
         )
 
-        assert result["synthesis"]["verification_mode"] == "runtime"
+        assert result["synthesis"]["verification_mode"] == "static"
         assert result["synthesis"]["runtime_evidence"]["passed"] == 1
-        assert result["gate_input"]["metrics"]["verification_mode"] == "runtime"
-        assert result["stage_evidence"]["qa"]["runtime_verified"] is True
+        assert result["gate_input"]["metrics"]["verification_mode"] == "static"
+        assert result["stage_evidence"]["qa"]["artifact_runtime_passed"] is True
+        assert result["stage_evidence"]["qa"]["runtime_verified"] is False
 
     def test_cl_5d_finalize_fails_closed_to_static_mode(self, tmp_path: Path) -> None:
         _write(tmp_path / "project.state.json", _state())

@@ -102,12 +102,11 @@ before invoking the next skill via the chain pattern:
    → On verdict=pass: record gate_verdict claim (verified by Judge) and
      proceed to chain invoke the next skill.
    → On verdict=skip: record skip in state.json.completed_stages, proceed.
-   → A blocked gate has exactly one exception: AskUserQuestion obtains explicit
-     user approval and the host records an immutable `user_approval` claim. Then
-     `gate_override(project_root=".", gate="<gate>",
-     reason="<exact user-approved reason>", approval_claim_id="<host-issued claim ID>")`
-     atomically consumes that approval and records a one-time `gate_override`
-     claim. Model-authored approval strings and unapproved `force_proceed` are forbidden.
+   → Current hosts do not expose a non-model-callable approval attestation
+     channel. Therefore `gate_override` is unavailable and every blocked gate
+     halts. Model-authored approval strings, ledger rows, event ids, and
+     unapproved `force_proceed` are never authority. A future adapter may
+     re-enable overrides only with a host-signed, replay-protected receipt.
 
 3. Stagnation sniff (optional; do on any non-pass)
    mcp__samvil_mcp__stagnation_evaluate(
@@ -149,7 +148,8 @@ Used when calling `gate_check` at post_stage.
 | design | `design_to_scaffold` | `{"blueprint_valid": bool, "stack_matrix_match": bool}` |
 | scaffold | `scaffold_to_build` | `{"sanity_build_ok": bool, "env_vars_present": bool}` |
 | build | `build_to_qa` | `{"implementation_rate": <float 0..1>}` |
-| qa | `qa_to_deploy` | `{"three_pass_pass": bool, "zero_stubs": bool}` |
+| qa → evolve | `qa_to_evolve` | `{"three_pass_pass": bool, "zero_stubs": bool}` |
+| qa → deploy | `qa_to_deploy` | `{"three_pass_pass": bool, "zero_stubs": bool, "runtime_verified": bool}` |
 | * (end of chain) | `any_to_retro` | `{"always_run": true}` |
 
 ## What stays OUT of skills

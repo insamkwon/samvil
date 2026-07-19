@@ -20,7 +20,7 @@ Ensure the pipeline has completed at least one full cycle.
 ## Execution
 
 1. Run MCP tool `read_chain_marker(project_root="${PWD}")` to confirm this is the expected stage.
-2. Read `.samvil/project.seed.json` for final seed state.
+2. Read root `project.seed.json` for final seed state.
 3. Read `.samvil/qa-results.json` for QA outcomes.
 4. Read `.samvil/events.jsonl` for pipeline event history.
 5. Run MCP tool `aggregate_retro_metrics(project_root="${PWD}")` for file-based metrics.

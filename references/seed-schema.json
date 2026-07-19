@@ -196,6 +196,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "minProperties": 1,
+                "required": ["command"],
                 "properties": {
                   "command": { "type": "string", "minLength": 1 },
                   "artifacts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
@@ -229,6 +230,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "minProperties": 1,
+                "required": ["command"],
                 "properties": {
                   "command": { "type": "string", "minLength": 1 },
                   "artifacts": { "type": "array", "items": { "type": "string", "minLength": 1 } },

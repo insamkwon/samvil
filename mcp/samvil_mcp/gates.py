@@ -13,7 +13,8 @@ Per HANDOFF-v3.2-DECISIONS.md §3.⑥ and §6.3:
     (See references/graceful-degradation.md.)
 
 `gate_check` is pure except for reading `gate_config.yaml`. `gate_override`
-is the explicit user-authorized exception: it appends an auditable claim.
+currently fails closed because no supported host exposes a non-model-callable,
+replay-protected user approval attestation.
 """
 
 from __future__ import annotations
@@ -440,7 +441,7 @@ def _required_action_for(
 
 
 def active_gate_override(ledger: "ClaimLedger", gate: str) -> "Claim | None":
-    """Atomically return and consume one fresh verified override."""
+    """Return no override until trusted host attestations are implemented."""
     return ledger.consume_gate_override(gate)
 
 
@@ -451,7 +452,7 @@ def gate_override(
     reason: str,
     approval_claim_id: str,
 ) -> dict[str, Any]:
-    """Record a one-time user-approved exception after a blocked gate."""
+    """Fail closed until a trusted host approval adapter is installed."""
     from .claim_ledger import ClaimLedger, ClaimLedgerError
 
     if gate not in {item.value for item in GateName}:

@@ -1,6 +1,6 @@
 ---
 name: samvil-council
-description: "Multi-agent council debate. Spawns agents via CC Agent tool, synthesizes verdicts, writes binding decisions. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
+description: "Multi-agent council debate. Spawns agents via CC Agent tool, synthesizes verdicts, writes binding decisions. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-council (ultra-thin)
@@ -30,6 +30,7 @@ Apply `selected_tier` (full matrix in `SKILL.legacy.md`):
 - `standard` → R1 skipped. R2: `product-owner`, `simplifier`, `scope-guard`.
 - `thorough` → R1: `business-analyst`. R2: above + `ceo-advisor`.
 - `full` → R1: `competitor-analyst`, `business-analyst`, `user-interviewer`. R2: all 4.
+- `deep` → same council roster as `full`; deeper rigor is enforced by the downstream gates and interview contract.
 
 ## Step 2 — Round 1 (Research, parallel spawn) — skip if tier < thorough
 

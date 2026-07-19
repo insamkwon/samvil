@@ -48,6 +48,7 @@ Outputs (all best-effort, no file writes here):
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -75,6 +76,83 @@ def _resolve_tier(state: dict[str, Any], config: dict[str, Any]) -> str:
         or config.get("selected_tier")
         or "standard"
     )
+
+
+def _seed_verify_contracts(seed: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return every leaf verify contract keyed by AC id."""
+    contracts: dict[str, dict[str, Any]] = {}
+    missing_id_count = 0
+
+    def visit(items: Any) -> None:
+        nonlocal missing_id_count
+        if not isinstance(items, list):
+            return
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            children = item.get("children")
+            if isinstance(children, list) and children:
+                visit(children)
+                continue
+            verify = item.get("verify")
+            if isinstance(verify, dict):
+                ac_id = str(item.get("id") or "")
+                if not ac_id:
+                    missing_id_count += 1
+                    ac_id = f"__verify_missing_id_{missing_id_count}"
+                contracts[ac_id] = {
+                    "verify": copy.deepcopy(verify),
+                    "criterion": str(
+                        item.get("description") or item.get("criterion") or ac_id
+                    ),
+                }
+
+    for feature in seed.get("features") or []:
+        if isinstance(feature, dict):
+            visit(feature.get("acceptance_criteria"))
+    return contracts
+
+
+def _fail_closed_verify_items(
+    evidence: dict[str, Any],
+    contracts: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], int]:
+    """Prevent PASS for seed verify contracts without a trusted runner."""
+    prepared = copy.deepcopy(evidence)
+    pass2 = prepared.setdefault("pass2", {})
+    items = pass2.setdefault("items", [])
+    if not isinstance(items, list):
+        items = []
+        pass2["items"] = items
+    by_id = {
+        str(item.get("id") or ""): item
+        for item in items
+        if isinstance(item, dict) and item.get("id")
+    }
+    blocked = 0
+    for ac_id, contract in contracts.items():
+        item = by_id.get(ac_id)
+        if item is None:
+            item = {
+                "id": ac_id,
+                "criterion": contract["criterion"],
+                "evidence": [],
+            }
+            items.append(item)
+        item["verify"] = copy.deepcopy(contract["verify"])
+        item["verdict"] = "FAIL"
+        item["method"] = "static"
+        item["reason"] = (
+            "trusted AC command runner unavailable; verify contract cannot PASS"
+        )
+        item["mechanical_verification"] = {
+            "ran": False,
+            "passed": False,
+            "primary_evidence": False,
+            "errors": ["trusted AC command runner unavailable"],
+        }
+        blocked += 1
+    return prepared, blocked
 
 
 def _build_claim_actions(
@@ -391,7 +469,16 @@ def finalize_qa_verdict(
         (report.stage_evidence.get("qa") or {}).get("runtime_verified")
         and npm_test.get("exit_code") is not None
     )
-    evidence_for_synthesis = dict(evidence)
+    seed = _read_json_safe(root / "project.seed.json") or {}
+    verify_contracts = _seed_verify_contracts(seed)
+    evidence_for_synthesis, blocked_verify_count = _fail_closed_verify_items(
+        evidence, verify_contracts
+    )
+    if blocked_verify_count:
+        report.notes.append(
+            f"{blocked_verify_count} verify contract(s) forced to FAIL: "
+            "trusted AC command runner unavailable"
+        )
     evidence_for_synthesis["verification_mode"] = (
         "runtime" if runtime_verified else "static"
     )

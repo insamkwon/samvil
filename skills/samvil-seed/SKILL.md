@@ -1,6 +1,6 @@
 ---
 name: samvil-seed
-description: "MCP-driven seed stage: crystallize interview-summary.md into project.seed.json and chain portably. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
+description: "MCP-driven seed stage: crystallize interview-summary.md into project.seed.json and chain portably. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # SAMVIL Seed - Thin Orchestrated Entry
@@ -89,7 +89,7 @@ In both paths: validate against `references/seed-schema.json`, present, and ask 
 ## Chain
 
 Use `host_chain_strategy.chain_via`:
-- Default: `next_skill="samvil-design"` for every tier. Exact `--council` opt-in on standard/thorough/full sets `next_skill="samvil-council"`; minimal remains design.
+- Default: `next_skill="samvil-design"` for every tier. Exact `--council` opt-in on standard/thorough/full/deep sets `next_skill="samvil-council"`; minimal remains design.
 - `skill_tool`: invoke the resolved `next_skill` directly.
 - `file_marker`: write `.samvil/next-skill.json` with `{schema_version:"1.0", chain_via:"file_marker", host, next_skill, reason, from_stage:"seed", created_by:"samvil-seed"}`.
 

@@ -1,6 +1,6 @@
 ---
 name: samvil-evolve
-description: "Seed evolution loop. Wonder → Reflect → new seed version. Repeat until convergence or user stops. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
+description: "Seed evolution loop. Wonder → Reflect → new seed version. Repeat until convergence or user stops. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-evolve (ultra-thin)

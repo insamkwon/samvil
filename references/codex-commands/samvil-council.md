@@ -3,12 +3,12 @@
 ## Prerequisites
 
 Read `.samvil/next-skill.json`. If `next_skill` is not `samvil-council`, skip this stage.
-Ensure `.samvil/project.seed.json` exists.
+Ensure root `project.seed.json` exists.
 
 ## Execution
 
 1. Run MCP tool `read_chain_marker(project_root="${PWD}")` to confirm this is the expected stage.
-2. Read `.samvil/project.seed.json` for the full seed.
+2. Read root `project.seed.json` for the full seed.
 3. **Round 1 — Research**: Analyze the seed for:
    - Technical feasibility (stack, dependencies, complexity)
    - Scope realism (feature count, AC coverage)

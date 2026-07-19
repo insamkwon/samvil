@@ -93,18 +93,11 @@ def test_wave2_mechanical_evidence_and_override_flow(tmp_path: Path) -> None:
         claimed_by="agent:orchestrator-agent",
         meta={"verdict": "block"},
     )
-    reason = "dogfood accepts static deployment risk"
-    approval_claim_id = ledger.record_host_user_approval(
-        gate="qa_to_deploy",
-        reason=reason,
-        host_event_id="dogfood-user-approval",
-    ).claim_id
-    override = gate_override(
-        tmp_path,
-        gate="qa_to_deploy",
-        reason=reason,
-        approval_claim_id=approval_claim_id,
-    )
-    active = active_gate_override(ledger, "qa_to_deploy")
-    assert active is not None
-    assert active.claim_id == override["claim_id"]
+    with pytest.raises(ValueError, match="trusted host approval adapter"):
+        gate_override(
+            tmp_path,
+            gate="qa_to_deploy",
+            reason="dogfood accepts static deployment risk",
+            approval_claim_id="dogfood-forged-approval",
+        )
+    assert active_gate_override(ledger, "qa_to_deploy") is None

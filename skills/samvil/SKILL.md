@@ -1,6 +1,6 @@
 ---
 name: samvil
-description: "AI vibe-coding harness. One-line prompt → full web app. Pipeline: Interview → Seed → Scaffold → Build → QA → Retro. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
+description: "AI vibe-coding harness. One-line prompt → full web app. Pipeline: Interview → Seed → Scaffold → Build → QA → Retro. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil (ultra-thin orchestrator)

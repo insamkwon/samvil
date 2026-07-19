@@ -785,7 +785,8 @@ async def save_event(
             )
         else:
             try:
-                _append_project_event(
+                await asyncio.to_thread(
+                    _append_project_event,
                     project_path,
                     timestamp=event.timestamp,
                     event_type=event_type,
@@ -2619,7 +2620,9 @@ async def gate_check(
             if evidence_mode != "mechanical":
                 raise ValueError("evidence_mode must be empty or 'mechanical'")
             mechanical_metrics, mechanical_thresholds, stage_evidence = (
-                _mechanical_gate_evidence(project_root, gate_name)
+                await asyncio.to_thread(
+                    _mechanical_gate_evidence, project_root, gate_name
+                )
             )
             for key, mechanical in mechanical_metrics.items():
                 if key in reported_metrics and reported_metrics[key] != mechanical:
@@ -2679,7 +2682,7 @@ async def gate_override(
     reason: str,
     approval_claim_id: str,
 ) -> str:
-    """Record a one-time gate exception after explicit user approval."""
+    """Fail closed until a trusted host approval adapter is installed."""
     try:
         from .gates import gate_override as _gate_override
 
@@ -4574,13 +4577,20 @@ async def write_chain_marker(
     project_root: str,
     host_name: str | None,
     current_skill: str,
+    next_skill: str | None = None,
 ) -> str:
     """Write next-skill marker after current_skill completes.
 
     Creates .samvil/next-skill.json with chain continuation data.
     """
     try:
-        result = _write_chain_marker(project_root, host_name, current_skill)
+        result = await asyncio.to_thread(
+            _write_chain_marker,
+            project_root,
+            host_name,
+            current_skill,
+            next_skill=next_skill,
+        )
         _log_mcp_health("ok", "write_chain_marker")
         return json.dumps(result)
     except Exception as e:
@@ -4595,7 +4605,7 @@ async def read_chain_marker(project_root: str) -> str:
     Returns marker dict or null if no marker exists.
     """
     try:
-        result = _read_chain_marker(project_root)
+        result = await asyncio.to_thread(_read_chain_marker, project_root)
         _log_mcp_health("ok", "read_chain_marker")
         return json.dumps(result)
     except Exception as e:
@@ -4607,7 +4617,7 @@ async def read_chain_marker(project_root: str) -> str:
 async def clear_chain_marker(project_root: str) -> str:
     """Remove the chain marker (after pipeline completes)."""
     try:
-        result = _clear_chain_marker(project_root)
+        result = await asyncio.to_thread(_clear_chain_marker, project_root)
         _log_mcp_health("ok", "clear_chain_marker")
         return json.dumps({"cleared": result})
     except Exception as e:
@@ -4625,7 +4635,7 @@ async def advance_chain(
     Returns new marker or pipeline_complete status.
     """
     try:
-        result = _advance_chain(project_root, host_name)
+        result = await asyncio.to_thread(_advance_chain, project_root, host_name)
         _log_mcp_health("ok", "advance_chain")
         return json.dumps(result)
     except Exception as e:
@@ -4640,7 +4650,7 @@ async def get_pipeline_status(project_root: str) -> str:
     Returns has_marker, current_position, next_skill, progress.
     """
     try:
-        result = _get_pipeline_status(project_root)
+        result = await asyncio.to_thread(_get_pipeline_status, project_root)
         _log_mcp_health("ok", "get_pipeline_status")
         return json.dumps(result)
     except Exception as e:
@@ -4808,7 +4818,7 @@ async def collect_stage_evidence(project_root: str, stage: str) -> str:
     try:
         from .stage_evidence import collect_stage_evidence as _collect
 
-        result = _collect(project_root, stage)
+        result = await asyncio.to_thread(_collect, project_root, stage)
         _log_mcp_health("ok", "collect_stage_evidence")
         return json.dumps(result)
     except Exception as e:

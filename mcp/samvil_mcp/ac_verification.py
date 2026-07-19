@@ -1,24 +1,20 @@
-"""Prepare and execute lightweight AC verification contracts."""
+"""Prepare and validate AC verification contracts without host execution."""
 
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
-import os
 import re
-import signal
-import subprocess
+import shlex
 from pathlib import Path
 from typing import Any, Iterator
 
-from .ssot_io import atomic_write_text
 from .test_deliverable import feature_spec_filename
 
 
 VERIFY_KEYS = frozenset({"command", "artifacts", "assertion"})
 BROWSER_SOLUTION_TYPES = frozenset({"web-app", "dashboard", "game"})
 _BACKTICK_COMMAND = re.compile(r"`([^`]+)`")
+_SHELL_SYNTAX = re.compile(r"[\r\n;&|<>`$(){}]")
 
 
 def validate_verify_contract(verify: Any) -> list[str]:
@@ -30,6 +26,8 @@ def validate_verify_contract(verify: Any) -> list[str]:
     command = verify.get("command")
     if not isinstance(command, str) or not command.strip():
         errors.append("verify.command is required")
+    elif (command_error := _command_policy_error(command.strip())) is not None:
+        errors.append(command_error)
     assertion = verify.get("assertion")
     if assertion is not None and (
         not isinstance(assertion, str) or not assertion.strip()
@@ -60,7 +58,10 @@ def _automation_candidate(leaf: dict[str, Any]) -> dict[str, Any] | None:
     match = _BACKTICK_COMMAND.search(source)
     if not match:
         return None
-    verify: dict[str, Any] = {"command": match.group(1).strip()}
+    command = match.group(1).strip()
+    if _command_policy_error(command):
+        return None
+    verify: dict[str, Any] = {"command": command}
     expected = str(leaf.get("expected") or "").strip()
     if expected:
         verify["assertion"] = expected
@@ -108,12 +109,6 @@ def prepare_seed_verify_contracts(seed: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _safe_log_name(ac_id: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", ac_id).strip("-.")
-    digest = hashlib.sha256(ac_id.encode("utf-8")).hexdigest()[:10]
-    return f"{safe or 'ac'}-{digest}"
-
-
 def _artifact_status(root: Path, artifacts: list[str]) -> dict[str, list[str]]:
     present: list[str] = []
     missing: list[str] = []
@@ -128,6 +123,44 @@ def _artifact_status(root: Path, artifacts: list[str]) -> dict[str, list[str]]:
     return {"present": present, "missing": missing}
 
 
+def _command_policy_error(command: str) -> str | None:
+    """Validate portable test-runner syntax without resolving or executing it."""
+    if _SHELL_SYNTAX.search(command):
+        return "verify.command contains unsupported shell syntax"
+    try:
+        argv = shlex.split(command)
+    except ValueError as exc:
+        return f"verify.command cannot be parsed: {exc}"
+    if not argv:
+        return "verify.command is required"
+    if Path(argv[0]).name != argv[0]:
+        return "verify.command executable must be an exact runner name, not a path"
+
+    executable = argv[0]
+    args = argv[1:]
+    allowed = False
+    if executable in {"python", "python3"}:
+        allowed = len(args) >= 2 and args[0] == "-m" and args[1] in {
+            "pytest",
+            "unittest",
+        }
+    elif executable in {"pytest", "py.test"}:
+        allowed = True
+    elif executable == "npx":
+        allowed = len(args) >= 2 and args[:2] in (
+            ["playwright", "test"],
+            ["vitest", "run"],
+        )
+    elif executable in {"cargo", "go", "swift"}:
+        allowed = bool(args) and args[0] == "test"
+    elif executable == "gradle":
+        allowed = bool(args) and args[0] == "test"
+
+    if not allowed:
+        return "verify.command is not an allowed test runner invocation"
+    return None
+
+
 def run_ac_verification(
     project_root: str | Path,
     ac_id: str,
@@ -135,7 +168,13 @@ def run_ac_verification(
     *,
     timeout_seconds: float = 120,
 ) -> dict[str, Any]:
-    """Execute an AC command and judge exit, assertion, and artifacts."""
+    """Validate an AC contract and fail closed without a trusted runner.
+
+    The MCP process intentionally does not execute model- or seed-authored
+    commands. Current hosts lack a portable sandbox that can prevent a test
+    process from escaping its process tree or mutating the host. Host-driven
+    Playwright and emitted test files remain available as secondary evidence.
+    """
     errors = validate_verify_contract(verify)
     root = Path(project_root).expanduser().resolve()
     command = str(verify.get("command") or "").strip()
@@ -154,60 +193,18 @@ def run_ac_verification(
             "primary_evidence": False,
             "errors": errors + ([] if command else ["verify.command is required"]),
         }
-
-    exit_code = 1
-    timed_out = False
-    process = subprocess.Popen(
-            ["bash", "-o", "pipefail", "-c", command],
-            cwd=root,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-        )
-    try:
-        stdout, stderr = process.communicate(timeout=max(0.01, timeout_seconds))
-        exit_code = process.returncode
-        output = (stdout or "") + (stderr or "")
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
-        exit_code = 124
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            stdout, stderr = process.communicate(timeout=1.0)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            stdout, stderr = process.communicate()
-        output = (stdout or "") + (stderr or "")
-
-    relative_log = f".samvil/ac-evidence/{_safe_log_name(ac_id)}.log"
-    separator = "" if not output or output.endswith("\n") else "\n"
-    atomic_write_text(
-        root / relative_log,
-        f"{output}{separator}SAMVIL_EXIT:{exit_code}\n",
-    )
-    artifact_status = _artifact_status(root, artifacts)
-    assertion_matched = assertion in output if assertion else None
-    passed = (
-        exit_code == 0
-        and not artifact_status["missing"]
-        and assertion_matched is not False
-    )
     return {
         "ac_id": ac_id,
-        "ran": True,
-        "exit_code": exit_code,
-        "passed": passed,
-        "assertion_matched": assertion_matched,
+        "ran": False,
+        "exit_code": None,
+        "passed": False,
+        "assertion_matched": False if assertion else None,
         "artifacts": artifact_status,
-        "log_file": relative_log,
-        "primary_evidence": True,
-        "timed_out": timed_out,
-        "errors": [],
+        "log_file": "",
+        "primary_evidence": False,
+        "timed_out": False,
+        "output_truncated": False,
+        "errors": [
+            "trusted AC command runner unavailable; command was validated but not executed"
+        ],
     }

@@ -85,13 +85,14 @@ def test_save_event_examples_use_named_arguments() -> None:
         assert "data=" in text
 
 
-def test_all_stage_skills_forbid_unapproved_force_proceed() -> None:
+def test_all_stage_skills_fail_closed_without_trusted_gate_override() -> None:
     repo = Path(__file__).resolve().parents[2]
     wiring = _load_wiring_module()
 
     for skill in wiring.BOOT_CONTRACT_SKILLS:
         text = (repo / "skills" / skill / "SKILL.md").read_text()
         assert "gate_override" in text, skill
+        assert "unavailable" in text.lower() or "사용할 수 없" in text, skill
         assert "force_proceed" in text, skill
 
 
@@ -129,6 +130,83 @@ def test_council_is_only_an_explicit_seed_opt_in() -> None:
     assert "--council" in seed
     assert "default" in seed.lower()
     assert "samvil-design" in seed
+
+
+def test_deep_tier_is_defined_in_downstream_skill_matrices() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    qa = (repo / "skills" / "samvil-qa" / "SKILL.md").read_text()
+    design = (repo / "skills" / "samvil-design" / "SKILL.md").read_text()
+    council = (repo / "skills" / "samvil-council" / "SKILL.md").read_text()
+
+    assert "standard` / `thorough` / `full` / `deep" in qa
+    assert "thorough/full/deep" in design
+    assert "`deep`" in council
+
+
+def test_qa_selects_gate_after_next_skill_routing() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    qa = (repo / "skills" / "samvil-qa" / "SKILL.md").read_text()
+
+    assert "qa_to_evolve" in qa
+    assert "any_to_retro" in qa
+    assert "next_skill_decision.suggested" in qa
+    assert qa.index("emit_ac_spec") < qa.index("collect_ac_verification")
+
+
+def test_pm_and_codex_seed_paths_keep_council_opt_in_only() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    pm = (repo / "skills" / "samvil-pm-interview" / "SKILL.md").read_text()
+    codex = (repo / "references" / "codex-commands" / "samvil-seed.md").read_text()
+
+    assert "--council" in pm
+    assert "flags" in pm
+    assert "default" in pm.lower()
+    assert 'next_skill="samvil-design"' in codex
+    assert 'next_skill="samvil-council"' in codex
+
+
+def test_codex_qa_uses_dynamic_finalize_route() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex = (repo / "references" / "codex-commands" / "samvil-qa.md").read_text()
+
+    assert "finalize.next_skill_decision.suggested" in codex
+    assert "finalize_qa_verdict" in codex
+    assert "qa_to_deploy" in codex
+    assert "qa_to_evolve" in codex
+    assert "any_to_retro" in codex
+    assert "samvil_tier=<finalize.samvil_tier>" in codex
+    assert "metrics_json=<finalize.gate_input.metrics>" in codex
+    assert "three_pass_pass" in codex
+    assert "Only after gate PASS" in codex
+    assert 'next_skill="<finalize.next_skill_decision.suggested>"' in codex
+    assert "Deploy/Evolve/Retro" in codex
+
+
+def test_codex_commands_use_root_seed_ssot_and_deploy_fails_closed() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    command_dir = repo / "references" / "codex-commands"
+    command_text = "\n".join(
+        path.read_text() for path in sorted(command_dir.glob("samvil-*.md"))
+    )
+    deploy = (command_dir / "samvil-deploy.md").read_text()
+
+    assert ".samvil/project.seed.json" not in command_text
+    assert "ready=false" in deploy
+    assert 'qa_gate.verdict!="pass"' in deploy
+    assert "no marker is written" in deploy or "continuation marker" in deploy
+    assert 'next_skill="samvil-retro"' in deploy
+
+
+def test_codex_design_council_input_is_optional_and_gate_is_correct() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    design = (
+        repo / "references" / "codex-commands" / "samvil-design.md"
+    ).read_text()
+
+    assert "If `.samvil/council-results.md` exists" in design
+    assert 'gate_name="design_to_scaffold"' in design
+    assert "any non-`pass` verdict halts" in design
+    assert "project.blueprint.json" in design
 
 
 def test_numeric_drift_check_rejects_mismatched_named_constants(tmp_path: Path) -> None:

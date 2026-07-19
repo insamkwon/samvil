@@ -1,6 +1,6 @@
 ---
 name: samvil-design
-description: "MCP-driven design stage: turn project.seed.json into project.blueprint.json and chain portably. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
+description: "MCP-driven design stage: turn project.seed.json into project.blueprint.json and chain portably. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # SAMVIL Design - Thin Orchestrated Entry
@@ -65,7 +65,7 @@ Using `SKILL.legacy.md`, create a valid `project.blueprint.json` for the seed's
 - simplest architecture that satisfies the seed
 - no screens/features outside the seed
 - accepted ADRs override preferences
-- Gate B only for thorough/full tiers
+- Gate B only for thorough/full/deep tiers
 - feasibility review before user checkpoint
 - mobile considerations for form-heavy apps
 

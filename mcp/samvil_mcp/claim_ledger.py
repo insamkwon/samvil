@@ -392,41 +392,17 @@ class ClaimLedger:
         reason: str,
         host_event_id: str,
     ) -> Claim:
-        """Record approval emitted by a host AskUserQuestion interaction.
+        """Fail closed until a non-model-callable host adapter exists.
 
-        This method is intentionally not exposed as an MCP tool. Host adapters
-        own the interaction boundary; model-authored ``approved_by`` strings
-        are not accepted as authority.
+        A plain event id is forgeable by any process that can import this
+        module or write the ledger. Treating it as authority would make the
+        approval boundary cosmetic, so the current multi-host implementation
+        deliberately exposes no approval minting path.
         """
-        if not gate or not reason.strip() or not host_event_id.strip():
-            raise ClaimLedgerError(
-                "gate, non-empty reason, and host_event_id are required."
-            )
-
-        with _locked(self.path):
-            ts = _now_iso()
-            existing = self._latest_by_id().keys()
-            seq = self._next_seq(existing, ts)
-            claim = Claim(
-                claim_id=_claim_id(ts, seq),
-                type="user_approval",
-                subject=gate,
-                statement=f"host recorded user approval: {reason.strip()}",
-                authority_file=".samvil/claims.jsonl",
-                evidence=[f"host-event:{host_event_id.strip()}"],
-                claimed_by="host:AskUserQuestion",
-                verified_by="agent:user",
-                status="verified",
-                ts=ts,
-                meta={
-                    "source": "host",
-                    "reason": reason.strip(),
-                    "host_event_id": host_event_id.strip(),
-                    "consumed": False,
-                },
-            )
-            self._append(claim)
-        return claim
+        raise ClaimLedgerError(
+            "gate overrides are unavailable: no trusted host approval adapter "
+            "is installed. Halt at the blocked gate."
+        )
 
     def record_gate_override(
         self,
@@ -435,169 +411,15 @@ class ClaimLedger:
         reason: str,
         approval_claim_id: str,
     ) -> Claim:
-        """Atomically consume host approval and append a verified override."""
-        if not gate or not reason.strip() or not approval_claim_id:
-            raise ClaimLedgerError(
-                "gate, non-empty reason, and explicit user approval are required."
-            )
-
-        with _locked(self.path):
-            latest = self._latest_by_id()
-            verdicts = [
-                claim
-                for claim in latest.values()
-                if claim.subject == gate and claim.type == "gate_verdict"
-            ]
-            if not verdicts:
-                raise ClaimLedgerError(
-                    "gate override requires a recorded blocked gate verdict."
-                )
-            latest_verdict = max(verdicts, key=lambda claim: claim.claim_id)
-            verdict_value = str(
-                latest_verdict.meta.get("verdict") or latest_verdict.statement
-            ).casefold()
-            if "block" not in verdict_value:
-                raise ClaimLedgerError(
-                    "gate override requires the latest gate verdict to be block."
-                )
-
-            approval = latest.get(approval_claim_id)
-            valid_approval = (
-                approval is not None
-                and approval.type == "user_approval"
-                and approval.subject == gate
-                and approval.status == "verified"
-                and approval.verified_by == "agent:user"
-                and approval.meta.get("source") == "host"
-                and approval.meta.get("reason") == reason.strip()
-                and approval.meta.get("consumed") is False
-                and approval.claim_id > latest_verdict.claim_id
-            )
-            if not valid_approval:
-                raise ClaimLedgerError(
-                    "gate override requires explicit user approval from a "
-                    "fresh host interaction."
-                )
-
-            ts = _now_iso()
-            seq = self._next_seq(latest.keys(), ts)
-            override_id = _claim_id(ts, seq)
-            consumed_meta = dict(approval.meta)
-            consumed_meta.update(
-                {"consumed": True, "consumed_by": override_id, "consumed_at": ts}
-            )
-            self._append(
-                Claim(
-                    claim_id=approval.claim_id,
-                    type=approval.type,
-                    subject=approval.subject,
-                    statement=approval.statement,
-                    authority_file=approval.authority_file,
-                    evidence=list(approval.evidence),
-                    claimed_by=approval.claimed_by,
-                    verified_by=approval.verified_by,
-                    status=approval.status,
-                    ts=approval.ts,
-                    meta=consumed_meta,
-                )
-            )
-            claim = Claim(
-                claim_id=override_id,
-                type="gate_override",
-                subject=gate,
-                statement=f"user approved gate override: {reason.strip()}",
-                authority_file=".samvil/claims.jsonl",
-                evidence=[f"approval-claim:{approval_claim_id}"],
-                claimed_by="agent:orchestrator-agent",
-                verified_by="agent:user",
-                status="verified",
-                ts=ts,
-                meta={
-                    "overridden_by": "user",
-                    "reason": reason.strip(),
-                    "one_time": True,
-                    "consumed": False,
-                    "approval_claim_id": approval_claim_id,
-                },
-            )
-            self._append(claim)
-        return claim
+        """Fail closed; see :meth:`record_host_user_approval`."""
+        raise ClaimLedgerError(
+            "gate overrides are unavailable: no trusted host approval adapter "
+            "is installed. Halt at the blocked gate."
+        )
 
     def consume_gate_override(self, gate: str) -> Claim | None:
-        """Atomically return and consume the newest eligible override."""
-        with _locked(self.path):
-            latest = self._latest_by_id()
-            verdicts = [
-                claim
-                for claim in latest.values()
-                if claim.subject == gate and claim.type == "gate_verdict"
-            ]
-            if not verdicts:
-                return None
-            latest_verdict = max(verdicts, key=lambda claim: claim.claim_id)
-            verdict_value = str(
-                latest_verdict.meta.get("verdict") or latest_verdict.statement
-            ).casefold()
-            if "block" not in verdict_value:
-                return None
-            overrides = [
-                claim
-                for claim in latest.values()
-                if claim.subject == gate
-                and claim.type == "gate_override"
-                and claim.status == "verified"
-                and claim.verified_by == "agent:user"
-                and claim.meta.get("overridden_by") == "user"
-                and claim.meta.get("consumed") is False
-                and claim.claim_id > latest_verdict.claim_id
-                and self._override_has_host_approval(
-                    claim,
-                    latest=latest,
-                    latest_verdict=latest_verdict,
-                )
-            ]
-            if not overrides:
-                return None
-            override = max(overrides, key=lambda claim: claim.claim_id)
-            consumed_meta = dict(override.meta)
-            consumed_meta.update({"consumed": True, "consumed_at": _now_iso()})
-            self._append(
-                Claim(
-                    claim_id=override.claim_id,
-                    type=override.type,
-                    subject=override.subject,
-                    statement=override.statement,
-                    authority_file=override.authority_file,
-                    evidence=list(override.evidence),
-                    claimed_by=override.claimed_by,
-                    verified_by=override.verified_by,
-                    status=override.status,
-                    ts=override.ts,
-                    meta=consumed_meta,
-                )
-            )
-        return override
-
-    @staticmethod
-    def _override_has_host_approval(
-        override: Claim,
-        *,
-        latest: dict[str, Claim],
-        latest_verdict: Claim,
-    ) -> bool:
-        approval_id = str(override.meta.get("approval_claim_id") or "")
-        approval = latest.get(approval_id)
-        return bool(
-            approval
-            and approval.type == "user_approval"
-            and approval.subject == override.subject
-            and approval.status == "verified"
-            and approval.verified_by == "agent:user"
-            and approval.meta.get("source") == "host"
-            and approval.meta.get("consumed") is True
-            and approval.meta.get("consumed_by") == override.claim_id
-            and latest_verdict.claim_id < approval.claim_id < override.claim_id
-        )
+        """Return no override until trusted host attestations are implemented."""
+        return None
 
     # ── Queries ────────────────────────────────────────────────────────
 

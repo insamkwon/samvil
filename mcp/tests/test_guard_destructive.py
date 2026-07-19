@@ -60,6 +60,11 @@ def run_guard(
         "xargs rm -rf /",
         'bash -lc "rm -rf /"',
         "(rm -rf /)",
+        "sudo -u root rm -rf /",
+        "sudo --user root rm -rf /",
+        "env -u HOME rm -rf /",
+        "env --unset HOME rm -rf /",
+        'env -S "rm -rf /"',
     ],
 )
 def test_destructive_variants_are_blocked(command: str) -> None:

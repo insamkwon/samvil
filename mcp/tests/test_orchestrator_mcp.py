@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 from samvil_mcp.claim_ledger import ClaimLedger
@@ -63,7 +64,6 @@ def test_stage_can_proceed_tool_reads_session_events(tmp_path, monkeypatch) -> N
 
     _run(runner())
 
-
 def test_get_orchestration_state_tool_reads_progress(tmp_path, monkeypatch) -> None:
     _isolated_server(monkeypatch, tmp_path)
 
@@ -114,6 +114,42 @@ def test_complete_stage_tool_emits_event_and_claim(tmp_path, monkeypatch) -> Non
     assert len(posted) == 1
     assert posted[0].statement == "verdict=pass via complete_stage"
 
+
+def test_save_event_file_lock_work_is_offloaded(tmp_path, monkeypatch) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    original = srv._append_project_event
+
+    def slow_append(*args, **kwargs):
+        time.sleep(0.2)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(srv, "_append_project_event", slow_append)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "nonblocking-event",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        started = asyncio.get_running_loop().time()
+
+        async def ticker():
+            await asyncio.sleep(0.01)
+            return asyncio.get_running_loop().time() - started
+
+        _, tick_delay = await asyncio.gather(
+            save_event(sess["session_id"], "qa_started", "qa", "{}"),
+            ticker(),
+        )
+        assert tick_delay < 0.1
+
+    _run(runner())
 
 def test_complete_stage_tool_returns_error_for_missing_session(tmp_path, monkeypatch) -> None:
     _isolated_server(monkeypatch, tmp_path)

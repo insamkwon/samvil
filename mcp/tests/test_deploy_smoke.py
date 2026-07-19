@@ -72,14 +72,14 @@ def test_qa_gate_blocks_when_qa_status_missing(tmp_path: Path) -> None:
     """No qa_status in state must block deploy with a clear reason."""
     gate = deploy_targets.evaluate_qa_gate({})
     assert gate["verdict"] == "blocked"
-    assert "PASS" in gate["reason"]
-    assert "qa" in gate["next_action"].lower()
+    assert "trusted runtime receipt" in gate["reason"]
+    assert "halt" in gate["next_action"].lower()
 
 
-def test_qa_gate_passes_only_on_pass_verbatim() -> None:
-    """Only `PASS` (case-insensitive) unlocks deploy."""
-    assert deploy_targets.evaluate_qa_gate({"qa_status": "PASS"})["verdict"] == "pass"
-    assert deploy_targets.evaluate_qa_gate({"qa_status": "pass"})["verdict"] == "pass"
+def test_qa_gate_never_trusts_persisted_pass_status() -> None:
+    """Model-writable PASS text cannot unlock deploy."""
+    assert deploy_targets.evaluate_qa_gate({"qa_status": "PASS"})["verdict"] == "blocked"
+    assert deploy_targets.evaluate_qa_gate({"qa_status": "pass"})["verdict"] == "blocked"
     assert deploy_targets.evaluate_qa_gate({"qa_status": "REVISE"})["verdict"] == "blocked"
     assert deploy_targets.evaluate_qa_gate({"qa_status": "FAIL"})["verdict"] == "blocked"
 
@@ -88,11 +88,11 @@ def test_qa_gate_reads_nested_qa_dict() -> None:
     """Some pipelines write `state.qa.status` instead of `qa_status`."""
     assert (
         deploy_targets.evaluate_qa_gate({"qa": {"status": "PASS"}})["verdict"]
-        == "pass"
+        == "blocked"
     )
     assert (
         deploy_targets.evaluate_qa_gate({"qa": {"verdict": "PASS"}})["verdict"]
-        == "pass"
+        == "blocked"
     )
 
 
@@ -163,7 +163,7 @@ def test_evaluate_blocks_when_qa_not_pass(tmp_path: Path) -> None:
 
     result = deploy_targets.evaluate_deploy_target(str(tmp_path))
     assert result["ready"] is False
-    assert any("PASS" in b for b in result["blockers"])
+    assert any("trusted runtime receipt" in b for b in result["blockers"])
     assert result["qa_gate"]["verdict"] == "blocked"
 
 
@@ -217,16 +217,16 @@ def test_evaluate_game_uses_dist_artifact_check(tmp_path: Path) -> None:
     assert any("build artifact missing" in b for b in result["blockers"])
 
 
-def test_evaluate_ready_when_all_gates_pass(tmp_path: Path) -> None:
-    """The happy path: QA=PASS, no env placeholders, build artifact present."""
+def test_evaluate_blocks_without_trusted_runtime_receipt(tmp_path: Path) -> None:
+    """QA=PASS text and a build artifact still cannot authorize deploy."""
     _write_state(tmp_path, "PASS")
     _write_seed(tmp_path, solution_type="web-app")
     (tmp_path / ".next").mkdir()  # build artifact exists
     # No .env.example → zero-state, not a blocker
 
     result = deploy_targets.evaluate_deploy_target(str(tmp_path))
-    assert result["ready"] is True, result["blockers"]
-    assert result["blockers"] == []
+    assert result["ready"] is False
+    assert any("trusted runtime receipt" in blocker for blocker in result["blockers"])
 
 
 def test_evaluate_missing_seed_does_not_crash(tmp_path: Path) -> None:
@@ -282,15 +282,14 @@ def test_artifact_paths_no_tech_stack_falls_back_to_solution_type() -> None:
     assert deploy_targets._artifact_paths_for_framework("mobile-app", None) == []
 
 
-def test_evaluate_vite_react_happy_path(tmp_path: Path) -> None:
-    """vite-react project with dist/ present and QA PASS must be ready=True."""
+def test_evaluate_vite_react_artifact_does_not_bypass_qa_trust(tmp_path: Path) -> None:
     _write_state(tmp_path, "PASS")
     _write_seed(tmp_path, solution_type="web-app", tech_stack={"framework": "vite-react"})
     (tmp_path / "dist").mkdir()
 
     result = deploy_targets.evaluate_deploy_target(str(tmp_path))
     assert result["build_artifact"]["checked_paths"] == ["dist"]
-    assert result["ready"] is True, result["blockers"]
+    assert result["ready"] is False
 
 
 def test_evaluate_vite_react_missing_dist_is_blocker(tmp_path: Path) -> None:
@@ -304,7 +303,7 @@ def test_evaluate_vite_react_missing_dist_is_blocker(tmp_path: Path) -> None:
     assert any("build artifact missing" in b for b in result["blockers"])
 
 
-def test_evaluate_nextjs_no_false_positive_with_vite_seed(tmp_path: Path) -> None:
+def test_evaluate_nextjs_checks_correct_artifact_but_still_blocks_deploy(tmp_path: Path) -> None:
     """A Next.js project with .next/ present must NOT be blocked as if Vite."""
     _write_state(tmp_path, "PASS")
     _write_seed(tmp_path, solution_type="web-app", tech_stack={"framework": "nextjs"})
@@ -312,7 +311,7 @@ def test_evaluate_nextjs_no_false_positive_with_vite_seed(tmp_path: Path) -> Non
 
     result = deploy_targets.evaluate_deploy_target(str(tmp_path))
     assert result["build_artifact"]["checked_paths"] == [".next"]
-    assert result["ready"] is True, result["blockers"]
+    assert result["ready"] is False
 
 
 # ── Wiring on live MCP server ─────────────────────────────────
@@ -332,7 +331,7 @@ async def test_evaluate_deploy_target_mcp_tool_returns_valid_json(
     payload = json.loads(raw)
     assert "error" not in payload, payload
     assert payload["solution_type"] == "web-app"
-    assert payload["qa_gate"]["verdict"] == "pass"
+    assert payload["qa_gate"]["verdict"] == "blocked"
 
 
 @pytest.mark.asyncio

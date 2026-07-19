@@ -18,7 +18,7 @@ All notable changes to SAMVIL are documented here.
   fresh-interview project roots for the start hook.
 - Made QA/deploy trust mechanical: project-local events feed retro durations,
   reporter artifacts override self-reported metrics, static-only evidence blocks
-  deploy, and user gate overrides leave an auditable claim.
+  deploy, and gate overrides fail closed until a trusted host attestation exists.
 - Reduced happy-path user checkpoints to 12, made Council explicit opt-in, and
   verified both standard dashboard and standard automation scenarios.
 - Consolidated agent personas and references, hardened destructive-command
@@ -27,6 +27,10 @@ All notable changes to SAMVIL are documented here.
 - Closed follow-up review gaps in destructive-command parsing, host-only gate
   approvals, persisted project-root routing, runtime deploy gating, async AC
   verification, and canonical `deep` tier propagation.
+- Removed host command execution from AC verification until a portable trusted
+  sandbox exists, and stopped treating model-writable QA artifacts or event ids
+  as deployment/approval authority. Council remains exact opt-in on every host,
+  and QA chooses Deploy, Evolve, or Retro gates only after routing is known.
 
 ---
 

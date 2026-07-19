@@ -23,7 +23,10 @@ from pathlib import Path
 from typing import Any
 
 from .claim_ledger import _locked
-from .host_adapters import get_chain_continuation as _get_chain_continuation
+from .host_adapters import (
+    _SKILL_CHAIN,
+    get_chain_continuation as _get_chain_continuation,
+)
 from .ssot_io import atomic_write_text
 
 MARKER_FILENAME = "next-skill.json"
@@ -34,6 +37,7 @@ def write_chain_marker(
     project_root: str,
     host_name: str | None,
     current_skill: str,
+    next_skill: str | None = None,
 ) -> dict[str, Any]:
     """Write the next-skill marker after current_skill completes.
 
@@ -45,6 +49,17 @@ def write_chain_marker(
     samvil_dir.mkdir(parents=True, exist_ok=True)
 
     continuation = _get_chain_continuation(host_name, current_skill)
+    if next_skill is not None:
+        valid_skills = {entry["name"] for entry in _SKILL_CHAIN}
+        if next_skill not in valid_skills:
+            raise ValueError(f"unknown next_skill: {next_skill!r}")
+        continuation["next_skill"] = next_skill
+    target_skill = str(continuation.get("next_skill") or "")
+    continuation["command"] = (
+        _get_chain_continuation(host_name, target_skill)["command"]
+        if target_skill
+        else ""
+    )
     marker = {
         **continuation,
         "schema_version": "1.0",
@@ -118,8 +133,6 @@ def get_pipeline_status(
     Returns dict with: has_marker, current_position, next_skill,
     pipeline_progress.
     """
-    from .host_adapters import _SKILL_CHAIN
-
     marker = read_chain_marker(project_root)
 
     if marker is None:
@@ -131,7 +144,9 @@ def get_pipeline_status(
             "total_skills": len(_SKILL_CHAIN),
         }
 
-    current = marker.get("command", "").split()[-1] if marker.get("command") else None
+    current = marker.get("from_stage")
+    if not current and marker.get("command"):
+        current = marker["command"].split()[-1]
     next_skill = marker.get("next_skill", "")
 
     # Find progress

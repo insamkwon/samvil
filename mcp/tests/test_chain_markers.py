@@ -37,9 +37,21 @@ class TestWriteChainMarker:
     def test_marker_content(self, project_root):
         result = write_chain_marker(project_root, "codex_cli", "samvil-build")
         assert result["next_skill"] == "samvil-qa"
+        assert result["command"] == "samvil samvil-qa"
         assert result["chain_via"] == "file_marker"
         assert result["host_name"] == "codex_cli"
         assert "written_at" in result
+
+    def test_dynamic_override_updates_command_with_next_skill(self, project_root):
+        result = write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-qa",
+            next_skill="samvil-evolve",
+        )
+
+        assert result["next_skill"] == "samvil-evolve"
+        assert result["command"] == "samvil samvil-evolve"
 
     def test_creates_samvil_dir(self, project_root):
         samvil_dir = Path(project_root) / SAMVIL_DIR

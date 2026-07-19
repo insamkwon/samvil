@@ -1,6 +1,6 @@
 ---
 name: samvil-interview
-description: "Socratic interview with app presets, unknown-unknown probing, and zero-question mode. Korean language. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
+description: "Socratic interview with app presets, unknown-unknown probing, and zero-question mode. Korean language. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-interview (ultra-thin)

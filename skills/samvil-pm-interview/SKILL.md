@@ -1,6 +1,6 @@
 ---
 name: samvil-pm-interview
-description: "PM-mode interview. Collect vision → users → metrics → epics → tasks → ACs, then convert to engineering seed. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
+description: "PM-mode interview. Collect vision → users → metrics → epics → tasks → ACs, then convert to engineering seed. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-pm-interview (ultra-thin)
@@ -18,7 +18,8 @@ remains the default.
 
 ## Boot Sequence
 
-1. Read `project.config.json` if present; pick up `selected_tier`.
+1. Read `project.config.json` if present; pick up `selected_tier` and exact
+   `"--council"` membership in `flags` as `council_opt_in`.
 2. Read existing `project.pm-seed.json` to resume at the first
    unfilled section.
 3. 한국어로 진행 (모든 사용자 대화 한국어).
@@ -74,8 +75,8 @@ After `project.seed.json` is written, invoke the next stage via the
 Skill tool. Both Council and Design read `project.seed.json`; nothing
 else needs to be passed.
 
-- `selected_tier` ∈ {`thorough`, `full`} → invoke `samvil-council`
-- `selected_tier` ∈ {`minimal`, `standard`} → invoke `samvil-design`
+- Exact `--council` opt-in with `selected_tier` ∈ {`standard`, `thorough`, `full`, `deep`} → invoke `samvil-council`.
+- Default for every tier (`minimal`, `standard`, `thorough`, `full`, `deep`) → invoke `samvil-design`.
 - Missing/unset tier → invoke `samvil-design`, emit `tier_missing`
   event (best-effort).
 

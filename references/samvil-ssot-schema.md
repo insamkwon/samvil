@@ -391,7 +391,7 @@ Phase 1 uses a conservative skip policy:
 | `council` | skip | skip | skip | skip |
 | `deploy` | skip | skip | skip | skip |
 
-Exact `--council` opt-in changes Council to `run` for standard/thorough/full;
+Exact `--council` opt-in changes Council to `run` for standard/thorough/full/deep;
 minimal still skips it.
 
 `deploy` remains skipped until a later host/project capability layer

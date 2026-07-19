@@ -1,4 +1,4 @@
-"""Collect mechanical build and QA evidence from persisted artifacts."""
+"""Collect bounded artifact observations without overstating host trust."""
 
 from __future__ import annotations
 
@@ -10,6 +10,23 @@ from typing import Any
 
 
 _EXIT_MARKER = re.compile(r"^SAMVIL_EXIT:(-?\d+)\s*$", re.MULTILINE)
+_MAX_LOG_BYTES = 2_000_000
+_MAX_REPORT_BYTES = 10_000_000
+
+
+def _read_tail(path: Path, limit: int = _MAX_LOG_BYTES) -> str:
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        size = handle.tell()
+        handle.seek(max(0, size - limit))
+        data = handle.read(limit)
+    return data.decode("utf-8", errors="replace")
+
+
+def _read_bounded(path: Path, limit: int) -> str:
+    if path.stat().st_size > limit:
+        raise ValueError(f"artifact exceeds {limit} bytes")
+    return path.read_text(encoding="utf-8")
 
 
 def _last_exit_code(log_text: str) -> int | None:
@@ -49,7 +66,7 @@ def _collect_build(root: Path) -> tuple[dict[str, Any], list[str], list[str]]:
             [relative],
         )
 
-    log_text = path.read_text(encoding="utf-8", errors="replace")
+    log_text = _read_tail(path)
     exit_code = _last_exit_code(log_text)
     last_block = _last_execution_block(log_text)
     warnings_count = sum(
@@ -79,7 +96,7 @@ def _collect_qa(root: Path) -> tuple[dict[str, Any], list[str], list[str]]:
     if log_path.is_file():
         evidence_files.append(log_relative)
         exit_code = _last_exit_code(
-            log_path.read_text(encoding="utf-8", errors="replace")
+            _read_tail(log_path)
         )
         if exit_code is None:
             missing.append(log_relative)
@@ -91,7 +108,7 @@ def _collect_qa(root: Path) -> tuple[dict[str, Any], list[str], list[str]]:
     if report_path.is_file():
         evidence_files.append(report_relative)
         try:
-            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report = json.loads(_read_bounded(report_path, _MAX_REPORT_BYTES))
             stats = report.get("stats") if isinstance(report, dict) else None
             if isinstance(stats, dict):
                 passed = _nonnegative_int(stats.get("expected")) + _nonnegative_int(
@@ -102,17 +119,18 @@ def _collect_qa(root: Path) -> tuple[dict[str, Any], list[str], list[str]]:
                 report_valid = True
             else:
                 missing.append(report_relative)
-        except (OSError, UnicodeError, json.JSONDecodeError):
+        except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
             missing.append(report_relative)
     else:
         missing.append(report_relative)
 
-    runtime_verified = (
+    artifact_runtime_passed = (
         report_valid
         and exit_code == 0
         and passed > 0
         and failed == 0
     )
+    runtime_verified = False
     return (
         {
             "npm_test": {
@@ -123,8 +141,13 @@ def _collect_qa(root: Path) -> tuple[dict[str, Any], list[str], list[str]]:
                 "skipped": skipped,
                 "from": report_relative,
             },
+            "artifact_runtime_passed": artifact_runtime_passed,
             "runtime_verified": runtime_verified,
-            "static_only": not runtime_verified,
+            "static_only": True,
+            "trust_reason": (
+                "artifact-only QA evidence is model-writable; a trusted host "
+                "receipt is required before runtime_verified can be true"
+            ),
         },
         evidence_files,
         missing,
@@ -132,10 +155,12 @@ def _collect_qa(root: Path) -> tuple[dict[str, Any], list[str], list[str]]:
 
 
 def collect_stage_evidence(project_root: str | Path, stage: str) -> dict[str, Any]:
-    """Return artifact-derived evidence for ``build`` or ``qa``.
+    """Return artifact-derived observations for ``build`` or ``qa``.
 
     Missing or malformed artifacts are reported explicitly and never inferred as
-    successful from caller-provided prose or metrics.
+    successful from caller-provided prose or metrics. QA artifacts remain
+    untrusted because the model can write them; only a future trusted host
+    receipt may set ``runtime_verified``.
     """
 
     normalized_stage = stage.strip().casefold()

@@ -1,6 +1,6 @@
 ---
 name: samvil-deploy
-description: "Deploy built app to Vercel/Railway/Coolify. Post-QA, pre-retro chain step. Gate blocks require explicit user approval plus gate_override; unapproved force_proceed is forbidden."
+description: "Deploy built app to Vercel/Railway/Coolify. Post-QA, pre-retro chain step. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-deploy (ultra-thin)
@@ -27,20 +27,22 @@ Returns: `qa_gate.{verdict,reason,next_action}`, `platforms[]`
 `{id,label,command,config_files,notes,recommended?}`, `selected_platform`
 (caller arg → seed `tech_stack.deploy` → catalog `recommended`),
 `env_vars.{required_keys,placeholder_keys,exists}`, `build_artifact.{checked_paths,present}`,
-plus `ready` + `blockers[]`. On `error`: report `⚠ MCP unreachable`, fall
-back to manual deploy guidance from `SKILL.legacy.md` (P8).
+plus `ready` + `blockers[]`. On `error`: report `⚠ MCP unreachable` and halt;
+deployment authority cannot degrade to manual prose (P8 truth boundary).
 
 ## Step 2 — Branch on `ready`
 
 **`ready: false`** — print blockers, stop:
 
-- `qa_gate.verdict != "pass"` → refuse. Run `/samvil:samvil-qa` until PASS.
+- `qa_gate.verdict != "pass"` → refuse. A persisted QA PASS is diagnostic only;
+  current hosts need a trusted runtime receipt adapter before deploy can proceed.
 - `env_vars.placeholder_keys` non-empty → AskUserQuestion to fill values.
   Write `.env` / `.env.production`. Never hardcode secrets.
 - `build_artifact.present == false` for non-`manual` → `npm run build > .samvil/build.log 2>&1`
   (INV-2), then re-call `evaluate_deploy_target`.
 
-**`ready: true`** — confirm `selected_platform` (silent if seed-pinned).
+**`ready: true`** — reserved for a future trusted receipt adapter; confirm
+`selected_platform` (silent if seed-pinned).
 For a different choice, re-call with `platform="<id>"` to recompute.
 
 ## Step 3 — Deploy (host-bound)

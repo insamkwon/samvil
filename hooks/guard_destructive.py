@@ -35,6 +35,12 @@ GIT_GLOBAL_WITH_VALUE = {
     "--super-prefix",
     "--work-tree",
 }
+SUDO_OPTIONS_WITH_VALUE = {
+    "-C", "-D", "-R", "-T", "-g", "-h", "-p", "-u",
+    "--chdir", "--chroot", "--close-from", "--command-timeout",
+    "--group", "--host", "--prompt", "--user",
+}
+ENV_OPTIONS_WITH_VALUE = {"-C", "-S", "-u", "--chdir", "--split-string", "--unset"}
 
 
 def _find_command(value: Any) -> str | None:
@@ -86,26 +92,67 @@ def _segments(command: str) -> list[list[str]]:
 def _command_start(tokens: list[str]) -> int:
     index = 0
     while index < len(tokens):
-        executable = _executable(tokens[index])
-        if executable == "sudo":
-            index += 1
-            while index < len(tokens) and tokens[index].startswith("-"):
-                index += 1
-            continue
-        if executable == "env":
-            index += 1
-            while index < len(tokens):
-                token = tokens[index]
-                if token.startswith("-") or ("=" in token and not token.startswith("=")):
-                    index += 1
-                    continue
-                break
-            continue
         if "=" in tokens[index] and not tokens[index].startswith(("/", "./", "../")):
             index += 1
             continue
         break
     return index
+
+
+def _consume_options(
+    tokens: list[str],
+    start: int,
+    *,
+    with_value: set[str],
+) -> tuple[int, str | None]:
+    index = start
+    split_command: str | None = None
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            return index + 1, split_command
+        if not token.startswith("-") or token == "-":
+            return index, split_command
+        key = token.split("=", 1)[0]
+        attached_short_value = False
+        if "=" not in token:
+            for option in with_value:
+                if len(option) == 2 and token.startswith(option) and len(token) > 2:
+                    key = option
+                    attached_short_value = True
+                    break
+        index += 1
+        if key in with_value and "=" not in token and not attached_short_value:
+            if index >= len(tokens):
+                return index, split_command
+            value = tokens[index]
+            index += 1
+            if key in {"-S", "--split-string"}:
+                split_command = value
+        elif key in {"-S", "--split-string"} and "=" in token:
+            split_command = token.split("=", 1)[1]
+    return index, split_command
+
+
+def _unwrap_prefix(tokens: list[str]) -> list[str]:
+    current = list(tokens)
+    while current:
+        executable = _executable(current[0])
+        if executable == "sudo":
+            index, _ = _consume_options(current, 1, with_value=SUDO_OPTIONS_WITH_VALUE)
+            current = current[index:]
+            continue
+        if executable == "env":
+            index, split_command = _consume_options(
+                current, 1, with_value=ENV_OPTIONS_WITH_VALUE
+            )
+            while index < len(current) and "=" in current[index]:
+                index += 1
+            suffix = current[index:]
+            current = (shlex.split(split_command) if split_command else []) + suffix
+            continue
+        break
+    return current
 
 
 def _git_subcommand(args: list[str]) -> tuple[str, list[str]]:
@@ -232,6 +279,7 @@ def _shell_command(args: list[str]) -> str | None:
 
 def analyze_command(command: str) -> str | None:
     for tokens in _segments(command):
+        tokens = _unwrap_prefix(tokens)
         start = _command_start(tokens)
         if start >= len(tokens):
             continue
