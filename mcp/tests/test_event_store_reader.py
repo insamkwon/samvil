@@ -203,6 +203,34 @@ def test_list_in_flight_accepts_legacy_ts(project_root: Path) -> None:
     assert result["in_flight_sessions"][0]["last_event_ts"] == "2026-05-16T11:00:00Z"
 
 
+def test_completed_stage_event_resumes_from_state_stage(project_root: Path) -> None:
+    """A *_complete event records the completed stage, not the resume target."""
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "interview_complete", "stage": "interview",
+         "timestamp": "2026-05-16T10:30:00Z"},
+    ])
+    _seed_state(project_root, {"current_stage": "seed", "session_id": "s1"})
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    assert len(result["in_flight_sessions"]) == 1
+    assert result["in_flight_sessions"][0]["current_stage"] == "seed"
+    assert result["in_flight_sessions"][0]["last_event_type"] == "interview_complete"
+
+
+def test_completed_stage_event_without_state_is_not_in_flight(project_root: Path) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "interview_complete", "stage": "interview",
+         "timestamp": "2026-05-16T10:30:00Z"},
+    ])
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    assert result["in_flight_sessions"] == []
+
+
 def test_list_terminal_session_excluded(project_root: Path) -> None:
     """A session whose last event is retro_complete should NOT be in-flight."""
     _seed_events(project_root, [
