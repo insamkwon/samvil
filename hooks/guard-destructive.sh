@@ -3,7 +3,7 @@
 
 set -u
 
-TOOL_INPUT="${1:-}"
+TOOL_INPUT="${1:-${TOOL_INPUT:-}}"
 if [ -z "$TOOL_INPUT" ]; then
   TOOL_INPUT="{}"
 fi

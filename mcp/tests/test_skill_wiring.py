@@ -171,13 +171,16 @@ def test_codex_qa_uses_dynamic_finalize_route() -> None:
 
     assert "finalize.next_skill_decision.suggested" in codex
     assert "finalize_qa_verdict" in codex
+    assert "materialize_qa_synthesis" in codex
+    assert codex.index("finalize_qa_verdict") < codex.index("materialize_qa_synthesis")
+    assert codex.index("materialize_qa_synthesis") < codex.index("gate_check")
     assert "qa_to_deploy" in codex
     assert "qa_to_evolve" in codex
     assert "any_to_retro" in codex
     assert "samvil_tier=<finalize.samvil_tier>" in codex
     assert "metrics_json=<finalize.gate_input.metrics>" in codex
     assert "three_pass_pass" in codex
-    assert "Only after gate PASS" in codex
+    assert "Only after materialize + gate PASS" in codex
     assert 'next_skill="<finalize.next_skill_decision.suggested>"' in codex
     assert "Deploy/Evolve/Retro" in codex
 
@@ -207,6 +210,16 @@ def test_codex_design_council_input_is_optional_and_gate_is_correct() -> None:
     assert 'gate_name="design_to_scaffold"' in design
     assert "any non-`pass` verdict halts" in design
     assert "project.blueprint.json" in design
+
+
+def test_codex_scaffold_reads_root_blueprint_ssot() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    scaffold = (
+        repo / "references" / "codex-commands" / "samvil-scaffold.md"
+    ).read_text()
+
+    assert "root `project.blueprint.json`" in scaffold
+    assert ".samvil/blueprint.json" not in scaffold
 
 
 def test_design_stage_preserves_explicit_council_opt_in() -> None:

@@ -12,6 +12,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 HOOK = REPO / "hooks" / "guard-destructive.sh"
+PLUGIN = REPO / ".claude-plugin" / "plugin.json"
 
 
 def run_guard(
@@ -57,6 +58,11 @@ def run_guard(
         "git push --prune origin",
         "git push origin --delete main",
         "git push origin :main",
+        "P=push; git $P -f origin main",
+        "S=reset; git $S --hard HEAD",
+        "C=clean; git $C -df",
+        "F=-f; git push $F origin main",
+        "git -c alias.nuke='push --force' nuke origin main",
         "/bin/rm -fr /",
         "/usr/bin/git -C /tmp push --force origin main",
         "git --git-dir=.git reset --hard HEAD~1",
@@ -93,12 +99,18 @@ def run_guard(
         "eval 'rm -rf /'",
         "builtin eval 'rm -rf /'",
         "R=rm; $R -rf /",
+        "F=-rf; rm $F /",
         "G=git; $G reset --hard HEAD",
+        "CMD='rm -rf /'; bash -c \"$CMD\"",
         "$(printf rm) -rf ~/.ssh",
+        "`printf r`m -rf /",
+        "/bin/r? -rf /",
         "r\\\nm -rf /",
         "echo `rm -rf /`",
         "printf 'rm -rf /' | bash",
         "bash <<< 'rm -rf /'",
+        "bash < script.sh",
+        "cat script.sh | bash",
         "rm -rf {*,.*}",
         "rm -rf {../outside,local}",
         "rm -rf .[!.]* ?*",
@@ -111,8 +123,19 @@ def run_guard(
         "env --unset HOME rm -rf /",
         'env -S "rm -rf /"',
         'env -S"rm -rf /"',
+        "/usr/bin/time -o /tmp/time.log rm -rf /",
+        "eval -- 'rm -rf /'",
+        "builtin eval -- 'rm -rf /'",
         "psql -c 'DROP/**/TABLE users'",
+        "mysql -e '/*!50000 DROP TABLE users */'",
+        "psql -c 'TRUNCATE TABLE users'",
+        "psql -c 'DELETE FROM users'",
+        "psql -c 'DROP SCHEMA public'",
+        "D=drop; psql -c \"$D table users\"",
+        "T=TABLE; psql -c \"DROP $T users\"",
         "printf 'DROP/**/TABLE users;' | psql '$DATABASE_URL'",
+        "P=psql; printf 'DROP TABLE users;' | $P",
+        "S=bash; printf 'rm -rf /' | $S",
         "psql <<'SQL'\nDROP TABLE users;\nSQL",
         "printf 'DROP TABLE users;' | time psql",
     ],
@@ -129,6 +152,8 @@ def test_destructive_variants_are_blocked(command: str) -> None:
         "rm -rf .next",
         "rm -rf .samvil/cache",
         "rm -rf node_modules",
+        "git clean -fdn",
+        "git clean --force --dirs --dry-run",
         "git push --force-with-lease origin feature",
         "git push origin feature",
         "select * from users",
@@ -152,7 +177,28 @@ def test_block_message_does_not_echo_sensitive_tool_input() -> None:
 
 def test_malformed_command_substitution_does_not_hang() -> None:
     result = run_guard("echo $(echo 'unterminated)", timeout=1)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"tool_input":{"command":"rm -rf /',
+        json.dumps({"tool_input": {"command": 'rm -rf /\necho "'}}),
+    ],
+)
+def test_malformed_payload_or_shell_syntax_fails_closed(payload: str) -> None:
+    result = subprocess.run(
+        ["bash", str(HOOK), payload],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
 
 
 def test_analyzer_failure_blocks_command(tmp_path: Path) -> None:
@@ -168,3 +214,11 @@ def test_analyzer_failure_blocks_command(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert "analyzer failed" in result.stderr.casefold()
+
+
+def test_guard_hook_uses_environment_not_argv_for_tool_input() -> None:
+    plugin = json.loads(PLUGIN.read_text(encoding="utf-8"))
+    command = plugin["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+
+    assert "guard-destructive.sh \"$TOOL_INPUT\"" not in command
+    assert "$TOOL_INPUT" not in command

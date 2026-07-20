@@ -11,6 +11,8 @@ from pathlib import PurePath
 from typing import Any
 
 
+MALFORMED_TOOL_INPUT_REASON = "malformed tool input"
+SHELL_PARSE_ERROR_REASON = "shell parse error"
 SQL_CLIENTS = {"mariadb", "mysql", "psql", "sqlite3", "sqlcmd"}
 SHELLS = {"bash", "dash", "sh", "zsh"}
 CHAIN_TOKENS = {";", "&&", "||", "|", "|&", "&", "\n", ";\n", "(", ")", "{", "}"}
@@ -64,6 +66,38 @@ def _normalize_shell_source(command: str) -> str:
     return command.replace("\\\r\n", "").replace("\\\n", "")
 
 
+def _simple_assignments(command: str) -> dict[str, str]:
+    """Collect simple shell assignments for conservative static expansion."""
+    assignments: dict[str, str] = {}
+    try:
+        segments = _segments(command)
+    except ValueError:
+        return assignments
+    pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+    for tokens in segments:
+        for token in tokens:
+            if not pattern.match(token):
+                continue
+            name, _, value = token.partition("=")
+            assignments[name] = value
+    return assignments
+
+
+def _expand_shell_variables(command: str, assignments: dict[str, str]) -> str:
+    if not assignments:
+        return command
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group("braced") or match.group("plain") or ""
+        return assignments.get(name, match.group(0))
+
+    return re.sub(
+        r"\$(?P<plain>[A-Za-z_][A-Za-z0-9_]*)|\$\{(?P<braced>[A-Za-z_][A-Za-z0-9_]*)\}",
+        replace,
+        command,
+    )
+
+
 def _find_command(value: Any) -> str | None:
     if isinstance(value, dict):
         command = value.get("command")
@@ -88,6 +122,8 @@ def extract_command(raw: str) -> str:
     try:
         return _find_command(json.loads(raw)) or ""
     except (json.JSONDecodeError, TypeError):
+        if raw.lstrip().startswith(("{", "[")):
+            return MALFORMED_TOOL_INPUT_REASON
         return raw
 
 
@@ -96,20 +132,17 @@ def _executable(token: str) -> str:
 
 
 def _segments(command: str) -> list[list[str]]:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n")
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n<>")
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     lexer.commenters = ""
     segments: list[list[str]] = [[]]
-    try:
-        for token in lexer:
-            if token in CHAIN_TOKENS:
-                if segments[-1]:
-                    segments.append([])
-                continue
-            segments[-1].append(token)
-    except ValueError:
-        return []
+    for token in lexer:
+        if token in CHAIN_TOKENS:
+            if segments[-1]:
+                segments.append([])
+            continue
+        segments[-1].append(token)
     return [segment for segment in segments if segment]
 
 
@@ -199,10 +232,38 @@ def _git_subcommand(args: list[str]) -> tuple[str, list[str]]:
         if token.startswith("-"):
             index += 1
             continue
+        alias_tokens = _git_alias_tokens(args, token)
+        if alias_tokens:
+            return alias_tokens[0].casefold(), alias_tokens[1:] + args[index + 1 :]
         return token.casefold(), args[index + 1 :]
     if index < len(args):
         return args[index].casefold(), args[index + 1 :]
     return "", []
+
+
+def _git_alias_tokens(args: list[str], subcommand: str) -> list[str] | None:
+    alias_prefix = f"alias.{subcommand}="
+    index = 0
+    while index < len(args):
+        token = args[index]
+        key = token.split("=", 1)[0]
+        value = ""
+        if key in {"-c", "--config"}:
+            if "=" in token and key != "-c":
+                value = token.split("=", 1)[1]
+            elif index + 1 < len(args):
+                value = args[index + 1]
+                index += 1
+        if value.casefold().startswith(alias_prefix.casefold()):
+            raw = value.split("=", 1)[1]
+            try:
+                alias_tokens = shlex.split(raw)
+            except ValueError:
+                return None
+            if alias_tokens:
+                return alias_tokens
+        index += 1
+    return None
 
 
 def _git_reason(args: list[str]) -> str | None:
@@ -220,7 +281,8 @@ def _git_reason(args: list[str]) -> str | None:
         )
         forced = "f" in short_flags or "--force" in sub_args
         directories = "d" in short_flags or "--dirs" in sub_args
-        if forced and directories:
+        dry_run = "n" in short_flags or "--dry-run" in sub_args
+        if forced and directories and not dry_run:
             return "git clean with force and directory removal"
     if subcommand == "push":
         short_flags = "".join(
@@ -320,11 +382,12 @@ def _sql_reason(executable: str, args: list[str]) -> str | None:
 
 
 def _has_destructive_sql(text: str) -> bool:
+    text = re.sub(r"/\*![0-9]*\s*(.*?)\*/", r" \1 ", text, flags=re.DOTALL)
     without_block_comments = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
     without_line_comments = re.sub(r"--[^\n]*(?:\n|$)", " ", without_block_comments)
     return bool(
         re.search(
-            r"\bdrop\s+(?:table|database)\b",
+            r"\b(?:drop\s+(?:table|database|schema)|truncate\s+table|delete\s+from)\b",
             without_line_comments,
             re.IGNORECASE,
         )
@@ -352,7 +415,7 @@ def _wrapped_tokens(executable: str, args: list[str]) -> list[str] | None:
         index = _skip_options(args, with_value={"-n", "--adjustment"})
         return args[index:]
     if executable == "time":
-        index = _skip_options(args)
+        index = _skip_options(args, with_value={"-f", "-o", "--format", "--output"})
         return args[index:]
     if executable == "timeout":
         index = _skip_options(
@@ -393,6 +456,8 @@ def _shell_stdin_reason(args: list[str]) -> str | None:
             if nested:
                 return nested
         if token.startswith("<<"):
+            return "shell stdin execution"
+        if token == "<" or (token.startswith("<") and token != "<>"):
             return "shell stdin execution"
     return None
 
@@ -484,6 +549,9 @@ def _command_substitution_executable_reason(command: str) -> str | None:
 
 def analyze_command(command: str) -> str | None:
     command = _normalize_shell_source(command)
+    if command == MALFORMED_TOOL_INPUT_REASON:
+        return MALFORMED_TOOL_INPUT_REASON
+    command = _expand_shell_variables(command, _simple_assignments(command))
     substitution_reason = _command_substitution_reason(command)
     if substitution_reason:
         return substitution_reason
@@ -503,6 +571,11 @@ def analyze_command(command: str) -> str | None:
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
+        if any(char in executable for char in "`$*?[{"):
+            if _rm_reason(args):
+                return "dynamic executable with destructive removal arguments"
+            if _git_reason(args):
+                return "dynamic executable with destructive git arguments"
         if executable.startswith("$"):
             if _rm_reason(args):
                 return "dynamic executable with destructive removal arguments"
@@ -526,7 +599,8 @@ def analyze_command(command: str) -> str | None:
             if stdin_reason:
                 return stdin_reason
         if executable == "eval" and args:
-            nested = analyze_command(" ".join(args))
+            nested_args = args[1:] if args and args[0] == "--" else args
+            nested = analyze_command(" ".join(nested_args))
             if nested:
                 return nested
         if executable == "git":
@@ -563,6 +637,7 @@ def _piped_shell_reason(command: str) -> str | None:
             embedded = _embedded_shell_payload_reason(before_shell)
             if embedded:
                 return "shell stdin execution"
+            return "shell stdin execution"
     return None
 
 
@@ -598,7 +673,10 @@ def _segment_executable_is(tokens: list[str], names: set[str]) -> bool:
 
 
 def main() -> int:
-    reason = analyze_command(extract_command(os.environ.get("TOOL_INPUT", "")))
+    try:
+        reason = analyze_command(extract_command(os.environ.get("TOOL_INPUT", "")))
+    except ValueError:
+        reason = SHELL_PARSE_ERROR_REASON
     if reason:
         print(reason)
     return 0

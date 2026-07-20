@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/guard-destructive.sh \"$TOOL_INPUT\""
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/guard-destructive.sh"
           }
         ]
       },

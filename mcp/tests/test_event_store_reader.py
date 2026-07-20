@@ -231,6 +231,44 @@ def test_completed_stage_event_without_state_is_not_in_flight(project_root: Path
     assert result["in_flight_sessions"] == []
 
 
+@pytest.mark.parametrize(
+    ("event_type", "stage"),
+    [
+        ("seed_generated", "seed"),
+        ("qa_pass", "qa"),
+        ("build_pass", "build"),
+        ("council_verdict", "council"),
+        ("evolve_converge", "evolve"),
+    ],
+)
+def test_success_events_without_complete_suffix_are_not_in_flight_when_stage_done(
+    project_root: Path,
+    event_type: str,
+    stage: str,
+) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": event_type, "stage": stage,
+         "timestamp": "2026-05-16T10:30:00Z"},
+    ])
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    assert result["in_flight_sessions"] == []
+
+
+def test_success_event_with_next_stage_resumes_without_state(project_root: Path) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "seed_generated", "stage": "design",
+         "timestamp": "2026-05-16T10:30:00Z"},
+    ])
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    assert result["in_flight_sessions"][0]["current_stage"] == "design"
+
+
 def test_completed_stage_event_with_next_stage_resumes_without_state(
     project_root: Path,
 ) -> None:

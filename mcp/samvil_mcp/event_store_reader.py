@@ -226,19 +226,17 @@ def list_in_flight_sessions(project_root: str | Path) -> dict:
             current_session_from_state == session_id
         )
         active_stage = last_stage
-        if last_event_type.endswith("_complete"):
-            if state_applies_to_session and current_stage_from_state in IN_FLIGHT_STAGES:
-                active_stage = str(current_stage_from_state)
-                is_in_flight = True
-            else:
-                completed_stage = SUCCESS_EVENT_TO_COMPLETED_STAGE.get(last_event_type)
-                is_in_flight = (
-                    last_stage in IN_FLIGHT_STAGES
-                    and (
-                        completed_stage is None
-                        or completed_stage != last_stage
-                    )
-                )
+        completed_stage = SUCCESS_EVENT_TO_COMPLETED_STAGE.get(last_event_type)
+        if state_applies_to_session and current_stage_from_state in IN_FLIGHT_STAGES:
+            active_stage = str(current_stage_from_state)
+            is_in_flight = True
+        elif completed_stage is not None:
+            is_in_flight = (
+                last_stage in IN_FLIGHT_STAGES
+                and completed_stage != last_stage
+            )
+        elif last_event_type.endswith("_complete"):
+            is_in_flight = last_stage in IN_FLIGHT_STAGES
         else:
             # Heuristic: in-flight if the last observed event points at a
             # non-terminal stage. Completed-stage rows record the stage that

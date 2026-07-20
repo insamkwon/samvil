@@ -9,7 +9,7 @@ Ensure root `project.seed.json` and `project.blueprint.json` exist.
 
 1. Run MCP tool `read_chain_marker(project_root="${PWD}")` to confirm this is the expected stage.
 2. Read root `project.seed.json` for tech stack configuration.
-3. Read `.samvil/blueprint.json` for folder structure.
+3. Read root `project.blueprint.json` for folder structure.
 4. Create project skeleton using CLI commands:
    - Initialize with appropriate framework CLI (create-next-app, npm create vite, etc.)
    - Install dependencies (shadcn/ui, Tailwind, TypeScript)
