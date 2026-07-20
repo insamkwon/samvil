@@ -745,6 +745,19 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/tests/test_guard_destructive.py:77`,
     `mcp/tests/test_guard_destructive.py:78`,
     `scripts/wave4-automation-dogfood.py:170`.
+- [x] **4.13 R7 pre-PR 재검수에서 확인된 Codex PATH 런타임 재현성 보정**
+  (스코프 보정: GitHub Release check와 일반 터미널 PATH에서는 Phase 6 runtime dogfood가
+  통과했지만, Codex 앱 기본 PATH는 Homebrew Node bin을 포함하지 않아 mandatory
+  `bash scripts/pre-commit-check.sh`가 `npm` 탐색 실패로 red가 될 수 있었다. runtime
+  dogfood가 `npm`을 PATH 우선으로 찾되 일반 macOS Node fallback 경로까지 확인하고,
+  fallback으로 찾은 bin 디렉터리를 child PATH에 주입해 `npm run build`와 `npm start`
+  둘 다 같은 재현성 계약을 따르게 했다.)
+  - 완료 증거: `c88898e`; `scripts/phase6-real-runtime-dogfood.py:40`,
+    `scripts/phase6-real-runtime-dogfood.py:313`,
+    `scripts/phase6-real-runtime-dogfood.py:328`,
+    `scripts/phase6-real-runtime-dogfood.py:342`,
+    `mcp/tests/test_phase6_real_runtime_dogfood.py:44`,
+    `mcp/tests/test_phase6_real_runtime_dogfood.py:60`.
 
 ---
 
