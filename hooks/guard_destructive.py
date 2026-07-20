@@ -16,6 +16,7 @@ SHELLS = {"bash", "dash", "sh", "zsh"}
 CHAIN_TOKENS = {";", "&&", "||", "|", "&", "\n", "(", ")", "{", "}"}
 SIMPLE_WRAPPERS = {"command", "exec", "nohup"}
 DETECTABLE_EXECUTABLES = SQL_CLIENTS | SHELLS | {
+    "eval",
     "git",
     "rm",
     "timeout",
@@ -76,7 +77,7 @@ def _executable(token: str) -> str:
 
 
 def _segments(command: str) -> list[list[str]]:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n{}")
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n")
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     lexer.commenters = ""
@@ -195,6 +196,7 @@ def _git_reason(args: list[str]) -> str | None:
             token == "-f"
             or token == "--force"
             or token.startswith("--force=")
+            or (token.startswith("+") and len(token) > 1)
             for token in sub_args
         )
         if forced:
@@ -218,9 +220,13 @@ def _rm_reason(args: list[str]) -> str | None:
         allowed_cache = normalized == ".next" or normalized.startswith(".next/")
         allowed_state = normalized == ".samvil" or normalized.startswith(".samvil/")
         parent_escape = normalized == ".." or normalized.startswith("../")
+        root_level_glob = "/" not in normalized and any(
+            char in normalized for char in "*?[{"
+        )
         dangerous = (
             normalized in {"/", "~", ".", "*"}
             or parent_escape
+            or root_level_glob
             or target.startswith("/")
             or target.startswith("~")
             or target.startswith("$")
@@ -276,11 +282,88 @@ def _wrapped_tokens(executable: str, args: list[str]) -> list[str] | None:
 def _shell_command(args: list[str]) -> str | None:
     for index, token in enumerate(args):
         if token.startswith("-") and "c" in token[1:] and index + 1 < len(args):
-            return args[index + 1]
+            command_index = index + 1
+            if args[command_index] == "--":
+                command_index += 1
+            if command_index < len(args):
+                return args[command_index]
+    return None
+
+
+def _command_substitution_reason(command: str) -> str | None:
+    index = 0
+    in_single = False
+    in_double = False
+    while index < len(command):
+        char = command[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if in_single:
+            index += 1
+            continue
+        if char == "`":
+            end = index + 1
+            while end < len(command):
+                if command[end] == "\\":
+                    end += 2
+                    continue
+                if command[end] == "`":
+                    nested = analyze_command(command[index + 1 : end])
+                    if nested:
+                        return nested
+                    index = end + 1
+                    break
+                end += 1
+            else:
+                index += 1
+            continue
+        if command.startswith("$(", index):
+            depth = 1
+            end = index + 2
+            while end < len(command) and depth:
+                if command[end] == "\\":
+                    end += 2
+                    continue
+                if command[end] == "'" and not in_double:
+                    quote_end = command.find("'", end + 1)
+                    if quote_end == -1:
+                        break
+                    end = quote_end + 1
+                    continue
+                if command[end] == '"' and not in_single:
+                    in_double = not in_double
+                elif command.startswith("$(", end):
+                    depth += 1
+                    end += 1
+                elif command[end] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        nested = analyze_command(command[index + 2 : end])
+                        if nested:
+                            return nested
+                        index = end + 1
+                        break
+                end += 1
+            else:
+                index += 1
+            continue
+        index += 1
     return None
 
 
 def analyze_command(command: str) -> str | None:
+    substitution_reason = _command_substitution_reason(command)
+    if substitution_reason:
+        return substitution_reason
     for tokens in _segments(command):
         tokens = _unwrap_prefix(tokens)
         start = _command_start(tokens)
@@ -299,6 +382,10 @@ def analyze_command(command: str) -> str | None:
                 nested = analyze_command(shell_command)
                 if nested:
                     return nested
+        if executable == "eval" and args:
+            nested = analyze_command(" ".join(args))
+            if nested:
+                return nested
         if executable == "git":
             reason = _git_reason(args)
         elif executable == "rm":
