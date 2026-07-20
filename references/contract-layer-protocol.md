@@ -149,7 +149,7 @@ Used when calling `gate_check` at post_stage.
 | scaffold | `scaffold_to_build` | `{"sanity_build_ok": bool, "env_vars_present": bool}` |
 | build | `build_to_qa` | `{"implementation_rate": <float 0..1>}` |
 | qa → evolve | `qa_to_evolve` | `{"three_pass_pass": bool, "zero_stubs": bool}` |
-| qa → deploy | `qa_to_deploy` | `{"three_pass_pass": bool, "zero_stubs": bool, "runtime_verified": bool}` |
+| qa → deploy | `qa_to_deploy` | `{"three_pass_pass": bool, "zero_stubs": bool, "runtime_verified": bool, "verification_mode": "runtime" \| "static"}` |
 | * (end of chain) | `any_to_retro` | `{"always_run": true}` |
 
 ## What stays OUT of skills

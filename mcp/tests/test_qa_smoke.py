@@ -657,6 +657,8 @@ class TestQAFinalize:
         assert gi["metrics"]["three_pass_pass"] is True
         assert gi["metrics"]["zero_stubs"] is True
         assert gi["metrics"]["fail_count"] == 0
+        assert gi["metrics"]["runtime_verified"] is False
+        assert gi["metrics"]["verification_mode"] == "static"
 
     def test_cl_5b_gate_input_blocked_on_fail(self, tmp_path: Path) -> None:
         _write(tmp_path / "project.state.json", _state())
@@ -685,6 +687,7 @@ class TestQAFinalize:
 
         assert result["synthesis"]["verification_mode"] == "static"
         assert result["synthesis"]["runtime_evidence"]["passed"] == 1
+        assert result["gate_input"]["metrics"]["runtime_verified"] is False
         assert result["gate_input"]["metrics"]["verification_mode"] == "static"
         assert result["stage_evidence"]["qa"]["artifact_runtime_passed"] is True
         assert result["stage_evidence"]["qa"]["runtime_verified"] is False

@@ -86,8 +86,8 @@ score_ambiguity(
 3. `min_questions_met` is true (minimal 5 / standard 10 / thorough 20 / full 30 / deep 40;
    reduced by 1 per pre-filled dim in Brownfield Mode)
 
-Inspect `dimension_scores` for the highest-scoring dimension — ask more questions targeting it.
-**No cap on reprompts** — keep asking until all three conditions hold.
+Inspect `dimension_scores` for the highest-scoring dimension — ask more questions targeting it while respecting the returned question budget.
+If `budget_action="offer_draft_or_extend"`, ask the user whether to draft the seed from current answers or extend by 5 more questions. Do not continue past `effective_max_questions` without this explicit user choice.
 
 ## Save Interview Results
 

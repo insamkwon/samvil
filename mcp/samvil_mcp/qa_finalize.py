@@ -262,6 +262,7 @@ def _build_gate_input(
         and unimplemented == 0
     )
     zero_stubs = unimplemented == 0
+    verification_mode = synthesis.get("verification_mode") or "static"
     return {
         "gate_name": "qa_to_deploy",
         "samvil_tier": samvil_tier,
@@ -270,7 +271,8 @@ def _build_gate_input(
             "zero_stubs": zero_stubs,
             "fail_count": fail,
             "unimplemented_count": unimplemented,
-            "verification_mode": synthesis.get("verification_mode") or "static",
+            "runtime_verified": verification_mode == "runtime",
+            "verification_mode": verification_mode,
         },
     }
 

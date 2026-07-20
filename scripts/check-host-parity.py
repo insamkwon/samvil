@@ -38,8 +38,10 @@ from typing import Iterable
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = REPO_ROOT / "skills"
 CODEX_DIR = REPO_ROOT / "references" / "codex-commands"
+GEMINI_DIR = REPO_ROOT / "references" / "gemini-commands"
 SERVER_PY = REPO_ROOT / "mcp" / "samvil_mcp" / "server.py"
 ALLOWLIST_FILE = REPO_ROOT / "references" / "host-parity-allowlist.yaml"
+FORBIDDEN_SEED_SSOT_PATH = ".samvil/project.seed.json"
 
 # Host-specific core tools. CC uses aggregator-style helpers
 # (e.g., aggregate_build_phase_a) while Codex uses lower-level
@@ -67,11 +69,16 @@ CORE_TOOLS_CODEX: dict[str, set[str]] = {
     "samvil": {"health_check", "aggregate_orchestrator_state"},
     "samvil-interview": {"score_ambiguity"},
     "samvil-pm-interview": {"validate_pm_seed"},
-    "samvil-seed": {"validate_seed"},
+    "samvil-seed": {"prepare_seed_verify_contracts", "validate_seed"},
     "samvil-council": set(),
     "samvil-design": set(),
     "samvil-scaffold": set(),
-    "samvil-build": {"next_buildable_leaves", "update_leaf_status"},
+    "samvil-build": {
+        "collect_stage_evidence",
+        "gate_check",
+        "next_buildable_leaves",
+        "update_leaf_status",
+    },
     "samvil-qa": set(),  # validation tools vary by track
     "samvil-deploy": {"evaluate_deploy_target"},
     "samvil-evolve": {"compare_seeds"},
@@ -247,6 +254,26 @@ def untested_core_contracts(matched: Iterable[str]) -> list[str]:
     )
 
 
+def seed_ssot_contract_issues() -> list[str]:
+    """All host-facing command docs must point at root project.seed.json."""
+    paths = [
+        REPO_ROOT / "AGENTS.md",
+        *sorted(CODEX_DIR.glob("*.md")),
+        *sorted(GEMINI_DIR.glob("*.toml")),
+    ]
+    issues: list[str] = []
+    for path in paths:
+        if not path.exists():
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if FORBIDDEN_SEED_SSOT_PATH in line:
+                issues.append(
+                    f"{path.relative_to(REPO_ROOT)}:{lineno}: "
+                    "uses legacy .samvil/project.seed.json; use root project.seed.json"
+                )
+    return issues
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     parser.add_argument(
@@ -271,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         codex_text = (CODEX_DIR / f"{name}.md").read_text(encoding="utf-8")
         allowed = allowlist.get(name, {})
         issues.extend(check_pair(name, cc_text, codex_text, all_tools, allowed))
+    issues.extend(seed_ssot_contract_issues())
 
     if issues:
         print("✗ host parity check found issues:")
@@ -296,8 +324,8 @@ def main(argv: list[str] | None = None) -> int:
         "documents and model-routing wiring only"
     )
     print(
-        "UNTESTED: Gemini native execution parity; no Gemini command corpus "
-        "is checked"
+        "UNTESTED: Gemini native stage execution; seed SSOT command corpus "
+        "contract is checked, but runtime parity is not"
     )
     return 0
 

@@ -164,7 +164,7 @@ def _command_policy_error(command: str) -> str | None:
 def run_ac_verification(
     project_root: str | Path,
     ac_id: str,
-    verify: dict[str, Any],
+    verify: Any,
     *,
     timeout_seconds: float = 120,
 ) -> dict[str, Any]:
@@ -176,12 +176,15 @@ def run_ac_verification(
     Playwright and emitted test files remain available as secondary evidence.
     """
     errors = validate_verify_contract(verify)
+    verify_obj = verify if isinstance(verify, dict) else {}
     root = Path(project_root).expanduser().resolve()
-    command = str(verify.get("command") or "").strip()
-    artifacts = list(verify.get("artifacts") or [])
-    assertion = str(verify.get("assertion") or "")
+    command = str(verify_obj.get("command") or "").strip()
+    artifacts = list(verify_obj.get("artifacts") or [])
+    assertion = str(verify_obj.get("assertion") or "")
     artifact_status = _artifact_status(root, artifacts)
     if errors or not command:
+        if not command and isinstance(verify, dict):
+            errors = errors + ["verify.command is required"]
         return {
             "ac_id": ac_id,
             "ran": False,
@@ -191,7 +194,7 @@ def run_ac_verification(
             "artifacts": artifact_status,
             "log_file": "",
             "primary_evidence": False,
-            "errors": errors + ([] if command else ["verify.command is required"]),
+            "errors": errors,
         }
     return {
         "ac_id": ac_id,

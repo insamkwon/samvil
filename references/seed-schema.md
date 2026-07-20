@@ -48,7 +48,7 @@
           "status": "pending | in_progress | pass | fail | blocked | skipped",
           "evidence": ["file:line", ...],
           "verify": {
-            "command": "optional mechanical command",
+            "command": "required mechanical command when verify is present",
             "artifacts": ["optional/output/path"],
             "assertion": "optional expected output substring"
           }

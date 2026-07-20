@@ -161,8 +161,34 @@ def test_pm_and_codex_seed_paths_keep_council_opt_in_only() -> None:
     assert "--council" in pm
     assert "flags" in pm
     assert "default" in pm.lower()
+    assert "prepare_seed_verify_contracts" in codex
+    assert "schema_version `3.3` only after approval" in codex
     assert 'next_skill="samvil-design"' in codex
     assert 'next_skill="samvil-council"' in codex
+
+
+def test_codex_build_uses_mechanical_build_gate_before_chain() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex = (repo / "references" / "codex-commands" / "samvil-build.md").read_text()
+
+    assert "collect_stage_evidence" in codex
+    assert 'gate_name="build_to_qa"' in codex
+    assert 'evidence_mode="mechanical"' in codex
+    assert "Any tool error or non-`pass` verdict halts" in codex
+    assert codex.index("collect_stage_evidence") < codex.index("gate_check")
+    assert codex.index("gate_check") < codex.index("write_chain_marker")
+
+
+def test_codex_interview_respects_question_budget_action() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex = (
+        repo / "references" / "codex-commands" / "samvil-interview.md"
+    ).read_text()
+
+    assert "**No cap on reprompts**" not in codex
+    assert 'budget_action="offer_draft_or_extend"' in codex
+    assert "effective_max_questions" in codex
+    assert "explicit user choice" in codex
 
 
 def test_codex_qa_uses_dynamic_finalize_route() -> None:

@@ -72,6 +72,43 @@ def test_chain_marker_write_is_offloaded(monkeypatch) -> None:
     assert delay < 0.1
 
 
+def test_checkpoint_save_is_offloaded(monkeypatch) -> None:
+    from samvil_mcp import checkpoint
+
+    def slow_save(self, cp):
+        time.sleep(0.2)
+
+    monkeypatch.setattr(checkpoint.CheckpointStore, "save", slow_save)
+    delay = asyncio.run(
+        _ticker_delay(
+            server.save_checkpoint(
+                seed_id="seed-1",
+                phase="build",
+                state_json=json.dumps({"tree": ["leaf"]}),
+            )
+        )
+    )
+    assert delay < 0.1
+
+
+def test_leaf_checkpoint_write_is_offloaded(monkeypatch) -> None:
+    def slow_write(*args, **kwargs):
+        time.sleep(0.2)
+        return {"feature_id": "F1", "leaf_id": "F1.AC1"}
+
+    monkeypatch.setattr(server, "_write_leaf_checkpoint", slow_write)
+    delay = asyncio.run(
+        _ticker_delay(
+            server.write_leaf_checkpoint(
+                project_root=".",
+                feature_id="F1",
+                leaf_id="F1.AC1",
+            )
+        )
+    )
+    assert delay < 0.1
+
+
 def test_finalize_qa_verdict_file_work_is_offloaded(monkeypatch) -> None:
     def slow_finalize(*args, **kwargs):
         time.sleep(0.2)

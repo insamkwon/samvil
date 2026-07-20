@@ -46,7 +46,8 @@ def test_current_repo_state_has_parity() -> None:
     assert "UNTESTED" in result.stdout
     assert "samvil-qa" in result.stdout
     assert "Codex native stage execution" in result.stdout
-    assert "Gemini native execution parity" in result.stdout
+    assert "Gemini native stage execution" in result.stdout
+    assert "seed SSOT command corpus contract is checked" in result.stdout
 
 
 def test_detects_missing_auto_proceed_heading(tmp_path: Path) -> None:
@@ -131,3 +132,39 @@ def test_allowlist_yaml_suppresses_intentional_gap(tmp_path: Path) -> None:
     finally:
         target_codex.write_text(backup_codex, encoding="utf-8")
         allowlist.write_text(backup_allow, encoding="utf-8")
+
+
+def test_detects_legacy_seed_ssot_path_in_gemini_commands() -> None:
+    target = REPO_ROOT / "references" / "gemini-commands" / "samvil-seed.toml"
+    backup = target.read_text(encoding="utf-8")
+    try:
+        target.write_text(
+            backup.replace("project.seed.json", ".samvil/project.seed.json", 1),
+            encoding="utf-8",
+        )
+
+        result = _run("--strict")
+
+        assert result.returncode == 1
+        assert "legacy .samvil/project.seed.json" in result.stdout
+        assert "references/gemini-commands/samvil-seed.toml" in result.stdout
+    finally:
+        target.write_text(backup, encoding="utf-8")
+
+
+def test_detects_legacy_seed_ssot_path_in_agents_contract() -> None:
+    target = REPO_ROOT / "AGENTS.md"
+    backup = target.read_text(encoding="utf-8")
+    try:
+        target.write_text(
+            backup.replace("root `project.seed.json`", "`.samvil/project.seed.json`", 1),
+            encoding="utf-8",
+        )
+
+        result = _run("--strict")
+
+        assert result.returncode == 1
+        assert "legacy .samvil/project.seed.json" in result.stdout
+        assert "AGENTS.md" in result.stdout
+    finally:
+        target.write_text(backup, encoding="utf-8")

@@ -1736,7 +1736,7 @@ async def save_checkpoint(
         store = CheckpointStore(base)
         state = json.loads(state_json)
         cp = CheckpointData.create(seed_id, phase, state)
-        store.save(cp)
+        await asyncio.to_thread(store.save, cp)
         return json.dumps({"saved": True, "timestamp": cp.timestamp})
     except Exception as e:
         _log_mcp_health("fail", "save_checkpoint", str(e))
@@ -5333,7 +5333,13 @@ async def write_leaf_checkpoint(
     Returns the written checkpoint as JSON.
     """
     try:
-        result = _write_leaf_checkpoint(project_root, feature_id, leaf_id, leaf_description)
+        result = await asyncio.to_thread(
+            _write_leaf_checkpoint,
+            project_root,
+            feature_id,
+            leaf_id,
+            leaf_description,
+        )
         _log_mcp_health("ok", "write_leaf_checkpoint")
         return json.dumps(result)
     except Exception as e:

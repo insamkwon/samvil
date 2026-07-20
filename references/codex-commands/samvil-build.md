@@ -15,8 +15,10 @@ Ensure `project.seed.json` exists and scaffold is complete.
    - Write production code (no stubs, no mocks).
    - Each PASS must have file:line evidence.
 5. After each leaf, run MCP tool `update_leaf_status(ac_tree_json=<tree>, leaf_id=<id>, status="pass", evidence_json=[...])`.
-6. Run `npm run build` to verify build passes.
-7. Run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-build")`.
+6. Run `npm run build > .samvil/build.log 2>&1; build_exit=$?; echo "SAMVIL_EXIT:${build_exit}" >> .samvil/build.log; test "$build_exit" -eq 0` to verify build passes and persist the receipt candidate.
+7. Run MCP tool `collect_stage_evidence(project_root=".", stage="build")` and keep the returned artifact evidence for the gate input.
+8. Run MCP tool `gate_check(gate_name="build_to_qa", samvil_tier=<tier>, metrics_json=<gate_input>, project_root=".", evidence_mode="mechanical")`. Any tool error or non-`pass` verdict halts; no marker is written. Current hosts fail closed unless trusted mechanical build evidence exists.
+9. Only after gate PASS, run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-build")`.
 
 ## Chain
 

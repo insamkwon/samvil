@@ -31,6 +31,7 @@ SIMPLE_WRAPPERS = {"builtin", "command", "exec", "nohup"}
 DETECTABLE_EXECUTABLES = SQL_CLIENTS | SHELLS | {
     "builtin",
     "eval",
+    "find",
     "git",
     "rm",
     "timeout",
@@ -316,6 +317,23 @@ def _git_reason(args: list[str]) -> str | None:
     return None
 
 
+def _find_reason(args: list[str]) -> str | None:
+    for index, token in enumerate(args):
+        if token == "-delete":
+            return "find delete"
+        if token in {"-exec", "-execdir"}:
+            nested_tokens: list[str] = []
+            for nested_token in args[index + 1 :]:
+                if nested_token in {";", "+"}:
+                    break
+                nested_tokens.append(nested_token)
+            if nested_tokens:
+                nested = analyze_command(shlex.join(nested_tokens))
+                if nested:
+                    return f"find {token} with destructive command"
+    return None
+
+
 def _git_config_reason(args: list[str]) -> str | None:
     index = 0
     while index < len(args):
@@ -576,11 +594,15 @@ def analyze_command(command: str) -> str | None:
                 return "dynamic executable with destructive removal arguments"
             if _git_reason(args):
                 return "dynamic executable with destructive git arguments"
+            if _find_reason(args):
+                return "dynamic executable with destructive find arguments"
         if executable.startswith("$"):
             if _rm_reason(args):
                 return "dynamic executable with destructive removal arguments"
             if _git_reason(args):
                 return "dynamic executable with destructive git arguments"
+            if _find_reason(args):
+                return "dynamic executable with destructive find arguments"
             sql_reason = _sql_reason("psql", args)
             if sql_reason:
                 return "dynamic executable with destructive SQL arguments"
@@ -605,6 +627,8 @@ def analyze_command(command: str) -> str | None:
                 return nested
         if executable == "git":
             reason = _git_reason(args)
+        elif executable == "find":
+            reason = _find_reason(args)
         elif executable == "rm":
             reason = _rm_reason(args)
         else:

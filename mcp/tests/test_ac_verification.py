@@ -6,6 +6,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from samvil_mcp.ac_verification import (
     prepare_seed_verify_contracts,
     run_ac_verification,
@@ -75,6 +77,19 @@ def test_verify_contract_requires_executable_command() -> None:
     errors = validate_verify_contract({"artifacts": ["result.txt"]})
 
     assert errors == ["verify.command is required"]
+
+
+@pytest.mark.parametrize("verify", ["bad", ["bad"], None])
+def test_non_object_verify_contract_fails_closed_without_crashing(
+    tmp_path: Path,
+    verify,
+) -> None:
+    result = run_ac_verification(tmp_path, "F1.AC-invalid", verify)
+
+    assert result["ran"] is False
+    assert result["passed"] is False
+    assert result["primary_evidence"] is False
+    assert result["errors"] == ["verify must be an object"]
 
 
 def test_allowed_contract_is_validated_but_not_executed_without_trusted_runner(

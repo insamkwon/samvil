@@ -85,7 +85,7 @@ automatically — just follow `next_skill` from the marker.
 
 ## 5. Critical Rules
 
-1. **Seed is SSOT** — always read `.samvil/project.seed.json` at each stage.
+1. **Seed is SSOT** — always read root `project.seed.json` at each stage.
 2. **Evidence-based assertions** — every PASS verdict needs a `file:line` reference (P1).
 3. **Stub = FAIL** — hardcoded or mocked values trigger automatic FAIL (P8).
 4. **Circuit Breaker** — same failure twice in a row → stop and report to user.
@@ -98,7 +98,7 @@ automatically — just follow `next_skill` from the marker.
 
 | File | Contents |
 |---|---|
-| `.samvil/project.seed.json` | Requirements, features, ACs |
+| `project.seed.json` | Requirements, features, ACs |
 | `.samvil/project.state.json` | Current pipeline stage |
 | `.samvil/handoff.md` | Cross-session continuation notes |
 | `.samvil/qa-results.json` | QA pass/fail verdicts |

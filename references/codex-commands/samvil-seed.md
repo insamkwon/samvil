@@ -13,11 +13,13 @@ Ensure `.samvil/interview-summary.md` exists.
    - Map features from interview responses
    - Build AC tree with leaf-level acceptance criteria
    - Set solution_type, tech_stack, constraints
-4. Run MCP tool `validate_seed(seed_json=<json>)` to validate seed structure.
-5. If validation fails, fix errors and re-validate.
-6. Save validated seed to root `project.seed.json` (canonical Seed SSOT).
-7. Run MCP tool `save_seed_version(session_id=<id>, version=1, seed_json=<json>)` to record seed history.
-8. Default: run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-seed", next_skill="samvil-design")`.
+4. Run MCP tool `prepare_seed_verify_contracts(seed_json=<draft>)` to propose v3.3 AC verify contracts. For browser flows, reuse generated per-feature Playwright specs; for automation flows, present concrete command/output candidates only as proposals.
+5. Present the concrete behavior sequence and verify-contract summary to the user. Write schema_version `3.3` only after approval; on change, revise AC/verify and re-present.
+6. Run MCP tool `validate_seed(seed_json=<json>)` to validate seed structure.
+7. If validation fails, fix errors and re-validate.
+8. Save validated seed to root `project.seed.json` (canonical Seed SSOT).
+9. Run MCP tool `save_seed_version(session_id=<id>, version=1, seed_json=<json>)` to record seed history.
+10. Default: run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-seed", next_skill="samvil-design")`.
    Only when the user supplied exact `--council` on standard/thorough/full/deep, use `next_skill="samvil-council"` instead.
 
 ## Chain
