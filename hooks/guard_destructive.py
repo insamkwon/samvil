@@ -13,8 +13,18 @@ from typing import Any
 
 SQL_CLIENTS = {"mariadb", "mysql", "psql", "sqlite3", "sqlcmd"}
 SHELLS = {"bash", "dash", "sh", "zsh"}
-CHAIN_TOKENS = {";", "&&", "||", "|", "&", "\n", "(", ")", "{", "}"}
-SHELL_CONTROL_PREFIXES = {"!", "then", "do", "else", "elif"}
+CHAIN_TOKENS = {";", "&&", "||", "|", "|&", "&", "\n", ";\n", "(", ")", "{", "}"}
+SHELL_CONTROL_PREFIXES = {
+    "!",
+    "if",
+    "then",
+    "while",
+    "until",
+    "do",
+    "else",
+    "elif",
+    "coproc",
+}
 SIMPLE_WRAPPERS = {"builtin", "command", "exec", "nohup"}
 DETECTABLE_EXECUTABLES = SQL_CLIENTS | SHELLS | {
     "builtin",
@@ -47,6 +57,11 @@ SUDO_OPTIONS_WITH_VALUE = {
 ENV_OPTIONS_WITH_VALUE = {"-C", "-S", "-u", "--chdir", "--split-string", "--unset"}
 EXEC_OPTIONS_WITH_VALUE = {"-a"}
 SHELL_OPTIONS_WITH_VALUE = {"--init-file", "--rcfile"}
+
+
+def _normalize_shell_source(command: str) -> str:
+    """Apply shell lexical normalizations that affect executable tokens."""
+    return command.replace("\\\r\n", "").replace("\\\n", "")
 
 
 def _find_command(value: Any) -> str | None:
@@ -134,7 +149,10 @@ def _consume_options(
                     attached_short_value = True
                     break
         index += 1
-        if key in with_value and "=" not in token and not attached_short_value:
+        if key in with_value and "=" not in token and attached_short_value:
+            if key in {"-S", "--split-string"}:
+                split_command = token[len(key):]
+        elif key in with_value and "=" not in token:
             if index >= len(tokens):
                 return index, split_command
             value = tokens[index]
@@ -205,8 +223,14 @@ def _git_reason(args: list[str]) -> str | None:
         if forced and directories:
             return "git clean with force and directory removal"
     if subcommand == "push":
+        short_flags = "".join(
+            token[1:]
+            for token in sub_args
+            if token.startswith("-") and not token.startswith("--")
+        )
         forced = any(
             token == "-f"
+            or "f" in short_flags
             or token == "--force"
             or token.startswith("--force=")
             or (token.startswith("+") and len(token) > 1)
@@ -217,6 +241,9 @@ def _git_reason(args: list[str]) -> str | None:
         destructive_ref_update = any(
             token == "--mirror"
             or token.startswith("--mirror=")
+            or "d" in short_flags
+            or token == "--prune"
+            or token.startswith("--prune=")
             or token == "--delete"
             or token.startswith("--delete=")
             or (token.startswith(":") and len(token) > 1)
@@ -268,10 +295,12 @@ def _rm_reason(args: list[str]) -> str | None:
         root_level_glob = "/" not in normalized and any(
             char in normalized for char in "*?[{"
         )
+        shell_expansion = any(char in normalized for char in "*?[{")
         dangerous = (
             normalized in {"/", "~", ".", "*", ".git"}
             or parent_escape
             or root_level_glob
+            or shell_expansion
             or target.startswith("/")
             or target.startswith("~")
             or target.startswith("$")
@@ -285,9 +314,21 @@ def _rm_reason(args: list[str]) -> str | None:
 def _sql_reason(executable: str, args: list[str]) -> str | None:
     if executable not in SQL_CLIENTS:
         return None
-    if re.search(r"\bdrop\s+(?:table|database)\b", " ".join(args), re.IGNORECASE):
+    if _has_destructive_sql(" ".join(args)):
         return "destructive SQL statement"
     return None
+
+
+def _has_destructive_sql(text: str) -> bool:
+    without_block_comments = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    without_line_comments = re.sub(r"--[^\n]*(?:\n|$)", " ", without_block_comments)
+    return bool(
+        re.search(
+            r"\bdrop\s+(?:table|database)\b",
+            without_line_comments,
+            re.IGNORECASE,
+        )
+    )
 
 
 def _skip_options(args: list[str], *, with_value: set[str] | None = None) -> int:
@@ -342,6 +383,17 @@ def _shell_command(args: list[str]) -> str | None:
                 command_index += 1
             if command_index < len(args):
                 return args[command_index]
+    return None
+
+
+def _shell_stdin_reason(args: list[str]) -> str | None:
+    for index, token in enumerate(args):
+        if token == "<<<" and index + 1 < len(args):
+            nested = analyze_command(args[index + 1])
+            if nested:
+                return nested
+        if token.startswith("<<"):
+            return "shell stdin execution"
     return None
 
 
@@ -416,13 +468,34 @@ def _command_substitution_reason(command: str) -> str | None:
     return None
 
 
+def _command_substitution_executable_reason(command: str) -> str | None:
+    """Conservatively block dynamic executables with destructive arguments."""
+    for match in re.finditer(r"(?:\$\([^)]*\)|`[^`]*`)(?P<tail>(?:\s+[^;&|\n(){}]+)+)", command):
+        try:
+            tail_tokens = shlex.split(match.group("tail"))
+        except ValueError:
+            continue
+        if _rm_reason(tail_tokens):
+            return "dynamic executable with destructive removal arguments"
+        if _git_reason(tail_tokens):
+            return "dynamic executable with destructive git arguments"
+    return None
+
+
 def analyze_command(command: str) -> str | None:
+    command = _normalize_shell_source(command)
     substitution_reason = _command_substitution_reason(command)
     if substitution_reason:
         return substitution_reason
+    dynamic_substitution_reason = _command_substitution_executable_reason(command)
+    if dynamic_substitution_reason:
+        return dynamic_substitution_reason
     piped_sql_reason = _piped_sql_reason(command)
     if piped_sql_reason:
         return piped_sql_reason
+    piped_shell_reason = _piped_shell_reason(command)
+    if piped_shell_reason:
+        return piped_shell_reason
     for tokens in _segments(command):
         tokens = _unwrap_prefix(tokens)
         start = _command_start(tokens)
@@ -430,8 +503,14 @@ def analyze_command(command: str) -> str | None:
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
-        if executable.startswith("$") and _rm_reason(args):
-            return "dynamic executable with destructive removal arguments"
+        if executable.startswith("$"):
+            if _rm_reason(args):
+                return "dynamic executable with destructive removal arguments"
+            if _git_reason(args):
+                return "dynamic executable with destructive git arguments"
+            sql_reason = _sql_reason("psql", args)
+            if sql_reason:
+                return "dynamic executable with destructive SQL arguments"
         wrapped = _wrapped_tokens(executable, args)
         if wrapped:
             nested = analyze_command(shlex.join(wrapped))
@@ -443,6 +522,9 @@ def analyze_command(command: str) -> str | None:
                 nested = analyze_command(shell_command)
                 if nested:
                     return nested
+            stdin_reason = _shell_stdin_reason(args)
+            if stdin_reason:
+                return stdin_reason
         if executable == "eval" and args:
             nested = analyze_command(" ".join(args))
             if nested:
@@ -459,16 +541,60 @@ def analyze_command(command: str) -> str | None:
 
 
 def _piped_sql_reason(command: str) -> str | None:
-    if "|" not in command:
+    if "|" not in command and "<<" not in command:
         return None
-    if not re.search(r"\bdrop\s+(?:table|database)\b", command, re.IGNORECASE):
+    if not _has_destructive_sql(command):
         return None
     for tokens in _segments(command):
-        tokens = _unwrap_prefix(tokens)
-        start = _command_start(tokens)
-        if start < len(tokens) and _executable(tokens[start]) in SQL_CLIENTS:
+        if _segment_executable_is(tokens, SQL_CLIENTS):
             return "destructive SQL statement"
     return None
+
+
+def _piped_shell_reason(command: str) -> str | None:
+    if "|" not in command:
+        return None
+    for tokens in _segments(command):
+        if _segment_executable_is(tokens, SHELLS):
+            before_shell = command.rsplit("|", 1)[0]
+            nested = analyze_command(before_shell)
+            if nested:
+                return "shell stdin execution"
+            embedded = _embedded_shell_payload_reason(before_shell)
+            if embedded:
+                return "shell stdin execution"
+    return None
+
+
+def _embedded_shell_payload_reason(command: str) -> str | None:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    for token in tokens:
+        if token == command:
+            continue
+        nested = analyze_command(token)
+        if nested:
+            return nested
+    return None
+
+
+def _segment_executable_is(tokens: list[str], names: set[str]) -> bool:
+    current = _unwrap_prefix(tokens)
+    while current:
+        start = _command_start(current)
+        if start >= len(current):
+            return False
+        executable = _executable(current[start])
+        args = current[start + 1:]
+        if executable in names:
+            return True
+        wrapped = _wrapped_tokens(executable, args)
+        if not wrapped:
+            return False
+        current = wrapped
+    return False
 
 
 def main() -> int:

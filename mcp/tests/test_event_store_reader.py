@@ -231,6 +231,60 @@ def test_completed_stage_event_without_state_is_not_in_flight(project_root: Path
     assert result["in_flight_sessions"] == []
 
 
+def test_completed_stage_event_with_next_stage_resumes_without_state(
+    project_root: Path,
+) -> None:
+    """File SSOT rows may store the next stage for MCP-free recovery."""
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "interview_complete", "stage": "seed",
+         "timestamp": "2026-05-16T10:30:00Z"},
+        {"session_id": "s2", "event_type": "scaffold_complete", "stage": "build",
+         "timestamp": "2026-05-16T11:30:00Z"},
+    ])
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    sessions = {s["session_id"]: s for s in result["in_flight_sessions"]}
+    assert sessions["s1"]["current_stage"] == "seed"
+    assert sessions["s2"]["current_stage"] == "build"
+
+
+def test_substage_complete_events_remain_in_flight_without_state(
+    project_root: Path,
+) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "qa_pass1_complete", "stage": "qa",
+         "timestamp": "2026-05-16T10:30:00Z"},
+        {"session_id": "s2", "event_type": "ac_leaf_complete", "stage": "build",
+         "timestamp": "2026-05-16T11:30:00Z"},
+    ])
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    sessions = {s["session_id"]: s for s in result["in_flight_sessions"]}
+    assert sessions["s1"]["current_stage"] == "qa"
+    assert sessions["s2"]["current_stage"] == "build"
+
+
+def test_state_without_session_id_does_not_resurrect_terminal_sessions(
+    project_root: Path,
+) -> None:
+    _seed_events(project_root, [
+        {"session_id": "old", "event_type": "interview_complete", "stage": "interview",
+         "timestamp": "2026-05-16T10:30:00Z"},
+        {"session_id": "new", "event_type": "build_start", "stage": "build",
+         "timestamp": "2026-05-16T11:30:00Z"},
+    ])
+    _seed_state(project_root, {"current_stage": "qa"})
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    assert [s["session_id"] for s in result["in_flight_sessions"]] == ["new"]
+
+
 def test_list_terminal_session_excluded(project_root: Path) -> None:
     """A session whose last event is retro_complete should NOT be in-flight."""
     _seed_events(project_root, [

@@ -38,6 +38,23 @@ IN_FLIGHT_STAGES = frozenset({
     "interview", "seed", "council", "design",
     "scaffold", "build", "qa", "deploy", "evolve",
 })
+SUCCESS_EVENT_TO_COMPLETED_STAGE = {
+    "interview_complete": "interview",
+    "seed_generated": "seed",
+    "pm_seed_complete": "seed",
+    "council_complete": "council",
+    "council_verdict": "council",
+    "design_complete": "design",
+    "blueprint_generated": "design",
+    "scaffold_complete": "scaffold",
+    "build_pass": "build",
+    "build_stage_complete": "build",
+    "feature_tree_complete": "build",
+    "qa_pass": "qa",
+    "deploy_complete": "deploy",
+    "retro_complete": "retro",
+    "evolve_converge": "evolve",
+}
 
 
 def _project_paths(project_root: str | Path) -> tuple[Path, Path]:
@@ -205,12 +222,8 @@ def list_in_flight_sessions(project_root: str | Path) -> dict:
         last_stage = last.get("stage", "")
         stages = sorted({e.get("stage", "") for e in entries if e.get("stage")})
 
-        state_applies_to_session = (
-            bool(current_stage_from_state)
-            and (
-                not current_session_from_state
-                or current_session_from_state == session_id
-            )
+        state_applies_to_session = bool(current_stage_from_state) and (
+            current_session_from_state == session_id
         )
         active_stage = last_stage
         if last_event_type.endswith("_complete"):
@@ -218,7 +231,14 @@ def list_in_flight_sessions(project_root: str | Path) -> dict:
                 active_stage = str(current_stage_from_state)
                 is_in_flight = True
             else:
-                is_in_flight = False
+                completed_stage = SUCCESS_EVENT_TO_COMPLETED_STAGE.get(last_event_type)
+                is_in_flight = (
+                    last_stage in IN_FLIGHT_STAGES
+                    and (
+                        completed_stage is None
+                        or completed_stage != last_stage
+                    )
+                )
         else:
             # Heuristic: in-flight if the last observed event points at a
             # non-terminal stage. Completed-stage rows record the stage that
