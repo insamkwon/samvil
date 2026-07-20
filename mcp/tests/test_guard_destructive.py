@@ -19,6 +19,7 @@ def run_guard(
     *,
     nested: bool = True,
     env: dict[str, str] | None = None,
+    timeout: float = 5,
 ) -> subprocess.CompletedProcess[str]:
     payload = {"tool_input": {"command": command}} if nested else {"command": command}
     return subprocess.run(
@@ -28,6 +29,7 @@ def run_guard(
         text=True,
         check=False,
         env=env,
+        timeout=timeout,
     )
 
 
@@ -42,17 +44,23 @@ def run_guard(
         "rm -rf ~-",
         "rm -rf ~root",
         "rm -rf . && echo .next",
+        "rm -rf .git",
         "git reset   --hard HEAD~1",
         "git clean -df",
         "git push -f origin main",
         "git push --force origin main",
         "git push origin +HEAD:main",
         "git push origin +feature",
+        "git push --mirror origin",
+        "git push origin --delete main",
+        "git push origin :main",
         "/bin/rm -fr /",
         "/usr/bin/git -C /tmp push --force origin main",
         "git --git-dir=.git reset --hard HEAD~1",
+        "git -c alias.nuke='!git reset --hard' nuke",
         "psql -c 'Drop Table users'",
         'mysql -e "dRoP dAtAbAsE production"',
+        "printf 'DROP TABLE users;' | psql '$DATABASE_URL'",
         "echo safe\nrm -rf /",
         "cd /tmp\ngit reset --hard HEAD~1",
         "rm -rf ../sibling-project",
@@ -60,16 +68,24 @@ def run_guard(
         "timeout 5 rm -rf /",
         "nohup git reset --hard HEAD~1",
         "nice rm -rf /home",
+        "time rm -rf /",
+        "! rm -rf /",
+        "if true; then rm -rf /; fi",
         "command rm -rf /",
         "exec rm -rf ~",
         "exec -a fake rm -rf .",
         "exec -cl -a fake rm -rf /",
         "xargs rm -rf /",
         'bash -lc "rm -rf /"',
+        "bash --norc -c 'rm -rf /'",
+        "bash --noprofile --norc -c 'rm -rf /'",
+        "bash --rcfile /tmp/x -c 'rm -rf /'",
         "bash -c -- 'rm -rf /'",
         "sh -c -- 'rm -rf /'",
         "zsh -c -- 'rm -rf /'",
         "eval 'rm -rf /'",
+        "builtin eval 'rm -rf /'",
+        "R=rm; $R -rf /",
         "echo `rm -rf /`",
         "rm -rf {*,.*}",
         "rm -rf .[!.]* ?*",
@@ -109,11 +125,16 @@ def test_safe_or_explicitly_allowed_variants_pass(command: str) -> None:
 
 def test_block_message_does_not_echo_sensitive_tool_input() -> None:
     sensitive_value = "token=" + "fixture-value"
-    result = run_guard(f"rm -fr / {sensitive_value}")
+    result = run_guard(f"rm -fr /tmp/{sensitive_value}")
 
     assert result.returncode == 2
     assert sensitive_value not in result.stdout
     assert sensitive_value not in result.stderr
+
+
+def test_malformed_command_substitution_does_not_hang() -> None:
+    result = run_guard("echo $(echo 'unterminated)", timeout=1)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_analyzer_failure_blocks_command(tmp_path: Path) -> None:

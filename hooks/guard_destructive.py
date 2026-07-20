@@ -14,8 +14,10 @@ from typing import Any
 SQL_CLIENTS = {"mariadb", "mysql", "psql", "sqlite3", "sqlcmd"}
 SHELLS = {"bash", "dash", "sh", "zsh"}
 CHAIN_TOKENS = {";", "&&", "||", "|", "&", "\n", "(", ")", "{", "}"}
-SIMPLE_WRAPPERS = {"command", "exec", "nohup"}
+SHELL_CONTROL_PREFIXES = {"!", "then", "do", "else", "elif"}
+SIMPLE_WRAPPERS = {"builtin", "command", "exec", "nohup"}
 DETECTABLE_EXECUTABLES = SQL_CLIENTS | SHELLS | {
+    "builtin",
     "eval",
     "git",
     "rm",
@@ -24,6 +26,7 @@ DETECTABLE_EXECUTABLES = SQL_CLIENTS | SHELLS | {
     "nice",
     "command",
     "exec",
+    "time",
     "xargs",
 }
 GIT_GLOBAL_WITH_VALUE = {
@@ -43,6 +46,7 @@ SUDO_OPTIONS_WITH_VALUE = {
 }
 ENV_OPTIONS_WITH_VALUE = {"-C", "-S", "-u", "--chdir", "--split-string", "--unset"}
 EXEC_OPTIONS_WITH_VALUE = {"-a"}
+SHELL_OPTIONS_WITH_VALUE = {"--init-file", "--rcfile"}
 
 
 def _find_command(value: Any) -> str | None:
@@ -82,18 +86,24 @@ def _segments(command: str) -> list[list[str]]:
     lexer.whitespace_split = True
     lexer.commenters = ""
     segments: list[list[str]] = [[]]
-    for token in lexer:
-        if token in CHAIN_TOKENS:
-            if segments[-1]:
-                segments.append([])
-            continue
-        segments[-1].append(token)
+    try:
+        for token in lexer:
+            if token in CHAIN_TOKENS:
+                if segments[-1]:
+                    segments.append([])
+                continue
+            segments[-1].append(token)
+    except ValueError:
+        return []
     return [segment for segment in segments if segment]
 
 
 def _command_start(tokens: list[str]) -> int:
     index = 0
     while index < len(tokens):
+        if tokens[index] in SHELL_CONTROL_PREFIXES:
+            index += 1
+            continue
         if "=" in tokens[index] and not tokens[index].startswith(("/", "./", "../")):
             index += 1
             continue
@@ -178,6 +188,9 @@ def _git_subcommand(args: list[str]) -> tuple[str, list[str]]:
 
 
 def _git_reason(args: list[str]) -> str | None:
+    config_reason = _git_config_reason(args)
+    if config_reason:
+        return config_reason
     subcommand, sub_args = _git_subcommand(args)
     if subcommand == "reset" and "--hard" in sub_args:
         return "git reset --hard"
@@ -201,6 +214,38 @@ def _git_reason(args: list[str]) -> str | None:
         )
         if forced:
             return "git force push"
+        destructive_ref_update = any(
+            token == "--mirror"
+            or token.startswith("--mirror=")
+            or token == "--delete"
+            or token.startswith("--delete=")
+            or (token.startswith(":") and len(token) > 1)
+            for token in sub_args
+        )
+        if destructive_ref_update:
+            return "git destructive push"
+    return None
+
+
+def _git_config_reason(args: list[str]) -> str | None:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        key = token.split("=", 1)[0]
+        value = ""
+        if key in {"-c", "--config"}:
+            if "=" in token and key != "-c":
+                value = token.split("=", 1)[1]
+            elif index + 1 < len(args):
+                value = args[index + 1]
+                index += 1
+        if value:
+            name, _, raw = value.partition("=")
+            if name.casefold().startswith("alias.") and raw.startswith("!"):
+                nested = analyze_command(raw[1:])
+                if nested:
+                    return "git shell alias with destructive command"
+        index += 1
     return None
 
 
@@ -224,7 +269,7 @@ def _rm_reason(args: list[str]) -> str | None:
             char in normalized for char in "*?[{"
         )
         dangerous = (
-            normalized in {"/", "~", ".", "*"}
+            normalized in {"/", "~", ".", "*", ".git"}
             or parent_escape
             or root_level_glob
             or target.startswith("/")
@@ -233,7 +278,7 @@ def _rm_reason(args: list[str]) -> str | None:
             or "${" in target
         )
         if dangerous and not (allowed_cache or allowed_state):
-            return f"recursive forced removal of {target}"
+            return "recursive forced removal"
     return None
 
 
@@ -265,6 +310,9 @@ def _wrapped_tokens(executable: str, args: list[str]) -> list[str] | None:
     if executable == "nice":
         index = _skip_options(args, with_value={"-n", "--adjustment"})
         return args[index:]
+    if executable == "time":
+        index = _skip_options(args)
+        return args[index:]
     if executable == "timeout":
         index = _skip_options(
             args,
@@ -281,6 +329,13 @@ def _wrapped_tokens(executable: str, args: list[str]) -> list[str] | None:
 
 def _shell_command(args: list[str]) -> str | None:
     for index, token in enumerate(args):
+        if token == "--":
+            continue
+        key = token.split("=", 1)[0]
+        if key in SHELL_OPTIONS_WITH_VALUE:
+            continue
+        if token.startswith("--"):
+            continue
         if token.startswith("-") and "c" in token[1:] and index + 1 < len(args):
             command_index = index + 1
             if args[command_index] == "--":
@@ -336,6 +391,7 @@ def _command_substitution_reason(command: str) -> str | None:
                 if command[end] == "'" and not in_double:
                     quote_end = command.find("'", end + 1)
                     if quote_end == -1:
+                        index = len(command)
                         break
                     end = quote_end + 1
                     continue
@@ -364,6 +420,9 @@ def analyze_command(command: str) -> str | None:
     substitution_reason = _command_substitution_reason(command)
     if substitution_reason:
         return substitution_reason
+    piped_sql_reason = _piped_sql_reason(command)
+    if piped_sql_reason:
+        return piped_sql_reason
     for tokens in _segments(command):
         tokens = _unwrap_prefix(tokens)
         start = _command_start(tokens)
@@ -371,6 +430,8 @@ def analyze_command(command: str) -> str | None:
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
+        if executable.startswith("$") and _rm_reason(args):
+            return "dynamic executable with destructive removal arguments"
         wrapped = _wrapped_tokens(executable, args)
         if wrapped:
             nested = analyze_command(shlex.join(wrapped))
@@ -394,6 +455,19 @@ def analyze_command(command: str) -> str | None:
             reason = _sql_reason(executable, args)
         if reason:
             return reason
+    return None
+
+
+def _piped_sql_reason(command: str) -> str | None:
+    if "|" not in command:
+        return None
+    if not re.search(r"\bdrop\s+(?:table|database)\b", command, re.IGNORECASE):
+        return None
+    for tokens in _segments(command):
+        tokens = _unwrap_prefix(tokens)
+        start = _command_start(tokens)
+        if start < len(tokens) and _executable(tokens[start]) in SQL_CLIENTS:
+            return "destructive SQL statement"
     return None
 
 
