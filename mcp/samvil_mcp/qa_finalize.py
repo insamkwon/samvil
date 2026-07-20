@@ -94,6 +94,8 @@ def _seed_verify_contracts(seed: dict[str, Any]) -> dict[str, dict[str, Any]]:
             if isinstance(children, list) and children:
                 visit(children)
                 continue
+            if "verify" not in item:
+                continue
             verify = item.get("verify")
             if isinstance(verify, dict):
                 ac_id = str(item.get("id") or "")
@@ -106,6 +108,18 @@ def _seed_verify_contracts(seed: dict[str, Any]) -> dict[str, dict[str, Any]]:
                         item.get("description") or item.get("criterion") or ac_id
                     ),
                 }
+                continue
+            ac_id = str(item.get("id") or "")
+            if not ac_id:
+                missing_id_count += 1
+                ac_id = f"__verify_missing_id_{missing_id_count}"
+            contracts[ac_id] = {
+                "verify": {},
+                "criterion": str(
+                    item.get("description") or item.get("criterion") or ac_id
+                ),
+                "contract_errors": ["verify must be an object"],
+            }
 
     for feature in seed.get("features") or []:
         if isinstance(feature, dict):
@@ -131,6 +145,13 @@ def _fail_closed_verify_items(
     }
     blocked = 0
     for ac_id, contract in contracts.items():
+        contract_errors = list(contract.get("contract_errors") or [])
+        errors = contract_errors or ["trusted AC command runner unavailable"]
+        reason = (
+            "; ".join(errors)
+            if contract_errors
+            else "trusted AC command runner unavailable; verify contract cannot PASS"
+        )
         item = by_id.get(ac_id)
         if item is None:
             item = {
@@ -142,14 +163,12 @@ def _fail_closed_verify_items(
         item["verify"] = copy.deepcopy(contract["verify"])
         item["verdict"] = "FAIL"
         item["method"] = "static"
-        item["reason"] = (
-            "trusted AC command runner unavailable; verify contract cannot PASS"
-        )
+        item["reason"] = reason
         item["mechanical_verification"] = {
             "ran": False,
             "passed": False,
             "primary_evidence": False,
-            "errors": ["trusted AC command runner unavailable"],
+            "errors": errors,
         }
         blocked += 1
     return prepared, blocked

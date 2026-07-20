@@ -62,7 +62,7 @@ Key tools used throughout the pipeline:
 | `read_chain_marker(project_root)` | Read current pipeline state |
 | `write_chain_marker(project_root, host_name, current_skill)` | Advance to next stage |
 | `score_ambiguity(interview_state, tier)` | Check if interview is complete |
-| `validate_seed(seed_path)` | Validate seed.json |
+| `validate_seed(seed_json)` | Validate seed.json |
 | `snapshot_generation(project_root)` | Capture evolve cycle results (regression guard) |
 | `get_health_tier_summary(project_root)` | MCP health: healthy / degraded / critical |
 

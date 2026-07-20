@@ -57,6 +57,16 @@ def test_reference_tool_check_catches_non_allowlisted_tool_prefix(tmp_path: Path
     }
 
 
+def test_agents_validate_seed_signature_matches_server_tool() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    agents = (repo / "AGENTS.md").read_text(encoding="utf-8")
+    server = (repo / "mcp" / "samvil_mcp" / "server.py").read_text(encoding="utf-8")
+
+    assert "async def validate_seed(seed_json: str)" in server
+    assert "validate_seed(seed_json)" in agents
+    assert "validate_seed(seed_path)" not in agents
+
+
 def test_interview_question_limits_use_decision_boundaries_ssot() -> None:
     repo = Path(__file__).resolve().parents[2]
     thin = (repo / "skills" / "samvil-interview" / "SKILL.md").read_text()

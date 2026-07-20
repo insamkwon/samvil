@@ -456,6 +456,29 @@ class TestQAFinalize:
         assert item["mechanical_verification"]["ran"] is False
         assert any("trusted AC command runner unavailable" in note for note in result["notes"])
 
+    def test_non_object_verify_contract_cannot_be_ignored(
+        self, tmp_path: Path
+    ) -> None:
+        seed = _seed()
+        leaf = seed["features"][0]["acceptance_criteria"][0]
+        leaf["verify"] = "pytest"
+        _write(tmp_path / "project.seed.json", seed)
+        _write(tmp_path / "project.state.json", _state())
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path,
+            evidence=_make_evidence(),
+        )
+
+        assert result["synthesis"]["verdict"] != "PASS"
+        item = result["synthesis"]["pass2"]["items"][0]
+        assert item["id"] == "feature_0.ac.1"
+        assert item["verdict"] == "FAIL"
+        assert item["reason"] == "verify must be an object"
+        assert item["mechanical_verification"]["errors"] == [
+            "verify must be an object"
+        ]
+
     def test_missing_verify_leaf_is_synthesized_as_fail(self, tmp_path: Path) -> None:
         seed = _seed(features_count=2)
         missing = seed["features"][1]["acceptance_criteria"][0]

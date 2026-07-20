@@ -307,7 +307,11 @@ def _normalize_pass2_item(data: dict[str, Any]) -> dict[str, Any]:
         method = "verify.command"
         if not isinstance(mechanical, dict) or not mechanical.get("ran"):
             verdict = "FAIL"
-            reason = "verify.command execution result is missing"
+            reason = (
+                "; ".join(mechanical.get("errors") or [])
+                if isinstance(mechanical, dict) and mechanical.get("errors")
+                else "verify.command execution result is missing"
+            )
         else:
             verdict = "PASS" if mechanical.get("passed") is True else "FAIL"
             if verdict == "FAIL":

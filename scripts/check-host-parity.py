@@ -93,6 +93,24 @@ CORE_TOOLS_CODEX: dict[str, set[str]] = {
 # (Skill tool invocation = auto-proceed by definition).
 CODEX_AUTO_PROCEED_REQUIRED: set[str] = {"samvil-evolve", "samvil-retro"}
 
+# Stage route contracts that must be visible in both host instruction files.
+# Dynamic stages list every allowed explicit target so a wrong hard-coded
+# replacement (for example samvil-seed -> samvil-retro) cannot hide behind a
+# generic "chain" or "next" section.
+CHAIN_TARGETS_REQUIRED: dict[str, set[str]] = {
+    "samvil": {"samvil-interview"},
+    "samvil-interview": {"samvil-seed", "samvil-build"},
+    "samvil-seed": {"samvil-design", "samvil-council"},
+    "samvil-council": {"samvil-design"},
+    "samvil-design": {"samvil-scaffold"},
+    "samvil-scaffold": {"samvil-build"},
+    "samvil-build": {"samvil-qa"},
+    "samvil-qa": {"samvil-deploy", "samvil-evolve", "samvil-retro"},
+    "samvil-deploy": {"samvil-retro"},
+    "samvil-evolve": {"samvil-retro"},
+    "samvil-analyze": {"samvil-interview", "samvil-qa", "samvil-design"},
+}
+
 
 def load_server_tools() -> set[str]:
     """All MCP tool names registered in server.py via @mcp.tool()."""
@@ -225,6 +243,21 @@ def check_pair(
             issues.append(
                 f"{name}: Codex command has no chain/next-skill mention"
             )
+    required_targets = CHAIN_TARGETS_REQUIRED.get(name, set())
+    missing_cc_targets = sorted(
+        target for target in required_targets if target not in cc_text
+    )
+    missing_codex_targets = sorted(
+        target for target in required_targets if target not in codex_text
+    )
+    if missing_cc_targets:
+        issues.append(
+            f"{name}: CC SKILL.md missing chain target(s): {missing_cc_targets}"
+        )
+    if missing_codex_targets:
+        issues.append(
+            f"{name}: Codex command missing chain target(s): {missing_codex_targets}"
+        )
 
     return issues
 

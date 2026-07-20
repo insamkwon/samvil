@@ -7,12 +7,13 @@ import json
 import os
 import re
 import shlex
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from typing import Any
 
 
 MALFORMED_TOOL_INPUT_REASON = "malformed tool input"
 SHELL_PARSE_ERROR_REASON = "shell parse error"
+FILE_INSPECTION_LIMIT_BYTES = 1_000_000
 SQL_CLIENTS = {"mariadb", "mysql", "psql", "sqlite3", "sqlcmd"}
 SHELLS = {"bash", "dash", "sh", "zsh"}
 CHAIN_TOKENS = {";", "&&", "||", "|", "|&", "&", "\n", ";\n", "(", ")", "{", "}"}
@@ -59,7 +60,9 @@ SUDO_OPTIONS_WITH_VALUE = {
 }
 ENV_OPTIONS_WITH_VALUE = {"-C", "-S", "-u", "--chdir", "--split-string", "--unset"}
 EXEC_OPTIONS_WITH_VALUE = {"-a"}
-SHELL_OPTIONS_WITH_VALUE = {"--init-file", "--rcfile"}
+SHELL_OPTIONS_WITH_VALUE = {"--init-file", "--rcfile", "-o"}
+SQL_FILE_OPTIONS_WITH_VALUE = {"-f", "--file"}
+UNINSPECTABLE_PATH_CHARS = "`$*?[{"
 
 
 def _normalize_shell_source(command: str) -> str:
@@ -396,6 +399,63 @@ def _sql_reason(executable: str, args: list[str]) -> str | None:
         return None
     if _has_destructive_sql(" ".join(args)):
         return "destructive SQL statement"
+    file_reason = _sql_file_reason(args)
+    if file_reason:
+        return file_reason
+    return None
+
+
+def _read_inspectable_file(token: str, label: str) -> tuple[str | None, str | None]:
+    if not token or token == "-":
+        return None, None
+    if any(char in token for char in UNINSPECTABLE_PATH_CHARS):
+        return None, f"{label} file cannot be inspected"
+    try:
+        path = Path(token).expanduser()
+    except RuntimeError:
+        return None, f"{label} file cannot be inspected"
+    if not path.exists():
+        return None, None
+    if not path.is_file():
+        return None, f"{label} file cannot be inspected"
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None, f"{label} file cannot be inspected"
+    if len(raw) > FILE_INSPECTION_LIMIT_BYTES:
+        return None, f"{label} file too large to inspect"
+    return raw.decode("utf-8", errors="replace"), None
+
+
+def _sql_file_reason(args: list[str]) -> str | None:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        file_token: str | None = None
+        if token == "<" and index + 1 < len(args):
+            file_token = args[index + 1]
+            index += 2
+        elif token.startswith("<") and token != "<>" and len(token) > 1:
+            file_token = token[1:]
+            index += 1
+        elif token in SQL_FILE_OPTIONS_WITH_VALUE and index + 1 < len(args):
+            file_token = args[index + 1]
+            index += 2
+        elif token.startswith("--file="):
+            file_token = token.split("=", 1)[1]
+            index += 1
+        elif token.startswith("-f") and token != "-f":
+            file_token = token[2:]
+            index += 1
+        else:
+            index += 1
+        if not file_token:
+            continue
+        text, error = _read_inspectable_file(file_token, "SQL")
+        if error:
+            return error
+        if text is not None and _has_destructive_sql(text):
+            return "destructive SQL file"
     return None
 
 
@@ -464,6 +524,65 @@ def _shell_command(args: list[str]) -> str | None:
                 command_index += 1
             if command_index < len(args):
                 return args[command_index]
+    return None
+
+
+def _shell_script_file_reason(args: list[str]) -> str | None:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            index += 1
+            break
+        key = token.split("=", 1)[0]
+        if key in SHELL_OPTIONS_WITH_VALUE:
+            index += 1
+            if "=" not in token and index < len(args):
+                index += 1
+            continue
+        if token.startswith("--"):
+            index += 1
+            continue
+        if token.startswith("-") and token != "-":
+            if "c" in token[1:]:
+                return None
+            if token.startswith("-o") and token == "-o" and index + 1 < len(args):
+                index += 2
+                continue
+            index += 1
+            continue
+        break
+    if index >= len(args):
+        return None
+    script = args[index]
+    text, error = _read_inspectable_file(script, "shell script")
+    if error:
+        return error
+    if text is None:
+        return None
+    nested = _shell_script_text_reason(text)
+    if nested:
+        return "shell script file with destructive command"
+    return None
+
+
+def _shell_script_text_reason(text: str) -> str | None:
+    pending = ""
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not pending and (not line or line.startswith("#")):
+            continue
+        if line.endswith("\\"):
+            pending += line[:-1] + " "
+            continue
+        line = pending + line
+        pending = ""
+        try:
+            nested = analyze_command(line)
+        except ValueError:
+            continue
+        if nested:
+            return nested
     return None
 
 
@@ -617,6 +736,9 @@ def analyze_command(command: str) -> str | None:
                 nested = analyze_command(shell_command)
                 if nested:
                     return nested
+            script_file_reason = _shell_script_file_reason(args)
+            if script_file_reason:
+                return script_file_reason
             stdin_reason = _shell_stdin_reason(args)
             if stdin_reason:
                 return stdin_reason
@@ -654,13 +776,6 @@ def _piped_shell_reason(command: str) -> str | None:
         return None
     for tokens in _segments(command):
         if _segment_executable_is(tokens, SHELLS):
-            before_shell = command.rsplit("|", 1)[0]
-            nested = analyze_command(before_shell)
-            if nested:
-                return "shell stdin execution"
-            embedded = _embedded_shell_payload_reason(before_shell)
-            if embedded:
-                return "shell stdin execution"
             return "shell stdin execution"
     return None
 

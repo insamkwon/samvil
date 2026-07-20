@@ -89,6 +89,24 @@ def test_detects_missing_core_tool_in_codex(tmp_path: Path) -> None:
         target.write_text(backup, encoding="utf-8")
 
 
+def test_detects_wrong_chain_target_in_codex_command(tmp_path: Path) -> None:
+    """Replacing a concrete next_skill target must fail strict parity."""
+    target = REPO_ROOT / "references" / "codex-commands" / "samvil-seed.md"
+    backup = target.read_text(encoding="utf-8")
+    try:
+        broken = backup.replace("samvil-design", "samvil-retro")
+        target.write_text(broken, encoding="utf-8")
+
+        result = _run("--strict")
+
+        assert result.returncode == 1
+        assert "samvil-seed" in result.stdout
+        assert "chain target" in result.stdout
+        assert "samvil-design" in result.stdout
+    finally:
+        target.write_text(backup, encoding="utf-8")
+
+
 def test_non_strict_mode_returns_zero_even_with_issues() -> None:
     """Without --strict, the script reports issues but still exits 0
     (suitable for non-blocking informational use)."""

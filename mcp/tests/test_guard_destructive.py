@@ -173,6 +173,77 @@ def test_safe_or_explicitly_allowed_variants_pass(command: str) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("shell", ["bash", "sh"])
+def test_shell_script_file_with_destructive_command_is_blocked(
+    tmp_path: Path, shell: str
+) -> None:
+    script = tmp_path / "nuke.sh"
+    script.write_text("rm -rf /\n", encoding="utf-8")
+
+    result = run_guard(f"{shell} {script}")
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+def test_shell_script_file_after_shell_options_is_blocked(tmp_path: Path) -> None:
+    script = tmp_path / "nuke.sh"
+    script.write_text("git reset --hard HEAD~1\n", encoding="utf-8")
+
+    result = run_guard(f"bash --noprofile --norc {script}")
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+def test_safe_shell_script_file_passes(tmp_path: Path) -> None:
+    script = tmp_path / "safe.sh"
+    script.write_text("echo safe\n", encoding="utf-8")
+
+    result = run_guard(f"bash {script}")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "command_template",
+    [
+        "psql -f {sql}",
+        "psql --file={sql}",
+        "mysql < {sql}",
+    ],
+)
+def test_sql_file_with_destructive_statement_is_blocked(
+    tmp_path: Path, command_template: str
+) -> None:
+    sql = tmp_path / "drop.sql"
+    sql.write_text("DROP TABLE users;\n", encoding="utf-8")
+
+    result = run_guard(command_template.format(sql=sql))
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+def test_safe_sql_file_passes(tmp_path: Path) -> None:
+    sql = tmp_path / "select.sql"
+    sql.write_text("SELECT * FROM users;\n", encoding="utf-8")
+
+    result = run_guard(f"psql -f {sql}")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_long_shell_pipeline_blocks_without_recursive_analyzer_failure() -> None:
+    command = "echo safe " + " | bash" * 850
+
+    result = run_guard(command, timeout=3)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+    assert "analyzer failed" not in result.stderr.casefold()
+
+
 def test_block_message_does_not_echo_sensitive_tool_input() -> None:
     sensitive_value = "token=" + "fixture-value"
     result = run_guard(f"rm -fr /tmp/{sensitive_value}")
