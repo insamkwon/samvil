@@ -734,6 +734,17 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `skills/samvil-design/SKILL.md:27`,
     `references/codex-commands/samvil-design.md:14`,
     `mcp/tests/test_skill_wiring.py:212`.
+- [x] **4.12 R6 pre-PR 재검수에서 확인된 PreToolUse 차단 의미론 보정**
+  (스코프 보정: 4.5와 4.8~4.11은 파괴 명령의 파싱 정확도를 "실가드"로
+  강화했지만, Claude Code `PreToolUse` hook의 실제 차단 의미론은 `exit 2`
+  또는 deny JSON에 의존한다. 기존 `exit 1` + stdout은 script 단위 테스트에선
+  차단처럼 보였지만 host 레벨에서는 non-blocking error가 될 수 있어, hook
+  차단 경로를 stderr + `exit 2`로 교정하고 dogfood oracle도 같은 계약으로 맞췄다.)
+  - 완료 증거: `095c835`; `hooks/guard-destructive.sh:13`,
+    `hooks/guard-destructive.sh:19`, `hooks/guard-destructive.sh:25`,
+    `mcp/tests/test_guard_destructive.py:77`,
+    `mcp/tests/test_guard_destructive.py:78`,
+    `scripts/wave4-automation-dogfood.py:170`.
 
 ---
 
