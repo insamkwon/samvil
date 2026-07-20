@@ -167,7 +167,7 @@ def run_dogfood() -> dict:
             "raw_test_passed": raw_test_passed,
             "qa_reported_passed": qa_reported_passed,
             "injected_failure_gate_verdict": injected["verdict"],
-            "destructive_guard_blocked": guard.returncode == 1,
+            "destructive_guard_blocked": guard.returncode == 2,
             "ask_user_question_calls": workflow["ask_user_question_calls"],
             "touchpoints": workflow["touchpoints"],
             "interview_ambiguity": interview["ambiguity"],

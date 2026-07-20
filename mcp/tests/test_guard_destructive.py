@@ -74,8 +74,8 @@ def run_guard(
 )
 def test_destructive_variants_are_blocked(command: str) -> None:
     result = run_guard(command)
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "BLOCKED" in result.stdout
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -100,7 +100,7 @@ def test_block_message_does_not_echo_sensitive_tool_input() -> None:
     sensitive_value = "token=" + "fixture-value"
     result = run_guard(f"rm -fr / {sensitive_value}")
 
-    assert result.returncode == 1
+    assert result.returncode == 2
     assert sensitive_value not in result.stdout
     assert sensitive_value not in result.stderr
 
@@ -116,5 +116,5 @@ def test_analyzer_failure_blocks_command(tmp_path: Path) -> None:
 
     result = run_guard("echo safe", env=env)
 
-    assert result.returncode == 1
-    assert "analyzer failed" in result.stdout.casefold()
+    assert result.returncode == 2
+    assert "analyzer failed" in result.stderr.casefold()
