@@ -106,15 +106,24 @@ class TestGetChainContinuation:
         result = get_chain_continuation("claude_code", "samvil-build")
         assert result["next_skill"] == "samvil-qa"
         assert result["chain_via"] == "skill_tool"
+        assert result["command"] == "/samvil:samvil-qa"
 
     def test_deploy_chains_to_retro_on_every_host(self):
-        for host in ("claude_code", "codex_cli", "opencode", "gemini_cli"):
+        expected_commands = {
+            "claude_code": "/samvil:samvil-retro",
+            "codex_cli": "samvil samvil-retro",
+            "opencode": "samvil samvil-retro",
+            "gemini_cli": "/samvil samvil-retro",
+        }
+        for host, command in expected_commands.items():
             result = get_chain_continuation(host, "samvil-deploy")
             assert result["next_skill"] == "samvil-retro"
+            assert result["command"] == command
 
     def test_last_skill_empty_next(self):
         result = get_chain_continuation("claude_code", "samvil-retro")
         assert result["next_skill"] == ""
+        assert result["command"] == ""
 
     def test_terminal_skills(self):
         for skill in ["samvil-analyze", "samvil-doctor", "samvil-update"]:
@@ -125,6 +134,8 @@ class TestGetChainContinuation:
         result = get_chain_continuation("codex_cli", "samvil-build")
         assert result["chain_via"] == "file_marker"
         assert result["marker_path"] == ".samvil/next-skill.json"
+        assert result["next_skill"] == "samvil-qa"
+        assert result["command"] == "samvil samvil-qa"
 
     def test_unknown_skill_empty(self):
         result = get_chain_continuation("claude_code", "nonexistent")
@@ -133,6 +144,7 @@ class TestGetChainContinuation:
     def test_generic_host(self):
         result = get_chain_continuation("generic", "samvil-seed")
         assert result["next_skill"] == "samvil-design"
+        assert result["command"] == "samvil samvil-design"
         assert result["chain_via"] == "file_marker"
 
     def test_host_name_in_result(self):

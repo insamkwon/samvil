@@ -25,6 +25,9 @@ from typing import Any
 from .claim_ledger import _locked
 from .host_adapters import (
     _SKILL_CHAIN,
+    _ADAPTERS,
+    _GENERIC_ADAPTER,
+    _host_command_for_skill,
     get_chain_continuation as _get_chain_continuation,
 )
 from .ssot_io import atomic_write_text
@@ -55,8 +58,12 @@ def write_chain_marker(
             raise ValueError(f"unknown next_skill: {next_skill!r}")
         continuation["next_skill"] = next_skill
     target_skill = str(continuation.get("next_skill") or "")
+    adapter = _ADAPTERS.get(
+        (host_name or "").strip().lower().replace("-", "_"),
+        _GENERIC_ADAPTER,
+    )
     continuation["command"] = (
-        _get_chain_continuation(host_name, target_skill)["command"]
+        _host_command_for_skill(adapter, target_skill)
         if target_skill
         else ""
     )
