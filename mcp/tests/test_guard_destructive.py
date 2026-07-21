@@ -205,6 +205,27 @@ def test_safe_shell_script_file_passes(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_shell_script_cross_line_assignment_payload_is_blocked(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "nuke.sh"
+    script.write_text("CMD='rm -rf /'\nbash -c \"$CMD\"\n", encoding="utf-8")
+
+    result = run_guard(f"bash {script}")
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+def test_safe_shell_script_cross_line_assignment_passes(tmp_path: Path) -> None:
+    script = tmp_path / "safe.sh"
+    script.write_text("MSG='hello world'\necho \"$MSG\"\n", encoding="utf-8")
+
+    result = run_guard(f"bash {script}")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize(
     "command_template",
     [

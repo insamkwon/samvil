@@ -568,6 +568,7 @@ def _shell_script_file_reason(args: list[str]) -> str | None:
 
 def _shell_script_text_reason(text: str) -> str | None:
     pending = ""
+    assignments: dict[str, str] = {}
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not pending and (not line or line.startswith("#")):
@@ -578,11 +579,15 @@ def _shell_script_text_reason(text: str) -> str | None:
         line = pending + line
         pending = ""
         try:
-            nested = analyze_command(line)
+            line_assignments = _simple_assignments(line)
+            effective_assignments = {**assignments, **line_assignments}
+            expanded_line = _expand_shell_variables(line, effective_assignments)
+            nested = analyze_command(expanded_line)
         except ValueError:
             continue
         if nested:
             return nested
+        assignments.update(line_assignments)
     return None
 
 
