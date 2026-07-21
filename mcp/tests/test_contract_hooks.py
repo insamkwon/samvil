@@ -118,6 +118,64 @@ def test_explicit_invalid_project_root_does_not_fall_back_to_cwd(tmp_path: Path)
     assert not (fallback / ".samvil").exists()
 
 
+def test_stage_end_hook_includes_interview_ambiguity_metric(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    home = tmp_path / "home"
+    project.mkdir()
+    home.mkdir()
+    (project / "project.state.json").write_text(
+        json.dumps(
+            {
+                "samvil_tier": "standard",
+                "seed_readiness": 0.99,
+                "ambiguity_converged": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (project / "project.seed.json").write_text(
+        json.dumps({"schema_version": "3.2"}),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "TOOL_NAME": "Skill",
+            "CLAUDE_PLUGIN_ROOT": str(REPO),
+        }
+    )
+
+    subprocess.run(
+        [
+            "bash",
+            str(REPO / "hooks" / "contract-stage-end.sh"),
+            json.dumps({"skill": "samvil-interview"}),
+            "0",
+        ],
+        cwd=project,
+        env=env,
+        check=True,
+    )
+
+    health_rows = [
+        json.loads(line)
+        for line in (home / ".samvil" / "mcp-health.jsonl").read_text().splitlines()
+        if '"tool": "hook:stage-end"' in line
+    ]
+    assert health_rows
+    assert "verdict=pass" in health_rows[-1]["error"]
+
+    claim_rows = [
+        json.loads(line)
+        for line in (project / ".samvil" / "claims.jsonl").read_text().splitlines()
+        if '"subject": "interview_to_seed"' in line
+    ]
+    assert claim_rows
+    assert "ambiguity_converged" in claim_rows[-1]["statement"]
+
+
 def test_plugin_does_not_run_stage_end_on_skill_prompt_load() -> None:
     plugin = json.loads((REPO / ".claude-plugin" / "plugin.json").read_text())
     post_commands = [

@@ -95,6 +95,17 @@ def test_save_event_examples_use_named_arguments() -> None:
         assert "data=" in text
 
 
+def test_codex_build_command_gets_gate_input_from_phase_z() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    text = (repo / "references" / "codex-commands" / "samvil-build.md").read_text()
+
+    phase_z_index = text.index("finalize_build_phase_z")
+    gate_index = text.index('gate_check(gate_name="build_to_qa"')
+    assert phase_z_index < gate_index
+    assert "metrics_json=<phase_z.gate_input.metrics>" in text
+    assert "metrics_json=<gate_input>" not in text
+
+
 def test_all_stage_skills_fail_closed_without_trusted_gate_override() -> None:
     repo = Path(__file__).resolve().parents[2]
     wiring = _load_wiring_module()

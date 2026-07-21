@@ -83,6 +83,20 @@ def _load_json(p: Path) -> dict:
         return {}
 
 
+def _as_bool(value, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes"}:
+            return True
+        if lowered in {"false", "0", "no", ""}:
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
 STAGE_TO_GATE = {
     "interview": GateName.INTERVIEW_TO_SEED.value,
     "seed": GateName.SEED_TO_COUNCIL.value,
@@ -100,8 +114,12 @@ def _metrics_for_stage(stage: str, state: dict, seed: dict, metrics: dict) -> di
         # seed_readiness is computed by the interview skill when β wiring
         # is live. Fall back to state.seed_readiness or a conservative
         # default so the gate can at least render a verdict.
+        converged = state.get("ambiguity_converged", metrics.get("ambiguity_converged"))
+        if converged is None:
+            converged = state.get("converged", metrics.get("converged", False))
         return {
-            "seed_readiness": state.get("seed_readiness", metrics.get("seed_readiness", 0.80))
+            "seed_readiness": state.get("seed_readiness", metrics.get("seed_readiness", 0.80)),
+            "ambiguity_converged": _as_bool(converged),
         }
     if stage == "seed":
         schema = seed.get("schema_version") or ""

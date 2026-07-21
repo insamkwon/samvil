@@ -63,11 +63,23 @@ EXEC_OPTIONS_WITH_VALUE = {"-a"}
 SHELL_OPTIONS_WITH_VALUE = {"--init-file", "--rcfile", "-o"}
 SQL_FILE_OPTIONS_WITH_VALUE = {"-f", "--file"}
 UNINSPECTABLE_PATH_CHARS = "`$*?[{"
+_SCRIPT_INSPECTION_STACK: list[str] = []
 
 
 def _normalize_shell_source(command: str) -> str:
     """Apply shell lexical normalizations that affect executable tokens."""
     return command.replace("\\\r\n", "").replace("\\\n", "")
+
+
+def _simple_assignments_from_tokens(tokens: list[str]) -> dict[str, str]:
+    assignments: dict[str, str] = {}
+    pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+    for token in tokens:
+        if not pattern.match(token):
+            continue
+        name, _, value = token.partition("=")
+        assignments[name] = value
+    return assignments
 
 
 def _simple_assignments(command: str) -> dict[str, str]:
@@ -77,13 +89,8 @@ def _simple_assignments(command: str) -> dict[str, str]:
         segments = _segments(command)
     except ValueError:
         return assignments
-    pattern = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
     for tokens in segments:
-        for token in tokens:
-            if not pattern.match(token):
-                continue
-            name, _, value = token.partition("=")
-            assignments[name] = value
+        assignments.update(_simple_assignments_from_tokens(tokens))
     return assignments
 
 
@@ -127,6 +134,19 @@ def _resolved_line_assignments(
     for name, value in line_assignments.items():
         scope = {**assignments, **resolved}
         resolved[name] = _expand_shell_variables_fixed_point(value, scope)
+    return resolved
+
+
+def _resolved_command_assignments(command: str) -> dict[str, str]:
+    """Resolve assignments in command order across top-level shell segments."""
+    resolved: dict[str, str] = {}
+    try:
+        segments = _segments(command)
+    except ValueError:
+        return resolved
+    for tokens in segments:
+        line_assignments = _simple_assignments_from_tokens(tokens)
+        resolved.update(_resolved_line_assignments(line_assignments, resolved))
     return resolved
 
 
@@ -176,6 +196,61 @@ def _segments(command: str) -> list[list[str]]:
             continue
         segments[-1].append(token)
     return [segment for segment in segments if segment]
+
+
+def _top_level_command_parts(command: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    index = 0
+    in_single = False
+    in_double = False
+    in_backtick = False
+    substitution_depth = 0
+    while index < len(command):
+        char = command[index]
+        if char == "\\":
+            current.append(command[index : index + 2])
+            index += 2
+            continue
+        if not in_single and not in_backtick and command.startswith("$(", index):
+            substitution_depth += 1
+            current.append("$(")
+            index += 2
+            continue
+        if substitution_depth:
+            current.append(char)
+            if char == ")" and not in_single and not in_double and not in_backtick:
+                substitution_depth -= 1
+            index += 1
+            continue
+        if char == "'" and not in_double and not in_backtick:
+            in_single = not in_single
+            current.append(char)
+            index += 1
+            continue
+        if char == '"' and not in_single and not in_backtick:
+            in_double = not in_double
+            current.append(char)
+            index += 1
+            continue
+        if char == "`" and not in_single:
+            in_backtick = not in_backtick
+            current.append(char)
+            index += 1
+            continue
+        if not in_single and not in_double and not in_backtick and char in ";&|\n(){}":
+            part = "".join(current).strip()
+            if part:
+                parts.append(part)
+            current = []
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+    part = "".join(current).strip()
+    if part:
+        parts.append(part)
+    return parts
 
 
 def _command_start(tokens: list[str]) -> int:
@@ -395,7 +470,13 @@ def _rm_reason(args: list[str]) -> str | None:
     )
     recursive = "r" in short_flags or "R" in short_flags or "--recursive" in args
     forced = "f" in short_flags or "--force" in args
-    if not (recursive and forced):
+    dynamic_short_flag = any(
+        token.startswith("-")
+        and not token.startswith("--")
+        and any(marker in token for marker in ("$", "`"))
+        for token in args
+    )
+    if not (recursive and forced or dynamic_short_flag):
         return None
     targets = [token for token in args if not token.startswith("-")]
     for target in targets:
@@ -418,6 +499,8 @@ def _rm_reason(args: list[str]) -> str | None:
             or "${" in target
         )
         if dangerous and not (allowed_cache or allowed_state):
+            if dynamic_short_flag and not (recursive and forced):
+                return "dynamic removal flags with dangerous target"
             return "recursive forced removal"
     return None
 
@@ -583,15 +666,25 @@ def _shell_script_file_reason(args: list[str]) -> str | None:
     if index >= len(args):
         return None
     script = args[index]
-    text, error = _read_inspectable_file(script, "shell script")
-    if error:
-        return error
-    if text is None:
+    try:
+        script_key = str(Path(script).expanduser().resolve())
+    except RuntimeError:
+        script_key = script
+    if script_key in _SCRIPT_INSPECTION_STACK:
         return None
-    nested = _shell_script_text_reason(text)
-    if nested:
-        return "shell script file with destructive command"
-    return None
+    _SCRIPT_INSPECTION_STACK.append(script_key)
+    try:
+        text, error = _read_inspectable_file(script, "shell script")
+        if error:
+            return error
+        if text is None:
+            return None
+        nested = _shell_script_text_reason(text)
+        if nested:
+            return "shell script file with destructive command"
+        return None
+    finally:
+        _SCRIPT_INSPECTION_STACK.pop()
 
 
 def _shell_script_text_reason(text: str) -> str | None:
@@ -722,11 +815,37 @@ def _command_substitution_executable_reason(command: str) -> str | None:
     return None
 
 
+def _dynamic_rm_flag_reason(command: str) -> str | None:
+    for part in _top_level_command_parts(command):
+        try:
+            tokens = shlex.split(part)
+        except ValueError:
+            continue
+        if not tokens:
+            continue
+        tokens = _unwrap_prefix(tokens)
+        start = _command_start(tokens)
+        if start >= len(tokens):
+            continue
+        executable = _executable(tokens[start])
+        if executable != "rm":
+            continue
+        reason = _rm_reason(tokens[start + 1 :])
+        if reason and reason.startswith("dynamic removal flags"):
+            return reason
+    return None
+
+
 def analyze_command(command: str) -> str | None:
     command = _normalize_shell_source(command)
     if command == MALFORMED_TOOL_INPUT_REASON:
         return MALFORMED_TOOL_INPUT_REASON
-    command = _expand_shell_variables(command, _simple_assignments(command))
+    command = _expand_shell_variables_fixed_point(
+        command, _resolved_command_assignments(command)
+    )
+    dynamic_rm_flag_reason = _dynamic_rm_flag_reason(command)
+    if dynamic_rm_flag_reason:
+        return dynamic_rm_flag_reason
     substitution_reason = _command_substitution_reason(command)
     if substitution_reason:
         return substitution_reason

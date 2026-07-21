@@ -104,8 +104,11 @@ def run_guard(
         "builtin eval 'rm -rf /'",
         "R=rm; $R -rf /",
         "F=-rf; rm $F /",
+        "F=$(printf rf); rm -$F /",
+        "F=$(printf rf); rm -$F ~/.ssh",
         "G=git; $G reset --hard HEAD",
         "CMD='rm -rf /'; bash -c \"$CMD\"",
+        "A='rm'; B='-rf /'; CMD=\"$A $B\"; bash -c \"$CMD\"",
         "$(printf rm) -rf ~/.ssh",
         "`printf r`m -rf /",
         "/bin/r? -rf /",
@@ -137,6 +140,7 @@ def run_guard(
         "psql -c 'DROP SCHEMA public'",
         "D=drop; psql -c \"$D table users\"",
         "T=TABLE; psql -c \"DROP $T users\"",
+        "D='DROP'; T='TABLE users'; SQL=\"$D $T\"; psql -c \"$SQL\"",
         "printf 'DROP/**/TABLE users;' | psql '$DATABASE_URL'",
         "P=psql; printf 'DROP TABLE users;' | $P",
         "S=bash; printf 'rm -rf /' | $S",
@@ -166,6 +170,7 @@ def test_destructive_variants_are_blocked(command: str) -> None:
         "select * from users",
         "echo 'DROP TABLE users'",
         "printf 'DROP DATABASE demo\\n'",
+        "F=$(printf rf); rm -$F .next",
     ],
 )
 def test_safe_or_explicitly_allowed_variants_pass(command: str) -> None:
@@ -264,6 +269,18 @@ def test_safe_shell_script_multi_var_assignment_passes(tmp_path: Path) -> None:
     result = run_guard(f"bash {script}")
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_safe_self_referential_shell_script_does_not_fail_analyzer(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "self.sh"
+    script.write_text(f"bash {script}\n", encoding="utf-8")
+
+    result = run_guard(f"bash {script}")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "analyzer failed" not in result.stderr.casefold()
 
 
 @pytest.mark.parametrize(

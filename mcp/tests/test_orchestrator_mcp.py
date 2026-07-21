@@ -203,6 +203,33 @@ def test_save_event_writes_project_events_ssot(tmp_path, monkeypatch) -> None:
     }
 
 
+def test_save_event_auto_claims_current_stage_entry_events(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    async def runner():
+        sess = json.loads(await create_session(
+            "entry-claims", "standard", project_root=str(project_root)
+        ))
+        sid = sess["session_id"]
+        build = json.loads(await save_event(sid, "build_started", "build", "{}"))
+        analyze = json.loads(await save_event(sid, "analyze_start", "analyze", "{}"))
+        assert build["saved"] is True
+        assert analyze["saved"] is True
+
+    _run(runner())
+
+    ledger = ClaimLedger(project_root / ".samvil" / "claims.jsonl")
+    build_claims = ledger.query_by_subject("stage:build")
+    analyze_claims = ledger.query_by_subject("stage:analyze")
+    assert [claim.type for claim in build_claims] == ["evidence_posted"]
+    assert [claim.type for claim in analyze_claims] == ["evidence_posted"]
+
+
 def test_save_event_warns_when_project_root_cannot_be_resolved(
     tmp_path,
     monkeypatch,

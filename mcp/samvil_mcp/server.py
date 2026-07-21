@@ -463,6 +463,8 @@ _STAGE_ENTRY_EVENTS = {
     "seed_started",
     "council_started",
     "design_started",
+    "analyze_start",
+    "build_started",
     "scaffold_started",
     "build_feature_start",
     "feature_tree_start",

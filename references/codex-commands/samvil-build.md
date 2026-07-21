@@ -16,9 +16,11 @@ Ensure `project.seed.json` exists and scaffold is complete.
    - Each PASS must have file:line evidence.
 5. After each leaf, run MCP tool `update_leaf_status(ac_tree_json=<tree>, leaf_id=<id>, status="pass", evidence_json=[...])`.
 6. Run `npm run build > .samvil/build.log 2>&1; build_exit=$?; echo "SAMVIL_EXIT:${build_exit}" >> .samvil/build.log; test "$build_exit" -eq 0` to verify build passes and persist the receipt candidate.
-7. Run MCP tool `collect_stage_evidence(project_root=".", stage="build")` and keep the returned artifact evidence for the gate input.
-8. Run MCP tool `gate_check(gate_name="build_to_qa", samvil_tier=<tier>, metrics_json=<gate_input>, project_root=".", evidence_mode="mechanical")`. Any tool error or non-`pass` verdict halts; no marker is written. Current hosts fail closed unless trusted mechanical build evidence exists.
-9. Only after gate PASS, run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-build")`.
+7. Run MCP tool `collect_stage_evidence(project_root=".", stage="build")` and keep the returned artifact evidence for Phase Z diagnostics.
+8. Run MCP tool `finalize_build_phase_z(project_path="${PWD}", rate_budget_stats_json=<stats JSON or "">, failed_features_json=<JSON array or "[]">, retries=<total retries>)`.
+9. From the Phase Z result, post each `ac_verdict_claims[]` entry with `claim_post(**entry)` and verify `stage_claim_id` with `claim_verify(claim_id=<id>, verified_by="agent:user")` when present.
+10. Run MCP tool `gate_check(gate_name="build_to_qa", samvil_tier=<phase_z.samvil_tier>, metrics_json=<phase_z.gate_input.metrics>, project_root=".", evidence_mode="mechanical")`. Any tool error or non-`pass` verdict halts; no marker is written. Current hosts fail closed unless trusted mechanical build evidence exists.
+11. Only after gate PASS, run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-build")`.
 
 ## Chain
 
