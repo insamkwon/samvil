@@ -102,6 +102,34 @@ def _expand_shell_variables(command: str, assignments: dict[str, str]) -> str:
     )
 
 
+def _expand_shell_variables_fixed_point(
+    command: str, assignments: dict[str, str], *, limit: int = 8
+) -> str:
+    """Expand simple shell variables until values stabilize.
+
+    This is intentionally bounded: the hook is a conservative static guard, not
+    a shell interpreter, and recursive assignments should not make it loop.
+    """
+    expanded = command
+    for _ in range(limit):
+        next_expanded = _expand_shell_variables(expanded, assignments)
+        if next_expanded == expanded:
+            return expanded
+        expanded = next_expanded
+    return expanded
+
+
+def _resolved_line_assignments(
+    line_assignments: dict[str, str], assignments: dict[str, str]
+) -> dict[str, str]:
+    """Resolve assignment RHS values before persisting them across script lines."""
+    resolved: dict[str, str] = {}
+    for name, value in line_assignments.items():
+        scope = {**assignments, **resolved}
+        resolved[name] = _expand_shell_variables_fixed_point(value, scope)
+    return resolved
+
+
 def _find_command(value: Any) -> str | None:
     if isinstance(value, dict):
         command = value.get("command")
@@ -580,14 +608,19 @@ def _shell_script_text_reason(text: str) -> str | None:
         pending = ""
         try:
             line_assignments = _simple_assignments(line)
-            effective_assignments = {**assignments, **line_assignments}
-            expanded_line = _expand_shell_variables(line, effective_assignments)
+            resolved_line_assignments = _resolved_line_assignments(
+                line_assignments, assignments
+            )
+            effective_assignments = {**assignments, **resolved_line_assignments}
+            expanded_line = _expand_shell_variables_fixed_point(
+                line, effective_assignments
+            )
             nested = analyze_command(expanded_line)
         except ValueError:
             continue
         if nested:
             return nested
-        assignments.update(line_assignments)
+        assignments.update(resolved_line_assignments)
     return None
 
 
