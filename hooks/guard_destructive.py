@@ -82,15 +82,39 @@ def _simple_assignments_from_tokens(tokens: list[str]) -> dict[str, str]:
     return assignments
 
 
+def _shell_unquote_assignment_value(value: str) -> str:
+    if value.startswith(("$(", "`")):
+        return value
+    try:
+        parts = shlex.split(value)
+    except ValueError:
+        return value
+    return parts[0] if len(parts) == 1 else value
+
+
+def _simple_assignments_from_part(part: str) -> dict[str, str]:
+    assignments: dict[str, str] = {}
+    pattern = re.compile(
+        r"\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)="
+        r"(?P<value>\$\([^)]*\)|`[^`]*`|'[^']*'|\"[^\"]*\"|[^ \t\r\n;&|(){}]+)"
+    )
+    index = 0
+    while index < len(part):
+        match = pattern.match(part, index)
+        if not match:
+            break
+        assignments[match.group("name")] = _shell_unquote_assignment_value(
+            match.group("value")
+        )
+        index = match.end()
+    return assignments
+
+
 def _simple_assignments(command: str) -> dict[str, str]:
     """Collect simple shell assignments for conservative static expansion."""
     assignments: dict[str, str] = {}
-    try:
-        segments = _segments(command)
-    except ValueError:
-        return assignments
-    for tokens in segments:
-        assignments.update(_simple_assignments_from_tokens(tokens))
+    for part in _top_level_command_parts(command):
+        assignments.update(_simple_assignments_from_part(part))
     return assignments
 
 
@@ -126,6 +150,73 @@ def _expand_shell_variables_fixed_point(
     return expanded
 
 
+def _literal_printf_substitution_output(source: str) -> str | None:
+    """Return a safe literal for simple `printf <literal>` substitutions.
+
+    The hook is not a shell interpreter. This intentionally recognizes only the
+    deterministic no-format shape that existing bypasses use, and leaves all
+    other command substitutions untouched for the conservative dynamic checks.
+    """
+    try:
+        tokens = shlex.split(source)
+    except ValueError:
+        return None
+    if len(tokens) == 2 and _executable(tokens[0]) == "printf":
+        return tokens[1]
+    return None
+
+
+def _expand_literal_command_substitutions(command: str) -> str:
+    output: list[str] = []
+    index = 0
+    in_single = False
+    in_double = False
+    while index < len(command):
+        char = command[index]
+        if char == "\\":
+            output.append(command[index : index + 2])
+            index += 2
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            output.append(char)
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            output.append(char)
+            index += 1
+            continue
+        if in_single:
+            output.append(char)
+            index += 1
+            continue
+        if command.startswith("$(", index):
+            end = command.find(")", index + 2)
+            if end == -1:
+                output.append(command[index:])
+                break
+            body = command[index + 2 : end]
+            replacement = _literal_printf_substitution_output(body)
+            output.append(replacement if replacement is not None else command[index : end + 1])
+            index = end + 1
+            continue
+        if char == "`":
+            end = command.find("`", index + 1)
+            if end == -1:
+                output.append(char)
+                index += 1
+                continue
+            body = command[index + 1 : end]
+            replacement = _literal_printf_substitution_output(body)
+            output.append(replacement if replacement is not None else command[index : end + 1])
+            index = end + 1
+            continue
+        output.append(char)
+        index += 1
+    return "".join(output)
+
+
 def _resolved_line_assignments(
     line_assignments: dict[str, str], assignments: dict[str, str]
 ) -> dict[str, str]:
@@ -140,12 +231,8 @@ def _resolved_line_assignments(
 def _resolved_command_assignments(command: str) -> dict[str, str]:
     """Resolve assignments in command order across top-level shell segments."""
     resolved: dict[str, str] = {}
-    try:
-        segments = _segments(command)
-    except ValueError:
-        return resolved
-    for tokens in segments:
-        line_assignments = _simple_assignments_from_tokens(tokens)
+    for part in _top_level_command_parts(command):
+        line_assignments = _simple_assignments_from_part(part)
         resolved.update(_resolved_line_assignments(line_assignments, resolved))
     return resolved
 
@@ -470,13 +557,12 @@ def _rm_reason(args: list[str]) -> str | None:
     )
     recursive = "r" in short_flags or "R" in short_flags or "--recursive" in args
     forced = "f" in short_flags or "--force" in args
-    dynamic_short_flag = any(
+    dynamic_flag = any(
         token.startswith("-")
-        and not token.startswith("--")
         and any(marker in token for marker in ("$", "`"))
         for token in args
     )
-    if not (recursive and forced or dynamic_short_flag):
+    if not (recursive or dynamic_flag):
         return None
     targets = [token for token in args if not token.startswith("-")]
     for target in targets:
@@ -499,9 +585,11 @@ def _rm_reason(args: list[str]) -> str | None:
             or "${" in target
         )
         if dangerous and not (allowed_cache or allowed_state):
-            if dynamic_short_flag and not (recursive and forced):
+            if dynamic_flag and not (recursive and forced):
                 return "dynamic removal flags with dangerous target"
-            return "recursive forced removal"
+            if forced:
+                return "recursive forced removal"
+            return "recursive removal with dangerous target"
     return None
 
 
@@ -843,6 +931,7 @@ def analyze_command(command: str) -> str | None:
     command = _expand_shell_variables_fixed_point(
         command, _resolved_command_assignments(command)
     )
+    command = _expand_literal_command_substitutions(command)
     dynamic_rm_flag_reason = _dynamic_rm_flag_reason(command)
     if dynamic_rm_flag_reason:
         return dynamic_rm_flag_reason
