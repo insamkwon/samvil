@@ -104,9 +104,41 @@ STAGE_TO_GATE = {
     "design": GateName.DESIGN_TO_SCAFFOLD.value,
     "scaffold": GateName.SCAFFOLD_TO_BUILD.value,
     "build": GateName.BUILD_TO_QA.value,
-    "qa": GateName.QA_TO_DEPLOY.value,
     "retro": GateName.ANY_TO_RETRO.value,
 }
+
+
+def _qa_results() -> dict:
+    results = _load_json(project / ".samvil" / "qa-results.json")
+    return results.get("synthesis") or {}
+
+
+def _qa_suggested_next_skill(state: dict) -> str:
+    routing = _load_json(project / ".samvil" / "qa-routing.json")
+    primary = routing.get("primary_route") or {}
+    routed = str(primary.get("next_skill") or "")
+    if routed and routed != "samvil-qa":
+        return routed
+    synthesis = _qa_results()
+    if not synthesis:
+        return ""
+    try:
+        from samvil_mcp.qa_finalize import _decide_next_skill
+
+        return str(_decide_next_skill(synthesis, state).get("suggested") or "")
+    except Exception:
+        return ""
+
+
+def _gate_for_stage(stage: str, state: dict) -> str | None:
+    if stage != "qa":
+        return STAGE_TO_GATE.get(stage)
+    suggested = _qa_suggested_next_skill(state)
+    if suggested == "samvil-evolve":
+        return GateName.QA_TO_EVOLVE.value
+    if suggested == "samvil-retro":
+        return GateName.ANY_TO_RETRO.value
+    return GateName.QA_TO_DEPLOY.value
 
 
 def _metrics_for_stage(stage: str, state: dict, seed: dict, metrics: dict) -> dict:
@@ -147,10 +179,24 @@ def _metrics_for_stage(stage: str, state: dict, seed: dict, metrics: dict) -> di
             impl = (completed / total) if total else 0.0
         return {"implementation_rate": float(impl)}
     if stage == "qa":
-        qa_verdict = state.get("qa_verdict") or metrics.get("qa_verdict") or "unknown"
+        synthesis = _qa_results()
+        pass1_status = str((synthesis.get("pass1") or {}).get("status") or "").upper()
+        pass3_verdict = str((synthesis.get("pass3") or {}).get("verdict") or "").upper()
+        counts = (synthesis.get("pass2") or {}).get("counts") or {}
+        fail = int(counts.get("FAIL", 0) or 0)
+        unimplemented = int(counts.get("UNIMPLEMENTED", 0) or 0)
+        qa_verdict = state.get("qa_verdict") or synthesis.get("verdict") or metrics.get("qa_verdict") or "unknown"
         return {
-            "three_pass_pass": qa_verdict.upper() in ("PASS", "PASSED"),
-            "zero_stubs": not bool(metrics.get("stub_detected")),
+            "three_pass_pass": (
+                str(qa_verdict).upper() in ("PASS", "PASSED")
+                and pass1_status in ("", "PASS")
+                and pass3_verdict in ("", "PASS")
+                and fail == 0
+                and unimplemented == 0
+            ),
+            "zero_stubs": unimplemented == 0 and not bool(metrics.get("stub_detected")),
+            "runtime_verified": str(synthesis.get("verification_mode") or "").casefold() == "runtime",
+            "verification_mode": synthesis.get("verification_mode") or "static",
         }
     if stage == "retro":
         return {"always_run": True}
@@ -161,7 +207,7 @@ state = _load_json(project / "project.state.json")
 seed = _load_json(project / "project.seed.json")
 metrics_file = _load_json(project / ".samvil" / "metrics.json")
 
-gate_name = STAGE_TO_GATE.get(stage)
+gate_name = _gate_for_stage(stage, state)
 if gate_name is None:
     print(f"skip;stage={stage};no-gate")
     sys.exit(0)
@@ -176,7 +222,11 @@ tier = (
 if tier not in {"minimal", "standard", "thorough", "full", "deep"}:
     tier = "standard"
 
-metrics = _metrics_for_stage(stage, state, seed, metrics_file)
+metrics = (
+    {"always_run": True}
+    if gate_name == GateName.ANY_TO_RETRO.value
+    else _metrics_for_stage(stage, state, seed, metrics_file)
+)
 
 try:
     verdict = gate_check(
@@ -231,12 +281,37 @@ PY
 #    A surviving marker = the chain invoke never happened — samvil-resume
 #    reads it as the recovery point.
 MARKER_RESULT="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
-import os, sys
+import json, os, sys
+from pathlib import Path
 project_root, skill_name = sys.argv[1:3]
 try:
     sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
     from samvil_mcp.chain_markers import write_chain_marker
-    marker = write_chain_marker(project_root, "claude_code", skill_name)
+    def _load_json(path):
+        try:
+            return json.loads(path.read_text())
+        except Exception:
+            return {}
+
+    def _qa_next_skill(project):
+        routing = _load_json(project / ".samvil" / "qa-routing.json")
+        primary = routing.get("primary_route") or {}
+        routed = str(primary.get("next_skill") or "")
+        if routed and routed != "samvil-qa":
+            return routed
+        results = _load_json(project / ".samvil" / "qa-results.json")
+        synthesis = results.get("synthesis") or {}
+        if not synthesis:
+            return None
+        state = _load_json(project / "project.state.json")
+        try:
+            from samvil_mcp.qa_finalize import _decide_next_skill
+            return str(_decide_next_skill(synthesis, state).get("suggested") or "") or None
+        except Exception:
+            return None
+
+    next_skill = _qa_next_skill(Path(project_root)) if skill_name == "samvil-qa" else None
+    marker = write_chain_marker(project_root, "claude_code", skill_name, next_skill=next_skill)
     nxt = marker.get("next_skill", "")
     if nxt:
         print(f"marker={skill_name}->{nxt}")
