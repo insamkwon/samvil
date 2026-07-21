@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -13,6 +14,16 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 HOOK = REPO / "hooks" / "guard-destructive.sh"
 PLUGIN = REPO / ".claude-plugin" / "plugin.json"
+
+
+def load_guard_module():
+    spec = importlib.util.spec_from_file_location(
+        "guard_destructive_py", REPO / "hooks" / "guard_destructive.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_guard(
@@ -319,6 +330,24 @@ def test_safe_sql_file_passes(tmp_path: Path) -> None:
     result = run_guard(f"psql -f {sql}")
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_large_inspectable_file_is_rejected_before_read_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    guard = load_guard_module()
+    script = tmp_path / "huge.sh"
+    script.write_bytes(b"x" * (guard.FILE_INSPECTION_LIMIT_BYTES + 2))
+
+    def fail_read_bytes(self: Path) -> bytes:
+        raise AssertionError("read_bytes must not run before size guard")
+
+    monkeypatch.setattr(guard.Path, "read_bytes", fail_read_bytes)
+
+    text, error = guard._read_inspectable_file(str(script), "shell script")
+
+    assert text is None
+    assert error == "shell script file too large to inspect"
 
 
 def test_long_shell_pipeline_blocks_without_recursive_analyzer_failure() -> None:

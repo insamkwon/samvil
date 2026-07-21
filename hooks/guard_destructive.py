@@ -618,7 +618,10 @@ def _read_inspectable_file(token: str, label: str) -> tuple[str | None, str | No
     if not path.is_file():
         return None, f"{label} file cannot be inspected"
     try:
-        raw = path.read_bytes()
+        if path.stat().st_size > FILE_INSPECTION_LIMIT_BYTES:
+            return None, f"{label} file too large to inspect"
+        with path.open("rb") as handle:
+            raw = handle.read(FILE_INSPECTION_LIMIT_BYTES + 1)
     except OSError:
         return None, f"{label} file cannot be inspected"
     if len(raw) > FILE_INSPECTION_LIMIT_BYTES:
