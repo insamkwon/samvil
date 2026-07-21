@@ -215,6 +215,34 @@ v4.31이 시작한 방향의 완성이다.
 **Wave 0 완료 기준**: pre-commit green + 신규 회귀 테스트 전부 포함 + 위 8건 각각
 독립 커밋.
 
+### Wave 0 PR review hardening — 2026-07-21
+
+- [x] **destructive guard 우회 3종 차단**
+  동적 long `rm` option, recursive-only 위험 target, SQL keyword command
+  substitution 우회를 함께 차단한다.
+  - 완료 증거: `d3ee4d2`; `hooks/guard_destructive.py:95`,
+    `hooks/guard_destructive.py:153`, `hooks/guard_destructive.py:560`,
+    `hooks/guard_destructive.py:937`, `mcp/tests/test_guard_destructive.py:92`,
+    `mcp/tests/test_guard_destructive.py:123`,
+    `mcp/tests/test_guard_destructive.py:157`.
+- [x] **canonical gate SSOT에 `qa_to_evolve` 복구**
+  runtime `GateName`/`gate_config.yaml`/QA command가 쓰는 게이트를
+  `decision-boundaries`와 glossary 목록에도 같은 순서로 명시한다.
+  - 완료 증거: `bd0a6c3`; `references/decision-boundaries.md:203`,
+    `references/glossary.md:20`, `mcp/tests/test_skill_wiring.py:86`.
+- [x] **inspectable file size guard를 read-before-cap에서 cap-before-read로 전환**
+  script/SQL 파일 검사는 `stat()`와 bounded read를 먼저 적용해 대용량 파일을
+  통째로 메모리에 올리지 않는다.
+  - 완료 증거: `9889280`; `hooks/guard_destructive.py:621`,
+    `hooks/guard_destructive.py:623`, `mcp/tests/test_guard_destructive.py:335`.
+- [x] **QA stage-end recovery marker가 동적 route를 보존**
+  QA 결과가 evolve/retro로 라우팅될 때 `samvil-qa → samvil-deploy` 기본 chain으로
+  새지 않게 gate와 `.samvil/next-skill.json`을 같은 next_skill 기준으로 쓴다.
+  - 완료 증거: `d7f1124`; `hooks/contract-stage-end.sh:116`,
+    `hooks/contract-stage-end.sh:133`, `hooks/contract-stage-end.sh:210`,
+    `hooks/contract-stage-end.sh:296`, `mcp/tests/test_contract_hooks.py:197`,
+    `mcp/tests/test_contract_hooks.py:238`.
+
 ---
 
 ## 4. Wave 1 — 이벤트 저장소 단일화 + SSOT 크래시 내성 (균열 ②③)
