@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import re
+import sys
 from pathlib import Path
 
 
@@ -79,6 +81,27 @@ def test_interview_question_limits_use_decision_boundaries_ssot() -> None:
     assert "| minimal | 3-4개 |" not in legacy
     assert "`min_questions_reference`" in boundaries
     assert "`max_questions`" in boundaries
+
+
+def test_canonical_gate_docs_match_runtime_gate_names() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(repo / "mcp"))
+    from samvil_mcp.gates import GateName
+
+    boundaries = (repo / "references" / "decision-boundaries.md").read_text(
+        encoding="utf-8"
+    )
+    glossary = (repo / "references" / "glossary.md").read_text(encoding="utf-8")
+    section = boundaries.split("## Canonical stage gates", 1)[1].split(
+        "\n## ", 1
+    )[0]
+    documented = re.findall(r"\d+\. `([^`]+)`", section)
+    runtime = [gate.value for gate in GateName]
+
+    assert documented == runtime
+    assert "9 named gates" in glossary
+    for gate in runtime:
+        assert gate in glossary
 
 
 def test_save_event_examples_use_named_arguments() -> None:

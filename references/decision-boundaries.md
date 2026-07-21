@@ -200,8 +200,9 @@ The ordered gate names are:
 4. `design_to_scaffold`
 5. `scaffold_to_build`
 6. `build_to_qa`
-7. `qa_to_deploy`
-8. `any_to_retro`
+7. `qa_to_evolve`
+8. `qa_to_deploy`
+9. `any_to_retro`
 
 ## Council compatibility matrix
 
