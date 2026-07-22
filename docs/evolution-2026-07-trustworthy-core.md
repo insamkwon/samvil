@@ -271,6 +271,44 @@ v4.31이 시작한 방향의 완성이다.
     `mcp/tests/test_guard_destructive.py:161`, `mcp/tests/test_guard_destructive.py:162`,
     `mcp/tests/test_guard_destructive.py:163`, `mcp/tests/test_guard_destructive.py:164`,
     `mcp/tests/test_guard_destructive.py:199`.
+- [x] **QA routing은 현재 `qa-results.json` 없이는 fail-closed**
+  stale `qa-routing.json`만 남은 상태에서는 retro/evolve/deploy route를 current로
+  인정하지 않고, 결과 파일이 없는 QA stage-end는 marker를 쓰지 않는다.
+  - 완료 증거: `7a16679`; `hooks/contract-stage-end.sh:120`,
+    `hooks/contract-stage-end.sh:123`, `hooks/contract-stage-end.sh:324`,
+    `hooks/contract-stage-end.sh:327`, `mcp/tests/test_contract_hooks.py:369`,
+    `mcp/tests/test_contract_hooks.py:401`, `mcp/tests/test_contract_hooks.py:402`,
+    `mcp/tests/test_contract_hooks.py:404`.
+- [x] **SQL 축약 destructive form까지 차단**
+  PostgreSQL `TRUNCATE users`, `TRUNCATE ONLY users`, `DROP OWNED BY`,
+  `DROP SERVER ... CASCADE`, `DROP PUBLICATION`을 SQL client 경로에서 차단한다.
+  - 완료 증거: `32372dd`; `hooks/guard_destructive.py:674`,
+    `hooks/guard_destructive.py:677`, `hooks/guard_destructive.py:680`,
+    `mcp/tests/test_guard_destructive.py:158`, `mcp/tests/test_guard_destructive.py:159`,
+    `mcp/tests/test_guard_destructive.py:160`, `mcp/tests/test_guard_destructive.py:167`,
+    `mcp/tests/test_guard_destructive.py:168`, `mcp/tests/test_guard_destructive.py:169`.
+- [x] **Codex command의 config/interview SSOT 경로 정렬**
+  `project.config.json`과 `interview-summary.md`는 root SSOT로만 쓰고 읽게 맞추며,
+  host parity가 `.samvil/project.config.json`/`.samvil/interview-summary.md` 재도입을
+  차단한다.
+  - 완료 증거: `25adc37`; `references/codex-commands/samvil.md:23`,
+    `references/codex-commands/samvil-seed.md:6`,
+    `references/codex-commands/samvil-seed.md:11`,
+    `references/codex-commands/samvil-interview.md:94`,
+    `references/codex-commands/samvil-pm-interview.md:16`,
+    `scripts/check-host-parity.py:44`, `scripts/check-host-parity.py:49`,
+    `scripts/check-host-parity.py:53`.
+- [x] **파일 마커 호스트의 dynamic next_skill 보존**
+  Codex orchestrator가 `chain.next_skill`을 `write_chain_marker(..., next_skill=...)`로
+  넘기고, PM interview static fallback은 seed 재실행 대신 design으로 간다.
+  Council opt-in은 명시적 `next_skill="samvil-council"` override로 유지한다.
+  - 완료 증거: `73dd36a`; `references/codex-commands/samvil.md:26`,
+    `references/codex-commands/samvil.md:30`,
+    `references/codex-commands/samvil-pm-interview.md:19`,
+    `references/codex-commands/samvil-pm-interview.md:20`,
+    `mcp/samvil_mcp/host_adapters.py:120`,
+    `scripts/check-host-parity.py:114`, `scripts/check-host-parity.py:116`,
+    `mcp/tests/test_chain_markers.py:56`, `mcp/tests/test_host_adapters.py:140`.
 
 ---
 
