@@ -79,6 +79,38 @@ def test_fetch_parses_keep_a_changelog_format(monkeypatch) -> None:
     assert "Welcome skill" in result["items"][1]["bullets"]
 
 
+def test_fetch_caps_response_body(monkeypatch) -> None:
+    """Remote fetch reads at most MAX+1 and rejects oversized bodies."""
+    from samvil_mcp import benchmark
+
+    mock_response = MagicMock()
+    mock_response.read.return_value = b"x" * (benchmark.MAX_CHANGELOG_BYTES + 1)
+    mock_response.__enter__ = lambda self: mock_response
+    mock_response.__exit__ = lambda self, *a: None
+    with patch("urllib.request.urlopen", return_value=mock_response):
+        result = fetch_external_changelog(url="http://example.com/CHANGELOG.md")
+
+    mock_response.read.assert_called_once_with(benchmark.MAX_CHANGELOG_BYTES + 1)
+    assert result["ok"] is False
+    assert "too large" in result["error"]
+
+
+def test_fetch_clamps_caller_timeout(monkeypatch) -> None:
+    """MCP callers cannot pin a worker with an arbitrary timeout."""
+    mock_response = MagicMock()
+    mock_response.read.return_value = SAMPLE_CHANGELOG.encode("utf-8")
+    mock_response.__enter__ = lambda self: mock_response
+    mock_response.__exit__ = lambda self, *a: None
+    with patch("urllib.request.urlopen", return_value=mock_response) as urlopen:
+        result = fetch_external_changelog(
+            url="http://example.com/CHANGELOG.md",
+            timeout=9999.0,
+        )
+
+    assert result["ok"] is True
+    assert urlopen.call_args.kwargs["timeout"] == 10.0
+
+
 def test_fetch_no_sections_found(monkeypatch) -> None:
     """Markdown without ## headings → no sections → ok=False."""
     mock_response = MagicMock()
