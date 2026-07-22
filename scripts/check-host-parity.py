@@ -50,6 +50,10 @@ FORBIDDEN_SSOT_PATHS: dict[str, tuple[str, str]] = {
         "legacy .samvil/project.config.json",
         "root project.config.json",
     ),
+    ".samvil/project.state.json": (
+        "legacy .samvil/project.state.json",
+        "root project.state.json",
+    ),
     ".samvil/interview-summary.md": (
         "legacy .samvil/interview-summary.md",
         "root interview-summary.md",

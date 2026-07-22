@@ -99,7 +99,7 @@ automatically — just follow `next_skill` from the marker.
 | File | Contents |
 |---|---|
 | `project.seed.json` | Requirements, features, ACs |
-| `.samvil/project.state.json` | Current pipeline stage |
+| `project.state.json` | Current pipeline stage |
 | `.samvil/handoff.md` | Cross-session continuation notes |
 | `.samvil/qa-results.json` | QA pass/fail verdicts |
 | `.samvil/events.jsonl` | Event audit log |

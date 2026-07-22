@@ -112,6 +112,7 @@ def test_detects_wrong_chain_target_in_codex_command(tmp_path: Path) -> None:
     [
         (".samvil/project.seed.json", "root project.seed.json"),
         (".samvil/project.config.json", "root project.config.json"),
+        (".samvil/project.state.json", "root project.state.json"),
         (".samvil/interview-summary.md", "root interview-summary.md"),
     ],
 )

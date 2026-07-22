@@ -40,5 +40,7 @@
 
 ## Chain
 
-After this stage, proceed to the instruction file for `samvil-interview`.
-The path is listed in the AGENTS.md skill table under "Interview".
+After this stage, proceed to the instruction file for `<chain.next_skill>`.
+The valid targets are `samvil-interview`, `samvil-pm-interview`, and
+`samvil-analyze`; choose the one returned by step 4 and persisted by step 7.
+Their paths are listed in the AGENTS.md skill table.
