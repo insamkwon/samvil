@@ -16,6 +16,13 @@ SHELL_PARSE_ERROR_REASON = "shell parse error"
 FILE_INSPECTION_LIMIT_BYTES = 1_000_000
 SQL_CLIENTS = {"mariadb", "mysql", "psql", "sqlite3", "sqlcmd"}
 SHELLS = {"bash", "dash", "sh", "zsh"}
+SOURCE_BUILTINS = {".", "source"}
+PROTECTED_ROOT_SSOT_PATHS = {
+    "interview-summary.md",
+    "project.config.json",
+    "project.seed.json",
+    "project.state.json",
+}
 CHAIN_TOKENS = {";", "&&", "||", "|", "|&", "&", "\n", ";\n", "(", ")", "{", "}"}
 SHELL_CONTROL_PREFIXES = {
     "!",
@@ -267,6 +274,8 @@ def extract_command(raw: str) -> str:
 
 
 def _executable(token: str) -> str:
+    if token == ".":
+        return "."
     return PurePath(token).name.casefold()
 
 
@@ -578,6 +587,7 @@ def _rm_reason(args: list[str]) -> str | None:
         shell_expansion = any(char in normalized for char in "*?[{")
         dangerous = (
             normalized in {"/", "~", ".", "*", ".git", ".samvil"}
+            or normalized in PROTECTED_ROOT_SSOT_PATHS
             or parent_escape
             or root_level_glob
             or shell_expansion
@@ -659,8 +669,68 @@ def _sql_file_reason(args: list[str]) -> str | None:
         text, error = _read_inspectable_file(file_token, "SQL")
         if error:
             return error
-        if text is not None and _has_destructive_sql(text):
-            return "destructive SQL file"
+        if text is not None:
+            reason = _sql_text_reason(text, base_dir=Path(file_token).expanduser().parent)
+            if reason:
+                return reason
+    return None
+
+
+def _sql_text_reason(
+    text: str,
+    *,
+    base_dir: Path | None = None,
+    seen: set[str] | None = None,
+) -> str | None:
+    if _has_destructive_sql(text):
+        return "destructive SQL file"
+    include_reason = _sql_include_reason(text, base_dir=base_dir, seen=seen or set())
+    if include_reason:
+        return include_reason
+    return None
+
+
+def _sql_include_reason(
+    text: str,
+    *,
+    base_dir: Path | None,
+    seen: set[str],
+) -> str | None:
+    for raw_line in text.splitlines():
+        line = raw_line.strip().rstrip(";").strip()
+        if not line or line.startswith(("--", "#")):
+            continue
+        match = re.match(r"^(?:\\i|\\include|\\\.|source)\s+(.+)$", line, re.IGNORECASE)
+        if not match:
+            continue
+        try:
+            parts = shlex.split(match.group(1), posix=True)
+        except ValueError:
+            return "SQL include file cannot be inspected"
+        if not parts:
+            continue
+        include_token = parts[0]
+        if base_dir is not None and not Path(include_token).expanduser().is_absolute():
+            include_token = str(base_dir / include_token)
+        try:
+            include_key = str(Path(include_token).expanduser().resolve())
+        except RuntimeError:
+            include_key = include_token
+        if include_key in seen:
+            continue
+        seen.add(include_key)
+        include_text, error = _read_inspectable_file(include_token, "SQL include")
+        if error:
+            return error
+        if include_text is None:
+            continue
+        nested = _sql_text_reason(
+            include_text,
+            base_dir=Path(include_token).expanduser().parent,
+            seen=seen,
+        )
+        if nested:
+            return "destructive SQL include file"
     return None
 
 
@@ -786,6 +856,32 @@ def _shell_script_file_reason(args: list[str]) -> str | None:
         nested = _shell_script_text_reason(text)
         if nested:
             return "shell script file with destructive command"
+        return None
+    finally:
+        _SCRIPT_INSPECTION_STACK.pop()
+
+
+def _source_script_reason(args: list[str]) -> str | None:
+    index = _skip_options(args)
+    if index >= len(args):
+        return None
+    script = args[index]
+    try:
+        script_key = str(Path(script).expanduser().resolve())
+    except RuntimeError:
+        script_key = script
+    if script_key in _SCRIPT_INSPECTION_STACK:
+        return None
+    _SCRIPT_INSPECTION_STACK.append(script_key)
+    try:
+        text, error = _read_inspectable_file(script, "shell source")
+        if error:
+            return error
+        if text is None:
+            return None
+        nested = _shell_script_text_reason(text)
+        if nested:
+            return "shell source file with destructive command"
         return None
     finally:
         _SCRIPT_INSPECTION_STACK.pop()
@@ -1004,6 +1100,10 @@ def analyze_command(command: str) -> str | None:
             stdin_reason = _shell_stdin_reason(args)
             if stdin_reason:
                 return stdin_reason
+        if executable in SOURCE_BUILTINS:
+            source_reason = _source_script_reason(args)
+            if source_reason:
+                return source_reason
         if executable == "eval" and args:
             nested_args = args[1:] if args and args[0] == "--" else args
             nested = analyze_command(" ".join(nested_args))

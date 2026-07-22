@@ -94,6 +94,10 @@ def run_guard(
         "rm -rf .samvil",
         "rm -rf .samvil/claims.jsonl",
         "rm -rf .samvil/next-skill.json",
+        "rm -rf project.seed.json",
+        "rm -rf project.state.json",
+        "rm -rf project.config.json",
+        "rm -rf interview-summary.md",
         'bash -c "rm -r /"',
         "timeout 5 rm -rf /",
         "nohup git reset --hard HEAD~1",
@@ -244,6 +248,40 @@ def test_safe_shell_script_file_passes(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("source_command", ["source {script}", ". {script}"])
+def test_shell_source_file_with_destructive_command_is_blocked(
+    tmp_path: Path, source_command: str
+) -> None:
+    script = tmp_path / "nuke.sh"
+    script.write_text("rm -rf /\n", encoding="utf-8")
+
+    result = run_guard(source_command.format(script=script))
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+def test_nested_shell_source_file_with_destructive_command_is_blocked(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "nuke.sh"
+    script.write_text("rm -rf /\n", encoding="utf-8")
+
+    result = run_guard(f'bash -c "source {script}"')
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+def test_safe_shell_source_file_passes(tmp_path: Path) -> None:
+    script = tmp_path / "safe.sh"
+    script.write_text("echo safe\n", encoding="utf-8")
+
+    result = run_guard(f"source {script}")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_shell_script_cross_line_assignment_payload_is_blocked(
     tmp_path: Path,
 ) -> None:
@@ -332,6 +370,43 @@ def test_sql_file_with_destructive_statement_is_blocked(
     sql.write_text("DROP TABLE users;\n", encoding="utf-8")
 
     result = run_guard(command_template.format(sql=sql))
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "outer_sql",
+    [
+        "\\i {inner}\n",
+        "\\include {inner}\n",
+        "source {inner}\n",
+        "\\. {inner}\n",
+    ],
+)
+def test_sql_include_file_with_destructive_statement_is_blocked(
+    tmp_path: Path, outer_sql: str
+) -> None:
+    inner = tmp_path / "inner.sql"
+    inner.write_text("DROP TABLE users;\n", encoding="utf-8")
+    outer = tmp_path / "outer.sql"
+    outer.write_text(outer_sql.format(inner=inner), encoding="utf-8")
+
+    result = run_guard(f"psql -f {outer}")
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+def test_sql_relative_include_file_with_destructive_statement_is_blocked(
+    tmp_path: Path,
+) -> None:
+    inner = tmp_path / "inner.sql"
+    inner.write_text("DROP TABLE users;\n", encoding="utf-8")
+    outer = tmp_path / "outer.sql"
+    outer.write_text("\\i inner.sql\n", encoding="utf-8")
+
+    result = run_guard(f"psql -f {outer}")
 
     assert result.returncode == 2, result.stdout + result.stderr
     assert "BLOCKED" in result.stderr
