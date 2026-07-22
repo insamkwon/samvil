@@ -568,23 +568,26 @@ def _rm_reason(args: list[str]) -> str | None:
     for target in targets:
         normalized = os.path.normpath(target)
         allowed_cache = normalized == ".next" or normalized.startswith(".next/")
-        allowed_state = normalized == ".samvil" or normalized.startswith(".samvil/")
+        allowed_samvil_cache = normalized == ".samvil/cache" or normalized.startswith(
+            ".samvil/cache/"
+        )
         parent_escape = normalized == ".." or normalized.startswith("../")
         root_level_glob = "/" not in normalized and any(
             char in normalized for char in "*?[{"
         )
         shell_expansion = any(char in normalized for char in "*?[{")
         dangerous = (
-            normalized in {"/", "~", ".", "*", ".git"}
+            normalized in {"/", "~", ".", "*", ".git", ".samvil"}
             or parent_escape
             or root_level_glob
             or shell_expansion
+            or normalized.startswith(".samvil/")
             or target.startswith("/")
             or target.startswith("~")
             or target.startswith("$")
             or "${" in target
         )
-        if dangerous and not (allowed_cache or allowed_state):
+        if dangerous and not (allowed_cache or allowed_samvil_cache):
             if dynamic_flag and not (recursive and forced):
                 return "dynamic removal flags with dangerous target"
             if forced:

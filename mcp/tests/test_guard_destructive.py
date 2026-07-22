@@ -91,6 +91,9 @@ def run_guard(
         "rm -rf ../..",
         "rm -R ~/.ssh",
         "rm -r ../sibling-project",
+        "rm -rf .samvil",
+        "rm -rf .samvil/claims.jsonl",
+        "rm -rf .samvil/next-skill.json",
         'bash -c "rm -r /"',
         "timeout 5 rm -rf /",
         "nohup git reset --hard HEAD~1",
@@ -177,6 +180,7 @@ def test_destructive_variants_are_blocked(command: str) -> None:
     [
         "rm -rf .next",
         "rm -rf .samvil/cache",
+        "rm -r .samvil/cache",
         "rm -rf node_modules",
         "rm -r .next",
         "rm -r node_modules",
