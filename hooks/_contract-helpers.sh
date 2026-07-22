@@ -179,7 +179,8 @@ samvil_contract_is_stage_skill() {
 samvil_contract_stage_name() {
   local skill="$1"
   case "$skill" in
-    samvil-interview|samvil-pm-interview) echo "interview" ;;
+    samvil-interview) echo "interview" ;;
+    samvil-pm-interview) echo "pm-interview" ;;
     samvil-seed)       echo "seed" ;;
     samvil-council)    echo "council" ;;
     samvil-design)     echo "design" ;;
@@ -200,6 +201,7 @@ samvil_contract_primary_agent() {
   local stage="$1"
   case "$stage" in
     interview)  echo "agent:socratic-interviewer" ;;
+    pm-interview) echo "agent:product-owner" ;;
     seed)       echo "agent:seed-architect" ;;
     council)    echo "agent:product-owner" ;;
     design)     echo "agent:tech-architect" ;;

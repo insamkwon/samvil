@@ -194,6 +194,37 @@ def test_stage_end_hook_includes_interview_ambiguity_metric(tmp_path: Path) -> N
     assert "ambiguity_converged" in claim_rows[-1]["statement"]
 
 
+def test_pm_interview_stage_end_skips_interview_gate_and_writes_design_marker(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_json(
+        project / "project.state.json",
+        {"samvil_tier": "standard", "current_stage": "pm-interview"},
+    )
+    _write_json(project / "project.seed.json", {"schema_version": "3.2"})
+
+    subprocess.run(
+        [
+            "bash",
+            str(REPO / "hooks" / "contract-stage-end.sh"),
+            json.dumps({"skill": "samvil-pm-interview"}),
+            "0",
+        ],
+        cwd=project,
+        env=_stage_end_env(tmp_path, project),
+        check=True,
+    )
+
+    marker = json.loads((project / ".samvil" / "next-skill.json").read_text())
+    claims_path = project / ".samvil" / "claims.jsonl"
+    claims = claims_path.read_text() if claims_path.exists() else ""
+    assert marker["next_skill"] == "samvil-design"
+    assert marker["from_stage"] == "samvil-pm-interview"
+    assert '"subject": "interview_to_seed"' not in claims
+
+
 def test_qa_stage_end_marker_uses_failed_qa_retro_route(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
