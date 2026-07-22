@@ -673,9 +673,11 @@ def _has_destructive_sql(text: str) -> bool:
             r"\b(?:"
             r"drop\s+(?:"
             r"table|database|schema|role|user|view|materialized\s+view|index|"
-            r"sequence|function|procedure|trigger|type|policy|extension"
+            r"sequence|function|procedure|trigger|type|policy|extension|"
+            r"owned\s+by|server|publication|subscription|event\s+trigger|"
+            r"foreign\s+table|foreign\s+data\s+wrapper"
             r")"
-            r"|truncate\s+table"
+            r"|truncate\s+(?:table\s+)?(?:only\s+)?[A-Za-z_\"`][\w.\"`]*"
             r"|delete\s+from"
             r"|alter\s+table\b[^;]*\bdrop\s+(?:column|constraint)\b"
             r")\b",
