@@ -366,6 +366,44 @@ def test_qa_stage_end_ignores_stale_qa_routing(tmp_path: Path) -> None:
     assert '"subject": "any_to_retro"' not in claims
 
 
+def test_qa_stage_end_ignores_routing_without_qa_results(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_json(
+        project / "project.state.json",
+        {
+            "samvil_tier": "standard",
+            "current_stage": "qa",
+            "qa_verdict": "PASS",
+        },
+    )
+    _write_json(project / "project.seed.json", {"schema_version": "3.2"})
+    _write_json(
+        project / ".samvil" / "qa-routing.json",
+        {
+            "generated_at": "2026-07-22T00:00:00Z",
+            "primary_route": {"next_skill": "samvil-retro"},
+        },
+    )
+
+    subprocess.run(
+        [
+            "bash",
+            str(REPO / "hooks" / "contract-stage-end.sh"),
+            json.dumps({"skill": "samvil-qa"}),
+            "0",
+        ],
+        cwd=project,
+        env=_stage_end_env(tmp_path, project),
+        check=True,
+    )
+
+    claims = (project / ".samvil" / "claims.jsonl").read_text()
+    assert not (project / ".samvil" / "next-skill.json").exists()
+    assert '"subject": "qa_to_deploy"' in claims
+    assert '"subject": "any_to_retro"' not in claims
+
+
 def test_plugin_does_not_run_stage_end_on_skill_prompt_load() -> None:
     plugin = json.loads((REPO / ".claude-plugin" / "plugin.json").read_text())
     post_commands = [

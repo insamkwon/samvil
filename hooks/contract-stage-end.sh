@@ -121,7 +121,7 @@ def _routing_is_current(routing: dict, results: dict) -> bool:
     if not routing:
         return False
     if not results:
-        return True
+        return False
     routing_ts = str(routing.get("generated_at") or "")
     results_ts = str(results.get("generated_at") or "")
     if not routing_ts or not results_ts:
@@ -325,7 +325,7 @@ try:
         if not routing:
             return False
         if not results:
-            return True
+            return False
         routing_ts = str(routing.get("generated_at") or "")
         results_ts = str(results.get("generated_at") or "")
         if not routing_ts or not results_ts:
