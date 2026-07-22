@@ -108,18 +108,35 @@ STAGE_TO_GATE = {
 }
 
 
-def _qa_results() -> dict:
+def _qa_results_payload() -> dict:
     results = _load_json(project / ".samvil" / "qa-results.json")
-    return results.get("synthesis") or {}
+    return results
+
+
+def _qa_results() -> dict:
+    return _qa_results_payload().get("synthesis") or {}
+
+
+def _routing_is_current(routing: dict, results: dict) -> bool:
+    if not routing:
+        return False
+    if not results:
+        return True
+    routing_ts = str(routing.get("generated_at") or "")
+    results_ts = str(results.get("generated_at") or "")
+    if not routing_ts or not results_ts:
+        return False
+    return routing_ts >= results_ts
 
 
 def _qa_suggested_next_skill(state: dict) -> str:
+    results = _qa_results_payload()
     routing = _load_json(project / ".samvil" / "qa-routing.json")
     primary = routing.get("primary_route") or {}
     routed = str(primary.get("next_skill") or "")
-    if routed and routed != "samvil-qa":
+    if routed and routed != "samvil-qa" and _routing_is_current(routing, results):
         return routed
-    synthesis = _qa_results()
+    synthesis = results.get("synthesis") or {}
     if not synthesis:
         return ""
     try:
@@ -279,8 +296,19 @@ PY
 # 3. Write the expected next-skill marker (W2.2 chain-break recovery).
 #    The stage-start hook clears it when the chain actually continues.
 #    A surviving marker = the chain invoke never happened — samvil-resume
-#    reads it as the recovery point.
-MARKER_RESULT="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
+#    reads it as the recovery point. Hard gate blocks intentionally skip this
+#    marker: a blocked stage has no safe continuation to recover.
+case "$GATE_RESULT" in
+  *";verdict=pass;"*|skip\;*)
+    SHOULD_WRITE_MARKER=1
+    ;;
+  *)
+    SHOULD_WRITE_MARKER=0
+    ;;
+esac
+
+if [ "$SHOULD_WRITE_MARKER" = "1" ]; then
+  MARKER_RESULT="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
 import json, os, sys
 from pathlib import Path
 project_root, skill_name = sys.argv[1:3]
@@ -293,13 +321,24 @@ try:
         except Exception:
             return {}
 
+    def _routing_is_current(routing, results):
+        if not routing:
+            return False
+        if not results:
+            return True
+        routing_ts = str(routing.get("generated_at") or "")
+        results_ts = str(results.get("generated_at") or "")
+        if not routing_ts or not results_ts:
+            return False
+        return routing_ts >= results_ts
+
     def _qa_next_skill(project):
+        results = _load_json(project / ".samvil" / "qa-results.json")
         routing = _load_json(project / ".samvil" / "qa-routing.json")
         primary = routing.get("primary_route") or {}
         routed = str(primary.get("next_skill") or "")
-        if routed and routed != "samvil-qa":
+        if routed and routed != "samvil-qa" and _routing_is_current(routing, results):
             return routed
-        results = _load_json(project / ".samvil" / "qa-results.json")
         synthesis = results.get("synthesis") or {}
         if not synthesis:
             return None
@@ -320,8 +359,14 @@ try:
 except Exception as e:
     sys.stderr.write(f"[samvil-contract-hook] chain marker write failed: {e}\n")
 PY
-)"
-if [ -n "$MARKER_RESULT" ]; then
+  )"
+else
+  MARKER_RESULT="marker=skipped-gate-${STAGE}"
+fi
+
+if [ "$SHOULD_WRITE_MARKER" != "1" ]; then
+  samvil_contract_log_health "chain" "ok" "$MARKER_RESULT"
+elif [ -n "$MARKER_RESULT" ]; then
   samvil_contract_log_health "chain" "ok" "$MARKER_RESULT"
 else
   samvil_contract_log_health "chain" "fail" "next-skill marker not written after $STAGE"
