@@ -3,12 +3,12 @@
 ## Prerequisites
 
 Read `.samvil/next-skill.json`. If `next_skill` is not `samvil-seed`, skip this stage.
-Ensure `.samvil/interview-summary.md` exists.
+Ensure root `interview-summary.md` exists.
 
 ## Execution
 
 1. Run MCP tool `read_chain_marker(project_root="${PWD}")` to confirm this is the expected stage.
-2. Read `.samvil/interview-summary.md` and `project.config.json`; derive Council opt-in only from exact `"--council"` membership in `project.config.json.flags`.
+2. Read root `interview-summary.md` and `project.config.json`; derive Council opt-in only from exact `"--council"` membership in `project.config.json.flags`.
 3. Construct seed JSON from interview answers:
    - Map features from interview responses
    - Build AC tree with leaf-level acceptance criteria

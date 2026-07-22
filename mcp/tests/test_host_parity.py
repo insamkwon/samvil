@@ -47,7 +47,7 @@ def test_current_repo_state_has_parity() -> None:
     assert "samvil-qa" in result.stdout
     assert "Codex native stage execution" in result.stdout
     assert "Gemini native stage execution" in result.stdout
-    assert "seed SSOT command corpus contract is checked" in result.stdout
+    assert "SSOT command corpus contract is checked" in result.stdout
 
 
 def test_detects_missing_auto_proceed_heading(tmp_path: Path) -> None:
@@ -103,6 +103,33 @@ def test_detects_wrong_chain_target_in_codex_command(tmp_path: Path) -> None:
         assert "samvil-seed" in result.stdout
         assert "chain target" in result.stdout
         assert "samvil-design" in result.stdout
+    finally:
+        target.write_text(backup, encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("legacy_path", "canonical_path"),
+    [
+        (".samvil/project.seed.json", "root project.seed.json"),
+        (".samvil/project.config.json", "root project.config.json"),
+        (".samvil/interview-summary.md", "root interview-summary.md"),
+    ],
+)
+def test_detects_legacy_host_command_ssot_paths(
+    legacy_path: str,
+    canonical_path: str,
+) -> None:
+    """Host-facing commands must not reintroduce legacy .samvil SSOT paths."""
+    target = REPO_ROOT / "references" / "codex-commands" / "samvil-seed.md"
+    backup = target.read_text(encoding="utf-8")
+    try:
+        target.write_text(f"Read `{legacy_path}`.\n", encoding="utf-8")
+
+        result = _run("--strict")
+
+        assert result.returncode == 1
+        assert legacy_path in result.stdout
+        assert canonical_path in result.stdout
     finally:
         target.write_text(backup, encoding="utf-8")
 

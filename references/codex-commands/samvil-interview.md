@@ -91,7 +91,7 @@ If `budget_action="offer_draft_or_extend"`, ask the user whether to draft the se
 
 ## Save Interview Results
 
-Write to `.samvil/interview-summary.md`:
+Write to root `interview-summary.md`:
 
 ```markdown
 # Interview Summary
