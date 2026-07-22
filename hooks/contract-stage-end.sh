@@ -117,25 +117,8 @@ def _qa_results() -> dict:
     return _qa_results_payload().get("synthesis") or {}
 
 
-def _routing_is_current(routing: dict, results: dict) -> bool:
-    if not routing:
-        return False
-    if not results:
-        return False
-    routing_ts = str(routing.get("generated_at") or "")
-    results_ts = str(results.get("generated_at") or "")
-    if not routing_ts or not results_ts:
-        return False
-    return routing_ts >= results_ts
-
-
 def _qa_suggested_next_skill(state: dict) -> str:
     results = _qa_results_payload()
-    routing = _load_json(project / ".samvil" / "qa-routing.json")
-    primary = routing.get("primary_route") or {}
-    routed = str(primary.get("next_skill") or "")
-    if routed and routed != "samvil-qa" and _routing_is_current(routing, results):
-        return routed
     synthesis = results.get("synthesis") or {}
     if not synthesis:
         return ""
@@ -321,24 +304,8 @@ try:
         except Exception:
             return {}
 
-    def _routing_is_current(routing, results):
-        if not routing:
-            return False
-        if not results:
-            return False
-        routing_ts = str(routing.get("generated_at") or "")
-        results_ts = str(results.get("generated_at") or "")
-        if not routing_ts or not results_ts:
-            return False
-        return routing_ts >= results_ts
-
     def _qa_next_skill(project):
         results = _load_json(project / ".samvil" / "qa-results.json")
-        routing = _load_json(project / ".samvil" / "qa-routing.json")
-        primary = routing.get("primary_route") or {}
-        routed = str(primary.get("next_skill") or "")
-        if routed and routed != "samvil-qa" and _routing_is_current(routing, results):
-            return routed
         synthesis = results.get("synthesis") or {}
         if not synthesis:
             return None

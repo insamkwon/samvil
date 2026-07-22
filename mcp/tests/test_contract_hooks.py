@@ -397,6 +397,55 @@ def test_qa_stage_end_ignores_stale_qa_routing(tmp_path: Path) -> None:
     assert '"subject": "any_to_retro"' not in claims
 
 
+def test_qa_stage_end_ignores_future_qa_routing(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_json(
+        project / "project.state.json",
+        {"samvil_tier": "standard", "current_stage": "qa"},
+    )
+    _write_json(project / "project.seed.json", {"schema_version": "3.2"})
+    _write_json(
+        project / ".samvil" / "qa-routing.json",
+        {
+            "generated_at": "2099-01-01T00:00:00Z",
+            "primary_route": {"next_skill": "samvil-retro"},
+        },
+    )
+    _write_json(
+        project / ".samvil" / "qa-results.json",
+        {
+            "generated_at": "2026-07-22T00:00:01Z",
+            "synthesis": {
+                "verdict": "PASS",
+                "verification_mode": "runtime",
+                "pass1": {"status": "PASS"},
+                "pass2": {"counts": {"PASS": 1, "PARTIAL": 0, "UNIMPLEMENTED": 0, "FAIL": 0}},
+                "pass3": {"verdict": "PASS"},
+            },
+            "convergence": {"verdict": "continue"},
+        },
+    )
+
+    subprocess.run(
+        [
+            "bash",
+            str(REPO / "hooks" / "contract-stage-end.sh"),
+            json.dumps({"skill": "samvil-qa"}),
+            "0",
+        ],
+        cwd=project,
+        env=_stage_end_env(tmp_path, project),
+        check=True,
+    )
+
+    marker = json.loads((project / ".samvil" / "next-skill.json").read_text())
+    claims = (project / ".samvil" / "claims.jsonl").read_text()
+    assert marker["next_skill"] == "samvil-deploy"
+    assert '"subject": "qa_to_deploy"' in claims
+    assert '"subject": "any_to_retro"' not in claims
+
+
 def test_qa_stage_end_ignores_routing_without_qa_results(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
