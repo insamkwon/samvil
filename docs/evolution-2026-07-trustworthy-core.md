@@ -309,6 +309,58 @@ v4.31이 시작한 방향의 완성이다.
     `mcp/samvil_mcp/host_adapters.py:120`,
     `scripts/check-host-parity.py:114`, `scripts/check-host-parity.py:116`,
     `mcp/tests/test_chain_markers.py:56`, `mcp/tests/test_host_adapters.py:140`.
+- [x] **재리뷰에서 남은 destructive guard 우회 경로 차단**
+  `source`/`.`로 읽는 shell script, SQL include 파일, root SSOT 파일 recursive 삭제를
+  fail-closed로 차단한다. `.samvil/cache`와 `.next`의 의도된 cache 삭제 예외는 유지한다.
+  - 완료 증거: `7149e0c`; `hooks/guard_destructive.py:19`,
+    `hooks/guard_destructive.py:20`, `hooks/guard_destructive.py:590`,
+    `hooks/guard_destructive.py:673`, `hooks/guard_destructive.py:703`,
+    `mcp/tests/test_guard_destructive.py:97`,
+    `mcp/tests/test_guard_destructive.py:251`,
+    `mcp/tests/test_guard_destructive.py:264`,
+    `mcp/tests/test_guard_destructive.py:387`,
+    `mcp/tests/test_guard_destructive.py:401`.
+- [x] **PM interview stage-end가 seed gate로 오인되지 않게 분리**
+  `samvil-pm-interview`는 `interview` gate에 접지 않고 `pm-interview` stage로 보존해
+  no-gate recovery marker가 `samvil-design`으로 이어지게 한다.
+  - 완료 증거: `f0f85fe`; `hooks/_contract-helpers.sh:182`,
+    `hooks/_contract-helpers.sh:183`, `hooks/_contract-helpers.sh:204`,
+    `mcp/tests/test_contract_hooks.py:197`,
+    `mcp/tests/test_contract_hooks.py:223`.
+- [x] **QA 반복 실패 BLOCKED를 현재 synthesis 기준으로 handoff에 반영**
+  `finalize_qa_verdict`의 `blocked` 출력이 이미 계산된 current convergence를 신뢰하게
+  연결해, 두 번째 반복 실패부터 handoff가 manual intervention 필요성을 드러낸다.
+  - 완료 증거: `9c286ec`; `mcp/samvil_mcp/qa_finalize.py:544`,
+    `mcp/samvil_mcp/qa_finalize.py:547`,
+    `mcp/samvil_mcp/qa_finalize.py:550`,
+    `mcp/tests/test_qa_smoke.py:744`,
+    `mcp/tests/test_qa_smoke.py:766`,
+    `mcp/tests/test_qa_smoke.py:771`.
+- [x] **QA stage-end routing 기준을 현재 `qa-results.json`으로 단일화**
+  stale/future `qa-routing.json`이 현재 runtime PASS 결과를 덮어 retro/evolve marker를
+  쓰지 못하게, stage-end hook은 current synthesis의 next-skill decision만 사용한다.
+  - 완료 증거: `d254b8f`; `hooks/contract-stage-end.sh:120`,
+    `hooks/contract-stage-end.sh:122`, `hooks/contract-stage-end.sh:136`,
+    `hooks/contract-stage-end.sh:319`,
+    `mcp/tests/test_contract_hooks.py:400`,
+    `mcp/tests/test_contract_hooks.py:411`,
+    `mcp/tests/test_contract_hooks.py:444`,
+    `mcp/tests/test_contract_hooks.py:446`.
+- [x] **호스트 문서 SSOT와 dynamic orchestrator chain 문구 정렬**
+  host parity가 `.samvil/project.state.json` 재도입을 잡게 하고, Codex orchestrator의
+  Chain 안내를 hard-coded `samvil-interview`가 아닌 `<chain.next_skill>` 기준으로 고쳤다.
+  - 완료 증거: `56d8d61`; `scripts/check-host-parity.py:53`,
+    `AGENTS.md:102`, `references/codex-commands/samvil.md:43`,
+    `references/codex-commands/samvil.md:45`,
+    `mcp/tests/test_host_parity.py:115`.
+- [x] **benchmark 외부 fetch resource cap 추가**
+  MCP로 노출된 changelog fetch가 arbitrary URL/timeout으로 worker를 오래 붙잡거나
+  대용량 응답을 통째로 읽지 않도록 timeout clamp와 byte cap을 둔다.
+  - 완료 증거: `136114a`; `mcp/samvil_mcp/benchmark.py:42`,
+    `mcp/samvil_mcp/benchmark.py:52`, `mcp/samvil_mcp/benchmark.py:70`,
+    `mcp/samvil_mcp/benchmark.py:71`, `mcp/tests/test_benchmark.py:82`,
+    `mcp/tests/test_benchmark.py:93`, `mcp/tests/test_benchmark.py:98`,
+    `mcp/tests/test_benchmark.py:111`.
 
 ---
 
