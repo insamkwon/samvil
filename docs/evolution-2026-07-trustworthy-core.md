@@ -243,6 +243,35 @@ v4.31이 시작한 방향의 완성이다.
     `hooks/contract-stage-end.sh:296`, `mcp/tests/test_contract_hooks.py:197`,
     `mcp/tests/test_contract_hooks.py:238`.
 
+### Wave 0 PR review hardening — 2026-07-22
+
+- [x] **QA deploy gate block 시 recovery marker 쓰기 중단**
+  QA 결과가 static-only PASS라 `qa_to_deploy=block`이면 안전한 다음 단계가 없으므로
+  `.samvil/next-skill.json`을 쓰지 않는다. stale `qa-routing.json`은 현재
+  `qa-results.json`보다 최신일 때만 marker routing에 사용한다.
+  - 완료 증거: `689a3e6`; `hooks/contract-stage-end.sh:120`,
+    `hooks/contract-stage-end.sh:132`, `hooks/contract-stage-end.sh:296`,
+    `hooks/contract-stage-end.sh:301`, `hooks/contract-stage-end.sh:324`,
+    `mcp/tests/test_contract_hooks.py:279`, `mcp/tests/test_contract_hooks.py:315`,
+    `mcp/tests/test_contract_hooks.py:320`, `mcp/tests/test_contract_hooks.py:364`.
+- [x] **`.samvil` SSOT 삭제를 destructive guard에서 차단**
+  `.samvil/cache`만 명시 예외로 남기고 `.samvil`, `.samvil/claims.jsonl`,
+  `.samvil/next-skill.json` 같은 상태 원장은 recursive rm 대상이면 차단한다.
+  - 완료 증거: `19353f5`; `hooks/guard_destructive.py:570`,
+    `hooks/guard_destructive.py:571`, `hooks/guard_destructive.py:580`,
+    `hooks/guard_destructive.py:584`, `mcp/tests/test_guard_destructive.py:94`,
+    `mcp/tests/test_guard_destructive.py:95`, `mcp/tests/test_guard_destructive.py:96`,
+    `mcp/tests/test_guard_destructive.py:186`, `mcp/tests/test_guard_destructive.py:187`.
+- [x] **destructive SQL 탐지 범위 확장**
+  기존 `DROP TABLE|DATABASE|SCHEMA`, `TRUNCATE TABLE`, `DELETE FROM`에 더해
+  `ALTER TABLE ... DROP COLUMN|CONSTRAINT`, `DROP ROLE`, `DROP VIEW` 등 schema/role
+  파괴 명령을 SQL client 경로에서 차단한다.
+  - 완료 증거: `d670626`; `hooks/guard_destructive.py:673`,
+    `hooks/guard_destructive.py:675`, `hooks/guard_destructive.py:680`,
+    `mcp/tests/test_guard_destructive.py:161`, `mcp/tests/test_guard_destructive.py:162`,
+    `mcp/tests/test_guard_destructive.py:163`, `mcp/tests/test_guard_destructive.py:164`,
+    `mcp/tests/test_guard_destructive.py:199`.
+
 ---
 
 ## 4. Wave 1 — 이벤트 저장소 단일화 + SSOT 크래시 내성 (균열 ②③)
