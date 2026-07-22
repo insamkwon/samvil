@@ -670,7 +670,15 @@ def _has_destructive_sql(text: str) -> bool:
     without_line_comments = re.sub(r"--[^\n]*(?:\n|$)", " ", without_block_comments)
     return bool(
         re.search(
-            r"\b(?:drop\s+(?:table|database|schema)|truncate\s+table|delete\s+from)\b",
+            r"\b(?:"
+            r"drop\s+(?:"
+            r"table|database|schema|role|user|view|materialized\s+view|index|"
+            r"sequence|function|procedure|trigger|type|policy|extension"
+            r")"
+            r"|truncate\s+table"
+            r"|delete\s+from"
+            r"|alter\s+table\b[^;]*\bdrop\s+(?:column|constraint)\b"
+            r")\b",
             without_line_comments,
             re.IGNORECASE,
         )
