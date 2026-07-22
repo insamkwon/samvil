@@ -541,8 +541,20 @@ def finalize_qa_verdict(
     # Gate input.
     report.gate_input = _build_gate_input(synthesis, report.samvil_tier)
 
-    # Ralph-loop BLOCKED detection.
-    report.blocked = _detect_blocked(qa_history)
+    # Ralph-loop BLOCKED detection. `convergence` includes the current
+    # synthesis; the legacy helper only sees already-persisted history.
+    history_blocked = _detect_blocked(qa_history)
+    if str(report.convergence.get("verdict") or "").casefold() == "blocked":
+        report.blocked = {
+            "detected": True,
+            "persistent_issue_ids": list(
+                report.convergence.get("issue_ids")
+                or history_blocked.get("persistent_issue_ids")
+                or []
+            ),
+        }
+    else:
+        report.blocked = history_blocked
 
     # Next-skill decision.
     report.next_skill_decision = _decide_next_skill(synthesis, state)

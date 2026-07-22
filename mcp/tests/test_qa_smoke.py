@@ -741,6 +741,35 @@ class TestQAFinalize:
         assert "x" in result["handoff_block"]
         assert "y" in result["handoff_block"]
 
+    def test_cl_6b_current_repeated_issue_is_carried_in_handoff(
+        self, tmp_path: Path
+    ) -> None:
+        history = [
+            {"iteration": 1, "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"]},
+        ]
+        _write(tmp_path / "project.state.json", _state(qa_history=history))
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path,
+            evidence=_make_evidence(
+                pass2_items=[
+                    {
+                        "id": "AC-1",
+                        "criterion": "Create task",
+                        "verdict": "UNIMPLEMENTED",
+                        "reason": "stub",
+                    },
+                ],
+                iteration=2,
+            ),
+        )
+
+        assert result["convergence"]["verdict"] == "blocked"
+        assert result["blocked"]["detected"] is True
+        assert result["blocked"]["persistent_issue_ids"] == [
+            "pass2:AC-1:UNIMPLEMENTED"
+        ]
+        assert "BLOCKED" in result["handoff_block"]
+
     def test_cl_7_next_skill_pass_to_deploy(self, tmp_path: Path) -> None:
         _write(tmp_path / "project.state.json", _state())
         result = qa_finalize.finalize_qa_verdict(
