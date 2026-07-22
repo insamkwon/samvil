@@ -93,7 +93,9 @@ Print:
 
 Resolve `mcp__samvil_mcp__resolve_host_capability(host_name="<host>")` + `mcp__samvil_mcp__host_chain_strategy(host_name="<host>")`.
 
-- Default greenfield route is `samvil-interview`; PM/brownfield/resume modes use the returned `chain.next_skill` target.
+- Default greenfield route is `samvil-interview`; PM-mode route is
+  `samvil-pm-interview`; brownfield/resume modes use the returned
+  `chain.next_skill` target such as `samvil-analyze`.
 - `chain_via=skill_tool` → invoke `chain.next_skill` directly via the Skill tool.
 - `chain_via=file_marker` → write `.samvil/next-skill.json` (`schema_version="1.0"`, `chain_via="file_marker"`, `host`, `next_skill=chain.next_skill`, `reason=chain.reason`, `from_stage="orchestrator"`, `created_by="samvil"`) and tell the user to invoke that skill manually.
 - `chain_via=manual` → instruct the user to run the next skill explicitly.

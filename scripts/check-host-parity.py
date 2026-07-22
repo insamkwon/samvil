@@ -111,8 +111,9 @@ CODEX_AUTO_PROCEED_REQUIRED: set[str] = {"samvil-evolve", "samvil-retro"}
 # replacement (for example samvil-seed -> samvil-retro) cannot hide behind a
 # generic "chain" or "next" section.
 CHAIN_TARGETS_REQUIRED: dict[str, set[str]] = {
-    "samvil": {"samvil-interview"},
+    "samvil": {"samvil-interview", "samvil-pm-interview", "samvil-analyze"},
     "samvil-interview": {"samvil-seed", "samvil-build"},
+    "samvil-pm-interview": {"samvil-design", "samvil-council"},
     "samvil-seed": {"samvil-design", "samvil-council"},
     "samvil-council": {"samvil-design"},
     "samvil-design": {"samvil-scaffold"},

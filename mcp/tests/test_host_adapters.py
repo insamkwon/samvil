@@ -137,6 +137,18 @@ class TestGetChainContinuation:
         assert result["next_skill"] == "samvil-qa"
         assert result["command"] == "samvil samvil-qa"
 
+    def test_pm_interview_defaults_to_design_after_seed_conversion(self):
+        for host, command in {
+            "claude_code": "/samvil:samvil-design",
+            "codex_cli": "samvil samvil-design",
+            "opencode": "samvil samvil-design",
+            "gemini_cli": "/samvil samvil-design",
+            "generic": "samvil samvil-design",
+        }.items():
+            result = get_chain_continuation(host, "samvil-pm-interview")
+            assert result["next_skill"] == "samvil-design"
+            assert result["command"] == command
+
     def test_unknown_skill_empty(self):
         result = get_chain_continuation("claude_code", "nonexistent")
         assert result["next_skill"] == ""

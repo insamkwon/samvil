@@ -117,7 +117,7 @@ _GENERIC_ALIASES: dict[str, str] = {
 _SKILL_CHAIN: list[dict[str, str]] = [
     {"name": "samvil", "next": "samvil-interview"},
     {"name": "samvil-interview", "next": "samvil-seed"},
-    {"name": "samvil-pm-interview", "next": "samvil-seed"},
+    {"name": "samvil-pm-interview", "next": "samvil-design"},
     {"name": "samvil-seed", "next": "samvil-design"},
     {"name": "samvil-council", "next": "samvil-design"},
     {"name": "samvil-design", "next": "samvil-scaffold"},

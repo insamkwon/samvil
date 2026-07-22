@@ -12,7 +12,8 @@
    prompt="<user's one-line idea>", host_name="codex_cli",
    council_opt_in=<exact --council flag present>)`.
    - Captures: `tier.samvil_tier`, `solution_type.solution_type`,
-     `brownfield.is_brownfield`, `council_opt_in`, `chain.next_skill`.
+     `brownfield.is_brownfield`, `is_pm_mode`, `council_opt_in`,
+     `chain.next_skill`.
    - Persist an explicit `--council` token in `project.config.json.flags`;
      absent means Council is default-off.
    - On MCP error: default to `samvil_tier="standard"`, ask user for
@@ -22,9 +23,11 @@
    Persist chosen tier to root `project.config.json` fields `samvil_tier`
    and `selected_tier`.
 6. **Mode** — if `brownfield.is_brownfield` is true: jump to
-   `samvil-analyze.md`. Otherwise proceed as greenfield.
+   `samvil-analyze.md`. PM-mode prompts route to `samvil-pm-interview`;
+   default greenfield prompts route to `samvil-interview`.
 7. Run MCP tool `write_chain_marker(project_root="${PWD}",
-   host_name="codex_cli", current_skill="samvil")`.
+   host_name="codex_cli", current_skill="samvil",
+   next_skill="<chain.next_skill>")`.
 8. Initialize `.samvil/` if needed:
    `mkdir -p .samvil` and create default `project.state.json`:
    `{"current_stage":"interview","completed_stages":[],"samvil_tier":"<chosen>"}`.
@@ -32,7 +35,7 @@
    ```
    [SAMVIL] Starting pipeline for: "<prompt>"
    [SAMVIL] Tier: <samvil_tier>  solution_type: <type>
-   [SAMVIL] Next: samvil-interview
+   [SAMVIL] Next: <chain.next_skill>
    ```
 
 ## Chain

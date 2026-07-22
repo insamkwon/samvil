@@ -53,6 +53,17 @@ class TestWriteChainMarker:
         assert result["next_skill"] == "samvil-evolve"
         assert result["command"] == "samvil samvil-evolve"
 
+    def test_orchestrator_dynamic_override_preserves_pm_route(self, project_root):
+        result = write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil",
+            next_skill="samvil-pm-interview",
+        )
+
+        assert result["next_skill"] == "samvil-pm-interview"
+        assert result["command"] == "samvil samvil-pm-interview"
+
     def test_creates_samvil_dir(self, project_root):
         samvil_dir = Path(project_root) / SAMVIL_DIR
         assert not samvil_dir.exists()
