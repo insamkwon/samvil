@@ -36,6 +36,13 @@ NAMED_NUMERIC_CONSTANT_RE = re.compile(
     r"\b([A-Z][A-Z0-9_]{2,})[ \t]*(?:=|:)[ \t]*(\d+(?:\.\d+)?)\b"
 )
 DECISION_BOUNDARIES_REF = "references/decision-boundaries.md"
+RETIRED_REFERENCE_TOOLS: frozenset[str] = frozenset(
+    {
+        # Trustworthy Core §3.4: deterministic interview_engine output replaced
+        # the model-scored v3.2 readiness helper.
+        "compute_seed_readiness",
+    }
+)
 
 CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
     # (skill_name, skill_path, required substrings)
@@ -375,6 +382,7 @@ def find_unresolved_reference_tools(repo: Path = REPO) -> dict[str, list[str]]:
             candidates = {
                 name for name in raw_candidates
                 if name.split("_", 1)[0] in tool_prefixes
+                or name in RETIRED_REFERENCE_TOOLS
             }
             candidates.update(REFERENCE_TOOL_PREFIXED_RE.findall(line))
             for name in sorted(candidates - registered):

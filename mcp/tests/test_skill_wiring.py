@@ -59,6 +59,29 @@ def test_reference_tool_check_catches_non_allowlisted_tool_prefix(tmp_path: Path
     }
 
 
+def test_reference_tool_check_rejects_removed_interview_readiness_tool(
+    tmp_path: Path,
+) -> None:
+    server = tmp_path / "mcp" / "samvil_mcp" / "server.py"
+    server.parent.mkdir(parents=True)
+    server.write_text(
+        "@mcp.tool()\nasync def score_ambiguity(interview_state: str):\n    pass\n",
+        encoding="utf-8",
+    )
+    references = tmp_path / "references"
+    references.mkdir()
+    (references / "contract-layer-protocol.md").write_text(
+        "Call `compute_seed_readiness(dimensions={})` before the gate.\n",
+        encoding="utf-8",
+    )
+
+    wiring = _load_wiring_module()
+
+    assert wiring.find_unresolved_reference_tools(tmp_path) == {
+        "compute_seed_readiness": ["references/contract-layer-protocol.md:1"]
+    }
+
+
 def test_agents_validate_seed_signature_matches_server_tool() -> None:
     repo = Path(__file__).resolve().parents[2]
     agents = (repo / "AGENTS.md").read_text(encoding="utf-8")

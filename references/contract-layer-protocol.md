@@ -152,6 +152,10 @@ Used when calling `gate_check` at post_stage.
 | qa → deploy | `qa_to_deploy` | `{"three_pass_pass": bool, "zero_stubs": bool, "runtime_verified": bool, "verification_mode": "runtime" \| "static"}` |
 | * (end of chain) | `any_to_retro` | `{"always_run": true}` |
 
+For the interview gate, re-run `score_ambiguity` against the persisted answers.
+Pass its deterministic `seed_readiness` field unchanged and map `converged` to
+`ambiguity_converged`; model-authored readiness dimensions are not accepted.
+
 ## What stays OUT of skills
 
 - **Claim ledger append-only mechanics.** The ledger module handles
