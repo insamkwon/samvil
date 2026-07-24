@@ -52,6 +52,17 @@ def test_current_repo_state_has_parity() -> None:
     assert "SSOT command corpus contract is checked" in result.stdout
 
 
+def test_fresh_codex_boot_creates_and_persists_session_before_chaining() -> None:
+    command = (
+        REPO_ROOT / "references" / "codex-commands" / "samvil.md"
+    ).read_text(encoding="utf-8")
+
+    assert "create_session(" in command
+    assert 'project_root="${PWD}"' in command
+    assert '"session_id":"<returned session_id>"' in command
+    assert command.index("create_session(") < command.index("write_chain_marker(")
+
+
 def test_detects_missing_auto_proceed_heading(tmp_path: Path) -> None:
     """Removing '## Auto-Proceed Policy' from samvil-evolve.md must fail strict."""
     target = REPO_ROOT / "references" / "codex-commands" / "samvil-evolve.md"

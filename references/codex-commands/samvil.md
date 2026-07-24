@@ -25,13 +25,16 @@
 6. **Mode** — if `brownfield.is_brownfield` is true: jump to
    `samvil-analyze.md`. PM-mode prompts route to `samvil-pm-interview`;
    default greenfield prompts route to `samvil-interview`.
-7. Run MCP tool `write_chain_marker(project_root="${PWD}",
+7. **Fresh start only** — run MCP tool
+   `create_session(project_name="<resolved project slug>", samvil_tier="<chosen>", project_root="${PWD}")`.
+   A missing/error `session_id` halts the chain. Initialize `project.state.json`
+   with `{"session_id":"<returned session_id>","current_stage":"<chain.state_stage>","completed_stages":[],"samvil_tier":"<chosen>"}`.
+8. Run MCP tool `write_chain_marker(project_root="${PWD}",
    host_name="codex_cli", current_skill="samvil",
    next_skill="<chain.next_skill>")`.
-8. Initialize `.samvil/` if needed:
-   `mkdir -p .samvil` and create default `project.state.json`:
-   `{"current_stage":"<chain.state_stage>","completed_stages":[],"samvil_tier":"<chosen>"}`.
-9. Print:
+9. Initialize `.samvil/` if needed with `mkdir -p .samvil`; never replace the
+   session-bearing `project.state.json` written in step 7.
+10. Print:
    ```
    [SAMVIL] Starting pipeline for: "<prompt>"
    [SAMVIL] Tier: <samvil_tier>  solution_type: <type>
@@ -42,5 +45,5 @@
 
 After this stage, proceed to the instruction file for `<chain.next_skill>`.
 The valid targets are `samvil-interview`, `samvil-pm-interview`, and
-`samvil-analyze`; choose the one returned by step 4 and persisted by step 7.
+`samvil-analyze`; choose the one returned by step 4 and persisted by step 8.
 Their paths are listed in the AGENTS.md skill table.
