@@ -13,6 +13,9 @@ agree on the things a user would notice when switching hosts:
 4. **Auto-Proceed Policy** — Codex commands for mechanical-only stages
    (evolve, retro) must declare the auto-proceed policy explicitly. CC
    SKILL.md is implicit via the Skill tool.
+5. **Gemini QA lifecycle** — the Gemini QA command must finalize and
+   materialize synthesis, pass the route-specific gate, and preserve the
+   dynamic next skill instead of defaulting every outcome to deploy.
 
 Intentional divergences are listed in `references/host-parity-allowlist.yaml`.
 
@@ -59,6 +62,13 @@ FORBIDDEN_SSOT_PATHS: dict[str, tuple[str, str]] = {
         "root interview-summary.md",
     ),
 }
+GEMINI_QA_REQUIRED_MARKERS: tuple[str, ...] = (
+    "finalize_qa_verdict",
+    "materialize_qa_synthesis",
+    "gate_check",
+    'next_skill="<finalize.next_skill_decision.suggested>"',
+    "do not write a marker",
+)
 
 # Host-specific core tools. CC uses aggregator-style helpers
 # (e.g., aggregate_build_phase_a) while Codex uses lower-level
@@ -326,6 +336,20 @@ def ssot_path_contract_issues() -> list[str]:
     return issues
 
 
+def gemini_qa_lifecycle_contract_issues() -> list[str]:
+    """Gemini QA must preserve the same finalized dynamic route as other hosts."""
+    path = GEMINI_DIR / "samvil-qa.toml"
+    if not path.exists():
+        return ["Gemini QA lifecycle contract: missing samvil-qa.toml"]
+    text = path.read_text(encoding="utf-8")
+    return [
+        "Gemini QA lifecycle contract: "
+        f"references/gemini-commands/samvil-qa.toml missing {marker}"
+        for marker in GEMINI_QA_REQUIRED_MARKERS
+        if marker not in text
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     parser.add_argument(
@@ -351,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
         allowed = allowlist.get(name, {})
         issues.extend(check_pair(name, cc_text, codex_text, all_tools, allowed))
     issues.extend(ssot_path_contract_issues())
+    issues.extend(gemini_qa_lifecycle_contract_issues())
 
     if issues:
         print("✗ host parity check found issues:")

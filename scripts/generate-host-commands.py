@@ -75,6 +75,8 @@ Read `.samvil/next-skill.json`. If `next_skill` is not `{skill_name}`, skip this
 
 
 def _gemini_template(skill_name: str, next_skill: str) -> str:
+    if skill_name == "samvil-qa":
+        return _gemini_qa_template()
     desc = _SKILL_DESCRIPTIONS.get(skill_name, skill_name)
     chain_note = f'Read `.samvil/next-skill.json` for the next stage ({next_skill}) and report to the user.' if next_skill else "This is a terminal skill — no automatic chain continuation."
     return f"""prompt = \"\"\"
@@ -90,7 +92,7 @@ If `next_skill` is not `{skill_name}`, skip and report the expected stage.
 ## Execution
 
 1. Use MCP tool `read_chain_marker` with project_root to confirm stage.
-2. Read `.samvil/project.seed.json` for seed context.
+2. Read `project.seed.json` for seed context.
 3. Execute the {skill_name} stage logic (see `skills/{skill_name}/SKILL.md`).
 4. On completion, use MCP tool `write_chain_marker` with project_root="${{PWD}}",
    host_name="gemini_cli", current_skill="{skill_name}".
@@ -100,6 +102,35 @@ If `next_skill` is not `{skill_name}`, skip and report the expected stage.
 {chain_note}
 \"\"\"
 """
+
+
+def _gemini_qa_template() -> str:
+    return '''prompt = """
+SAMVIL pipeline stage: samvil-qa.
+
+## Prerequisites
+
+Use MCP tool `read_chain_marker` with project_root="${PWD}" to check pipeline position.
+If `next_skill` is not `samvil-qa`, skip and report the expected stage.
+
+## Execution
+
+1. Read `project.seed.json` and execute the full `skills/samvil-qa/SKILL.md` QA flow.
+2. Call `finalize_qa_verdict` and read `finalize.next_skill_decision.suggested`.
+3. Call `materialize_qa_synthesis` before any chain continuation.
+4. Run the route-specific `gate_check`; tool error or any verdict other than exact
+   `pass` halts and must not write a marker.
+5. Only after materialization and gate PASS, call `write_chain_marker` with
+   project_root="${PWD}", host_name="gemini_cli", current_skill="samvil-qa",
+   next_skill="<finalize.next_skill_decision.suggested>".
+6. If the suggested skill is `samvil-qa`, remain in the Ralph loop and do not write a marker.
+
+## Chain
+
+Read `.samvil/next-skill.json` for the finalized dynamic Deploy/Evolve/Retro route
+and report the next command to the user.
+"""
+'''
 
 
 def generate_codex(force: bool, dry_run: bool) -> list[str]:

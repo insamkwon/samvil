@@ -13,6 +13,7 @@ repo state.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -23,6 +24,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "check-host-parity.py"
+GENERATOR = REPO_ROOT / "scripts" / "generate-host-commands.py"
 
 
 def _run(*args: str) -> subprocess.CompletedProcess:
@@ -196,6 +198,38 @@ def test_detects_legacy_seed_ssot_path_in_gemini_commands() -> None:
         assert "references/gemini-commands/samvil-seed.toml" in result.stdout
     finally:
         target.write_text(backup, encoding="utf-8")
+
+
+def test_detects_missing_gemini_qa_lifecycle_contract() -> None:
+    target = REPO_ROOT / "references" / "gemini-commands" / "samvil-qa.toml"
+    backup = target.read_text(encoding="utf-8")
+    try:
+        target.write_text(
+            backup.replace("materialize_qa_synthesis", "REMOVED_QA_MATERIALIZER", 1),
+            encoding="utf-8",
+        )
+
+        result = _run("--strict")
+
+        assert result.returncode == 1
+        assert "Gemini QA lifecycle contract" in result.stdout
+        assert "materialize_qa_synthesis" in result.stdout
+    finally:
+        target.write_text(backup, encoding="utf-8")
+
+
+def test_gemini_qa_command_matches_generator() -> None:
+    spec = importlib.util.spec_from_file_location("generate_host_commands", GENERATOR)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    generated = module._gemini_template("samvil-qa", "samvil-deploy")
+    actual = (
+        REPO_ROOT / "references" / "gemini-commands" / "samvil-qa.toml"
+    ).read_text(encoding="utf-8")
+
+    assert generated == actual
 
 
 def test_detects_legacy_seed_ssot_path_in_agents_contract() -> None:
