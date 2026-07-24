@@ -278,17 +278,17 @@ class EventStore:
         token_count: int | None = None,
     ) -> StageTransition:
         """Persist an event and its session-stage transition atomically."""
-        event = Event(
-            id=_uuid(),
-            session_id=session_id,
-            event_type=event_type,
-            stage=stage,
-            data=data or {},
-            timestamp=_now(),
-        )
         async with aiosqlite.connect(self.db_path) as db:
             try:
                 await db.execute("BEGIN IMMEDIATE")
+                event = Event(
+                    id=_uuid(),
+                    session_id=session_id,
+                    event_type=event_type,
+                    stage=stage,
+                    data=data or {},
+                    timestamp=_now(),
+                )
                 session_cursor = await db.execute(
                     "SELECT current_stage, stage_transition_id FROM sessions WHERE id = ?",
                     (session_id,),

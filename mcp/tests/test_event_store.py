@@ -1,5 +1,6 @@
 """Tests for SAMVIL EventStore."""
 
+import asyncio
 import json
 import os
 import sqlite3
@@ -7,6 +8,7 @@ import tempfile
 
 import pytest
 import pytest_asyncio
+import aiosqlite
 
 from samvil_mcp.event_store import EventStore, _migration_plan
 from samvil_mcp.models import EventType, Stage
@@ -204,6 +206,41 @@ async def test_transition_captures_previous_stage_inside_write_transaction(
     assert compensated is True
     assert failed.previous_stage == Stage.SEED
     assert current is not None and current.current_stage == Stage.SEED
+
+
+@pytest.mark.asyncio
+async def test_transition_timestamp_is_created_after_write_lock_acquisition(
+    store: EventStore,
+    monkeypatch,
+) -> None:
+    from samvil_mcp import event_store
+
+    session = await store.create_session("locked-timestamp")
+    timestamps: list[str] = []
+
+    def tracked_now() -> str:
+        timestamps.append("2026-07-25T00:00:00+00:00")
+        return timestamps[-1]
+
+    monkeypatch.setattr(event_store, "_now", tracked_now)
+    blocker = await aiosqlite.connect(store.db_path)
+    await blocker.execute("BEGIN IMMEDIATE")
+    transition_task = asyncio.create_task(
+        store.save_event_and_update_stage(
+            session.id,
+            EventType.STAGE_END,
+            Stage.SEED,
+        )
+    )
+
+    await asyncio.sleep(0.05)
+    timestamps_before_unlock = list(timestamps)
+    await blocker.rollback()
+    await blocker.close()
+    transition = await transition_task
+    assert timestamps_before_unlock == []
+    assert transition.event.timestamp == "2026-07-25T00:00:00+00:00"
+    assert timestamps == ["2026-07-25T00:00:00+00:00"]
 
 
 @pytest.mark.asyncio
