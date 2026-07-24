@@ -436,6 +436,29 @@ v4.31이 시작한 방향의 완성이다.
     `mcp/samvil_mcp/semantic_checker.py:106`,
     `mcp/tests/test_semantic_checker.py:130`,
     `mcp/tests/test_semantic_checker.py:141`.
+- [x] **종료 R3 재검수: 공개 MCP 입력을 trusted runner receipt로 승격하지 않음**
+  caller가 전달한 `runner_exit_code=0`과 성공 문자열은 신뢰 경계를 통과하지 못하며,
+  별도 host adapter가 `trusted_runner=true`를 부여한 경우만 clean evidence로 승인한다.
+  - 완료 증거: `7fbeaf8`; `mcp/samvil_mcp/semantic_checker.py:96`,
+    `mcp/samvil_mcp/semantic_checker.py:101`,
+    `mcp/samvil_mcp/semantic_checker.py:112`,
+    `mcp/tests/test_semantic_checker.py:153`,
+    `mcp/tests/test_semantic_checker.py:164`.
+- [x] **종료 R3 재검수: canonical event 실패의 보조 DB 부분 저장을 보상**
+  `.samvil/events.jsonl` append 실패 시 직전에 넣은 SQLite event를 event id로 삭제하고,
+  보상 성공 여부와 partial persistence를 응답에 명시해 안전한 재시도를 보장한다.
+  - 완료 증거: `a6ed839`; `mcp/samvil_mcp/event_store.py:266`,
+    `mcp/samvil_mcp/server.py:801`, `mcp/samvil_mcp/server.py:805`,
+    `mcp/samvil_mcp/server.py:817`,
+    `mcp/tests/test_orchestrator_mcp.py:206`,
+    `mcp/tests/test_orchestrator_mcp.py:249`.
+- [x] **종료 R3 재검수: QA recovery도 canonical state-aware 결정표를 사용**
+  recovery routing이 root `project.state.json`을 읽어 finalizer와 같은 decision table에
+  전달하고, blocked/failed 상태에서 deploy/QA 같은 전진 경로가 나오면 retro로 fail-closed한다.
+  - 완료 증거: `95cf374`; `mcp/samvil_mcp/qa_routing.py:39`,
+    `mcp/samvil_mcp/qa_routing.py:42`, `mcp/samvil_mcp/qa_routing.py:132`,
+    `mcp/samvil_mcp/qa_routing.py:150`,
+    `mcp/tests/test_qa_routing.py:76`, `mcp/tests/test_qa_routing.py:91`.
 
 ---
 
