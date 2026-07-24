@@ -389,7 +389,7 @@ def test_save_event_never_persists_raw_prompt_email_or_token(
         ))
         result = json.loads(await save_event(
             sess["session_id"],
-            "stage_change",
+            raw_prompt,
             "interview",
             json.dumps({"app": raw_prompt, "note": raw_prompt}),
         ))
@@ -401,10 +401,12 @@ def test_save_event_never_persists_raw_prompt_email_or_token(
     _run(runner())
 
     persisted = (project_root / ".samvil" / "events.jsonl").read_text(encoding="utf-8")
-    claims = (project_root / ".samvil" / "claims.jsonl").read_text(encoding="utf-8")
+    claims_path = project_root / ".samvil" / "claims.jsonl"
+    claims = claims_path.read_text(encoding="utf-8") if claims_path.exists() else ""
     assert raw_prompt not in persisted
     assert "person@example.com" not in persisted
     assert "fixture-secret" not in persisted
+    assert "redacted_event_type" in persisted
     assert raw_prompt not in claims
 
 

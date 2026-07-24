@@ -18,6 +18,7 @@ _CREDENTIAL = re.compile(
 )
 _MAX_STRING_LENGTH = 4096
 _MAX_DEPTH = 8
+_SAFE_EVENT_LABEL = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
 
 
 def _redact_string(value: str) -> str:
@@ -51,3 +52,9 @@ def sanitize_event_data(value: Any, *, _depth: int = 0) -> Any:
     if value is None or isinstance(value, (bool, int, float)):
         return value
     return _redact_string(str(value))
+
+
+def sanitize_event_label(value: str) -> str:
+    """Keep stable machine labels only; never persist arbitrary caller prose."""
+    normalized = value.strip().casefold()
+    return normalized if _SAFE_EVENT_LABEL.fullmatch(normalized) else "redacted_event_type"

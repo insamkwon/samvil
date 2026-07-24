@@ -74,7 +74,7 @@ from .scaffold_targets import (
     evaluate_scaffold_target as _evaluate_scaffold_target,
 )
 from .ssot_io import atomic_write_text
-from .event_sanitizer import sanitize_event_data
+from .event_sanitizer import sanitize_event_data, sanitize_event_label
 from .build_phase_a import (
     aggregate_build_phase_a as _aggregate_build_phase_a,
 )
@@ -782,13 +782,14 @@ async def save_event(
         if not isinstance(parsed_data, dict):
             raise ValueError("event data must be a JSON object")
         parsed_data = sanitize_event_data(parsed_data)
+        persisted_event_type = sanitize_event_label(event_type)
 
         # Lenient EventType: try the enum, fall back to STAGE_CHANGE.
         try:
             event_type_enum = EventType(event_type)
         except ValueError:
             event_type_enum = EventType.STAGE_CHANGE
-            parsed_data.setdefault("event_type_raw", event_type)
+            parsed_data.setdefault("event_type_raw", persisted_event_type)
 
         # Lenient Stage: fall back to STAGE_CHANGE's stage if unknown.
         try:
@@ -830,8 +831,8 @@ async def save_event(
                     _append_project_event,
                     project_path,
                     timestamp=event.timestamp,
-                    event_type=event_type,
-                    stage=_canonical_stage_for_event(event_type, stage_enum.value),
+                    event_type=persisted_event_type,
+                    stage=_canonical_stage_for_event(persisted_event_type, stage_enum.value),
                     session_id=session_id,
                     data=parsed_data,
                 )
@@ -865,7 +866,7 @@ async def save_event(
         # v3.2 contract-layer auto-claim (best-effort, never blocks).
         await _auto_post_claim_for_event(
             session_id,
-            event_type,
+            persisted_event_type,
             stage,
             parsed_data,
             canonical_evidence=canonical_evidence,
