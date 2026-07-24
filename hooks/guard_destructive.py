@@ -79,6 +79,14 @@ ENV_OPTIONS_WITH_VALUE = {"-C", "-S", "-u", "--chdir", "--split-string", "--unse
 EXEC_OPTIONS_WITH_VALUE = {"-a"}
 SHELL_OPTIONS_WITH_VALUE = {"--init-file", "--rcfile", "-o"}
 SQL_FILE_OPTIONS_WITH_VALUE = {"-f", "--file"}
+SQL_COMMAND_OPTIONS_WITH_VALUE = {
+    "-c",
+    "-e",
+    "-q",
+    "-Q",
+    "--command",
+    "--execute",
+}
 UNINSPECTABLE_PATH_CHARS = "`$*?[{"
 _SCRIPT_INSPECTION_STACK: list[str] = []
 
@@ -693,11 +701,50 @@ def _rm_reason(args: list[str]) -> str | None:
 def _sql_reason(executable: str, args: list[str]) -> str | None:
     if executable not in SQL_CLIENTS:
         return None
-    if _has_destructive_sql(" ".join(args)):
-        return "destructive SQL statement"
+    payloads = _sql_command_payloads(args) or [" ".join(args)]
+    for payload in payloads:
+        meta_reason = _sql_meta_shell_reason(payload)
+        if meta_reason:
+            return meta_reason
+        if _has_dynamic_destructive_sql(payload) or _has_destructive_sql(payload):
+            return "destructive SQL statement"
     file_reason = _sql_file_reason(args)
     if file_reason:
         return file_reason
+    return None
+
+
+def _sql_command_payloads(args: list[str]) -> list[str]:
+    payloads: list[str] = []
+    index = 0
+    while index < len(args):
+        token = args[index]
+        key = token.split("=", 1)[0]
+        if key in SQL_COMMAND_OPTIONS_WITH_VALUE:
+            if "=" in token:
+                payloads.append(token.split("=", 1)[1])
+                index += 1
+                continue
+            if len(token) > 2 and key in {"-c", "-e", "-q", "-Q"}:
+                payloads.append(token[2:])
+                index += 1
+                continue
+            if index + 1 < len(args):
+                payloads.append(args[index + 1])
+                index += 2
+                continue
+        index += 1
+    return payloads
+
+
+def _sql_meta_shell_reason(text: str) -> str | None:
+    for raw_line in text.splitlines() or [text]:
+        line = raw_line.lstrip()
+        if not line.startswith(r"\!"):
+            continue
+        nested = analyze_command(line[2:].lstrip())
+        if nested:
+            return "SQL client shell command with destructive command"
     return None
 
 
@@ -894,6 +941,87 @@ def _sql_sequence_at(tokens: list[str], index: int, sequence: tuple[str, ...]) -
     return tokens[index : index + len(sequence)] == list(sequence)
 
 
+def _sql_string_literals(text: str) -> list[str]:
+    literals: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] != "'":
+            index += 1
+            continue
+        index += 1
+        value: list[str] = []
+        while index < len(text):
+            if text[index] == "\\" and index + 1 < len(text):
+                value.append(text[index + 1])
+                index += 2
+                continue
+            if text[index] == "'":
+                if index + 1 < len(text) and text[index + 1] == "'":
+                    value.append("'")
+                    index += 2
+                    continue
+                index += 1
+                break
+            value.append(text[index])
+            index += 1
+        literals.append("".join(value))
+    return literals
+
+
+def _sql_without_string_literals(text: str) -> str:
+    output: list[str] = []
+    index = 0
+    in_literal = False
+    while index < len(text):
+        char = text[index]
+        if not in_literal and char == "'":
+            in_literal = True
+            output.append(" ")
+            index += 1
+            continue
+        if in_literal:
+            if char == "\\" and index + 1 < len(text):
+                output.extend((" ", " "))
+                index += 2
+                continue
+            if char == "'":
+                if index + 1 < len(text) and text[index + 1] == "'":
+                    output.extend((" ", " "))
+                    index += 2
+                    continue
+                in_literal = False
+            output.append(" ")
+            index += 1
+            continue
+        output.append(char)
+        index += 1
+    return "".join(output)
+
+
+def _has_dynamic_destructive_sql(text: str) -> bool:
+    without_literals = _sql_without_string_literals(text)
+    if re.search(r"\\gexec\b", without_literals, re.IGNORECASE):
+        return True
+    tokens = _sql_tokens(text)
+    dynamic_execution = (
+        "PREPARE" in tokens
+        or "SP_EXECUTESQL" in tokens
+        or any(
+            _sql_sequence_at(tokens, index, sequence)
+            for index in range(len(tokens))
+            for sequence in (("EXECUTE", "IMMEDIATE"), ("EXEC",))
+        )
+    )
+    if not dynamic_execution:
+        return False
+    literals = _sql_string_literals(text)
+    if any(_has_destructive_sql(literal) for literal in literals):
+        return True
+    if "PREPARE" in tokens and "FROM" in tokens and not literals:
+        return True
+    return False
+
+
 def _has_destructive_sql(text: str) -> bool:
     tokens = _sql_tokens(text)
     drop_objects = (
@@ -944,6 +1072,8 @@ def _has_destructive_sql(text: str) -> bool:
         if token == "TRUNCATE":
             return True
         if token == "DELETE":
+            if index == 0 or tokens[index - 1] in {";", "THEN"}:
+                return True
             for following in tokens[index + 1 :]:
                 if following == ";":
                     break

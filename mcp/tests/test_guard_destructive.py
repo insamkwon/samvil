@@ -239,6 +239,38 @@ def test_destructive_words_inside_sql_string_literal_pass() -> None:
 @pytest.mark.parametrize(
     "command",
     [
+        "mysql -e \"PREPARE stmt FROM 'DROP TABLE users'; EXECUTE stmt\"",
+        "psql -c \"SELECT 'DROP TABLE users;' \\\\gexec\"",
+        "psql -c '\\! rm -f project.seed.json'",
+        "sqlcmd -Q 'DELETE dbo.Users WHERE id = 1'",
+        "sqlcmd -Q 'DELETE TOP (1) dbo.Users WHERE id = 1'",
+        "sqlcmd -Q 'MERGE dbo.Users AS target USING src ON 1=1 WHEN MATCHED THEN DELETE;'",
+    ],
+)
+def test_dynamic_and_dialect_specific_sql_deletion_is_blocked(command: str) -> None:
+    result = run_guard(command)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "mysql -e \"PREPARE stmt FROM 'SELECT 1'; EXECUTE stmt\"",
+        "psql -c '\\! echo safe'",
+        "sqlcmd -Q 'GRANT DELETE ON dbo.Users TO app_user'",
+    ],
+)
+def test_safe_dynamic_or_permission_sql_variants_pass(command: str) -> None:
+    result = run_guard(command)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "rm -f project.seed.json",
         "rm project.state.json",
         "rm --force ./project.config.json",
