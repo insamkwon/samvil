@@ -12,7 +12,9 @@ from .test_deliverable import feature_spec_filename
 
 
 VERIFY_KEYS = frozenset({"command", "artifacts", "assertion"})
-BROWSER_SOLUTION_TYPES = frozenset({"web-app", "dashboard", "game"})
+BROWSER_SOLUTION_TYPES = frozenset(
+    {"web-app", "dashboard", "game", "mobile-app"}
+)
 _BACKTICK_COMMAND = re.compile(r"`([^`]+)`")
 _SHELL_SYNTAX = re.compile(r"[\r\n;&|<>`$(){}]")
 

@@ -51,6 +51,21 @@ def test_browser_ac_contracts_reuse_feature_playwright_spec() -> None:
     assert prepared["filled_count"] == 2
 
 
+def test_mobile_app_ac_contracts_generate_expo_web_playwright_evidence() -> None:
+    seed = _seed("mobile-app")
+    seed["tech_stack"] = {"framework": "expo"}
+
+    prepared = prepare_seed_verify_contracts(seed)
+    leaves = prepared["seed"]["features"][0]["acceptance_criteria"]
+
+    assert leaves[0]["verify"] == {
+        "command": "npx playwright test tests/e2e/task-list.spec.ts"
+    }
+    assert leaves[1]["children"][0]["verify"] == leaves[0]["verify"]
+    assert prepared["filled_count"] == 2
+    assert prepared["automation_candidates"] == []
+
+
 def test_existing_verify_contract_is_preserved() -> None:
     seed = _seed()
     existing = {"command": "npm run test:unit", "assertion": "12 passed"}
