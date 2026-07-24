@@ -42,6 +42,7 @@ SUCCESS_EVENT_TO_COMPLETED_STAGE = {
     "interview_complete": "interview",
     "seed_generated": "seed",
     "pm_seed_complete": "seed",
+    "pm_seed_converted": "seed",
     "council_complete": "council",
     "council_verdict": "council",
     "design_complete": "design",

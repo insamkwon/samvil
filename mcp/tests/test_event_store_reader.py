@@ -235,6 +235,7 @@ def test_completed_stage_event_without_state_is_not_in_flight(project_root: Path
     ("event_type", "stage"),
     [
         ("seed_generated", "seed"),
+        ("pm_seed_converted", "seed"),
         ("qa_pass", "qa"),
         ("build_pass", "build"),
         ("council_verdict", "council"),
