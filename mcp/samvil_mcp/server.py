@@ -1752,7 +1752,8 @@ async def semantic_check(
     try:
         from .semantic_checker import analyze_code_snippet
         return json.dumps(
-            analyze_code_snippet(
+            await asyncio.to_thread(
+                analyze_code_snippet,
                 code,
                 context_hint,
                 shell_command=shell_command,

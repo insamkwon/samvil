@@ -137,3 +137,22 @@ def test_seed_v3_3_migration_is_offloaded(monkeypatch) -> None:
     monkeypatch.setattr(migrate_v3_3, "apply_migration", slow_apply)
     delay = asyncio.run(_ticker_delay(server.migrate_seed_v3_3(".")))
     assert delay < 0.1
+
+
+def test_semantic_check_is_offloaded(monkeypatch) -> None:
+    from samvil_mcp import semantic_checker
+
+    def slow_analyze(*args, **kwargs):
+        time.sleep(0.2)
+        return {"risk_level": "LOW", "findings": []}
+
+    monkeypatch.setattr(semantic_checker, "analyze_code_snippet", slow_analyze)
+    delay = asyncio.run(
+        _ticker_delay(
+            server.semantic_check(
+                code="const answer = 42",
+                execution_log="x" * 1_000_000,
+            )
+        )
+    )
+    assert delay < 0.1
