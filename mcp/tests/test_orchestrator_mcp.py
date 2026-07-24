@@ -114,6 +114,7 @@ def _write_valid_blueprint(project_root: Path) -> None:
                     "feature_components": {"tasks": ["TaskList"]},
                 },
                 "routing": {"/": "TaskBoard"},
+                "mobile_considerations": {},
             }
         ),
         encoding="utf-8",
@@ -701,6 +702,136 @@ def test_blueprint_validator_rejects_empty_nested_contracts(
 
 
 @pytest.mark.parametrize(
+    ("solution_type", "case"),
+    [
+        ("web-app", "missing_mobile_considerations"),
+        ("web-app", "invalid_state_management"),
+        ("web-app", "invalid_api_route"),
+        ("dashboard", "invalid_data_source_type"),
+        ("mobile-app", "invalid_navigation_type"),
+        ("mobile-app", "invalid_tab"),
+        ("automation", "invalid_dependency"),
+        ("automation", "invalid_execution_type"),
+        ("automation", "invalid_error_handling"),
+        ("game", "invalid_scene_flow"),
+        ("game", "invalid_asset"),
+    ],
+)
+def test_blueprint_validator_rejects_invalid_leaf_contracts(
+    solution_type: str,
+    case: str,
+) -> None:
+    from samvil_mcp.server import (
+        OrchestratorError,
+        _validate_blueprint_exit_evidence,
+    )
+
+    blueprints = {
+        "web-app": {
+            "screens": ["Home"],
+            "data_model": {"Task": {"id": "string"}},
+            "api_routes": [],
+            "state_management": "useState",
+            "auth_strategy": "none",
+            "key_libraries": ["react"],
+            "component_structure": {
+                "shared_ui": ["Button"],
+                "feature_components": {"tasks": ["TaskList"]},
+            },
+            "routing": {"/": "Home"},
+            "mobile_considerations": {},
+        },
+        "dashboard": {
+            "screens": ["DashboardOverview"],
+            "data_model": {"Metric": {"value": "number"}},
+            "api_routes": [],
+            "state_management": "useState",
+            "auth_strategy": "none",
+            "key_libraries": ["recharts"],
+            "component_structure": {
+                "shared_ui": ["Card"],
+                "feature_components": {"charts": ["LineChart"]},
+            },
+            "routing": {"/": "DashboardOverview"},
+            "chart_components": ["LineChart"],
+            "data_sources": [
+                {"name": "primary", "type": "localStorage", "refresh_interval": None}
+            ],
+            "refresh_interval": None,
+            "alert_thresholds": [],
+            "mobile_considerations": {},
+        },
+        "mobile-app": {
+            "screens": ["HomeScreen"],
+            "navigation": {
+                "type": "tabs",
+                "tabs": [{"name": "Home", "screen": "HomeScreen", "icon": "home"}],
+            },
+            "data_model": {"Task": {"id": "string"}},
+            "state_management": "zustand",
+            "native_modules": [],
+            "key_libraries": ["expo-router", "zustand"],
+            "component_structure": {
+                "shared_ui": ["Button"],
+                "feature_components": {"tasks": ["TaskList"]},
+            },
+        },
+        "automation": {
+            "entry_point": "src/main.py",
+            "modules": {"core": ["main.py"], "utils": ["logger.py"]},
+            "fixtures": {
+                "input": "fixtures/input/",
+                "expected": "fixtures/expected/",
+            },
+            "dependencies": [],
+            "error_handling": "retry_with_logging",
+            "execution": {"type": "cli", "schedule": None},
+        },
+        "game": {
+            "scenes": ["BootScene", "GameScene"],
+            "entities": ["Player"],
+            "game_config": {
+                "width": 800,
+                "height": 600,
+                "physics": "arcade",
+                "input": "keyboard",
+            },
+            "assets": {"sprites": [], "audio": []},
+            "scene_flow": {"BootScene": "GameScene"},
+            "key_libraries": ["phaser"],
+            "state_management": "phaser-scene",
+            "component_structure": {"scenes": [], "entities": [], "config": []},
+        },
+    }
+    blueprint = blueprints[solution_type]
+    if case == "missing_mobile_considerations":
+        blueprint.pop("mobile_considerations")
+    elif case == "invalid_state_management":
+        blueprint["state_management"] = "redux-ish"
+    elif case == "invalid_api_route":
+        blueprint["api_routes"] = [42]
+    elif case == "invalid_data_source_type":
+        blueprint["data_sources"][0]["type"] = "spreadsheet-ish"
+    elif case == "invalid_navigation_type":
+        blueprint["navigation"]["type"] = "carousel"
+    elif case == "invalid_tab":
+        blueprint["navigation"]["tabs"] = [{"name": "Home"}]
+    elif case == "invalid_dependency":
+        blueprint["dependencies"] = [42]
+    elif case == "invalid_execution_type":
+        blueprint["execution"]["type"] = "daemon-ish"
+    elif case == "invalid_error_handling":
+        blueprint["error_handling"] = "ignore_everything"
+    elif case == "invalid_scene_flow":
+        blueprint["scene_flow"] = {"BootScene": 42}
+    elif case == "invalid_asset":
+        blueprint["assets"]["sprites"] = [42]
+
+    with pytest.raises(OrchestratorError, match="design exit evidence is invalid"):
+        _validate_blueprint_exit_evidence(blueprint, solution_type)
+
+
+@pytest.mark.parametrize(
     ("solution_type", "blueprint"),
     [
         (
@@ -727,6 +858,7 @@ def test_blueprint_validator_rejects_empty_nested_contracts(
                 ],
                 "refresh_interval": None,
                 "alert_thresholds": [],
+                "mobile_considerations": {},
             },
         ),
         (
@@ -765,7 +897,12 @@ def test_blueprint_validator_rejects_empty_nested_contracts(
             "mobile-app",
             {
                 "screens": ["HomeScreen"],
-                "navigation": {"type": "tabs", "tabs": []},
+                "navigation": {
+                    "type": "tabs",
+                    "tabs": [
+                        {"name": "Home", "screen": "HomeScreen", "icon": "home"}
+                    ],
+                },
                 "data_model": {"Task": {"id": "string"}},
                 "state_management": "zustand",
                 "native_modules": [],

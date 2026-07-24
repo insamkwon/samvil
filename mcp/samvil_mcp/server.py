@@ -1320,12 +1320,28 @@ def _validate_blueprint_exit_evidence(
     if solution_type in {"web-app", "dashboard"}:
         _require_blueprint_name_list(blueprint, "screens", errors)
         _require_blueprint_nonempty_dict(blueprint, "data_model", errors)
+        _validate_blueprint_data_model(blueprint, errors)
         _require_blueprint_type(blueprint, "api_routes", list, errors)
-        _require_blueprint_text(blueprint, "state_management", errors)
-        _require_blueprint_text(blueprint, "auth_strategy", errors)
+        _validate_blueprint_api_routes(blueprint, errors)
+        state_options = {"zustand", "useState"}
+        if solution_type == "web-app":
+            state_options.add("none")
+        _require_blueprint_enum(
+            blueprint,
+            "state_management",
+            state_options,
+            errors,
+        )
+        _require_blueprint_enum(
+            blueprint,
+            "auth_strategy",
+            {"none", "localStorage", "supabase", "custom"},
+            errors,
+        )
         _require_blueprint_name_list(blueprint, "key_libraries", errors)
         _require_component_structure(blueprint, errors)
         _require_blueprint_nonempty_dict(blueprint, "routing", errors)
+        _require_blueprint_type(blueprint, "mobile_considerations", dict, errors)
         routing = blueprint.get("routing")
         if isinstance(routing, dict) and any(
             not isinstance(route, str)
@@ -1347,6 +1363,8 @@ def _validate_blueprint_exit_evidence(
                     or not source["name"].strip()
                     or not isinstance(source.get("type"), str)
                     or not source["type"].strip()
+                    or source["type"] not in {"localStorage", "api", "supabase"}
+                    or "refresh_interval" not in source
                     for source in data_sources
                 )
             ):
@@ -1359,11 +1377,37 @@ def _validate_blueprint_exit_evidence(
         _require_blueprint_nonempty_dict(blueprint, "navigation", errors)
         navigation = blueprint.get("navigation")
         if isinstance(navigation, dict):
-            _require_nested_text(navigation, "navigation", "type", errors)
+            _require_nested_enum(
+                navigation,
+                "navigation",
+                "type",
+                {"tabs", "drawer", "stack"},
+                errors,
+            )
             _require_nested_type(navigation, "navigation", "tabs", list, errors)
+            tabs = navigation.get("tabs")
+            if isinstance(tabs, list) and any(
+                not isinstance(tab, dict)
+                or any(
+                    not isinstance(tab.get(field), str)
+                    or not tab[field].strip()
+                    for field in ("name", "screen", "icon")
+                )
+                for tab in tabs
+            ):
+                errors.append(
+                    "navigation.tabs must contain named screen and icon mappings"
+                )
         _require_blueprint_nonempty_dict(blueprint, "data_model", errors)
-        _require_blueprint_text(blueprint, "state_management", errors)
+        _validate_blueprint_data_model(blueprint, errors)
+        _require_blueprint_enum(
+            blueprint,
+            "state_management",
+            {"zustand"},
+            errors,
+        )
         _require_blueprint_type(blueprint, "native_modules", list, errors)
+        _validate_blueprint_string_list(blueprint, "native_modules", errors)
         _require_blueprint_name_list(blueprint, "key_libraries", errors)
         _require_component_structure(blueprint, errors)
     elif solution_type == "automation":
@@ -1373,19 +1417,37 @@ def _validate_blueprint_exit_evidence(
         if isinstance(modules, dict):
             _require_nested_name_list(modules, "modules", "core", errors)
             _require_nested_type(modules, "modules", "utils", list, errors)
+            _validate_nested_string_list(modules, "modules", "utils", errors)
         _require_blueprint_nonempty_dict(blueprint, "fixtures", errors)
         fixtures = blueprint.get("fixtures")
         if isinstance(fixtures, dict):
             _require_nested_text(fixtures, "fixtures", "input", errors)
             _require_nested_text(fixtures, "fixtures", "expected", errors)
         _require_blueprint_type(blueprint, "dependencies", list, errors)
-        _require_blueprint_text(blueprint, "error_handling", errors)
+        _validate_blueprint_string_list(blueprint, "dependencies", errors)
+        _require_blueprint_enum(
+            blueprint,
+            "error_handling",
+            {"retry_with_logging", "skip_and_continue", "fail_fast"},
+            errors,
+        )
         _require_blueprint_nonempty_dict(blueprint, "execution", errors)
         execution = blueprint.get("execution")
         if isinstance(execution, dict):
-            _require_nested_text(execution, "execution", "type", errors)
+            _require_nested_enum(
+                execution,
+                "execution",
+                "type",
+                {"cli", "cron", "webhook", "cc-skill"},
+                errors,
+            )
             if "schedule" not in execution:
                 errors.append("execution.schedule is required")
+            elif execution["schedule"] is not None and (
+                not isinstance(execution["schedule"], str)
+                or not execution["schedule"].strip()
+            ):
+                errors.append("execution.schedule must be null or a non-empty string")
     elif solution_type == "game":
         _require_blueprint_name_list(blueprint, "scenes", errors)
         _require_blueprint_name_list(blueprint, "entities", errors)
@@ -1403,9 +1465,25 @@ def _validate_blueprint_exit_evidence(
         if isinstance(assets, dict):
             _require_nested_type(assets, "assets", "sprites", list, errors)
             _require_nested_type(assets, "assets", "audio", list, errors)
+            _validate_nested_string_list(assets, "assets", "sprites", errors)
+            _validate_nested_string_list(assets, "assets", "audio", errors)
         _require_blueprint_nonempty_dict(blueprint, "scene_flow", errors)
+        scene_flow = blueprint.get("scene_flow")
+        if isinstance(scene_flow, dict) and any(
+            not isinstance(scene, str)
+            or not scene.strip()
+            or not isinstance(target, str)
+            or not target.strip()
+            for scene, target in scene_flow.items()
+        ):
+            errors.append("scene_flow must map non-empty scenes to non-empty targets")
         _require_blueprint_name_list(blueprint, "key_libraries", errors)
-        _require_blueprint_text(blueprint, "state_management", errors)
+        _require_blueprint_enum(
+            blueprint,
+            "state_management",
+            {"phaser-scene"},
+            errors,
+        )
         component_structure = blueprint.get("component_structure")
         _require_blueprint_nonempty_dict(blueprint, "component_structure", errors)
         if isinstance(component_structure, dict):
@@ -1415,6 +1493,12 @@ def _validate_blueprint_exit_evidence(
                     "component_structure",
                     field,
                     list,
+                    errors,
+                )
+                _validate_nested_string_list(
+                    component_structure,
+                    "component_structure",
+                    field,
                     errors,
                 )
     else:
@@ -1468,6 +1552,33 @@ def _require_nested_text(
         errors.append(f"{parent}.{field} must be a non-empty string")
 
 
+def _require_nested_enum(
+    container: dict[str, Any],
+    parent: str,
+    field: str,
+    allowed: set[str],
+    errors: list[str],
+) -> None:
+    value = container.get(field)
+    if not isinstance(value, str) or value not in allowed:
+        errors.append(
+            f"{parent}.{field} must be one of {', '.join(sorted(allowed))}"
+        )
+
+
+def _validate_nested_string_list(
+    container: dict[str, Any],
+    parent: str,
+    field: str,
+    errors: list[str],
+) -> None:
+    value = container.get(field)
+    if isinstance(value, list) and any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        errors.append(f"{parent}.{field} must contain only non-empty strings")
+
+
 def _require_nested_name_list(
     container: dict[str, Any],
     parent: str,
@@ -1491,6 +1602,12 @@ def _require_component_structure(
     value = blueprint.get("component_structure")
     if isinstance(value, dict):
         _require_nested_type(value, "component_structure", "shared_ui", list, errors)
+        _validate_nested_string_list(
+            value,
+            "component_structure",
+            "shared_ui",
+            errors,
+        )
         _require_nested_type(
             value,
             "component_structure",
@@ -1498,6 +1615,20 @@ def _require_component_structure(
             dict,
             errors,
         )
+        feature_components = value.get("feature_components")
+        if isinstance(feature_components, dict) and any(
+            not isinstance(feature, str)
+            or not feature.strip()
+            or not isinstance(components, list)
+            or any(
+                not isinstance(component, str) or not component.strip()
+                for component in components
+            )
+            for feature, components in feature_components.items()
+        ):
+            errors.append(
+                "component_structure.feature_components must map names to string lists"
+            )
 
 
 def _require_blueprint_text(
@@ -1508,6 +1639,65 @@ def _require_blueprint_text(
     value = blueprint.get(field)
     if not isinstance(value, str) or not value.strip():
         errors.append(f"{field} must be a non-empty string")
+
+
+def _require_blueprint_enum(
+    blueprint: dict[str, Any],
+    field: str,
+    allowed: set[str],
+    errors: list[str],
+) -> None:
+    value = blueprint.get(field)
+    if not isinstance(value, str) or value not in allowed:
+        errors.append(f"{field} must be one of {', '.join(sorted(allowed))}")
+
+
+def _validate_blueprint_string_list(
+    blueprint: dict[str, Any],
+    field: str,
+    errors: list[str],
+) -> None:
+    value = blueprint.get(field)
+    if isinstance(value, list) and any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        errors.append(f"{field} must contain only non-empty strings")
+
+
+def _validate_blueprint_data_model(
+    blueprint: dict[str, Any],
+    errors: list[str],
+) -> None:
+    value = blueprint.get("data_model")
+    if isinstance(value, dict) and any(
+        not isinstance(entity, str)
+        or not entity.strip()
+        or not isinstance(fields, dict)
+        or not fields
+        or any(
+            not isinstance(field, str)
+            or not field.strip()
+            or not isinstance(field_type, str)
+            or not field_type.strip()
+            for field, field_type in fields.items()
+        )
+        for entity, fields in value.items()
+    ):
+        errors.append("data_model must map named entities to string field types")
+
+
+def _validate_blueprint_api_routes(
+    blueprint: dict[str, Any],
+    errors: list[str],
+) -> None:
+    value = blueprint.get("api_routes")
+    if isinstance(value, list) and any(
+        (isinstance(route, str) and not route.strip())
+        or (isinstance(route, dict) and not route)
+        or not isinstance(route, (str, dict))
+        for route in value
+    ):
+        errors.append("api_routes must contain only non-empty strings or objects")
 
 
 def _require_blueprint_name_list(
