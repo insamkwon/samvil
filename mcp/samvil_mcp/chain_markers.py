@@ -107,6 +107,10 @@ def _read_project_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _is_nonnegative_int(value: Any) -> bool:
+    return type(value) is int and value >= 0
+
+
 def resolve_stage_next_skill(
     project_root: str | Path,
     current_skill: str,
@@ -131,7 +135,18 @@ def resolve_stage_next_skill(
             counts = pass2.get("counts")
             if counts is not None and not isinstance(counts, dict):
                 return None
+            if isinstance(counts, dict) and any(
+                not isinstance(label, str) or not _is_nonnegative_int(value)
+                for label, value in counts.items()
+            ):
+                return None
         state = _read_project_json(root / "project.state.json")
+        build_retries = state.get("build_retries")
+        if build_retries is not None and not _is_nonnegative_int(build_retries):
+            return None
+        qa_history = state.get("qa_history")
+        if qa_history is not None and not isinstance(qa_history, list):
+            return None
         convergence = results.get("convergence")
         if convergence is None:
             convergence = {}

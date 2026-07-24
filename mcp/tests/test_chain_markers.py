@@ -262,6 +262,30 @@ class TestAdvanceChain:
                     "pass2": {"counts": ["corrupt"]},
                 }
             },
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass2": {"counts": {"PARTIAL": "corrupt"}},
+                }
+            },
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass2": {"counts": {"PARTIAL": []}},
+                }
+            },
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass2": {"counts": {"PARTIAL": True}},
+                }
+            },
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass2": {"counts": {"PARTIAL": -1}},
+                }
+            },
         ],
     )
     def test_advance_chain_keeps_qa_for_parseable_structural_corruption(
@@ -273,6 +297,49 @@ class TestAdvanceChain:
         (root / ".samvil").mkdir(exist_ok=True)
         (root / ".samvil" / "qa-results.json").write_text(
             json.dumps(qa_results),
+            encoding="utf-8",
+        )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        assert resolve_stage_next_skill(project_root, "samvil-qa") is None
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["next_skill"] == "samvil-qa"
+        assert result["status"] == "blocked_missing_qa_results"
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            {"build_retries": "corrupt"},
+            {"build_retries": []},
+            {"build_retries": True},
+            {"build_retries": -1},
+            {"qa_history": "corrupt"},
+        ],
+    )
+    def test_advance_chain_keeps_qa_for_corrupt_routing_state(
+        self, project_root, state
+    ):
+        root = Path(project_root)
+        (root / ".samvil").mkdir(exist_ok=True)
+        (root / ".samvil" / "qa-results.json").write_text(
+            json.dumps(
+                {
+                    "synthesis": {
+                        "verdict": "PASS",
+                        "pass2": {"counts": {"PARTIAL": 0}},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "project.state.json").write_text(
+            json.dumps(state),
             encoding="utf-8",
         )
         write_chain_marker(
