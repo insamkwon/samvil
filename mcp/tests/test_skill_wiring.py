@@ -141,6 +141,17 @@ def test_save_event_examples_use_named_arguments() -> None:
         assert "data=" in text
 
 
+def test_interview_completion_uses_trusted_stage_transition() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    text = (repo / "skills" / "samvil-interview" / "SKILL.md").read_text()
+
+    assert (
+        'mcp__samvil_mcp__complete_stage(session_id="<sid>", '
+        'stage="interview", verdict="pass")'
+    ) in text
+    assert 'save_event(event_type="interview_complete"' not in text
+
+
 def test_codex_build_command_gets_gate_input_from_phase_z() -> None:
     repo = Path(__file__).resolve().parents[2]
     text = (repo / "references" / "codex-commands" / "samvil-build.md").read_text()

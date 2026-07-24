@@ -92,7 +92,7 @@ Step 5 직전 한 줄 재진술. Epic Claim과 *같은 한 줄에 수렴*이 이
    - `escalate` → bump `interview_level` one step (`normal→deep→max`) and re-run that Phase.
    - `pass` → continue.
 4. `mcp__samvil_mcp__claim_post(project_root=".", claim_type="gate_verdict", subject="interview_to_seed", statement="verdict=<v>, seed_readiness=<total>", authority_file="state.json", claimed_by="agent:socratic-interviewer", evidence_json='["interview-summary.md"]', meta_json='<verdict dict>')`. Per `references/contract-layer-protocol.md`, the Judge here is `agent:user` or `agent:product-owner` invoked out-of-band during approval — do NOT self-verify.
-5. `mcp__samvil_mcp__save_event(event_type="interview_complete", stage="seed", data='{"questions_asked":<N>,"preset_matched":"<preset.name>"}')`.
+5. `mcp__samvil_mcp__complete_stage(session_id="<sid>", stage="interview", verdict="pass")`. Any error halts before seed; the trusted transition writes the canonical completion event and advances the session together.
 6. Append the Interview block to `.samvil/handoff.md` via Bash `cat >>` or Edit (never the Write tool).
 
 ## Brownfield Mode (auto-detected from `state._analysis_source == "brownfield"`)
