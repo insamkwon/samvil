@@ -459,15 +459,10 @@ class EventStore:
         query = f"""
             SELECT * FROM events
             WHERE session_id = ?
+              AND json_extract(data, '$.trusted_transition') = 1
               AND (
-                json_extract(data, '$.trusted_transition') = 1
-                OR (
-                  json_type(data, '$.trusted_transition') IS NULL
-                  AND (
-                    event_type IN ({placeholders})
-                    OR json_extract(data, '$.event_type_raw') IN ({placeholders})
-                  )
-                )
+                event_type IN ({placeholders})
+                OR json_extract(data, '$.event_type_raw') IN ({placeholders})
               )
             ORDER BY timestamp DESC, rowid DESC
         """

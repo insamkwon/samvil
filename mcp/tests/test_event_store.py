@@ -215,6 +215,33 @@ async def test_compensation_preserves_prerequisite_owned_by_newer_stage(
 
 
 @pytest.mark.asyncio
+async def test_orchestration_events_require_explicit_trusted_transition(
+    store: EventStore,
+) -> None:
+    session = await store.create_session("trusted-boundary")
+    legacy = await store.save_event(
+        session.id,
+        EventType.STAGE_END,
+        Stage.SEED,
+        {"event_type_raw": "interview_complete"},
+    )
+    trusted = await store.save_event(
+        session.id,
+        EventType.STAGE_CHANGE,
+        Stage.SEED,
+        {"event_type_raw": "interview_complete", "trusted_transition": True},
+    )
+
+    events = await store.get_orchestration_events(
+        session.id,
+        frozenset({"interview_complete"}),
+    )
+
+    assert [event.id for event in events] == [trusted.id]
+    assert legacy.id not in {event.id for event in events}
+
+
+@pytest.mark.asyncio
 async def test_transition_captures_previous_stage_inside_write_transaction(
     store: EventStore,
 ) -> None:
