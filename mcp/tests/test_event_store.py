@@ -242,6 +242,40 @@ async def test_orchestration_events_require_explicit_trusted_transition(
 
 
 @pytest.mark.asyncio
+async def test_orchestration_query_uses_trusted_transition_index(
+    store: EventStore,
+) -> None:
+    session = await store.create_session("trusted-query-plan")
+    await store.save_event(
+        session.id,
+        EventType.STAGE_CHANGE,
+        Stage.SEED,
+        {"event_type_raw": "interview_complete", "trusted_transition": True},
+    )
+
+    with sqlite3.connect(store.db_path) as db:
+        plan = db.execute(
+            """
+            EXPLAIN QUERY PLAN
+            SELECT * FROM events INDEXED BY idx_events_trusted_transition
+            WHERE session_id = ?
+              AND json_extract(data, '$.trusted_transition') = 1
+              AND (
+                event_type IN (?)
+                OR json_extract(data, '$.event_type_raw') IN (?)
+              )
+            ORDER BY timestamp DESC, rowid DESC
+            """,
+            (session.id, "interview_complete", "interview_complete"),
+        ).fetchall()
+
+    assert any(
+        "idx_events_trusted_transition" in str(row[3])
+        for row in plan
+    ), plan
+
+
+@pytest.mark.asyncio
 async def test_transition_captures_previous_stage_inside_write_transaction(
     store: EventStore,
 ) -> None:

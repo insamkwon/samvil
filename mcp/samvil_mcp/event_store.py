@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS seed_versions (
 
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(session_id, event_type);
+CREATE INDEX IF NOT EXISTS idx_events_trusted_transition
+ON events(session_id, json_extract(data, '$.trusted_transition'), timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_name);
 CREATE INDEX IF NOT EXISTS idx_seed_versions_session ON seed_versions(session_id, version);
 """
@@ -457,7 +459,7 @@ class EventStore:
             return []
         placeholders = ", ".join("?" for _ in event_types)
         query = f"""
-            SELECT * FROM events
+            SELECT * FROM events INDEXED BY idx_events_trusted_transition
             WHERE session_id = ?
               AND json_extract(data, '$.trusted_transition') = 1
               AND (
