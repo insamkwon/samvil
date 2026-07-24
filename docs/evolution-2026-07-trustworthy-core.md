@@ -1253,6 +1253,48 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   session stage를 함께 확정해 seed gate가 정상 통과한다.)
   - 완료 증거: `66954d3`; `skills/samvil-interview/SKILL.md:95`,
     `mcp/tests/test_skill_wiring.py:144`.
+- [x] **4.49 token 형태 event/stage label의 원문 저장 차단**
+  (machine label 정규식에 맞더라도 자격증명 형태면 redacted 고정 라벨로 치환한다.)
+  - 완료 증거: `f99511d`; `mcp/samvil_mcp/event_sanitizer.py:78`,
+    `mcp/samvil_mcp/event_sanitizer.py:83`, `mcp/samvil_mcp/event_sanitizer.py:93`,
+    `mcp/tests/test_event_sanitizer.py:28`.
+- [x] **4.50 동일 timestamp event의 결정적 최신 결과 복원**
+  (SQLite rowid로 newest-first total order를 만들고 orchestrator 입력에서 정확히
+  뒤집어, 같은 시각의 후속 성공·실패 결과가 삽입 순서대로 최종 판정된다.)
+  - 완료 증거: `c0c68f4`; `mcp/samvil_mcp/event_store.py:409`,
+    `mcp/samvil_mcp/event_store.py:419`, `mcp/samvil_mcp/server.py:972`,
+    `mcp/tests/test_orchestrator_mcp.py:157`.
+- [x] **4.51 Codex interview·seed 명령의 trusted completion 연결**
+  (marker를 쓰기 전에 각 stage의 `complete_stage`가 성공해야 하며, 실패하면 다음
+  skill로 진행하지 않는다.)
+  - 완료 증거: `58661d5`; `references/codex-commands/samvil-interview.md:139`,
+    `references/codex-commands/samvil-seed.md:23`, `mcp/tests/test_host_parity.py:70`,
+    `mcp/tests/test_host_parity.py:77`.
+- [x] **4.52 GitHub fine-grained PAT payload redaction**
+  (`github_pat_` 장형 토큰도 중첩 payload 어디에서든 저장 전에 제거한다.)
+  - 완료 증거: `75d0271`; `mcp/samvil_mcp/event_sanitizer.py:19`,
+    `mcp/samvil_mcp/event_sanitizer.py:20`, `mcp/tests/test_event_sanitizer.py:36`,
+    `mcp/tests/test_event_sanitizer.py:48`.
+- [x] **4.53 대량 telemetry 뒤의 stage 완료 이력 보존**
+  (공개 조회 기본 limit은 유지하고 orchestration·completion 판정만 전체 session
+  이력을 읽어 1,000건 이전 trusted transition을 잃지 않는다.)
+  - 완료 증거: `63421f1`; `mcp/samvil_mcp/event_store.py:399`,
+    `mcp/samvil_mcp/event_store.py:419`, `mcp/samvil_mcp/server.py:989`,
+    `mcp/samvil_mcp/server.py:1102`, `mcp/tests/test_orchestrator_mcp.py:98`.
+- [x] **4.54 줄바꿈 없는 canonical JSONL tail 안전 append**
+  (기존 마지막 행이 newline 없이 끝나도 구분 newline을 같은 lock·rollback 경계에서
+  추가해 새 이벤트가 독립 행과 정확한 file:line 증거를 유지한다.)
+  - 완료 증거: `b138098`; `mcp/samvil_mcp/server.py:659`,
+    `mcp/samvil_mcp/server.py:696`, `mcp/tests/test_orchestrator_mcp.py:790`.
+- [x] **4.55 인터뷰 trusted completion의 실제 exit evidence 검증**
+  (빈 프로젝트나 요약만 있는 프로젝트는 전진시키지 않고, non-empty summary와 최신
+  `interview_to_seed` pass claim이 함께 있어야 canonical event·stage를 확정한다.
+  스코프 보정으로 Codex 명령도 gate→claim→complete 순서를 명시했다.)
+  - 완료 증거: `2c509dd`; `mcp/samvil_mcp/server.py:1099`,
+    `mcp/samvil_mcp/server.py:1213`, `mcp/tests/test_orchestrator_mcp.py:235`,
+    `mcp/tests/test_orchestrator_mcp.py:268`,
+    `references/codex-commands/samvil-interview.md:126`,
+    `mcp/tests/test_skill_wiring.py:154`.
 
 ---
 
