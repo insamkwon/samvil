@@ -50,6 +50,37 @@ def _prepare_interview_exit(project_root: Path) -> None:
     )
 
 
+def _write_valid_seed(project_root: Path) -> None:
+    (project_root / "project.seed.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "3.2",
+                "name": "evidence-demo",
+                "description": "Exit evidence fixture",
+                "solution_type": "web-app",
+                "tech_stack": {"framework": "nextjs"},
+                "core_experience": {
+                    "primary_screen": "TaskBoard",
+                    "key_interactions": ["Create task"],
+                },
+                "features": [
+                    {
+                        "name": "core-flow",
+                        "priority": 1,
+                        "acceptance_criteria": [
+                            {"id": "F1.AC1", "description": "Flow completes"}
+                        ],
+                    }
+                ],
+                "constraints": ["No external API"],
+                "out_of_scope": ["Team collaboration"],
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_get_next_stage_tool_returns_next_stage() -> None:
     out = _run(get_next_stage("seed", "standard"))
     data = json.loads(out)
@@ -134,6 +165,7 @@ def test_get_orchestration_state_tool_reads_progress(tmp_path, monkeypatch) -> N
     project_root = tmp_path / "orch-state"
     project_root.mkdir()
     _prepare_interview_exit(project_root)
+    _write_valid_seed(project_root)
 
     async def runner():
         sess = json.loads(
@@ -305,6 +337,72 @@ def test_complete_stage_requires_latest_passing_interview_gate(
         assert result["status"] == "error"
         assert "latest interview_to_seed" in result["error"]
         assert stored_events == []
+
+    _run(runner())
+
+
+@pytest.mark.parametrize("stage", ["seed", "design", "scaffold", "build", "qa"])
+def test_complete_stage_rejects_pass_without_stage_artifact(
+    tmp_path, monkeypatch, stage
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / f"missing-{stage}-evidence"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                f"missing-{stage}-evidence",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        store = await srv.get_store()
+        sid = sess["session_id"]
+        assert json.loads(await complete_stage(sid, "interview", "pass"))[
+            "status"
+        ] == "ok"
+
+        if stage != "seed":
+            _write_valid_seed(project_root)
+            assert json.loads(await complete_stage(sid, "seed", "pass"))[
+                "status"
+            ] == "ok"
+        if stage not in {"seed", "design"}:
+            (project_root / "project.blueprint.json").write_text(
+                json.dumps({"architecture": {"framework": "nextjs"}}),
+                encoding="utf-8",
+            )
+            assert json.loads(await complete_stage(sid, "design", "pass"))[
+                "status"
+            ] == "ok"
+        if stage in {"build", "qa"}:
+            (project_root / ".samvil" / "scaffold-results.json").write_text(
+                json.dumps({"all_passed": True}),
+                encoding="utf-8",
+            )
+            assert json.loads(await complete_stage(sid, "scaffold", "pass"))[
+                "status"
+            ] == "ok"
+        if stage == "qa":
+            (project_root / ".samvil" / "build.log").write_text(
+                "npm run build\nSAMVIL_EXIT:0\n",
+                encoding="utf-8",
+            )
+            assert json.loads(await complete_stage(sid, "build", "pass"))[
+                "status"
+            ] == "ok"
+
+        before = await store.get_events(sid)
+        result = json.loads(await complete_stage(sid, stage, "pass"))
+        stored_events = await store.get_events(sid)
+
+        assert result["status"] == "error"
+        assert f"{stage} exit evidence" in result["error"]
+        assert len(stored_events) == len(before)
 
     _run(runner())
 

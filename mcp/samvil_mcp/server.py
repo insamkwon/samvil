@@ -1094,10 +1094,11 @@ async def complete_stage(
             raise OrchestratorError(
                 f"cannot complete stage {stage!r}; current stage is {current_stage}"
             )
-        if stage == "interview" and verdict in ("pass", "complete"):
+        if verdict in ("pass", "complete"):
             await asyncio.to_thread(
-                _require_interview_exit_evidence,
+                _require_stage_exit_evidence,
                 project_path,
+                stage,
             )
         stored_events = await store.get_events(session_id, limit=None)
         prerequisite = _orchestrator_stage_can_proceed(
@@ -1208,6 +1209,80 @@ async def complete_stage(
     except Exception as e:
         _log_mcp_health("fail", "complete_stage", str(e))
         return json.dumps({"status": "error", "error": str(e)})
+
+
+def _require_stage_exit_evidence(project_path: Path, stage: str) -> None:
+    if stage == "interview":
+        _require_interview_exit_evidence(project_path)
+        return
+    if stage == "seed":
+        seed = _read_stage_exit_json(project_path, "project.seed.json", stage)
+        from .seed_manager import validate_seed as _validate_seed
+
+        try:
+            validation = _validate_seed(seed)
+        except Exception as exc:
+            raise OrchestratorError(
+                f"seed exit evidence is invalid: {exc}"
+            ) from exc
+        if not validation.get("valid"):
+            errors = "; ".join(str(item) for item in validation.get("errors", []))
+            raise OrchestratorError(
+                f"seed exit evidence is invalid: {errors or 'validation failed'}"
+            )
+        return
+    if stage == "design":
+        _read_stage_exit_json(project_path, "project.blueprint.json", stage)
+        return
+    if stage == "scaffold":
+        result = _read_stage_exit_json(
+            project_path,
+            ".samvil/scaffold-results.json",
+            stage,
+        )
+        if result.get("all_passed") is not True:
+            raise OrchestratorError(
+                "scaffold exit evidence requires all_passed=true"
+            )
+        return
+    if stage == "build":
+        from .stage_evidence import collect_stage_evidence
+
+        evidence = collect_stage_evidence(project_path, "build")
+        build = evidence.get("build") or {}
+        if build.get("exit_code") != 0:
+            raise OrchestratorError(
+                "build exit evidence requires a successful SAMVIL_EXIT code"
+            )
+        return
+    if stage == "qa":
+        results = _read_stage_exit_json(
+            project_path,
+            ".samvil/qa-results.json",
+            stage,
+        )
+        synthesis = results.get("synthesis") or {}
+        if not isinstance(synthesis, dict) or str(
+            synthesis.get("verdict") or ""
+        ).upper() != "PASS":
+            raise OrchestratorError(
+                "qa exit evidence requires synthesis.verdict=PASS"
+            )
+
+
+def _read_stage_exit_json(project_path: Path, relative: str, stage: str) -> dict:
+    path = project_path / relative
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise OrchestratorError(
+            f"{stage} exit evidence is unavailable: {relative}: {exc}"
+        ) from exc
+    if not isinstance(payload, dict) or not payload:
+        raise OrchestratorError(
+            f"{stage} exit evidence is invalid: {relative} must be a non-empty object"
+        )
+    return payload
 
 
 def _require_interview_exit_evidence(project_path: Path) -> None:
