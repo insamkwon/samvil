@@ -20,15 +20,25 @@ def _seed() -> dict:
     return {
         "schema_version": "3.2",
         "name": "demo-app",
+        "description": "A demo counter application",
         "solution_type": "web-app",
+        "tech_stack": {"framework": "nextjs"},
+        "core_experience": {
+            "primary_screen": "CounterScreen",
+            "key_interactions": ["increment counter"],
+        },
         "features": [
             {
                 "name": "counter",
+                "priority": 1,
                 "acceptance_criteria": [
                     {"id": "F1.AC1", "description": "counter increments"}
                 ],
             }
         ],
+        "constraints": ["local-first"],
+        "out_of_scope": ["authentication"],
+        "version": "1.0.0",
     }
 
 
@@ -88,6 +98,22 @@ def test_apply_migration_replaces_parseable_but_incomplete_backup(
     seed_path.write_text(original_text)
     backup_path = tmp_path / BACKUP_FILENAME
     backup_path.write_text(json.dumps({"schema_version": "3.2"}))
+
+    apply_migration(tmp_path)
+
+    assert backup_path.read_text() == original_text
+
+
+def test_apply_migration_replaces_backup_rejected_by_canonical_validator(
+    tmp_path: Path,
+) -> None:
+    seed_path = tmp_path / "project.seed.json"
+    original_text = json.dumps(_seed())
+    seed_path.write_text(original_text)
+    invalid_backup = _seed()
+    invalid_backup["tech_stack"] = {"framework": "unsupported"}
+    backup_path = tmp_path / BACKUP_FILENAME
+    backup_path.write_text(json.dumps(invalid_backup))
 
     apply_migration(tmp_path)
 
