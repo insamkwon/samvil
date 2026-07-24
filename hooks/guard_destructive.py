@@ -794,7 +794,10 @@ def _wrapped_tokens(executable: str, args: list[str]) -> list[str] | None:
     return None
 
 
-def _shell_command(args: list[str]) -> str | None:
+def _shell_command_invocation(
+    args: list[str],
+) -> tuple[str, str, list[str]] | None:
+    """Return ``bash -c`` command text, argv0, and positional arguments."""
     for index, token in enumerate(args):
         if token == "--":
             continue
@@ -808,8 +811,105 @@ def _shell_command(args: list[str]) -> str | None:
             if args[command_index] == "--":
                 command_index += 1
             if command_index < len(args):
-                return args[command_index]
+                tail = args[command_index + 1 :]
+                argv0 = tail[0] if tail else ""
+                return args[command_index], argv0, tail[1:]
     return None
+
+
+def _double_quote_shell_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+
+
+def _shell_positional_value(
+    name: str,
+    *,
+    argv0: str,
+    positional: list[str],
+) -> str | list[str]:
+    if name in {"@", "*"}:
+        return positional
+    if name == "#":
+        return str(len(positional))
+    if name == "0":
+        return argv0
+    index = int(name) - 1
+    return positional[index] if 0 <= index < len(positional) else ""
+
+
+def _expand_shell_positional_parameters(
+    command: str,
+    *,
+    argv0: str,
+    positional: list[str],
+) -> tuple[str, bool]:
+    """Model the positional parameters visible to a ``shell -c`` body.
+
+    Values are shell-quoted because parameter expansion cannot introduce new
+    control operators. A remaining positional expression means the static
+    analyzer cannot model the command safely and must fail closed.
+    """
+    output: list[str] = []
+    index = 0
+    in_single = False
+    in_double = False
+    unresolved = False
+    exact_quoted = re.compile(r'^"\$(?:\{(?P<braced>[@*#]|[0-9]+)\}|(?P<plain>[@*#0-9]))"')
+    parameter = re.compile(r'^\$(?:\{(?P<braced>[@*#]|[0-9]+)\}|(?P<plain>[@*#0-9]))')
+
+    while index < len(command):
+        char = command[index]
+        if char == "\\":
+            output.append(command[index : index + 2])
+            index += 2
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            output.append(char)
+            index += 1
+            continue
+        if in_single:
+            output.append(char)
+            index += 1
+            continue
+        if char == '"':
+            quoted = exact_quoted.match(command[index:])
+            if quoted:
+                name = quoted.group("braced") or quoted.group("plain") or ""
+                value = _shell_positional_value(
+                    name, argv0=argv0, positional=positional
+                )
+                if isinstance(value, list):
+                    output.append(shlex.join(value))
+                else:
+                    output.append(shlex.quote(value))
+                index += quoted.end()
+                continue
+            in_double = not in_double
+            output.append(char)
+            index += 1
+            continue
+        if char == "$":
+            matched = parameter.match(command[index:])
+            if matched:
+                name = matched.group("braced") or matched.group("plain") or ""
+                value = _shell_positional_value(
+                    name, argv0=argv0, positional=positional
+                )
+                if isinstance(value, list):
+                    replacement = shlex.join(value)
+                elif in_double:
+                    replacement = _double_quote_shell_value(value)
+                else:
+                    replacement = shlex.quote(value)
+                output.append(replacement)
+                index += matched.end()
+                continue
+            if re.match(r"^\$(?:\{(?:[@*#0-9])[^}]*\}|[@*#0-9])", command[index:]):
+                unresolved = True
+        output.append(char)
+        index += 1
+    return "".join(output), unresolved
 
 
 def _shell_script_file_reason(args: list[str]) -> str | None:
@@ -1089,9 +1189,17 @@ def analyze_command(command: str) -> str | None:
             if nested:
                 return nested
         if executable in SHELLS:
-            shell_command = _shell_command(args)
-            if shell_command:
-                nested = analyze_command(shell_command)
+            shell_invocation = _shell_command_invocation(args)
+            if shell_invocation:
+                shell_command, argv0, positional = shell_invocation
+                expanded_command, unresolved = _expand_shell_positional_parameters(
+                    shell_command,
+                    argv0=argv0,
+                    positional=positional,
+                )
+                if unresolved:
+                    return "shell positional expansion cannot be inspected"
+                nested = analyze_command(expanded_command)
                 if nested:
                     return nested
             script_file_reason = _shell_script_file_reason(args)

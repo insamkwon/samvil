@@ -48,6 +48,29 @@ def run_guard(
 @pytest.mark.parametrize(
     "command",
     [
+        "bash -c 'rm \"$@\"' -- -rf /",
+        "bash -c 'git \"$@\"' -- reset --hard HEAD",
+        "bash -c 'psql -c \"$1\"' -- 'DROP TABLE users'",
+    ],
+)
+def test_shell_c_positional_arguments_cannot_hide_destructive_commands(
+    command: str,
+) -> None:
+    result = run_guard(command)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+def test_shell_c_safe_positional_arguments_pass() -> None:
+    result = run_guard("bash -c 'printf \"%s\\n\" \"$@\"' -- hello world")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "rm  -rf /",
         "rm -fr /",
         "rm -r -f $TARGET",
