@@ -1012,6 +1012,25 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `scripts/phase6-real-runtime-dogfood.py:342`,
     `mcp/tests/test_phase6_real_runtime_dogfood.py:44`,
     `mcp/tests/test_phase6_real_runtime_dogfood.py:60`.
+- [x] **4.14 동일 HEAD 연속 클린 검수 전 문서 증거 드리프트 교정**
+  (스코프 보정: 과거 Wave 2 dogfood의 모델 입력 기반 override 성공 기록은 현재의
+  trusted-host fail-closed 정책과 충돌했고, 코드 이동 뒤 `collect_stage_evidence`
+  MCP 도구의 file:line 포인터도 더는 구현을 가리키지 않았다. 과거 실측을 현재
+  보안 보장으로 오해하지 않도록 거부 계약을 명시하고 현재 구현 위치를 다시 고정했다.)
+  - 완료 증거: `4f59b5a`;
+    `docs/evidence/evolution-2026-07-wave2-dogfood.md:15`,
+    `docs/evidence/evolution-2026-07-wave2-dogfood.md:18`,
+    `mcp/tests/test_wave2_dogfood.py:96`, `mcp/tests/test_wave2_dogfood.py:103`.
+  - 완료 증거: `48366f6`; `docs/evolution-2026-07-trustworthy-core.md:584`,
+    `mcp/samvil_mcp/server.py:4899`.
+- [x] **4.15 최종 게이트에서 드러난 manifest 시각 경계 플래키 제거**
+  (스코프 보정: 구현의 manifest와 module metadata는 각각 생성 시각을 보존하는 것이
+  정상이나, 기존 멱등성 테스트는 최상위 `generated_at`만 제외했다. 두 호출이 초
+  경계를 넘으면 중첩 `summary_generated_at`과 `last_updated` 때문에 간헐 실패했으므로,
+  서로 다른 두 시각을 강제하고 모든 생성 시각만 정규화해 실제 결정론을 검증한다.)
+  - 완료 증거: `1fceb8b`; `mcp/tests/test_manifest.py:616`,
+    `mcp/tests/test_manifest.py:624`, `mcp/tests/test_manifest.py:637`,
+    `mcp/tests/test_manifest.py:647`.
 
 ---
 
