@@ -85,8 +85,11 @@ def _write_valid_blueprint(project_root: Path) -> None:
     (project_root / "project.blueprint.json").write_text(
         json.dumps(
             {
-                "key_libraries": [],
-                "component_structure": {"pages": ["TaskBoard"]},
+                "screens": ["TaskBoard"],
+                "data_model": {"Task": {"title": "string"}},
+                "api_routes": [],
+                "state_management": "useState",
+                "auth_strategy": "none",
             }
         ),
         encoding="utf-8",
@@ -527,6 +530,47 @@ def test_qa_completion_rejects_self_authored_pass_without_runtime_receipt(
 
         assert result["status"] == "error"
         assert "trusted runtime" in result["error"]
+        assert len(after) == len(before)
+
+    _run(runner())
+
+
+def test_design_completion_rejects_nonempty_but_invalid_blueprint(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "invalid-blueprint"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+    _write_valid_seed(project_root)
+    (project_root / "project.blueprint.json").write_text(
+        json.dumps({"x": 1}),
+        encoding="utf-8",
+    )
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "invalid-blueprint",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+        for stage in ("interview", "seed"):
+            assert json.loads(await complete_stage(sid, stage, "pass"))[
+                "status"
+            ] == "ok"
+
+        store = await srv.get_store()
+        before = await store.get_events(sid, limit=None)
+        result = json.loads(await complete_stage(sid, "design", "pass"))
+        after = await store.get_events(sid, limit=None)
+
+        assert result["status"] == "error"
+        assert "design exit evidence is invalid" in result["error"]
         assert len(after) == len(before)
 
     _run(runner())

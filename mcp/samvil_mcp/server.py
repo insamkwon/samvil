@@ -1233,7 +1233,12 @@ def _require_stage_exit_evidence(project_path: Path, stage: str) -> None:
             )
         return
     if stage == "design":
-        _read_stage_exit_json(project_path, "project.blueprint.json", stage)
+        blueprint = _read_stage_exit_json(
+            project_path,
+            "project.blueprint.json",
+            stage,
+        )
+        _validate_blueprint_exit_evidence(blueprint)
         return
     if stage == "scaffold":
         result = _read_stage_exit_json(
@@ -1285,6 +1290,35 @@ def _require_stage_exit_evidence(project_path: Path, stage: str) -> None:
             raise OrchestratorError(
                 "qa exit evidence requires trusted runtime verification"
             )
+
+
+def _validate_blueprint_exit_evidence(blueprint: dict[str, Any]) -> None:
+    """Validate the canonical project.blueprint.json contract."""
+    errors: list[str] = []
+
+    screens = blueprint.get("screens")
+    if (
+        not isinstance(screens, list)
+        or not screens
+        or any(not isinstance(screen, str) or not screen.strip() for screen in screens)
+    ):
+        errors.append("screens must be a non-empty list of names")
+
+    if not isinstance(blueprint.get("data_model"), dict):
+        errors.append("data_model must be an object")
+
+    if not isinstance(blueprint.get("api_routes"), list):
+        errors.append("api_routes must be a list")
+
+    for field in ("state_management", "auth_strategy"):
+        value = blueprint.get(field)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"{field} must be a non-empty string")
+
+    if errors:
+        raise OrchestratorError(
+            "design exit evidence is invalid: " + "; ".join(errors)
+        )
 
 
 def _read_stage_exit_json(project_path: Path, relative: str, stage: str) -> dict:
