@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 import time
 from pathlib import Path
+
+import pytest
 
 from samvil_mcp.claim_ledger import ClaimLedger
 from samvil_mcp.event_store_reader import read_events
@@ -164,6 +167,74 @@ def test_complete_stage_fails_closed_when_canonical_event_append_fails(
     claims = ClaimLedger(project_root / ".samvil" / "claims.jsonl")
     assert claims.query_by_subject("gate:interview_exit") == []
     assert read_events(project_root)["entries"] == []
+
+
+@pytest.mark.parametrize("operation", ["save_event", "complete_stage"])
+def test_event_and_stage_update_are_atomic_and_retry_safe(
+    tmp_path, monkeypatch, operation
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                f"atomic-{operation}",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+
+        with sqlite3.connect(srv.DB_PATH) as db:
+            db.execute(
+                """CREATE TRIGGER fail_session_stage_update
+                BEFORE UPDATE OF current_stage ON sessions
+                BEGIN
+                    SELECT RAISE(ABORT, 'stage update failed');
+                END"""
+            )
+
+        if operation == "save_event":
+            first = json.loads(
+                await save_event(sid, "interview_complete", "seed", "{}")
+            )
+        else:
+            first = json.loads(await complete_stage(sid, "interview", "pass"))
+
+        state_after_failure = json.loads(await get_orchestration_state(sid))
+        events_after_failure = await (await srv.get_store()).get_events(sid)
+
+        assert first.get("saved", first.get("status") == "ok") is False
+        assert state_after_failure["current_stage"] == "interview"
+        assert state_after_failure["completed_stages"] == []
+        assert events_after_failure == []
+        assert read_events(project_root)["entries"] == []
+
+        with sqlite3.connect(srv.DB_PATH) as db:
+            db.execute("DROP TRIGGER fail_session_stage_update")
+
+        if operation == "save_event":
+            retry = json.loads(
+                await save_event(sid, "interview_complete", "seed", "{}")
+            )
+            assert retry["saved"] is True
+        else:
+            retry = json.loads(await complete_stage(sid, "interview", "pass"))
+            assert retry["status"] == "ok"
+
+        state_after_retry = json.loads(await get_orchestration_state(sid))
+        events_after_retry = await (await srv.get_store()).get_events(sid)
+
+        assert state_after_retry["current_stage"] == "seed"
+        assert state_after_retry["completed_stages"] == ["interview"]
+        assert len(events_after_retry) == 1
+        assert len(read_events(project_root)["entries"]) == 1
+
+    _run(runner())
 
 
 def test_complete_stage_reports_claim_degradation_without_reversing_completion(

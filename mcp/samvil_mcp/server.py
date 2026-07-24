@@ -775,14 +775,23 @@ async def save_event(
             parsed_data.setdefault("stage_raw", stage)
 
         store = await get_store()
-        event = await store.save_event(
+        session = await store.get_session(session_id)
+        if session is None:
+            return json.dumps(
+                {
+                    "event_id": None,
+                    "saved": False,
+                    "error": f"session {session_id} not found",
+                }
+            )
+        previous_stage = session.current_stage
+        event = await store.save_event_and_update_stage(
             session_id=session_id,
             event_type=event_type_enum,
             stage=stage_enum,
             data=parsed_data,
             token_count=token_count,
         )
-        session = await store.get_session(session_id)
         project_path = _session_project_path(session)
         canonical_saved = False
         canonical_evidence = None
@@ -809,7 +818,12 @@ async def save_event(
                 db_rolled_back = False
                 rollback_error = ""
                 try:
-                    db_rolled_back = await store.delete_event(event.id)
+                    db_rolled_back = await store.delete_event_and_restore_stage(
+                        event.id,
+                        session_id,
+                        stage_enum,
+                        previous_stage,
+                    )
                 except Exception as rollback_exc:
                     rollback_error = str(rollback_exc)
                     _log_mcp_health(
@@ -830,9 +844,6 @@ async def save_event(
                         ),
                     }
                 )
-        # Update session's current stage
-        await store.update_session_stage(session_id, stage_enum)
-
         # v3.2 contract-layer auto-claim (best-effort, never blocks).
         await _auto_post_claim_for_event(
             session_id,
@@ -1032,7 +1043,8 @@ async def complete_stage(
             event_data.setdefault("event_type_raw", plan["event_type"])
         stage_enum = Stage(plan["event_stage"])
 
-        event = await store.save_event(
+        previous_stage = session.current_stage
+        event = await store.save_event_and_update_stage(
             session_id=session_id,
             event_type=event_type_enum,
             stage=stage_enum,
@@ -1061,7 +1073,12 @@ async def complete_stage(
                 db_rolled_back = False
                 rollback_error = ""
                 try:
-                    db_rolled_back = await store.delete_event(event.id)
+                    db_rolled_back = await store.delete_event_and_restore_stage(
+                        event.id,
+                        session_id,
+                        stage_enum,
+                        previous_stage,
+                    )
                 except Exception as rollback_exc:
                     rollback_error = str(rollback_exc)
                     _log_mcp_health(
@@ -1084,8 +1101,6 @@ async def complete_stage(
                         ),
                     }
                 )
-
-            await store.update_session_stage(session_id, stage_enum)
             claim_data = plan["claim"]
             try:
                 ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
@@ -1103,9 +1118,6 @@ async def complete_stage(
             except Exception as exc:
                 claim_error = str(exc)
                 _log_mcp_health("fail", "complete_stage.claim", claim_error)
-        else:
-            await store.update_session_stage(session_id, stage_enum)
-
         _log_mcp_health("ok", "complete_stage")
         return json.dumps({
             "status": "ok",

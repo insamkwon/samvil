@@ -263,6 +263,50 @@ class EventStore:
             await db.commit()
         return event
 
+    async def save_event_and_update_stage(
+        self,
+        session_id: str,
+        event_type: EventType,
+        stage: Stage,
+        data: dict | None = None,
+        token_count: int | None = None,
+    ) -> Event:
+        """Persist an event and its session-stage transition atomically."""
+        event = Event(
+            id=_uuid(),
+            session_id=session_id,
+            event_type=event_type,
+            stage=stage,
+            data=data or {},
+            timestamp=_now(),
+        )
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                await db.execute("BEGIN")
+                await db.execute(
+                    "INSERT INTO events (id, session_id, event_type, stage, data, token_count, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        event.id,
+                        event.session_id,
+                        event.event_type.value,
+                        event.stage.value,
+                        json.dumps(event.data),
+                        token_count,
+                        event.timestamp,
+                    ),
+                )
+                cursor = await db.execute(
+                    "UPDATE sessions SET current_stage = ?, updated_at = ? WHERE id = ?",
+                    (stage.value, _now(), session_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError(f"session {session_id} not found")
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+        return event
+
     async def delete_event(self, event_id: str) -> bool:
         """Compensate an event insert that could not reach the file SSOT."""
         async with aiosqlite.connect(self.db_path) as db:
@@ -270,6 +314,48 @@ class EventStore:
             cursor = await db.execute("DELETE FROM events WHERE id = ?", (event_id,))
             await db.commit()
             return cursor.rowcount == 1
+
+    async def delete_event_and_restore_stage(
+        self,
+        event_id: str,
+        session_id: str,
+        expected_stage: Stage,
+        restore_stage: Stage,
+    ) -> bool:
+        """Atomically compensate a DB event and its matching stage update.
+
+        The stage comparison prevents an older failed write from rewinding a
+        session that has already moved on through another concurrent event.
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                await db.execute("BEGIN")
+                deleted = await db.execute(
+                    "DELETE FROM events WHERE id = ? AND session_id = ?",
+                    (event_id, session_id),
+                )
+                if deleted.rowcount != 1:
+                    await db.rollback()
+                    return False
+                restored = await db.execute(
+                    """UPDATE sessions
+                    SET current_stage = ?, updated_at = ?
+                    WHERE id = ? AND current_stage = ?""",
+                    (
+                        restore_stage.value,
+                        _now(),
+                        session_id,
+                        expected_stage.value,
+                    ),
+                )
+                if restored.rowcount != 1:
+                    await db.rollback()
+                    return False
+                await db.commit()
+                return True
+            except Exception:
+                await db.rollback()
+                raise
 
     async def get_events(
         self,
