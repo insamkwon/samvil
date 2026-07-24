@@ -705,6 +705,28 @@ def _rm_reason(args: list[str]) -> str | None:
     return None
 
 
+def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
+    for index, token in enumerate(args[:-1]):
+        if token in {">", ">>", ">|", "<>", "&>", "&>>"} and _is_protected_ssot_target(
+            args[index + 1]
+        ):
+            return "protected SAMVIL SSOT shell overwrite"
+
+    if executable == "truncate" and any(
+        _is_protected_ssot_target(token) for token in args if not token.startswith("-")
+    ):
+        return "protected SAMVIL SSOT truncation"
+
+    if (
+        executable == "cp"
+        and len(args) >= 2
+        and _normalized_rm_target(args[-2]) == "/dev/null"
+        and _is_protected_ssot_target(args[-1])
+    ):
+        return "protected SAMVIL SSOT overwrite from /dev/null"
+    return None
+
+
 def _sql_reason(executable: str, args: list[str]) -> str | None:
     if executable not in SQL_CLIENTS:
         return None
@@ -1521,6 +1543,9 @@ def _analyze_command_impl(command: str) -> str | None:
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
+        overwrite_reason = _protected_overwrite_reason(executable, args)
+        if overwrite_reason:
+            return overwrite_reason
         if any(char in executable for char in "`$*?[{"):
             if _rm_reason(args):
                 return "dynamic executable with destructive removal arguments"

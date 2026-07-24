@@ -322,6 +322,22 @@ def test_brace_expansion_limit_cannot_hide_protected_ssot() -> None:
 @pytest.mark.parametrize(
     "command",
     [
+        "truncate -s 0 project.seed.json",
+        "cp /dev/null .samvil/events.jsonl",
+        "printf '{}' > project.state.json",
+        "echo corrupt >> .samvil/qa-results.json",
+    ],
+)
+def test_non_rm_overwrites_cannot_destroy_protected_ssot(command: str) -> None:
+    result = run_guard(command)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "rm -f tmp.log",
         "rm -f *.tmp",
         "rm -f .samvil/cache/tmp.json",
