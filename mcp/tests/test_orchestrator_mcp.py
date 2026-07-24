@@ -131,6 +131,39 @@ def test_complete_stage_tool_emits_event_and_claim(tmp_path, monkeypatch) -> Non
     assert rows["entries"][0]["data"]["verdict"] == "pass"
 
 
+def test_complete_stage_rejects_out_of_order_stage_completion(
+    tmp_path, monkeypatch
+) -> None:
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "orch-out-of-order",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+
+        result = json.loads(await complete_stage(sid, "qa", "pass"))
+        state = json.loads(await get_orchestration_state(sid))
+        stored_events = await (await __import__(
+            "samvil_mcp.server", fromlist=["get_store"]
+        ).get_store()).get_events(sid)
+
+        assert result["status"] == "error"
+        assert "current stage is interview" in result["error"]
+        assert state["current_stage"] == "interview"
+        assert state["completed_stages"] == []
+        assert stored_events == []
+
+    _run(runner())
+    assert read_events(project_root)["entries"] == []
+
+
 def test_complete_stage_fails_closed_when_canonical_event_append_fails(
     tmp_path, monkeypatch
 ) -> None:

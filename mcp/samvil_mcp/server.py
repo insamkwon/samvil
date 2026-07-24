@@ -1052,6 +1052,24 @@ async def complete_stage(
         if session is None:
             return json.dumps({"status": "error", "error": f"session {session_id} not found"})
 
+        current_stage = session.current_stage.value
+        if current_stage != stage:
+            raise OrchestratorError(
+                f"cannot complete stage {stage!r}; current stage is {current_stage}"
+            )
+        stored_events = await store.get_events(session_id, limit=1000)
+        prerequisite = _orchestrator_stage_can_proceed(
+            session,
+            _events_to_orchestrator(stored_events),
+            stage,
+            council_opt_in=council_opt_in,
+        )
+        if not prerequisite["can_proceed"]:
+            raise OrchestratorError(
+                f"cannot complete stage {stage!r}: "
+                + "; ".join(prerequisite["blockers"])
+            )
+
         plan = _complete_stage_plan(
             session, stage, verdict, council_opt_in=council_opt_in
         )
