@@ -358,6 +358,44 @@ def test_save_event_writes_project_events_ssot(tmp_path, monkeypatch) -> None:
     }
 
 
+def test_save_event_uses_valid_line_index_without_rescanning_jsonl(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from samvil_mcp import server as srv
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    first = srv._append_project_event(
+        project_root,
+        timestamp="2026-07-25T00:00:00Z",
+        event_type="build_started",
+        stage="build",
+        session_id="session-1",
+        data={},
+    )
+    assert first == ".samvil/events.jsonl:1"
+
+    def unexpected_scan(_handle):
+        raise AssertionError("valid line index must avoid a full JSONL scan")
+
+    monkeypatch.setattr(srv, "_scan_event_line_count", unexpected_scan)
+    second = srv._append_project_event(
+        project_root,
+        timestamp="2026-07-25T00:00:01Z",
+        event_type="build_pass",
+        stage="build",
+        session_id="session-1",
+        data={},
+    )
+    assert second == ".samvil/events.jsonl:2"
+
+    index = json.loads(
+        (project_root / ".samvil" / "events.jsonl.index").read_text(encoding="utf-8")
+    )
+    assert index["line_count"] == 2
+
+
 def test_save_event_fails_closed_when_project_events_append_fails(
     tmp_path, monkeypatch
 ) -> None:

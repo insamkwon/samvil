@@ -73,6 +73,7 @@ from .deploy_targets import (
 from .scaffold_targets import (
     evaluate_scaffold_target as _evaluate_scaffold_target,
 )
+from .ssot_io import atomic_write_text
 from .build_phase_a import (
     aggregate_build_phase_a as _aggregate_build_phase_a,
 )
@@ -635,6 +636,7 @@ def _append_project_event(
 ) -> str:
     """Append one canonical project event and return its file-backed evidence."""
     path = project_root / ".samvil" / "events.jsonl"
+    index_path = path.with_suffix(path.suffix + ".index")
     path.parent.mkdir(parents=True, exist_ok=True)
     row = {
         "timestamp": timestamp,
@@ -645,12 +647,50 @@ def _append_project_event(
     }
     with _file_locked(path):
         with path.open("a+", encoding="utf-8") as handle:
-            handle.seek(0)
-            line_number = sum(1 for _ in handle) + 1
             handle.seek(0, os.SEEK_END)
+            current_size = handle.tell()
+            line_count = _indexed_event_line_count(
+                handle,
+                index_path,
+                current_size=current_size,
+            )
+            line_number = line_count + 1
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            handle.flush()
+            new_size = handle.tell()
+        try:
+            atomic_write_text(
+                index_path,
+                json.dumps({"size": new_size, "line_count": line_number}),
+            )
+        except OSError as exc:
+            _log_mcp_health("warn", "save_event.events_index", str(exc))
     relative_path = path.relative_to(project_root).as_posix()
     return f"{relative_path}:{line_number}"
+
+
+def _scan_event_line_count(handle: Any) -> int:
+    handle.seek(0)
+    return sum(1 for _ in handle)
+
+
+def _indexed_event_line_count(
+    handle: Any,
+    index_path: Path,
+    *,
+    current_size: int,
+) -> int:
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        if (
+            isinstance(index, dict)
+            and int(index.get("size", -1)) == current_size
+            and int(index.get("line_count", -1)) >= 0
+        ):
+            return int(index["line_count"])
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return _scan_event_line_count(handle)
 
 
 async def _auto_post_claim_for_event(
