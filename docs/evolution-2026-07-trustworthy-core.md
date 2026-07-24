@@ -1404,6 +1404,60 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   두 호출이 모두 barrier에 도달했음을 확인한 뒤 transaction CAS를 검증한다.)
   - 완료 증거: `5c3639e`; `mcp/tests/test_orchestrator_mcp.py:1063`,
     `mcp/tests/test_orchestrator_mcp.py:1114`.
+- [x] **4.76 canonical event 보상 완료 전 후속 stage 전환 직렬화**
+  (DB stage 전환 뒤 canonical append가 실패한 요청의 보상이 끝나기 전에 동일 session의
+  후속 stage가 선행 증거를 소비하지 못하도록 append·보상까지 lock 경계에 포함한다.)
+  - 완료 증거: `4ef5da4`; `mcp/samvil_mcp/server.py:1137`,
+    `mcp/samvil_mcp/server.py:1141`, `mcp/tests/test_orchestrator_mcp.py:1264`.
+- [x] **4.77 QA scalar routing state 손상의 fail-closed 보강**
+  (`counts`와 `build_retries`의 bool·음수·비정수, 비-list `qa_history`도 예외나
+  deploy 진행 없이 QA marker에 머물게 한다.)
+  - 완료 증거: `86c5528`; `mcp/samvil_mcp/chain_markers.py:110`,
+    `mcp/samvil_mcp/chain_markers.py:135`, `mcp/samvil_mcp/chain_markers.py:147`,
+    `mcp/tests/test_chain_markers.py:262`, `mcp/tests/test_chain_markers.py:318`.
+- [x] **4.78 QA terminal verdict의 trusted stage 완료 선행**
+  (PASS·FAIL·BLOCKED 결과가 marker나 다음 Skill을 호출하기 전에 `complete_stage`의
+  exact `status=ok`를 통과하도록 Claude·Codex·Gemini 실행 계약을 정렬한다.)
+  - 완료 증거: `6f990c9`; `skills/samvil-qa/SKILL.md:110`,
+    `references/codex-commands/samvil-qa.md:25`, `mcp/tests/test_skill_wiring.py:357`.
+- [x] **4.79 Council 승인 결과의 trusted stage 완료 선행**
+  (승인된 Council 결과도 design chain 전에 `council_opt_in=true`인 `complete_stage`를
+  통과해 단순 handoff·marker가 orchestration gate를 우회하지 못하게 한다.)
+  - 완료 증거: `d3ccad5`; `skills/samvil-council/SKILL.md:103`,
+    `references/codex-commands/samvil-council.md:22`,
+    `mcp/tests/test_skill_wiring.py:388`.
+- [x] **4.80 PM interview→seed의 trusted 전환 순서 고정**
+  (`validate_pm_seed`의 결정적 readiness를 interview gate에 전달하고 interview 완료 뒤
+  변환·seed 완료를 수행해 PM 경로도 정식 stage 계약을 따른다.)
+  - 완료 증거: `1f8eab0`; `mcp/samvil_mcp/server.py:3127`,
+    `skills/samvil-pm-interview/SKILL.md:51`, `skills/samvil-pm-interview/SKILL.md:66`,
+    `mcp/tests/test_server_v3_tools.py:198`.
+- [x] **4.81 runtime stdin·script file·env 경유 SSOT 변경 차단**
+  (inline option뿐 아니라 heredoc/stdin payload, 실제 runtime script file, 환경변수로
+  분리된 보호 경로까지 읽어 간접 mutation을 차단하고 read-only 경계는 유지한다.)
+  - 완료 증거: `43466b3`; `hooks/guard_destructive.py:858`,
+    `hooks/guard_destructive.py:911`, `mcp/tests/test_guard_destructive.py:108`,
+    `mcp/tests/test_guard_destructive.py:121`, `mcp/tests/test_guard_destructive.py:136`.
+- [x] **4.82 quoted credential의 공백·delimiter 전체 redaction**
+  (따옴표 안에 공백·쉼표·세미콜론이 있어도 종료 quote까지 하나의 credential 값으로
+  인식해 canonical event 저장 전에 전부 가린다.)
+  - 완료 증거: `d622a95`; `mcp/samvil_mcp/event_sanitizer.py:29`,
+    `mcp/samvil_mcp/event_sanitizer.py:68`, `mcp/tests/test_event_sanitizer.py:99`.
+- [x] **4.83 trusted transition의 transaction provenance 분리**
+  (model-authored JSON flag 대신 event+stage 원자 전환 경로만 DB provenance를 기록하고,
+  raw INSERT·일반 save_event·직접 EventStore mutation은 prerequisite로 신뢰하지 않는다.)
+  - 완료 증거: `38defe0`; `mcp/samvil_mcp/event_store.py:34`,
+    `mcp/samvil_mcp/event_store.py:336`, `mcp/samvil_mcp/event_store.py:490`,
+    `mcp/tests/test_event_store.py:283`, `mcp/tests/test_event_store.py:318`,
+    `hooks/guard_destructive.py:837`, `mcp/tests/test_guard_destructive.py:197`.
+- [x] **4.84 blueprint enum·leaf canonical 계약 검증**
+  (web/dashboard의 `mobile_considerations`, solution type별 enum, navigation tab,
+  dependency·asset·scene-flow 등 중첩 leaf가 documented shape를 벗어나면 design 완료를
+  fail-closed한다.)
+  - 완료 증거: `9450b69`; `mcp/samvil_mcp/server.py:1344`,
+    `mcp/samvil_mcp/server.py:1399`, `mcp/samvil_mcp/server.py:1450`,
+    `mcp/samvil_mcp/server.py:1479`, `mcp/samvil_mcp/server.py:1644`,
+    `mcp/samvil_mcp/server.py:1667`, `mcp/tests/test_orchestrator_mcp.py:720`.
 
 ---
 
