@@ -54,9 +54,15 @@ def test_should_skip_stage_tool_returns_bool() -> None:
 
 def test_stage_can_proceed_tool_reads_session_events(tmp_path, monkeypatch) -> None:
     _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "orch-test"
+    project_root.mkdir()
 
     async def runner():
-        sess = json.loads(await create_session("orch-test", "standard"))
+        sess = json.loads(
+            await create_session(
+                "orch-test", "standard", project_root=str(project_root)
+            )
+        )
         sid = sess["session_id"]
         blocked = json.loads(await stage_can_proceed(sid, "seed"))
         assert blocked["can_proceed"] is False
@@ -73,9 +79,15 @@ def test_stage_can_proceed_tool_reads_session_events(tmp_path, monkeypatch) -> N
 
 def test_get_orchestration_state_tool_reads_progress(tmp_path, monkeypatch) -> None:
     _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "orch-state"
+    project_root.mkdir()
 
     async def runner():
-        sess = json.loads(await create_session("orch-state", "minimal"))
+        sess = json.loads(
+            await create_session(
+                "orch-state", "minimal", project_root=str(project_root)
+            )
+        )
         sid = sess["session_id"]
         await complete_stage(sid, "interview", "pass")
         await complete_stage(sid, "seed", "pass")
@@ -465,6 +477,30 @@ def test_complete_stage_tool_returns_error_for_missing_session(tmp_path, monkeyp
     data = json.loads(out)
     assert data["status"] == "error"
     assert "not found" in data["error"]
+
+
+def test_complete_stage_fails_closed_when_project_root_is_unresolved(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    monkeypatch.setattr(srv, "_resolve_project_path", lambda _name: None)
+
+    async def runner():
+        sess = json.loads(await create_session("missing-events-root", "standard"))
+        result = json.loads(
+            await complete_stage(sess["session_id"], "interview", "pass")
+        )
+        state = json.loads(await get_orchestration_state(sess["session_id"]))
+        stored_events = await (await srv.get_store()).get_events(sess["session_id"])
+
+        assert result["status"] == "error"
+        assert "project root unresolved" in result["error"]
+        assert state["current_stage"] == "interview"
+        assert stored_events == []
+
+    _run(runner())
 
 
 def test_save_event_writes_project_events_ssot(tmp_path, monkeypatch) -> None:

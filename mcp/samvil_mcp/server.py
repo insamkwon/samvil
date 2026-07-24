@@ -1071,6 +1071,11 @@ async def complete_stage(
         session = await store.get_session(session_id)
         if session is None:
             return json.dumps({"status": "error", "error": f"session {session_id} not found"})
+        project_path = _session_project_path(session)
+        if project_path is None:
+            raise OrchestratorError(
+                f"project root unresolved for session {session_id}"
+            )
 
         current_stage = session.current_stage.value
         if current_stage != stage:
@@ -1113,7 +1118,6 @@ async def complete_stage(
         claim_id = None
         claim_saved = False
         claim_error = ""
-        project_path = _session_project_path(session)
         if project_path is not None:
             try:
                 await asyncio.to_thread(
