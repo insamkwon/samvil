@@ -779,6 +779,7 @@ async def save_event(
         )
         session = await store.get_session(session_id)
         project_path = _session_project_path(session)
+        canonical_saved = False
         if project_path is None:
             _log_mcp_health(
                 "warn",
@@ -796,8 +797,17 @@ async def save_event(
                     session_id=session_id,
                     data=parsed_data,
                 )
+                canonical_saved = True
             except OSError as exc:
                 _log_mcp_health("fail", "save_event.events_ssot", str(exc))
+                return json.dumps(
+                    {
+                        "event_id": event.id,
+                        "saved": False,
+                        "canonical_saved": False,
+                        "error": str(exc),
+                    }
+                )
         # Update session's current stage
         await store.update_session_stage(session_id, stage_enum)
 
@@ -807,7 +817,13 @@ async def save_event(
         )
 
         _log_mcp_health("ok", "save_event")
-        return json.dumps({"event_id": event.id, "saved": True})
+        return json.dumps(
+            {
+                "event_id": event.id,
+                "saved": True,
+                "canonical_saved": canonical_saved,
+            }
+        )
     except Exception as e:
         _log_mcp_health("fail", "save_event", str(e))
         return json.dumps({"event_id": None, "saved": False, "error": str(e)})

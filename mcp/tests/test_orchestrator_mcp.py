@@ -203,6 +203,46 @@ def test_save_event_writes_project_events_ssot(tmp_path, monkeypatch) -> None:
     }
 
 
+def test_save_event_fails_closed_when_project_events_append_fails(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    def fail_append(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(srv, "_append_project_event", fail_append)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "events-ssot-failure",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        result = json.loads(
+            await save_event(
+                sess["session_id"],
+                "build_stage_complete",
+                "qa",
+                "{}",
+            )
+        )
+        state = json.loads(await get_orchestration_state(sess["session_id"]))
+
+        assert result["saved"] is False
+        assert result["canonical_saved"] is False
+        assert "disk full" in result["error"]
+        assert state["current_stage"] == "interview"
+
+    _run(runner())
+
+
 def test_save_event_auto_claims_current_stage_entry_events(
     tmp_path,
     monkeypatch,
