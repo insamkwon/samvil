@@ -22,7 +22,8 @@ Ensure build passes (`npm run build` succeeds).
    - Retro → `gate_name="any_to_retro"`, `metrics_json='{"always_run":true}'`.
    - QA continue → no cross-stage gate or marker; apply the reported fixes and repeat the Ralph loop.
    Tool error or block halts; no marker is written.
-10. Only after materialize + gate PASS for Deploy/Evolve/Retro, run `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-qa", next_skill="<finalize.next_skill_decision.suggested>")`. For `samvil-qa`, remain in the current stage and do not write a marker.
+10. Only after materialize + gate PASS, run `complete_stage(session_id=<sid>, stage="qa", verdict="<pass|fail|blocked>")`: map synthesis PASS→`pass`, FAIL→`fail`, and convergence BLOCKED→`blocked`. Exact `status="ok"` is required. For `samvil-qa` continue, do not complete the stage.
+11. Only after trusted completion for Deploy/Evolve/Retro, run `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-qa", next_skill="<finalize.next_skill_decision.suggested>")`. For `samvil-qa`, remain in the current stage and do not write a marker.
 
 ## Chain
 

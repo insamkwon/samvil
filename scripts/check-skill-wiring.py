@@ -95,6 +95,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "aggregate_qa_boot_context",
             "dispatch_qa_pass1_batch",
             "finalize_qa_verdict",
+            "complete_stage",
             "SKILL.legacy.md",
         ),
     ),

@@ -324,6 +324,26 @@ def test_codex_qa_uses_dynamic_finalize_route() -> None:
     assert "Deploy/Evolve/Retro" in codex
     assert "samvil-qa" in codex
     assert "no cross-stage gate" in codex
+    complete_call = (
+        'complete_stage(session_id=<sid>, stage="qa", '
+        'verdict="<pass|fail|blocked>")'
+    )
+    assert complete_call in codex
+    assert codex.index("gate_check") < codex.index(complete_call)
+    assert codex.index(complete_call) < codex.index("write_chain_marker")
+
+
+def test_qa_skill_records_trusted_completion_before_host_chain() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    qa = (repo / "skills" / "samvil-qa" / "SKILL.md").read_text()
+    complete_call = (
+        'complete_stage(session_id="<sid>", stage="qa", '
+        'verdict="<pass|fail|blocked>")'
+    )
+
+    assert complete_call in qa
+    assert qa.index("gate_check") < qa.index(complete_call)
+    assert qa.index(complete_call) < qa.index("HostCapability")
 
 
 def test_codex_commands_use_root_seed_ssot_and_deploy_fails_closed() -> None:

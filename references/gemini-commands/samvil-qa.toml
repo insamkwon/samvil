@@ -13,10 +13,12 @@ If `next_skill` is not `samvil-qa`, skip and report the expected stage.
 3. Call `materialize_qa_synthesis` before any chain continuation.
 4. Run the route-specific `gate_check`; tool error or any verdict other than exact
    `pass` halts and must not write a marker.
-5. Only after materialization and gate PASS, call `write_chain_marker` with
+5. After materialization and gate PASS, call `complete_stage` with session_id=<sid>,
+   stage="qa", verdict="<pass|fail|blocked>" and require exact status="ok".
+6. Only after trusted completion, call `write_chain_marker` with
    project_root="${PWD}", host_name="gemini_cli", current_skill="samvil-qa",
    next_skill="<finalize.next_skill_decision.suggested>".
-6. If the suggested skill is `samvil-qa`, remain in the Ralph loop and do not write a marker.
+7. If the suggested skill is `samvil-qa`, remain in the Ralph loop, do not complete the stage, and do not write a marker.
 
 ## Chain
 
