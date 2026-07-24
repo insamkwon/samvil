@@ -790,7 +790,7 @@ class TestQAFinalize:
         assert result["next_skill_decision"]["suggested"] == "samvil-evolve"
         assert "partial_count" in result["next_skill_decision"]["reason"]
 
-    def test_cl_7c_next_skill_fail_to_retro(self, tmp_path: Path) -> None:
+    def test_cl_7c_revise_with_continue_stays_in_qa(self, tmp_path: Path) -> None:
         _write(tmp_path / "project.state.json", _state())
         evidence = _make_evidence(
             pass2_items=[
@@ -798,6 +798,23 @@ class TestQAFinalize:
             ]
         )
         result = qa_finalize.finalize_qa_verdict(tmp_path, evidence=evidence)
+
+        assert result["synthesis"]["verdict"] == "REVISE"
+        assert result["convergence"]["verdict"] == "continue"
+        assert result["next_skill_decision"]["suggested"] == "samvil-qa"
+
+    def test_cl_7d_failed_convergence_routes_to_retro(self, tmp_path: Path) -> None:
+        _write(tmp_path / "project.state.json", _state())
+        evidence = _make_evidence(
+            pass2_items=[
+                {"id": "f.1", "criterion": "x", "verdict": "FAIL", "evidence": []},
+            ],
+            iteration=3,
+            max_iterations=3,
+        )
+        result = qa_finalize.finalize_qa_verdict(tmp_path, evidence=evidence)
+
+        assert result["convergence"]["verdict"] == "failed"
         assert result["next_skill_decision"]["suggested"] == "samvil-retro"
         assert "samvil-evolve" in result["next_skill_decision"]["user_options"]
         assert "samvil-retro" in result["next_skill_decision"]["user_options"]

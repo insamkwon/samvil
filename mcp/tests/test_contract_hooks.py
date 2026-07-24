@@ -333,6 +333,57 @@ def test_qa_stage_end_marker_uses_failed_qa_retro_route(tmp_path: Path) -> None:
     assert '"subject": "any_to_retro"' in claims
 
 
+def test_qa_stage_end_continue_keeps_ralph_loop_without_marker_or_gate(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_json(
+        project / "project.state.json",
+        {"samvil_tier": "standard", "current_stage": "qa"},
+    )
+    _write_json(project / "project.seed.json", {"schema_version": "3.2"})
+    _write_json(
+        project / ".samvil" / "qa-results.json",
+        {
+            "synthesis": {
+                "verdict": "REVISE",
+                "verification_mode": "static",
+                "pass1": {"status": "PASS"},
+                "pass2": {
+                    "counts": {
+                        "PASS": 0,
+                        "PARTIAL": 0,
+                        "UNIMPLEMENTED": 0,
+                        "FAIL": 1,
+                    }
+                },
+                "pass3": {"verdict": "PASS"},
+            },
+            "convergence": {"verdict": "continue"},
+        },
+    )
+
+    subprocess.run(
+        [
+            "bash",
+            str(REPO / "hooks" / "contract-stage-end.sh"),
+            json.dumps({"skill": "samvil-qa"}),
+            "0",
+        ],
+        cwd=project,
+        env=_stage_end_env(tmp_path, project),
+        check=True,
+    )
+
+    assert not (project / ".samvil" / "next-skill.json").exists()
+    claims_path = project / ".samvil" / "claims.jsonl"
+    claims = claims_path.read_text() if claims_path.exists() else ""
+    assert '"subject": "qa_to_deploy"' not in claims
+    assert '"subject": "qa_to_evolve"' not in claims
+    assert '"subject": "any_to_retro"' not in claims
+
+
 def test_qa_stage_end_marker_uses_auto_evolve_route(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()

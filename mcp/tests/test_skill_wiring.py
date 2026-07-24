@@ -261,6 +261,8 @@ def test_codex_qa_uses_dynamic_finalize_route() -> None:
     assert "Only after materialize + gate PASS" in codex
     assert 'next_skill="<finalize.next_skill_decision.suggested>"' in codex
     assert "Deploy/Evolve/Retro" in codex
+    assert "samvil-qa" in codex
+    assert "no cross-stage gate" in codex
 
 
 def test_codex_commands_use_root_seed_ssot_and_deploy_fails_closed() -> None:

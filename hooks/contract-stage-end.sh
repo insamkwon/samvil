@@ -106,6 +106,7 @@ STAGE_TO_GATE = {
     "build": GateName.BUILD_TO_QA.value,
     "retro": GateName.ANY_TO_RETRO.value,
 }
+QA_CONTINUE = "__qa_continue__"
 
 
 def _qa_results_payload() -> dict:
@@ -125,7 +126,10 @@ def _qa_suggested_next_skill(state: dict) -> str:
     try:
         from samvil_mcp.qa_finalize import _decide_next_skill
 
-        return str(_decide_next_skill(synthesis, state).get("suggested") or "")
+        convergence = results.get("convergence") or {}
+        return str(
+            _decide_next_skill(synthesis, state, convergence).get("suggested") or ""
+        )
     except Exception:
         return ""
 
@@ -134,6 +138,8 @@ def _gate_for_stage(stage: str, state: dict) -> str | None:
     if stage != "qa":
         return STAGE_TO_GATE.get(stage)
     suggested = _qa_suggested_next_skill(state)
+    if suggested == "samvil-qa":
+        return QA_CONTINUE
     if suggested == "samvil-evolve":
         return GateName.QA_TO_EVOLVE.value
     if suggested == "samvil-retro":
@@ -208,6 +214,9 @@ seed = _load_json(project / "project.seed.json")
 metrics_file = _load_json(project / ".samvil" / "metrics.json")
 
 gate_name = _gate_for_stage(stage, state)
+if gate_name == QA_CONTINUE:
+    print("hold;stage=qa;continue")
+    sys.exit(0)
 if gate_name is None:
     print(f"skip;stage={stage};no-gate")
     sys.exit(0)
@@ -312,7 +321,10 @@ try:
         state = _load_json(project / "project.state.json")
         try:
             from samvil_mcp.qa_finalize import _decide_next_skill
-            return str(_decide_next_skill(synthesis, state).get("suggested") or "") or None
+            convergence = results.get("convergence") or {}
+            return str(
+                _decide_next_skill(synthesis, state, convergence).get("suggested") or ""
+            ) or None
         except Exception:
             return None
 

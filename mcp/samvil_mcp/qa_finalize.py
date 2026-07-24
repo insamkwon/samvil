@@ -41,8 +41,8 @@ Outputs (all best-effort, no file writes here):
   - `consensus_triggers[]` — list of payloads for `consensus_trigger`.
   - `gate_input` — payload for `gate_check(gate_name='qa_to_deploy')`.
   - `blocked` — `{detected: bool, persistent_issue_ids: [str]}`.
-  - `next_skill_decision` — `{verdict, suggested: 'samvil-deploy' |
-    'samvil-evolve' | 'samvil-retro', reason}`.
+  - `next_skill_decision` — `{verdict, suggested: 'samvil-qa' |
+    'samvil-deploy' | 'samvil-evolve' | 'samvil-retro', reason}`.
   - `handoff_block` — pre-rendered Korean handoff section.
 """
 
@@ -323,13 +323,25 @@ def _detect_blocked(
 def _decide_next_skill(
     synthesis: dict[str, Any],
     state: dict[str, Any],
+    convergence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Decide the next skill to chain into based on verdict + auto-triggers."""
+    """Decide the next skill from synthesis and convergence as one table."""
     verdict = str(synthesis.get("verdict") or "").upper()
+    convergence_verdict = str(
+        (convergence or {}).get("verdict") or ""
+    ).casefold()
     counts = (synthesis.get("pass2") or {}).get("counts") or {}
     partial_count = int(counts.get("PARTIAL", 0) or 0)
     qa_history = state.get("qa_history") or []
     build_retries = int(state.get("build_retries") or 0)
+
+    if verdict == "REVISE" and convergence_verdict == "continue":
+        return {
+            "verdict": verdict,
+            "suggested": "samvil-qa",
+            "reason": "qa_revise + convergence=continue — stay in Ralph loop",
+            "user_options": ["samvil-qa"],
+        }
 
     if verdict in ("FAIL", "REVISE"):
         # FAIL → user choice (evolve / retro / manual). We default to retro.
@@ -557,7 +569,11 @@ def finalize_qa_verdict(
         report.blocked = history_blocked
 
     # Next-skill decision.
-    report.next_skill_decision = _decide_next_skill(synthesis, state)
+    report.next_skill_decision = _decide_next_skill(
+        synthesis,
+        state,
+        report.convergence,
+    )
 
     # Handoff block.
     report.handoff_block = _render_handoff_block(
