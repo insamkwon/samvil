@@ -1064,6 +1064,56 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/samvil_mcp/server.py:700`, `mcp/samvil_mcp/server.py:703`,
     `mcp/tests/test_orchestrator_mcp.py:403`,
     `mcp/tests/test_orchestrator_mcp.py:437`.
+- [x] **4.19 QA 결과 부재·손상 시 체인 진행 fail-closed**
+  (`resolve_stage_next_skill`의 기존 `None` 계약은 유지하고, `advance_chain`의 현재
+  단계가 QA일 때만 marker를 그대로 반환해 contract-stage-end QA gate 우회를
+  막는다. missing/corrupt 결과를 같은 회귀 테스트로 고정했다.)
+  - 완료 증거: `7783e6e`; `mcp/samvil_mcp/chain_markers.py:177`,
+    `mcp/samvil_mcp/chain_markers.py:179`, `mcp/samvil_mcp/chain_markers.py:182`,
+    `mcp/tests/test_chain_markers.py:190`, `mcp/tests/test_chain_markers.py:212`,
+    `mcp/tests/test_chain_markers.py:214`.
+- [x] **4.20 Event DB·canonical JSONL·session stage 원자성 보강**
+  (이벤트 INSERT와 stage UPDATE를 SQLite 한 트랜잭션으로 묶고, 이후 canonical
+  JSONL 저장 실패 시 이벤트 삭제와 이전 stage 복원을 조건부 보상 트랜잭션으로
+  수행한다. 실제 SQLite stage UPDATE 실패를 주입한 뒤 두 API의 무잔여·무중복
+  재시도를 검증했다.)
+  - 완료 증거: `bb7af29`; `mcp/samvil_mcp/event_store.py:266`,
+    `mcp/samvil_mcp/event_store.py:283`, `mcp/samvil_mcp/event_store.py:304`,
+    `mcp/samvil_mcp/event_store.py:318`, `mcp/samvil_mcp/event_store.py:340`,
+    `mcp/samvil_mcp/server.py:788`, `mcp/samvil_mcp/server.py:821`,
+    `mcp/samvil_mcp/server.py:1047`, `mcp/samvil_mcp/server.py:1076`,
+    `mcp/tests/test_orchestrator_mcp.py:172`,
+    `mcp/tests/test_orchestrator_mcp.py:192`,
+    `mcp/tests/test_orchestrator_mcp.py:211`,
+    `mcp/tests/test_orchestrator_mcp.py:232`.
+- [x] **4.21 v3.3 migration backup 원자 생성·검증**
+  (존재 여부 대신 JSON 파싱과 v3.2 식별로 기존 백업을 판정한다. 유효한 최초
+  백업은 보존하고, partial/corrupt 백업은 durable atomic write 후 원문과 파싱
+  결과를 재검증한다. 백업 실패 시 seed 쓰기에 진입하지 않는다.)
+  - 완료 증거: `8bdaf82`; `mcp/samvil_mcp/migrate_v3_3.py:18`,
+    `mcp/samvil_mcp/migrate_v3_3.py:29`, `mcp/samvil_mcp/migrate_v3_3.py:38`,
+    `mcp/samvil_mcp/migrate_v3_3.py:70`, `mcp/samvil_mcp/migrate_v3_3.py:80`,
+    `mcp/tests/test_migrate_v3_3.py:69`, `mcp/tests/test_migrate_v3_3.py:83`,
+    `mcp/tests/test_migrate_v3_3.py:97`, `mcp/tests/test_migrate_v3_3.py:117`.
+- [x] **4.22 mobile-app Expo web 브라우저 AC 계약 연결**
+  (`mobile-app`을 기존 browser solution type 집합에 포함해 Expo web surface도
+  per-feature Playwright spec을 AC 1차 검증 명령으로 사용한다.)
+  - 완료 증거: `d4c3def`; `mcp/samvil_mcp/ac_verification.py:15`,
+    `mcp/samvil_mcp/ac_verification.py:85`, `mcp/samvil_mcp/ac_verification.py:94`,
+    `mcp/tests/test_ac_verification.py:54`, `mcp/tests/test_ac_verification.py:61`,
+    `mcp/tests/test_ac_verification.py:65`.
+- [x] **4.23 제거된 interview readiness tool 문서 드리프트 차단**
+  (스코프 보정: `references/contract-layer-protocol.md`의 직접 호출은 선행 커밋
+  `bdc8712`에서 이미 `score_ambiguity`로 교정되어 있었다. 현재 코드 기준으로
+  `seed_readiness`와 `converged`의 gate 매핑을 명시하고, 제거된
+  `compute_seed_readiness`가 reference 문서에 재등장하면 wiring 검사가 실패하도록
+  고정했다. 역사 기록은 수정하지 않았다.)
+  - 완료 증거: `49af43e`; `references/contract-layer-protocol.md:145`,
+    `references/contract-layer-protocol.md:155`,
+    `references/contract-layer-protocol.md:157`, `scripts/check-skill-wiring.py:39`,
+    `scripts/check-skill-wiring.py:43`, `scripts/check-skill-wiring.py:357`,
+    `scripts/check-skill-wiring.py:382`, `scripts/check-skill-wiring.py:385`,
+    `mcp/tests/test_skill_wiring.py:62`, `mcp/tests/test_skill_wiring.py:80`.
 
 ---
 
