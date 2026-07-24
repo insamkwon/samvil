@@ -706,6 +706,10 @@ def _rm_reason(args: list[str]) -> str | None:
 
 
 def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
+    if executable in {">", ">>", ">|", "<>", "&>", "&>>"} and args:
+        if _is_protected_ssot_target(args[0]):
+            return "protected SAMVIL SSOT shell overwrite"
+
     for index, token in enumerate(args[:-1]):
         if token in {">", ">>", ">|", "<>", "&>", "&>>"} and _is_protected_ssot_target(
             args[index + 1]
@@ -718,12 +722,25 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
         return "protected SAMVIL SSOT truncation"
 
     if (
-        executable == "cp"
+        executable in {"cp", "install"}
         and len(args) >= 2
         and _normalized_rm_target(args[-2]) == "/dev/null"
         and _is_protected_ssot_target(args[-1])
     ):
         return "protected SAMVIL SSOT overwrite from /dev/null"
+
+    if executable == "tee" and any(
+        _is_protected_ssot_target(token) for token in args if not token.startswith("-")
+    ):
+        return "protected SAMVIL SSOT tee overwrite"
+
+    if executable == "dd":
+        options = dict(token.split("=", 1) for token in args if "=" in token)
+        if (
+            _normalized_rm_target(options.get("if", "")) == "/dev/null"
+            and _is_protected_ssot_target(options.get("of", ""))
+        ):
+            return "protected SAMVIL SSOT overwrite from /dev/null"
     return None
 
 

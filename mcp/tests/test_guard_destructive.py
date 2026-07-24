@@ -324,6 +324,10 @@ def test_brace_expansion_limit_cannot_hide_protected_ssot() -> None:
     [
         "truncate -s 0 project.seed.json",
         "cp /dev/null .samvil/events.jsonl",
+        "install /dev/null project.seed.json",
+        "tee project.state.json",
+        "dd if=/dev/null of=.samvil/qa-results.json",
+        "> project.seed.json",
         "printf '{}' > project.state.json",
         "echo corrupt >> .samvil/qa-results.json",
     ],
