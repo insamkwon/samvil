@@ -50,19 +50,36 @@ def _prepare_interview_exit(project_root: Path) -> None:
     )
 
 
-def _write_valid_seed(project_root: Path) -> None:
+def _write_valid_seed(
+    project_root: Path,
+    solution_type: str = "web-app",
+) -> None:
+    framework = {
+        "automation": "python-script",
+        "game": "phaser",
+        "mobile-app": "expo",
+    }.get(solution_type, "nextjs")
+    core_experience = (
+        {
+            "primary_screen": "TaskBoard",
+            "key_interactions": ["Create task"],
+        }
+        if solution_type in {"web-app", "dashboard"}
+        else {
+            "input": "User input",
+            "output": "Verified output",
+            "trigger": "User action",
+        }
+    )
     (project_root / "project.seed.json").write_text(
         json.dumps(
             {
                 "schema_version": "3.2",
                 "name": "evidence-demo",
                 "description": "Exit evidence fixture",
-                "solution_type": "web-app",
-                "tech_stack": {"framework": "nextjs"},
-                "core_experience": {
-                    "primary_screen": "TaskBoard",
-                    "key_interactions": ["Create task"],
-                },
+                "solution_type": solution_type,
+                "tech_stack": {"framework": framework},
+                "core_experience": core_experience,
                 "features": [
                     {
                         "name": "core-flow",
@@ -572,6 +589,85 @@ def test_design_completion_rejects_nonempty_but_invalid_blueprint(
         assert result["status"] == "error"
         assert "design exit evidence is invalid" in result["error"]
         assert len(after) == len(before)
+
+    _run(runner())
+
+
+@pytest.mark.parametrize(
+    ("solution_type", "blueprint"),
+    [
+        (
+            "automation",
+            {
+                "entry_point": "src/main.py",
+                "modules": {"core": ["main.py"], "utils": ["logger.py"]},
+                "fixtures": {
+                    "input": "fixtures/input/",
+                    "expected": "fixtures/expected/",
+                },
+                "dependencies": [],
+                "error_handling": "retry_with_logging",
+                "execution": {"type": "cli", "schedule": None},
+            },
+        ),
+        (
+            "game",
+            {
+                "scenes": ["BootScene", "MenuScene", "GameScene", "GameOverScene"],
+                "entities": ["Player"],
+                "game_config": {
+                    "width": 800,
+                    "height": 600,
+                    "physics": "arcade",
+                    "input": "keyboard",
+                },
+                "assets": {"sprites": [], "audio": []},
+                "scene_flow": {"BootScene": "MenuScene"},
+                "key_libraries": ["phaser"],
+                "state_management": "phaser-scene",
+                "component_structure": {"scenes": [], "entities": [], "config": []},
+            },
+        ),
+        (
+            "mobile-app",
+            {
+                "screens": ["HomeScreen"],
+                "navigation": {"type": "tabs", "tabs": []},
+                "data_model": {"Task": {"id": "string"}},
+                "state_management": "zustand",
+                "native_modules": [],
+                "key_libraries": ["expo-router", "zustand"],
+                "component_structure": {"shared_ui": [], "feature_components": {}},
+            },
+        ),
+    ],
+)
+def test_design_completion_accepts_canonical_blueprint_per_solution_type(
+    tmp_path, monkeypatch, solution_type, blueprint
+) -> None:
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / solution_type
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+    _write_valid_seed(project_root, solution_type)
+    (project_root / "project.blueprint.json").write_text(
+        json.dumps(blueprint),
+        encoding="utf-8",
+    )
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                solution_type,
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+        for stage in ("interview", "seed", "design"):
+            assert json.loads(await complete_stage(sid, stage, "pass"))[
+                "status"
+            ] == "ok"
 
     _run(runner())
 

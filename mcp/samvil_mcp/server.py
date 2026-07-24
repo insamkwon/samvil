@@ -1233,12 +1233,16 @@ def _require_stage_exit_evidence(project_path: Path, stage: str) -> None:
             )
         return
     if stage == "design":
+        seed = _read_stage_exit_json(project_path, "project.seed.json", stage)
         blueprint = _read_stage_exit_json(
             project_path,
             "project.blueprint.json",
             stage,
         )
-        _validate_blueprint_exit_evidence(blueprint)
+        _validate_blueprint_exit_evidence(
+            blueprint,
+            str(seed.get("solution_type") or ""),
+        )
         return
     if stage == "scaffold":
         result = _read_stage_exit_json(
@@ -1292,33 +1296,84 @@ def _require_stage_exit_evidence(project_path: Path, stage: str) -> None:
             )
 
 
-def _validate_blueprint_exit_evidence(blueprint: dict[str, Any]) -> None:
+def _validate_blueprint_exit_evidence(
+    blueprint: dict[str, Any],
+    solution_type: str,
+) -> None:
     """Validate the canonical project.blueprint.json contract."""
     errors: list[str] = []
 
-    screens = blueprint.get("screens")
-    if (
-        not isinstance(screens, list)
-        or not screens
-        or any(not isinstance(screen, str) or not screen.strip() for screen in screens)
-    ):
-        errors.append("screens must be a non-empty list of names")
-
-    if not isinstance(blueprint.get("data_model"), dict):
-        errors.append("data_model must be an object")
-
-    if not isinstance(blueprint.get("api_routes"), list):
-        errors.append("api_routes must be a list")
-
-    for field in ("state_management", "auth_strategy"):
-        value = blueprint.get(field)
-        if not isinstance(value, str) or not value.strip():
-            errors.append(f"{field} must be a non-empty string")
+    if solution_type in {"web-app", "dashboard"}:
+        _require_blueprint_name_list(blueprint, "screens", errors)
+        _require_blueprint_type(blueprint, "data_model", dict, errors)
+        _require_blueprint_type(blueprint, "api_routes", list, errors)
+        _require_blueprint_text(blueprint, "state_management", errors)
+        _require_blueprint_text(blueprint, "auth_strategy", errors)
+    elif solution_type == "mobile-app":
+        _require_blueprint_name_list(blueprint, "screens", errors)
+        _require_blueprint_type(blueprint, "navigation", dict, errors)
+        _require_blueprint_type(blueprint, "data_model", dict, errors)
+        _require_blueprint_text(blueprint, "state_management", errors)
+        _require_blueprint_type(blueprint, "native_modules", list, errors)
+        _require_blueprint_type(blueprint, "key_libraries", list, errors)
+        _require_blueprint_type(blueprint, "component_structure", dict, errors)
+    elif solution_type == "automation":
+        _require_blueprint_text(blueprint, "entry_point", errors)
+        _require_blueprint_type(blueprint, "modules", dict, errors)
+        _require_blueprint_type(blueprint, "fixtures", dict, errors)
+        _require_blueprint_type(blueprint, "dependencies", list, errors)
+        _require_blueprint_text(blueprint, "error_handling", errors)
+        _require_blueprint_type(blueprint, "execution", dict, errors)
+    elif solution_type == "game":
+        _require_blueprint_name_list(blueprint, "scenes", errors)
+        _require_blueprint_type(blueprint, "entities", list, errors)
+        _require_blueprint_type(blueprint, "game_config", dict, errors)
+        _require_blueprint_type(blueprint, "assets", dict, errors)
+        _require_blueprint_type(blueprint, "scene_flow", dict, errors)
+        _require_blueprint_type(blueprint, "key_libraries", list, errors)
+        _require_blueprint_text(blueprint, "state_management", errors)
+        _require_blueprint_type(blueprint, "component_structure", dict, errors)
+    else:
+        errors.append(f"unsupported solution_type: {solution_type or '<missing>'}")
 
     if errors:
         raise OrchestratorError(
             "design exit evidence is invalid: " + "; ".join(errors)
         )
+
+
+def _require_blueprint_type(
+    blueprint: dict[str, Any],
+    field: str,
+    expected_type: type,
+    errors: list[str],
+) -> None:
+    if not isinstance(blueprint.get(field), expected_type):
+        errors.append(f"{field} must be a {expected_type.__name__}")
+
+
+def _require_blueprint_text(
+    blueprint: dict[str, Any],
+    field: str,
+    errors: list[str],
+) -> None:
+    value = blueprint.get(field)
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{field} must be a non-empty string")
+
+
+def _require_blueprint_name_list(
+    blueprint: dict[str, Any],
+    field: str,
+    errors: list[str],
+) -> None:
+    value = blueprint.get(field)
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+    ):
+        errors.append(f"{field} must be a non-empty list of names")
 
 
 def _read_stage_exit_json(project_path: Path, relative: str, stage: str) -> dict:
