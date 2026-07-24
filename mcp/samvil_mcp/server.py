@@ -975,7 +975,7 @@ async def _session_and_events(session_id: str) -> tuple[Session | None, list[_Or
     session = await store.get_session(session_id)
     if session is None:
         return None, []
-    events = await store.get_events(session_id, limit=1000)
+    events = await store.get_events(session_id, limit=None)
     return session, _events_to_orchestrator(events)
 
 
@@ -1083,7 +1083,7 @@ async def complete_stage(
             raise OrchestratorError(
                 f"cannot complete stage {stage!r}; current stage is {current_stage}"
             )
-        stored_events = await store.get_events(session_id, limit=1000)
+        stored_events = await store.get_events(session_id, limit=None)
         prerequisite = _orchestrator_stage_can_proceed(
             session,
             _events_to_orchestrator(stored_events),

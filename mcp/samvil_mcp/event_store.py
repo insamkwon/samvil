@@ -400,14 +400,24 @@ class EventStore:
         self,
         session_id: str,
         event_type: EventType | None = None,
-        limit: int = 50,
+        limit: int | None = 50,
     ) -> list[Event]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            if event_type:
+            if event_type and limit is None:
+                cursor = await db.execute(
+                    "SELECT * FROM events WHERE session_id = ? AND event_type = ? ORDER BY timestamp DESC, rowid DESC",
+                    (session_id, event_type.value),
+                )
+            elif event_type:
                 cursor = await db.execute(
                     "SELECT * FROM events WHERE session_id = ? AND event_type = ? ORDER BY timestamp DESC, rowid DESC LIMIT ?",
                     (session_id, event_type.value, limit),
+                )
+            elif limit is None:
+                cursor = await db.execute(
+                    "SELECT * FROM events WHERE session_id = ? ORDER BY timestamp DESC, rowid DESC",
+                    (session_id,),
                 )
             else:
                 cursor = await db.execute(

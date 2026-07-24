@@ -77,6 +77,41 @@ def test_stage_can_proceed_tool_reads_session_events(tmp_path, monkeypatch) -> N
 
     _run(runner())
 
+
+def test_stage_history_is_not_truncated_by_large_telemetry_volume(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+    from samvil_mcp.models import EventType, Stage
+
+    _isolated_server(monkeypatch, tmp_path)
+
+    async def runner():
+        sess = json.loads(await create_session("long-history", "standard"))
+        store = await srv.get_store()
+        await store.save_event(
+            sess["session_id"],
+            EventType.STAGE_CHANGE,
+            Stage.SEED,
+            {
+                "event_type_raw": "interview_complete",
+                "trusted_transition": True,
+            },
+        )
+        for index in range(1001):
+            await store.save_event(
+                sess["session_id"],
+                EventType.AC_VERDICT,
+                Stage.BUILD,
+                {"index": index, "trusted_transition": False},
+            )
+
+        allowed = json.loads(await stage_can_proceed(sess["session_id"], "seed"))
+        assert allowed["can_proceed"] is True
+
+    _run(runner())
+
+
 def test_get_orchestration_state_tool_reads_progress(tmp_path, monkeypatch) -> None:
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "orch-state"
