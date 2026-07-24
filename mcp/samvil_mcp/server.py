@@ -1255,6 +1255,10 @@ def _require_stage_exit_evidence(project_path: Path, stage: str) -> None:
             raise OrchestratorError(
                 "build exit evidence requires a successful SAMVIL_EXIT code"
             )
+        if build.get("runtime_verified") is not True:
+            raise OrchestratorError(
+                "build exit evidence requires trusted runtime verification"
+            )
         return
     if stage == "qa":
         results = _read_stage_exit_json(

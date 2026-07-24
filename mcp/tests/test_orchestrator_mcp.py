@@ -81,6 +81,25 @@ def _write_valid_seed(project_root: Path) -> None:
     )
 
 
+def _write_valid_blueprint(project_root: Path) -> None:
+    (project_root / "project.blueprint.json").write_text(
+        json.dumps(
+            {
+                "key_libraries": [],
+                "component_structure": {"pages": ["TaskBoard"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_scaffold_result(project_root: Path) -> None:
+    (project_root / ".samvil" / "scaffold-results.json").write_text(
+        json.dumps({"all_passed": True}),
+        encoding="utf-8",
+    )
+
+
 def test_get_next_stage_tool_returns_next_stage() -> None:
     out = _run(get_next_stage("seed", "standard"))
     data = json.loads(out)
@@ -346,6 +365,7 @@ def test_complete_stage_rejects_pass_without_stage_artifact(
     tmp_path, monkeypatch, stage
 ) -> None:
     from samvil_mcp import server as srv
+    from samvil_mcp.models import EventType, Stage
 
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / f"missing-{stage}-evidence"
@@ -372,29 +392,23 @@ def test_complete_stage_rejects_pass_without_stage_artifact(
                 "status"
             ] == "ok"
         if stage not in {"seed", "design"}:
-            (project_root / "project.blueprint.json").write_text(
-                json.dumps({"architecture": {"framework": "nextjs"}}),
-                encoding="utf-8",
-            )
+            _write_valid_blueprint(project_root)
             assert json.loads(await complete_stage(sid, "design", "pass"))[
                 "status"
             ] == "ok"
         if stage in {"build", "qa"}:
-            (project_root / ".samvil" / "scaffold-results.json").write_text(
-                json.dumps({"all_passed": True}),
-                encoding="utf-8",
-            )
+            _write_scaffold_result(project_root)
             assert json.loads(await complete_stage(sid, "scaffold", "pass"))[
                 "status"
             ] == "ok"
         if stage == "qa":
-            (project_root / ".samvil" / "build.log").write_text(
-                "npm run build\nSAMVIL_EXIT:0\n",
-                encoding="utf-8",
+            await store.save_event_and_update_stage(
+                session_id=sid,
+                event_type=EventType.BUILD_PASS,
+                stage=Stage.QA,
+                data={"trusted_transition": True},
+                expected_stage=Stage.BUILD,
             )
-            assert json.loads(await complete_stage(sid, "build", "pass"))[
-                "status"
-            ] == "ok"
 
         before = await store.get_events(sid)
         result = json.loads(await complete_stage(sid, stage, "pass"))
@@ -403,6 +417,49 @@ def test_complete_stage_rejects_pass_without_stage_artifact(
         assert result["status"] == "error"
         assert f"{stage} exit evidence" in result["error"]
         assert len(stored_events) == len(before)
+
+    _run(runner())
+
+
+def test_build_completion_rejects_model_writable_static_receipt(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "static-build-receipt"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+    _write_valid_seed(project_root)
+    _write_valid_blueprint(project_root)
+    _write_scaffold_result(project_root)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "static-build-receipt",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+        for stage in ("interview", "seed", "design", "scaffold"):
+            assert json.loads(await complete_stage(sid, stage, "pass"))[
+                "status"
+            ] == "ok"
+
+        (project_root / ".samvil" / "build.log").write_text(
+            "npm run build\nSAMVIL_EXIT:0\n",
+            encoding="utf-8",
+        )
+        store = await srv.get_store()
+        before = await store.get_events(sid, limit=None)
+        result = json.loads(await complete_stage(sid, "build", "pass"))
+        after = await store.get_events(sid, limit=None)
+
+        assert result["status"] == "error"
+        assert "trusted runtime" in result["error"]
+        assert len(after) == len(before)
 
     _run(runner())
 
