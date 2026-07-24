@@ -69,7 +69,9 @@ SAMPLE_DATA = re.compile(
 )
 
 PIPE_FILTER = re.compile(r"\|\s*(?:tail|grep)\b", re.IGNORECASE)
-EXIT_MARKER = re.compile(r"^SAMVIL_EXIT:-?\d+\s*$", re.MULTILINE)
+EXIT_MARKER = re.compile(r"^SAMVIL_EXIT:(?P<code>-?\d+)\s*$", re.MULTILINE)
+FAILURE_COUNT = re.compile(r"\b[1-9]\d*\s+failed\b", re.IGNORECASE)
+FAILURE_LINE = re.compile(r"^(?:FAILED|FAIL|ERROR|npm ERR!)\b", re.IGNORECASE | re.MULTILINE)
 
 
 @dataclass
@@ -98,7 +100,18 @@ def analyze_shell_evidence(
     runner_exit_code: int | None = None,
 ) -> dict:
     """Reject filtered evidence unless the trusted runner reports success."""
-    mismatch = bool(PIPE_FILTER.search(command) and runner_exit_code != 0)
+    marker_failures = any(
+        int(match.group("code")) != 0 for match in EXIT_MARKER.finditer(execution_log)
+    )
+    log_reports_failure = bool(
+        marker_failures
+        or FAILURE_COUNT.search(execution_log)
+        or FAILURE_LINE.search(execution_log)
+    )
+    mismatch = bool(
+        log_reports_failure
+        or (PIPE_FILTER.search(command) and runner_exit_code != 0)
+    )
     findings = []
     if mismatch:
         findings.append(
@@ -107,8 +120,8 @@ def analyze_shell_evidence(
                 "pattern": "evidence_form_mismatch",
                 "severity": "HIGH",
                 "explanation": (
-                    "test output is filtered through tail/grep without a "
-                    "trusted runner exit status"
+                    "test evidence reports failure or is filtered without a "
+                    "trusted successful runner exit status"
                 ),
             }
         )

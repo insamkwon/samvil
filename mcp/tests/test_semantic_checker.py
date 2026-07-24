@@ -127,10 +127,21 @@ def test_piped_test_log_without_exit_marker_is_rejected() -> None:
     assert result["findings"][0]["code"] == "EVIDENCE_FORM_MISMATCH"
 
 
-def test_piped_test_log_with_trusted_success_status_is_accepted() -> None:
+def test_piped_test_log_rejects_failure_text_despite_zero_pipeline_exit() -> None:
     result = analyze_shell_evidence(
         "npm test | grep FAIL",
         "1 failed\nSAMVIL_EXIT:1\n",
+        runner_exit_code=0,
+    )
+
+    assert result["accepted"] is False
+    assert result["risk_level"] == "HIGH"
+
+
+def test_piped_test_log_with_trusted_success_and_clean_log_is_accepted() -> None:
+    result = analyze_shell_evidence(
+        "npm test | tail -20",
+        "10 passed\nSAMVIL_EXIT:0\n",
         runner_exit_code=0,
     )
 
