@@ -1299,8 +1299,8 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   (seed·design·scaffold·build·QA는 각 단계의 정식 seed, blueprint, sanity 결과,
   종료 코드, PASS qa-results가 없거나 손상되면 trusted event와 stage를 만들지 않는다.)
   - 완료 증거: `89e5b17`; `mcp/samvil_mcp/server.py:1099`,
-    `mcp/samvil_mcp/server.py:1215`, `mcp/samvil_mcp/server.py:1274`,
-    `mcp/tests/test_orchestrator_mcp.py:345`.
+    `mcp/samvil_mcp/server.py:1215`, `mcp/samvil_mcp/server.py:1268`,
+    `mcp/tests/test_orchestrator_mcp.py:367`.
 - [x] **4.57 scaffold·build canonical completion과 chain 순서 정렬**
   (scaffold sanity 결과와 build gate PASS 뒤 각각 `complete_stage`가 성공해야만
   다음 skill marker 또는 native chain을 실행해 session과 실행 흐름이 갈라지지 않는다.)
@@ -1314,7 +1314,23 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   다시 비교해 정확히 한 호출만 event·JSONL·claim을 생성한다.)
   - 완료 증거: `7928fa9`; `mcp/samvil_mcp/event_store.py:279`,
     `mcp/samvil_mcp/event_store.py:302`, `mcp/samvil_mcp/server.py:1133`,
-    `mcp/tests/test_orchestrator_mcp.py:664`.
+    `mcp/tests/test_orchestrator_mcp.py:833`.
+- [x] **4.59 build 완료의 trusted runtime 증거 강제**
+  (모델이 직접 쓸 수 있는 `build.log`의 성공 exit code만으로는 trusted transition을
+  만들지 않고, host adapter가 제공하는 `runtime_verified=true`를 함께 요구한다.)
+  - 완료 증거: `ae612b6`; `mcp/samvil_mcp/server.py:1254`,
+    `mcp/samvil_mcp/server.py:1263`, `mcp/tests/test_orchestrator_mcp.py:427`.
+- [x] **4.60 QA 완료의 self-authored PASS 차단**
+  (`qa-results.json` PASS와 성공 test artifact가 있어도 trusted runtime receipt가
+  없으면 QA 완료 event·stage를 확정하지 않는다.)
+  - 완료 증거: `0c0c4f5`; `mcp/samvil_mcp/server.py:1268`,
+    `mcp/samvil_mcp/server.py:1283`, `mcp/samvil_mcp/server.py:1289`,
+    `mcp/tests/test_orchestrator_mcp.py:470`.
+- [x] **4.61 design blueprint canonical 계약 검증**
+  (파싱 가능한 임의 객체를 blueprint로 승인하지 않고, documented screens·data model·
+  API routes·state management·auth strategy 구조를 모두 검증한다.)
+  - 완료 증거: `8fa3b42`; `mcp/samvil_mcp/server.py:1235`,
+    `mcp/samvil_mcp/server.py:1295`, `mcp/tests/test_orchestrator_mcp.py:538`.
 
 ---
 
