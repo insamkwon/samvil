@@ -214,6 +214,31 @@ def test_destructive_variants_are_blocked(command: str) -> None:
 @pytest.mark.parametrize(
     "command",
     [
+        "mysql -e 'DROP # comment\nTABLE users'",
+        "mysql -e 'TRUNCATE # comment\nTABLE users'",
+        "mysql -e 'DELETE # comment\nFROM users'",
+        "mysql -e 'ALTER TABLE users DROP FOREIGN KEY fk_user'",
+        "mysql -e 'ALTER TABLE users DROP PRIMARY KEY'",
+        "mysql -e 'ALTER TABLE users DROP INDEX idx_email'",
+        "mysql -e 'DROP TEMPORARY TABLE scratch_users'",
+    ],
+)
+def test_mysql_comment_and_alter_drop_variants_are_blocked(command: str) -> None:
+    result = run_guard(command)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+def test_destructive_words_inside_sql_string_literal_pass() -> None:
+    result = run_guard("mysql -e \"SELECT 'DROP # comment\\nTABLE users'\"")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "rm -rf .next",
         "rm -rf .samvil/cache",
         "rm -r .samvil/cache",

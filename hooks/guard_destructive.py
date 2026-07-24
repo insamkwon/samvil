@@ -734,27 +734,150 @@ def _sql_include_reason(
     return None
 
 
+def _sql_tokens(text: str) -> list[str]:
+    """Tokenize SQL policy keywords while discarding comments and literals."""
+    tokens: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        if text[index].isspace():
+            index += 1
+            continue
+        if text.startswith("--", index) or text[index] == "#":
+            newline = text.find("\n", index + 1)
+            index = length if newline == -1 else newline + 1
+            continue
+        if text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            if end == -1:
+                return tokens
+            if text.startswith("/*!", index):
+                body = re.sub(r"^[0-9]+\s*", "", text[index + 3 : end])
+                tokens.extend(_sql_tokens(body))
+            index = end + 2
+            continue
+        if text[index] == "'":
+            index += 1
+            while index < length:
+                if text[index] == "\\":
+                    index += 2
+                    continue
+                if text[index] == "'":
+                    if index + 1 < length and text[index + 1] == "'":
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            continue
+        if text[index] == "$":
+            dollar_tag = re.match(r"\$[A-Za-z_0-9]*\$", text[index:])
+            if dollar_tag:
+                delimiter = dollar_tag.group(0)
+                end = text.find(delimiter, index + len(delimiter))
+                index = length if end == -1 else end + len(delimiter)
+                continue
+        if text[index] in {'"', "`", "["}:
+            opener = text[index]
+            closer = "]" if opener == "[" else opener
+            index += 1
+            while index < length:
+                if text[index] == closer:
+                    if index + 1 < length and text[index + 1] == closer:
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            tokens.append("IDENT")
+            continue
+        if text[index].isalnum() or text[index] in {"_", "$"}:
+            end = index + 1
+            while end < length and (
+                text[end].isalnum() or text[end] in {"_", "$"}
+            ):
+                end += 1
+            tokens.append(text[index:end].upper())
+            index = end
+            continue
+        if text[index] == ";":
+            tokens.append(";")
+        index += 1
+    return tokens
+
+
+def _sql_sequence_at(tokens: list[str], index: int, sequence: tuple[str, ...]) -> bool:
+    return tokens[index : index + len(sequence)] == list(sequence)
+
+
 def _has_destructive_sql(text: str) -> bool:
-    text = re.sub(r"/\*![0-9]*\s*(.*?)\*/", r" \1 ", text, flags=re.DOTALL)
-    without_block_comments = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
-    without_line_comments = re.sub(r"--[^\n]*(?:\n|$)", " ", without_block_comments)
-    return bool(
-        re.search(
-            r"\b(?:"
-            r"drop\s+(?:"
-            r"table|database|schema|role|user|view|materialized\s+view|index|"
-            r"sequence|function|procedure|trigger|type|policy|extension|"
-            r"owned\s+by|server|publication|subscription|event\s+trigger|"
-            r"foreign\s+table|foreign\s+data\s+wrapper"
-            r")"
-            r"|truncate\s+(?:table\s+)?(?:only\s+)?[A-Za-z_\"`][\w.\"`]*"
-            r"|delete\s+from"
-            r"|alter\s+table\b[^;]*\bdrop\s+(?:column|constraint)\b"
-            r")\b",
-            without_line_comments,
-            re.IGNORECASE,
-        )
+    tokens = _sql_tokens(text)
+    drop_objects = (
+        ("TABLE",),
+        ("DATABASE",),
+        ("SCHEMA",),
+        ("ROLE",),
+        ("USER",),
+        ("VIEW",),
+        ("MATERIALIZED", "VIEW"),
+        ("INDEX",),
+        ("SEQUENCE",),
+        ("FUNCTION",),
+        ("PROCEDURE",),
+        ("TRIGGER",),
+        ("TYPE",),
+        ("POLICY",),
+        ("EXTENSION",),
+        ("OWNED", "BY"),
+        ("SERVER",),
+        ("PUBLICATION",),
+        ("SUBSCRIPTION",),
+        ("EVENT", "TRIGGER"),
+        ("FOREIGN", "TABLE"),
+        ("FOREIGN", "DATA", "WRAPPER"),
     )
+    alter_drop_objects = (
+        ("COLUMN",),
+        ("CONSTRAINT",),
+        ("FOREIGN", "KEY"),
+        ("PRIMARY", "KEY"),
+        ("INDEX",),
+        ("KEY",),
+        ("CHECK",),
+        ("PARTITION",),
+    )
+
+    for index, token in enumerate(tokens):
+        if token == "DROP":
+            object_index = index + 1
+            if object_index < len(tokens) and tokens[object_index] == "TEMPORARY":
+                object_index += 1
+            if any(
+                _sql_sequence_at(tokens, object_index, sequence)
+                for sequence in drop_objects
+            ):
+                return True
+        if token == "TRUNCATE":
+            return True
+        if token == "DELETE":
+            for following in tokens[index + 1 :]:
+                if following == ";":
+                    break
+                if following == "FROM":
+                    return True
+        if token == "ALTER" and _sql_sequence_at(tokens, index, ("ALTER", "TABLE")):
+            for drop_index in range(index + 2, len(tokens)):
+                if tokens[drop_index] == ";":
+                    break
+                if tokens[drop_index] != "DROP":
+                    continue
+                object_index = drop_index + 1
+                if any(
+                    _sql_sequence_at(tokens, object_index, sequence)
+                    for sequence in alter_drop_objects
+                ):
+                    return True
+    return False
 
 
 def _skip_options(args: list[str], *, with_value: set[str] | None = None) -> int:
@@ -1233,11 +1356,12 @@ def analyze_command(command: str) -> str | None:
 def _piped_sql_reason(command: str) -> str | None:
     if "|" not in command and "<<" not in command:
         return None
-    if not _has_destructive_sql(command):
+    segments = _segments(command)
+    if not any(_segment_executable_is(tokens, SQL_CLIENTS) for tokens in segments):
         return None
-    for tokens in _segments(command):
-        if _segment_executable_is(tokens, SQL_CLIENTS):
-            return "destructive SQL statement"
+    payload = " ".join(" ".join(tokens) for tokens in segments)
+    if _has_destructive_sql(payload):
+        return "destructive SQL statement"
     return None
 
 
