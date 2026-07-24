@@ -656,12 +656,15 @@ def _append_project_event(
             with path.open("a+", encoding="utf-8") as handle:
                 handle.seek(0, os.SEEK_END)
                 current_size = handle.tell()
+                needs_separator = _event_file_needs_separator(path)
                 line_count = _indexed_event_line_count(
                     handle,
                     index_path,
                     current_size=current_size,
                 )
                 line_number = line_count + 1
+                if needs_separator:
+                    handle.write("\n")
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -688,6 +691,14 @@ def _append_project_event(
             _log_mcp_health("warn", "save_event.events_index", str(exc))
     relative_path = path.relative_to(project_root).as_posix()
     return f"{relative_path}:{line_number}"
+
+
+def _event_file_needs_separator(path: Path) -> bool:
+    if path.stat().st_size == 0:
+        return False
+    with path.open("rb") as handle:
+        handle.seek(-1, os.SEEK_END)
+        return handle.read(1) != b"\n"
 
 
 def _scan_event_line_count(handle: Any) -> int:

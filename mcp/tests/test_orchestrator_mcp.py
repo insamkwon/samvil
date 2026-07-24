@@ -686,6 +686,42 @@ def test_save_event_uses_valid_line_index_without_rescanning_jsonl(
     assert index["line_count"] == 2
 
 
+def test_save_event_separates_existing_jsonl_tail_without_newline(tmp_path) -> None:
+    from samvil_mcp import server as srv
+
+    project_root = tmp_path / "project"
+    events_path = project_root / ".samvil" / "events.jsonl"
+    events_path.parent.mkdir(parents=True)
+    events_path.write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-07-25T00:00:00Z",
+                "event_type": "build_started",
+                "stage": "build",
+                "session_id": "session-1",
+                "data": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    evidence = srv._append_project_event(
+        project_root,
+        timestamp="2026-07-25T00:00:01Z",
+        event_type="build_pass",
+        stage="build",
+        session_id="session-1",
+        data={},
+    )
+
+    assert evidence == ".samvil/events.jsonl:2"
+    entries = read_events(project_root)["entries"]
+    assert [entry["event_type"] for entry in entries] == [
+        "build_started",
+        "build_pass",
+    ]
+
+
 def test_save_event_fails_closed_when_project_events_append_fails(
     tmp_path, monkeypatch
 ) -> None:
