@@ -406,12 +406,12 @@ class EventStore:
             db.row_factory = aiosqlite.Row
             if event_type:
                 cursor = await db.execute(
-                    "SELECT * FROM events WHERE session_id = ? AND event_type = ? ORDER BY timestamp DESC LIMIT ?",
+                    "SELECT * FROM events WHERE session_id = ? AND event_type = ? ORDER BY timestamp DESC, rowid DESC LIMIT ?",
                     (session_id, event_type.value, limit),
                 )
             else:
                 cursor = await db.execute(
-                    "SELECT * FROM events WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?",
+                    "SELECT * FROM events WHERE session_id = ? ORDER BY timestamp DESC, rowid DESC LIMIT ?",
                     (session_id, limit),
                 )
             rows = await cursor.fetchall()

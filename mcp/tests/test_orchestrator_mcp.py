@@ -101,6 +101,41 @@ def test_get_orchestration_state_tool_reads_progress(tmp_path, monkeypatch) -> N
     _run(runner())
 
 
+def test_same_timestamp_uses_later_inserted_stage_outcome(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import event_store
+    from samvil_mcp import server as srv
+    from samvil_mcp.models import EventType, Stage
+
+    _isolated_server(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        event_store, "_now", lambda: "2026-07-25T00:00:00+00:00"
+    )
+
+    async def runner():
+        sess = json.loads(await create_session("same-timestamp", "standard"))
+        store = await srv.get_store()
+        await store.save_event(
+            sess["session_id"],
+            EventType.BUILD_FAIL,
+            Stage.BUILD,
+            {"trusted_transition": True},
+        )
+        await store.save_event(
+            sess["session_id"],
+            EventType.BUILD_PASS,
+            Stage.QA,
+            {"trusted_transition": True},
+        )
+
+        state = json.loads(await get_orchestration_state(sess["session_id"]))
+        assert "build" in state["completed_stages"]
+        assert "build" not in state["failed_stages"]
+
+    _run(runner())
+
+
 def test_complete_stage_tool_emits_event_and_claim(tmp_path, monkeypatch) -> None:
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "project"

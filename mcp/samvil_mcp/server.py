@@ -956,8 +956,9 @@ async def session_status(session_id: str) -> str:
 
 
 def _events_to_orchestrator(events: list[Event]) -> list[_OrchestratorStageEvent]:
-    # EventStore returns newest first; orchestrator status is chronological.
-    ordered = sorted(events, key=lambda event: event.timestamp)
+    # EventStore returns a total newest-first order (timestamp, then rowid).
+    # Reverse that exact order so equal timestamps still resolve by insertion.
+    ordered = reversed(events)
     return [
         _OrchestratorStageEvent(
             event_type=event.data.get("event_type_raw", event.event_type.value),
