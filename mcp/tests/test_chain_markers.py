@@ -187,6 +187,32 @@ class TestAdvanceChain:
         assert result["from_stage"] == "samvil-qa"
         assert result["next_skill"] == "samvil-retro"
 
+    @pytest.mark.parametrize("qa_results", [None, "not json{"])
+    def test_advance_chain_keeps_qa_when_current_results_are_unavailable(
+        self,
+        project_root,
+        qa_results,
+    ):
+        root = Path(project_root)
+        (root / ".samvil").mkdir(exist_ok=True)
+        if qa_results is not None:
+            (root / ".samvil" / "qa-results.json").write_text(
+                qa_results,
+                encoding="utf-8",
+            )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["next_skill"] == "samvil-qa"
+        assert result["command"] == "samvil samvil-qa"
+        assert result["status"] == "blocked_missing_qa_results"
+
     def test_pipeline_complete(self, project_root):
         write_chain_marker(project_root, "generic", "samvil-retro")
         result = advance_chain(project_root, "generic")

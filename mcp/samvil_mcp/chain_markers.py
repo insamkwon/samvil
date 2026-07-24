@@ -176,6 +176,11 @@ def advance_chain(
 
     next_skill = current["next_skill"]
     resolved = resolve_stage_next_skill(project_root, next_skill)
+    if next_skill == "samvil-qa" and resolved is None:
+        return {
+            **current,
+            "status": "blocked_missing_qa_results",
+        }
     new_marker = write_chain_marker(
         project_root,
         host_name,
