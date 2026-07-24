@@ -13,9 +13,10 @@
    reporter fixture를 `expected=2`, `unexpected=1`로 깨뜨리자 기계 값은
    `test_pass_rate=0.666667`이 되었고 `qa_to_deploy`는 `block`을 반환했다.
 3. QA log와 reporter를 제거해 static fallback을 강제하자
-   `verification_mode=static`, gate verdict `block`이 확인됐다. 그 block 뒤 사용자
-   승인 `gate_override`를 기록하자 verified claim이 ledger에 남고 active override로
-   조회됐다.
+   `verification_mode=static`, gate verdict `block`이 확인됐다.
+   - 스코프 보정(2026-07-24): 최초 dogfood 당시의 모델 입력 기반 override 기록은
+     현재 신뢰 경계와 충돌한다. frozen HEAD에서는 trusted host approval adapter가
+     없으므로 위조 가능한 approval claim을 거부하고 active override를 만들지 않는다.
 
 ## 자동 회귀 증거
 
@@ -23,5 +24,6 @@
   `mcp/tests/test_wave2_dogfood.py:40`
 - 고장 난 테스트가 서술형 PASS metrics를 덮어쓰고 gate block:
   `mcp/tests/test_wave2_dogfood.py:47`
-- static deploy block + override claim 기록:
-  `mcp/tests/test_wave2_dogfood.py:69`
+- static deploy block + 신뢰된 호스트 승인 없는 override 거부:
+  `mcp/tests/test_wave2_dogfood.py:69`, `mcp/tests/test_wave2_dogfood.py:96`,
+  `mcp/tests/test_wave2_dogfood.py:103`
