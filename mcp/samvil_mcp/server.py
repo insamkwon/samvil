@@ -266,6 +266,7 @@ mcp = FastMCP("samvil-mcp")
 # Default DB path — can be overridden via environment
 DB_PATH = Path.home() / ".samvil" / "samvil.db"
 _store: EventStore | None = None
+_stage_transition_locks: dict[str, asyncio.Lock] = {}
 
 
 async def get_store() -> EventStore:
@@ -1133,19 +1134,19 @@ async def complete_stage(
             event_data.setdefault("event_type_raw", plan["event_type"])
         stage_enum = Stage(plan["event_stage"])
 
-        transition = await store.save_event_and_update_stage(
-            session_id=session_id,
-            event_type=event_type_enum,
-            stage=stage_enum,
-            data=event_data,
-            expected_stage=Stage(stage),
+        transition_lock = _stage_transition_locks.setdefault(
+            session_id,
+            asyncio.Lock(),
         )
-        event = transition.event
-
-        claim_id = None
-        claim_saved = False
-        claim_error = ""
-        if project_path is not None:
+        async with transition_lock:
+            transition = await store.save_event_and_update_stage(
+                session_id=session_id,
+                event_type=event_type_enum,
+                stage=stage_enum,
+                data=event_data,
+                expected_stage=Stage(stage),
+            )
+            event = transition.event
             try:
                 await asyncio.to_thread(
                     _append_project_event,
@@ -1186,6 +1187,11 @@ async def complete_stage(
                         ),
                     }
                 )
+
+        claim_id = None
+        claim_saved = False
+        claim_error = ""
+        if project_path is not None:
             claim_data = plan["claim"]
             try:
                 ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")

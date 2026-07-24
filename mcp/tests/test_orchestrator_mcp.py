@@ -7,6 +7,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -1123,6 +1124,64 @@ def test_concurrent_stage_completion_creates_only_one_trusted_transition(
     assert [item["event_type"] for item in canonical].count("seed_generated") == 1
     claims = ClaimLedger(project_root / ".samvil" / "claims.jsonl")
     assert len(claims.query_by_subject("gate:seed_exit")) == 1
+
+
+def test_failed_canonical_append_blocks_dependent_transition_until_compensation(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "canonical-transition-lock"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+    _write_valid_seed(project_root)
+    append_started = Event()
+    release_append = Event()
+    real_append = srv._append_project_event
+
+    def delayed_failed_append(*args, **kwargs):
+        if kwargs.get("event_type") == "interview_complete":
+            append_started.set()
+            assert release_append.wait(timeout=2)
+            raise OSError("interview canonical append failed")
+        return real_append(*args, **kwargs)
+
+    monkeypatch.setattr(srv, "_append_project_event", delayed_failed_append)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "canonical-transition-lock",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+        interview_task = asyncio.create_task(
+            complete_stage(sid, "interview", "pass")
+        )
+        assert await asyncio.to_thread(append_started.wait, 2)
+        seed_task = asyncio.create_task(complete_stage(sid, "seed", "pass"))
+        await asyncio.sleep(0.05)
+        assert seed_task.done() is False
+        release_append.set()
+
+        interview_result, seed_result = [
+            json.loads(item)
+            for item in await asyncio.gather(interview_task, seed_task)
+        ]
+        session = await (await srv.get_store()).get_session(sid)
+        events = await (await srv.get_store()).get_events(sid, limit=None)
+
+        assert interview_result["status"] == "error"
+        assert interview_result["db_rolled_back"] is True
+        assert seed_result["status"] == "error"
+        assert session is not None and session.current_stage.value == "interview"
+        assert events == []
+
+    _run(runner())
+    assert read_events(project_root)["entries"] == []
 
 
 def test_complete_stage_reports_claim_degradation_without_reversing_completion(
