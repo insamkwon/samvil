@@ -1031,6 +1031,18 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   - 완료 증거: `1fceb8b`; `mcp/tests/test_manifest.py:616`,
     `mcp/tests/test_manifest.py:624`, `mcp/tests/test_manifest.py:637`,
     `mcp/tests/test_manifest.py:647`.
+- [x] **4.16 동일 HEAD 2차 검수에서 확인된 Gemini QA 동적 라우팅 정직화**
+  (스코프 보정: Gemini 명령의 기본 marker 호출은 기존 문구였지만, 이번 진화에서
+  QA가 finalize → materialize → route-specific gate → dynamic next skill 계약으로
+  강화되며 기본 `samvil-qa→samvil-deploy` 경로가 실제 회귀가 됐다. 생성기와 생성
+  산출물을 함께 고치고 strict parity가 필수 lifecycle marker를 검사하게 했다.)
+  - 완료 증거: `5b3ed7b`; `references/gemini-commands/samvil-qa.toml:12`,
+    `references/gemini-commands/samvil-qa.toml:13`,
+    `references/gemini-commands/samvil-qa.toml:14`,
+    `references/gemini-commands/samvil-qa.toml:18`,
+    `scripts/generate-host-commands.py:77`,
+    `scripts/check-host-parity.py:65`, `scripts/check-host-parity.py:339`,
+    `mcp/tests/test_host_parity.py:203`, `mcp/tests/test_host_parity.py:221`.
 
 ---
 
