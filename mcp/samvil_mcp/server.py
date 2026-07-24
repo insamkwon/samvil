@@ -1094,6 +1094,11 @@ async def complete_stage(
             raise OrchestratorError(
                 f"cannot complete stage {stage!r}; current stage is {current_stage}"
             )
+        if stage == "interview" and verdict in ("pass", "complete"):
+            await asyncio.to_thread(
+                _require_interview_exit_evidence,
+                project_path,
+            )
         stored_events = await store.get_events(session_id, limit=None)
         prerequisite = _orchestrator_stage_can_proceed(
             session,
@@ -1203,6 +1208,35 @@ async def complete_stage(
     except Exception as e:
         _log_mcp_health("fail", "complete_stage", str(e))
         return json.dumps({"status": "error", "error": str(e)})
+
+
+def _require_interview_exit_evidence(project_path: Path) -> None:
+    summary_path = project_path / "interview-summary.md"
+    try:
+        summary = summary_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise OrchestratorError(
+            f"interview exit evidence is unavailable: {exc}"
+        ) from exc
+    if not summary:
+        raise OrchestratorError(
+            "interview exit evidence is empty: interview-summary.md"
+        )
+
+    ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
+    claims = ledger.query_by_subject("interview_to_seed")
+    latest = max(claims, key=lambda claim: (claim.ts, claim.claim_id), default=None)
+    if (
+        latest is None
+        or latest.type != "gate_verdict"
+        or latest.status == "rejected"
+        or latest.meta.get("verdict") != "pass"
+        or "interview-summary.md" not in latest.evidence
+    ):
+        raise OrchestratorError(
+            "interview exit evidence requires the latest interview_to_seed "
+            "gate_verdict to pass with interview-summary.md evidence"
+        )
 
 
 # ── Host Capability (v3.3) ───────────────────────────────────

@@ -34,6 +34,22 @@ def _isolated_server(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(srv, "_store", None)
 
 
+def _prepare_interview_exit(project_root: Path) -> None:
+    (project_root / "interview-summary.md").write_text(
+        "# Interview Summary\n\nValidated interview output.\n",
+        encoding="utf-8",
+    )
+    ClaimLedger(project_root / ".samvil" / "claims.jsonl").post(
+        type="gate_verdict",
+        subject="interview_to_seed",
+        statement="verdict=pass",
+        authority_file="project.state.json",
+        claimed_by="agent:test-interviewer",
+        evidence=["interview-summary.md"],
+        meta={"verdict": "pass"},
+    )
+
+
 def test_get_next_stage_tool_returns_next_stage() -> None:
     out = _run(get_next_stage("seed", "standard"))
     data = json.loads(out)
@@ -56,6 +72,7 @@ def test_stage_can_proceed_tool_reads_session_events(tmp_path, monkeypatch) -> N
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "orch-test"
     project_root.mkdir()
+    _prepare_interview_exit(project_root)
 
     async def runner():
         sess = json.loads(
@@ -116,6 +133,7 @@ def test_get_orchestration_state_tool_reads_progress(tmp_path, monkeypatch) -> N
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "orch-state"
     project_root.mkdir()
+    _prepare_interview_exit(project_root)
 
     async def runner():
         sess = json.loads(
@@ -175,6 +193,7 @@ def test_complete_stage_tool_emits_event_and_claim(tmp_path, monkeypatch) -> Non
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "project"
     project_root.mkdir()
+    _prepare_interview_exit(project_root)
 
     async def runner():
         sess = json.loads(
@@ -211,6 +230,83 @@ def test_complete_stage_tool_emits_event_and_claim(tmp_path, monkeypatch) -> Non
     assert rows["entries"][0]["stage"] == "interview"
     assert rows["entries"][0]["session_id"]
     assert rows["entries"][0]["data"]["verdict"] == "pass"
+
+
+def test_complete_stage_rejects_interview_pass_without_exit_evidence(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "empty-project"
+    project_root.mkdir()
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "empty-project",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        result = json.loads(
+            await complete_stage(sess["session_id"], "interview", "pass")
+        )
+        state = json.loads(await get_orchestration_state(sess["session_id"]))
+        stored_events = await (await srv.get_store()).get_events(sess["session_id"])
+
+        assert result["status"] == "error"
+        assert "interview exit evidence" in result["error"]
+        assert state["current_stage"] == "interview"
+        assert stored_events == []
+
+    _run(runner())
+    assert read_events(project_root)["entries"] == []
+
+
+@pytest.mark.parametrize("latest_gate", ["missing", "block"])
+def test_complete_stage_requires_latest_passing_interview_gate(
+    tmp_path, monkeypatch, latest_gate
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / f"interview-gate-{latest_gate}"
+    project_root.mkdir()
+    (project_root / "interview-summary.md").write_text(
+        "# Interview Summary\n\nReal output exists.\n",
+        encoding="utf-8",
+    )
+    if latest_gate == "block":
+        _prepare_interview_exit(project_root)
+        ClaimLedger(project_root / ".samvil" / "claims.jsonl").post(
+            type="gate_verdict",
+            subject="interview_to_seed",
+            statement="verdict=block",
+            authority_file="project.state.json",
+            claimed_by="agent:test-interviewer",
+            evidence=["interview-summary.md"],
+            meta={"verdict": "block"},
+        )
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                f"interview-gate-{latest_gate}",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        result = json.loads(
+            await complete_stage(sess["session_id"], "interview", "pass")
+        )
+        stored_events = await (await srv.get_store()).get_events(sess["session_id"])
+
+        assert result["status"] == "error"
+        assert "latest interview_to_seed" in result["error"]
+        assert stored_events == []
+
+    _run(runner())
 
 
 def test_complete_stage_rejects_out_of_order_stage_completion(
@@ -254,6 +350,7 @@ def test_complete_stage_fails_closed_when_canonical_event_append_fails(
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "project"
     project_root.mkdir()
+    _prepare_interview_exit(project_root)
 
     def fail_append(*args, **kwargs):
         raise OSError("disk full")
@@ -297,6 +394,7 @@ def test_canonical_event_non_oserror_still_compensates_database(
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "project"
     project_root.mkdir()
+    _prepare_interview_exit(project_root)
 
     def fail_decode(*args, **kwargs):
         raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid byte")
@@ -336,6 +434,7 @@ def test_canonical_event_close_failure_removes_written_ghost_row(
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "project"
     project_root.mkdir()
+    _prepare_interview_exit(project_root)
     events_path = project_root / ".samvil" / "events.jsonl"
     original_open = Path.open
 
@@ -395,6 +494,7 @@ def test_event_and_stage_update_are_atomic_and_retry_safe(
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "project"
     project_root.mkdir()
+    _prepare_interview_exit(project_root)
 
     async def runner():
         sess = json.loads(
@@ -471,6 +571,7 @@ def test_complete_stage_reports_claim_degradation_without_reversing_completion(
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "project"
     project_root.mkdir()
+    _prepare_interview_exit(project_root)
 
     def fail_post(self, **kwargs):
         raise OSError("claims disk unavailable")

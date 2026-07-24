@@ -123,9 +123,21 @@ Write to root `interview-summary.md`:
 
 ## Chain
 
-Read `<sid>` from root `project.state.json`, then run
-`complete_stage(session_id=<sid>, stage="interview", verdict="pass")`.
-Any error halts before writing the next marker.
+Scope correction: the canonical skill already treats the interview gate claim
+as required exit evidence, so the Codex command must preserve the same trusted
+transition contract. Run `gate_check(gate_name="interview_to_seed",
+samvil_tier=<tier>, metrics_json='{"seed_readiness":<score.seed_readiness>,
+"ambiguity_converged":<score.converged>}', project_root=".")`. Any result other
+than exact `verdict="pass"` halts. Post that result with
+`claim_post(project_root=".", claim_type="gate_verdict",
+subject="interview_to_seed", statement="verdict=pass,
+seed_readiness=<score.seed_readiness>", authority_file="project.state.json",
+claimed_by="agent:socratic-interviewer",
+evidence_json='["interview-summary.md"]', meta_json=<gate result>)`.
+
+Then read `<sid>` from root `project.state.json` and run
+`complete_stage(session_id=<sid>, stage="interview", verdict="pass")`. Any
+error halts before writing the next marker.
 
 **Greenfield:**
 Run: `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-interview", next_skill="samvil-seed")`

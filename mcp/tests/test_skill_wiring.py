@@ -151,6 +151,16 @@ def test_interview_completion_uses_trusted_stage_transition() -> None:
     ) in text
     assert 'save_event(event_type="interview_complete"' not in text
 
+    codex = (
+        repo / "references" / "codex-commands" / "samvil-interview.md"
+    ).read_text()
+    gate_index = codex.index('gate_check(gate_name="interview_to_seed"')
+    claim_index = codex.index('claim_type="gate_verdict"')
+    complete_index = codex.index(
+        'complete_stage(session_id=<sid>, stage="interview", verdict="pass")'
+    )
+    assert gate_index < claim_index < complete_index
+
 
 def test_codex_build_command_gets_gate_input_from_phase_z() -> None:
     repo = Path(__file__).resolve().parents[2]
