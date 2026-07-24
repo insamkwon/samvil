@@ -234,11 +234,57 @@ def test_save_event_fails_closed_when_project_events_append_fails(
             )
         )
         state = json.loads(await get_orchestration_state(sess["session_id"]))
+        stored_events = await (await srv.get_store()).get_events(sess["session_id"])
 
         assert result["saved"] is False
         assert result["canonical_saved"] is False
+        assert result["db_rolled_back"] is True
         assert "disk full" in result["error"]
         assert state["current_stage"] == "interview"
+        assert stored_events == []
+
+    _run(runner())
+
+
+def test_save_event_retry_after_canonical_failure_does_not_duplicate_db_event(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    original_append = srv._append_project_event
+    attempts = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("disk full")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(srv, "_append_project_event", fail_once)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "events-ssot-retry",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+        first = json.loads(await save_event(sid, "build_started", "build", "{}"))
+        second = json.loads(await save_event(sid, "build_started", "build", "{}"))
+        stored_events = await (await srv.get_store()).get_events(sid)
+        canonical_events = read_events(project_root)["entries"]
+
+        assert first["saved"] is False
+        assert first["db_rolled_back"] is True
+        assert second["saved"] is True
+        assert len(stored_events) == 1
+        assert len(canonical_events) == 1
 
     _run(runner())
 

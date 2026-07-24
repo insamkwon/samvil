@@ -263,6 +263,14 @@ class EventStore:
             await db.commit()
         return event
 
+    async def delete_event(self, event_id: str) -> bool:
+        """Compensate an event insert that could not reach the file SSOT."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN")
+            cursor = await db.execute("DELETE FROM events WHERE id = ?", (event_id,))
+            await db.commit()
+            return cursor.rowcount == 1
+
     async def get_events(
         self,
         session_id: str,

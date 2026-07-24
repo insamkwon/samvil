@@ -800,12 +800,28 @@ async def save_event(
                 canonical_saved = True
             except OSError as exc:
                 _log_mcp_health("fail", "save_event.events_ssot", str(exc))
+                db_rolled_back = False
+                rollback_error = ""
+                try:
+                    db_rolled_back = await store.delete_event(event.id)
+                except Exception as rollback_exc:
+                    rollback_error = str(rollback_exc)
+                    _log_mcp_health(
+                        "fail", "save_event.events_ssot_rollback", rollback_error
+                    )
                 return json.dumps(
                     {
                         "event_id": event.id,
                         "saved": False,
                         "canonical_saved": False,
+                        "db_rolled_back": db_rolled_back,
+                        "partial_persistence": not db_rolled_back,
                         "error": str(exc),
+                        **(
+                            {"rollback_error": rollback_error}
+                            if rollback_error
+                            else {}
+                        ),
                     }
                 )
         # Update session's current stage
