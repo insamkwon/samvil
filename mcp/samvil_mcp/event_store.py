@@ -444,6 +444,51 @@ class EventStore:
                 for r in rows
             ]
 
+    async def get_orchestration_events(
+        self,
+        session_id: str,
+        recognized_event_types: set[str] | frozenset[str],
+    ) -> list[Event]:
+        """Load stage-decision rows without materializing unrelated telemetry."""
+        event_types = sorted(recognized_event_types)
+        if not event_types:
+            return []
+        placeholders = ", ".join("?" for _ in event_types)
+        query = f"""
+            SELECT * FROM events
+            WHERE session_id = ?
+              AND (
+                json_extract(data, '$.trusted_transition') = 1
+                OR (
+                  json_type(data, '$.trusted_transition') IS NULL
+                  AND (
+                    event_type IN ({placeholders})
+                    OR json_extract(data, '$.event_type_raw') IN ({placeholders})
+                  )
+                )
+              )
+            ORDER BY timestamp DESC, rowid DESC
+        """
+        params = (session_id, *event_types, *event_types)
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(query, params)
+            rows = await cursor.fetchall()
+            return [
+                Event(
+                    id=row["id"],
+                    session_id=row["session_id"],
+                    event_type=EventType(row["event_type"]),
+                    stage=Stage(row["stage"]),
+                    data=json.loads(row["data"]),
+                    token_count=(
+                        row["token_count"] if "token_count" in row.keys() else None
+                    ),
+                    timestamp=row["timestamp"],
+                )
+                for row in rows
+            ]
+
     # ── Seed Versions ─────────────────────────────────────
 
     async def save_seed_version(

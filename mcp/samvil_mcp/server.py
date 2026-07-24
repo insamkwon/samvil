@@ -161,7 +161,9 @@ from .narrate import (
     parse_narrative as _parse_narrative,
 )
 from .orchestrator import (
+    FAIL_EVENT_TO_STAGE as _ORCHESTRATOR_FAIL_EVENTS,
     OrchestratorError,
+    SUCCESS_EVENT_TO_STAGE as _ORCHESTRATOR_SUCCESS_EVENTS,
     StageEvent as _OrchestratorStageEvent,
     aggregate_orchestrator_state as _aggregate_orchestrator_state,
     complete_stage_plan as _complete_stage_plan,
@@ -986,7 +988,10 @@ async def _session_and_events(session_id: str) -> tuple[Session | None, list[_Or
     session = await store.get_session(session_id)
     if session is None:
         return None, []
-    events = await store.get_events(session_id, limit=None)
+    events = await store.get_orchestration_events(
+        session_id,
+        frozenset(_ORCHESTRATOR_SUCCESS_EVENTS | _ORCHESTRATOR_FAIL_EVENTS),
+    )
     return session, _events_to_orchestrator(events)
 
 
@@ -1100,7 +1105,10 @@ async def complete_stage(
                 project_path,
                 stage,
             )
-        stored_events = await store.get_events(session_id, limit=None)
+        stored_events = await store.get_orchestration_events(
+            session_id,
+            frozenset(_ORCHESTRATOR_SUCCESS_EVENTS | _ORCHESTRATOR_FAIL_EVENTS),
+        )
         prerequisite = _orchestrator_stage_can_proceed(
             session,
             _events_to_orchestrator(stored_events),

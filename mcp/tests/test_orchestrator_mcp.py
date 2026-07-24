@@ -193,8 +193,31 @@ def test_stage_history_is_not_truncated_by_large_telemetry_volume(
                 {"index": index, "trusted_transition": False},
             )
 
+        original_get_events = store.get_events
+
+        async def reject_unbounded_history(*args, **kwargs):
+            if kwargs.get("limit") is None:
+                raise AssertionError("orchestration must not materialize all telemetry")
+            return await original_get_events(*args, **kwargs)
+
+        monkeypatch.setattr(store, "get_events", reject_unbounded_history)
+        original_get_orchestration_events = store.get_orchestration_events
+        loaded_counts: list[int] = []
+
+        async def track_orchestration_rows(*args, **kwargs):
+            events = await original_get_orchestration_events(*args, **kwargs)
+            loaded_counts.append(len(events))
+            return events
+
+        monkeypatch.setattr(
+            store,
+            "get_orchestration_events",
+            track_orchestration_rows,
+        )
+
         allowed = json.loads(await stage_can_proceed(sess["session_id"], "seed"))
         assert allowed["can_proceed"] is True
+        assert loaded_counts == [1]
 
     _run(runner())
 
