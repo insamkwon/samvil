@@ -309,6 +309,16 @@ def test_dynamic_or_expanded_targets_cannot_hide_protected_ssot(
     assert "BLOCKED" in result.stderr
 
 
+def test_brace_expansion_limit_cannot_hide_protected_ssot() -> None:
+    harmless = [f"tmp-{index}.json" for index in range(32)]
+    command = "rm -f {" + ",".join([*harmless, "project.seed.json"]) + "}"
+
+    result = run_guard(command)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
 @pytest.mark.parametrize(
     "command",
     [

@@ -604,7 +604,7 @@ def _is_protected_ssot_target(target: str) -> bool:
     )
 
 
-def _brace_expansion_candidates(target: str, *, limit: int = 32) -> list[str]:
+def _brace_expansion_candidates(target: str, *, limit: int = 32) -> list[str] | None:
     candidates = [target]
     while len(candidates) < limit:
         expanded = False
@@ -616,12 +616,12 @@ def _brace_expansion_candidates(target: str, *, limit: int = 32) -> list[str]:
                 continue
             expanded = True
             for choice in match.group(1).split(","):
+                if len(next_candidates) >= limit:
+                    return None
                 next_candidates.append(
                     candidate[: match.start()] + choice + candidate[match.end() :]
                 )
-                if len(next_candidates) >= limit:
-                    break
-        candidates = next_candidates[:limit]
+        candidates = next_candidates
         if not expanded:
             break
     return candidates
@@ -640,7 +640,10 @@ def _rm_target_may_expand_to_protected_ssot(target: str) -> bool:
     protected = PROTECTED_ROOT_SSOT_PATHS | PROTECTED_SAMVIL_SSOT_PATHS | {
         ".samvil"
     }
-    for candidate in _brace_expansion_candidates(normalized):
+    candidates = _brace_expansion_candidates(normalized)
+    if candidates is None:
+        return True
+    for candidate in candidates:
         if candidate in protected:
             return True
         if any(marker in candidate for marker in "*?[") and any(
