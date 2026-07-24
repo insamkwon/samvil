@@ -1053,6 +1053,17 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/tests/test_orchestrator_mcp.py:169`,
     `mcp/tests/test_orchestrator_mcp.py:197`,
     `references/samvil-ssot-schema.md:476`.
+- [x] **4.18 동일 HEAD 클린 검수에서 확인된 단계 claim 증거 우회 제거**
+  (스코프 보정: `save_event`가 canonical event를 먼저 저장하고도 단계 시작 claim을
+  검증할 때 합성 `event:*` 문자열과 `skip_file_resolution=True`를 사용하고 있었다.
+  append 잠금 안에서 실제 줄 번호를 확정해 시작·완료 이벤트 모두
+  `.samvil/events.jsonl:<line>` 증거를 사용하고, 일반 file resolution을 통과해야만
+  verified 상태가 되도록 교정했다.)
+  - 완료 증거: `340ea2f`; `mcp/samvil_mcp/server.py:627`,
+    `mcp/samvil_mcp/server.py:646`, `mcp/samvil_mcp/server.py:682`,
+    `mcp/samvil_mcp/server.py:700`, `mcp/samvil_mcp/server.py:703`,
+    `mcp/tests/test_orchestrator_mcp.py:403`,
+    `mcp/tests/test_orchestrator_mcp.py:437`.
 
 ---
 
