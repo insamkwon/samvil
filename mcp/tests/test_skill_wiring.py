@@ -244,6 +244,12 @@ def test_qa_selects_gate_after_next_skill_routing() -> None:
 def test_pm_and_codex_seed_paths_keep_council_opt_in_only() -> None:
     repo = Path(__file__).resolve().parents[2]
     pm = (repo / "skills" / "samvil-pm-interview" / "SKILL.md").read_text()
+    pm_codex = (
+        repo / "references" / "codex-commands" / "samvil-pm-interview.md"
+    ).read_text()
+    pm_gemini = (
+        repo / "references" / "gemini-commands" / "samvil-pm-interview.toml"
+    ).read_text()
     codex = (repo / "references" / "codex-commands" / "samvil-seed.md").read_text()
 
     assert "--council" in pm
@@ -253,6 +259,29 @@ def test_pm_and_codex_seed_paths_keep_council_opt_in_only() -> None:
     assert "schema_version `3.3` only after approval" in codex
     assert 'next_skill="samvil-design"' in codex
     assert 'next_skill="samvil-council"' in codex
+    skill_interview = (
+        'complete_stage(session_id="<sid>", stage="interview", verdict="pass")'
+    )
+    skill_seed = (
+        'complete_stage(session_id="<sid>", stage="seed", verdict="pass", '
+        'council_opt_in=<true|false>)'
+    )
+    host_interview = (
+        'complete_stage(session_id=<sid>, stage="interview", verdict="pass")'
+    )
+    host_seed = (
+        'complete_stage(session_id=<sid>, stage="seed", verdict="pass", '
+        'council_opt_in=<true|false>)'
+    )
+    assert "interview-summary.md" in pm
+    assert skill_interview in pm and skill_seed in pm
+    assert pm.index("gate_check") < pm.index(skill_interview) < pm.index(skill_seed)
+    for command in (pm_codex, pm_gemini):
+        assert "interview-summary.md" in command
+        assert host_interview in command and host_seed in command
+        assert command.index("gate_check") < command.index(host_interview)
+        assert command.index(host_interview) < command.index(host_seed)
+        assert command.index(host_seed) < command.index("write_chain_marker")
 
 
 def test_codex_orchestrator_initializes_the_selected_stage() -> None:

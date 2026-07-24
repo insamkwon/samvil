@@ -62,6 +62,17 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
         ),
     ),
     (
+        "samvil-pm-interview",
+        "skills/samvil-pm-interview/SKILL.md",
+        (
+            "validate_pm_seed",
+            "gate_check",
+            "claim_post",
+            "complete_stage",
+            "pm_seed_to_eng_seed",
+        ),
+    ),
+    (
         "samvil-build",
         "skills/samvil-build/SKILL.md",
         (

@@ -2928,8 +2928,16 @@ async def validate_pm_seed(pm_seed_json: str) -> str:
         from .pm_seed import validate_pm_seed as _validate
         pm_seed = json.loads(pm_seed_json)
         errors = _validate(pm_seed)
+        valid = not errors
         _log_mcp_health("ok", "validate_pm_seed")
-        return json.dumps({"valid": not errors, "errors": errors})
+        return json.dumps(
+            {
+                "valid": valid,
+                "errors": errors,
+                "seed_readiness": 1.0 if valid else 0.0,
+                "ambiguity_converged": valid,
+            }
+        )
     except Exception as e:
         _log_mcp_health("fail", "validate_pm_seed", str(e))
         return json.dumps({"valid": False, "errors": [str(e)]})

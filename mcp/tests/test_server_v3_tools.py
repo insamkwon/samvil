@@ -200,6 +200,8 @@ def test_validate_pm_seed_tool_ok():
     d = json.loads(out)
     assert d["valid"] is True
     assert d["errors"] == []
+    assert d["seed_readiness"] == 1.0
+    assert d["ambiguity_converged"] is True
 
 
 def test_validate_pm_seed_tool_reports_errors():
@@ -207,6 +209,8 @@ def test_validate_pm_seed_tool_reports_errors():
     d = json.loads(out)
     assert d["valid"] is False
     assert d["errors"]
+    assert d["seed_readiness"] == 0.0
+    assert d["ambiguity_converged"] is False
 
 
 def test_pm_seed_to_eng_seed_tool_roundtrips_to_validate_seed():

@@ -9,9 +9,12 @@ If `next_skill` is not `samvil-pm-interview`, skip and report the expected stage
 ## Execution
 
 1. Use MCP tool `read_chain_marker` with project_root to confirm stage.
-2. Read `project.seed.json` for seed context.
-3. Execute the samvil-pm-interview stage logic (see Codex command reference for details).
-4. On completion, use MCP tool `write_chain_marker` to advance pipeline.
+2. Execute the samvil-pm-interview stage logic and write `interview-summary.md`.
+3. Run `validate_pm_seed`, then `gate_check` with its seed_readiness and ambiguity_converged; post the passing interview_to_seed claim.
+4. Call `complete_stage(session_id=<sid>, stage="interview", verdict="pass")` and require exact status="ok".
+5. Convert and write root `project.seed.json`.
+6. Call `complete_stage(session_id=<sid>, stage="seed", verdict="pass", council_opt_in=<true|false>)` and require exact status="ok".
+7. On trusted completion, use MCP tool `write_chain_marker` to advance pipeline.
 
 ## Chain
 

@@ -79,6 +79,8 @@ def _gemini_template(skill_name: str, next_skill: str) -> str:
         return _gemini_qa_template()
     if skill_name == "samvil-council":
         return _gemini_council_template()
+    if skill_name == "samvil-pm-interview":
+        return _gemini_pm_interview_template()
     desc = _SKILL_DESCRIPTIONS.get(skill_name, skill_name)
     chain_note = f'Read `.samvil/next-skill.json` for the next stage ({next_skill}) and report to the user.' if next_skill else "This is a terminal skill — no automatic chain continuation."
     return f"""prompt = \"\"\"
@@ -153,6 +155,33 @@ If `next_skill` is not `samvil-council`, skip and report the expected stage.
 3. Execute the samvil-council stage logic (see Codex command reference for details).
 4. For an approved council, call `complete_stage(session_id=<sid>, stage="council", verdict="pass", council_opt_in=true)` and require exact status="ok".
 5. On trusted completion, use MCP tool `write_chain_marker` to advance pipeline.
+
+## Chain
+
+Read `.samvil/next-skill.json` for the next stage.
+Report to the user what the next command should be.
+"""
+'''
+
+
+def _gemini_pm_interview_template() -> str:
+    return '''prompt = """
+SAMVIL pipeline stage: samvil-pm-interview.
+
+## Prerequisites
+
+Read `.samvil/next-skill.json` to check current pipeline position.
+If `next_skill` is not `samvil-pm-interview`, skip and report the expected stage.
+
+## Execution
+
+1. Use MCP tool `read_chain_marker` with project_root to confirm stage.
+2. Execute the samvil-pm-interview stage logic and write `interview-summary.md`.
+3. Run `validate_pm_seed`, then `gate_check` with its seed_readiness and ambiguity_converged; post the passing interview_to_seed claim.
+4. Call `complete_stage(session_id=<sid>, stage="interview", verdict="pass")` and require exact status="ok".
+5. Convert and write root `project.seed.json`.
+6. Call `complete_stage(session_id=<sid>, stage="seed", verdict="pass", council_opt_in=<true|false>)` and require exact status="ok".
+7. On trusted completion, use MCP tool `write_chain_marker` to advance pipeline.
 
 ## Chain
 
