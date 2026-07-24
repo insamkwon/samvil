@@ -632,8 +632,8 @@ def _append_project_event(
     stage: str,
     session_id: str,
     data: dict,
-) -> Path:
-    """Append one canonical project event under an advisory file lock."""
+) -> str:
+    """Append one canonical project event and return its file-backed evidence."""
     path = project_root / ".samvil" / "events.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     row = {
@@ -644,9 +644,13 @@ def _append_project_event(
         "data": data,
     }
     with _file_locked(path):
-        with path.open("a", encoding="utf-8") as handle:
+        with path.open("a+", encoding="utf-8") as handle:
+            handle.seek(0)
+            line_number = sum(1 for _ in handle) + 1
+            handle.seek(0, os.SEEK_END)
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    return path
+    relative_path = path.relative_to(project_root).as_posix()
+    return f"{relative_path}:{line_number}"
 
 
 async def _auto_post_claim_for_event(
@@ -654,6 +658,7 @@ async def _auto_post_claim_for_event(
     event_type_raw: str,
     stage: str,
     data: dict,
+    canonical_evidence: str | None = None,
 ) -> None:
     """Best-effort append to the project's .samvil/claims.jsonl based on
     the event type. Never raises — on failure we log to health and move
@@ -681,7 +686,7 @@ async def _auto_post_claim_for_event(
                 statement=f"{event_type_raw} @ {stage}",
                 authority_file="project.state.json",
                 claimed_by=f"agent:orchestrator-agent",
-                evidence=["project.state.json"],
+                evidence=[canonical_evidence] if canonical_evidence else [],
                 meta={"via": "save_event", "event_type": event_type_raw},
             )
         elif et in _STAGE_EXIT_EVENTS:
@@ -692,14 +697,14 @@ async def _auto_post_claim_for_event(
                 for c in ledger.query_by_subject(subject)
                 if c.status == "pending" and c.type == "evidence_posted"
             ]
-            if pending:
+            if pending and canonical_evidence:
                 target = sorted(pending, key=lambda c: c.ts)[-1]
                 try:
                     ledger.verify(
                         target.claim_id,
                         verified_by="agent:user",
-                        evidence=[f"event:{event_type_raw}"],
-                        skip_file_resolution=True,
+                        evidence=[canonical_evidence],
+                        project_root=project_path,
                     )
                 except ClaimLedgerError:
                     pass
@@ -726,7 +731,7 @@ async def _auto_post_claim_for_event(
                 statement=f"{event_type_raw} failure @ {stage}",
                 authority_file="project.state.json",
                 claimed_by="agent:orchestrator-agent",
-                evidence=["project.state.json"],
+                evidence=[canonical_evidence] if canonical_evidence else [],
                 meta={"via": "save_event", "failure": True, "event_type": event_type_raw},
             )
         # Other event types: not stage transitions; skip.
@@ -780,6 +785,7 @@ async def save_event(
         session = await store.get_session(session_id)
         project_path = _session_project_path(session)
         canonical_saved = False
+        canonical_evidence = None
         if project_path is None:
             _log_mcp_health(
                 "warn",
@@ -788,7 +794,7 @@ async def save_event(
             )
         else:
             try:
-                await asyncio.to_thread(
+                canonical_evidence = await asyncio.to_thread(
                     _append_project_event,
                     project_path,
                     timestamp=event.timestamp,
@@ -829,7 +835,11 @@ async def save_event(
 
         # v3.2 contract-layer auto-claim (best-effort, never blocks).
         await _auto_post_claim_for_event(
-            session_id, event_type, stage, parsed_data
+            session_id,
+            event_type,
+            stage,
+            parsed_data,
+            canonical_evidence=canonical_evidence,
         )
 
         _log_mcp_health("ok", "save_event")

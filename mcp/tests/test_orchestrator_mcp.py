@@ -400,6 +400,48 @@ def test_save_event_auto_claims_current_stage_entry_events(
     assert [claim.type for claim in analyze_claims] == ["evidence_posted"]
 
 
+def test_save_event_stage_exit_verifies_claim_with_canonical_event_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "exit-claim-evidence",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+        started = json.loads(await save_event(sid, "build_started", "build", "{}"))
+        completed = json.loads(
+            await save_event(sid, "build_stage_complete", "qa", "{}")
+        )
+        assert started["saved"] is True
+        assert completed["saved"] is True
+
+    _run(runner())
+
+    ledger = ClaimLedger(project_root / ".samvil" / "claims.jsonl")
+    evidence_claims = [
+        claim
+        for claim in ledger.query_by_subject("stage:build")
+        if claim.type == "evidence_posted"
+    ]
+    assert len(evidence_claims) == 1
+    verified = evidence_claims[0]
+    assert verified.status == "verified"
+    assert verified.evidence == [
+        ".samvil/events.jsonl:1",
+        ".samvil/events.jsonl:2",
+    ]
+    assert all(not item.startswith("event:") for item in verified.evidence)
+
+
 def test_save_event_warns_when_project_root_cannot_be_resolved(
     tmp_path,
     monkeypatch,
