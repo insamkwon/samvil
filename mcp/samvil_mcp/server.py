@@ -74,6 +74,7 @@ from .scaffold_targets import (
     evaluate_scaffold_target as _evaluate_scaffold_target,
 )
 from .ssot_io import atomic_write_text
+from .event_sanitizer import sanitize_event_data
 from .build_phase_a import (
     aggregate_build_phase_a as _aggregate_build_phase_a,
 )
@@ -778,6 +779,9 @@ async def save_event(
     """
     try:
         parsed_data = json.loads(data) if data else {}
+        if not isinstance(parsed_data, dict):
+            raise ValueError("event data must be a JSON object")
+        parsed_data = sanitize_event_data(parsed_data)
 
         # Lenient EventType: try the enum, fall back to STAGE_CHANGE.
         try:

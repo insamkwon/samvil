@@ -372,6 +372,42 @@ def test_save_event_writes_project_events_ssot(tmp_path, monkeypatch) -> None:
     }
 
 
+def test_save_event_never_persists_raw_prompt_email_or_token(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    raw_prompt = "Build payroll for person@example.com token=fixture-secret"
+
+    async def runner():
+        sess = json.loads(await create_session(
+            "redacted-events", "standard", project_root=str(project_root)
+        ))
+        result = json.loads(await save_event(
+            sess["session_id"],
+            "stage_change",
+            "interview",
+            json.dumps({"app": raw_prompt, "note": raw_prompt}),
+        ))
+        assert result["saved"] is True
+        stored = await (await srv.get_store()).get_events(sess["session_id"])
+        assert len(stored) == 1
+        assert raw_prompt not in json.dumps(stored[0].data)
+
+    _run(runner())
+
+    persisted = (project_root / ".samvil" / "events.jsonl").read_text(encoding="utf-8")
+    claims = (project_root / ".samvil" / "claims.jsonl").read_text(encoding="utf-8")
+    assert raw_prompt not in persisted
+    assert "person@example.com" not in persisted
+    assert "fixture-secret" not in persisted
+    assert raw_prompt not in claims
+
+
 def test_save_event_uses_valid_line_index_without_rescanning_jsonl(
     tmp_path,
     monkeypatch,

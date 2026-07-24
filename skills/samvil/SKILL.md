@@ -76,7 +76,7 @@ If `solution_type.confidence == "high"`, print `ℹ️ 프로젝트 타입: <typ
 `TaskCreate` for each default pipeline stage so the user sees progress: Interview, Seed, Design, Scaffold, Build, QA, Deploy, Retro. Council is not a default task; explicit `--council` is routed by `samvil-seed`. Each downstream skill flips its task to `in_progress` / `completed`.
 
 ```
-mcp__samvil_mcp__save_event(session_id="<sid>", event_type="stage_change", stage="interview", data='{"app":"<prompt>","tier":"<tier>","solution_type":"<type>"}')
+mcp__samvil_mcp__save_event(session_id="<sid>", event_type="stage_change", stage="interview", data='{"app_prompt_recorded":true,"tier":"<tier>","solution_type":"<type>"}')
 ```
 
 Print:
