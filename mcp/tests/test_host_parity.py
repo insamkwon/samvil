@@ -63,6 +63,23 @@ def test_fresh_codex_boot_creates_and_persists_session_before_chaining() -> None
     assert command.index("create_session(") < command.index("write_chain_marker(")
 
 
+@pytest.mark.parametrize(
+    ("command_name", "stage"),
+    [("samvil-interview.md", "interview"), ("samvil-seed.md", "seed")],
+)
+def test_codex_stage_commands_complete_trusted_stage_before_marker(
+    command_name: str,
+    stage: str,
+) -> None:
+    command = (
+        REPO_ROOT / "references" / "codex-commands" / command_name
+    ).read_text(encoding="utf-8")
+    complete_call = f'complete_stage(session_id=<sid>, stage="{stage}", verdict="pass"'
+
+    assert complete_call in command
+    assert command.index(complete_call) < command.index("write_chain_marker(")
+
+
 def test_detects_missing_auto_proceed_heading(tmp_path: Path) -> None:
     """Removing '## Auto-Proceed Policy' from samvil-evolve.md must fail strict."""
     target = REPO_ROOT / "references" / "codex-commands" / "samvil-evolve.md"

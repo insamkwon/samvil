@@ -123,6 +123,10 @@ Write to root `interview-summary.md`:
 
 ## Chain
 
+Read `<sid>` from root `project.state.json`, then run
+`complete_stage(session_id=<sid>, stage="interview", verdict="pass")`.
+Any error halts before writing the next marker.
+
 **Greenfield:**
 Run: `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-interview", next_skill="samvil-seed")`
 
@@ -131,5 +135,8 @@ Run: `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_s
 2. Build `interview_state_json` from all collected answers.
 3. Run MCP tool: `merge_brownfield_seed(existing_seed_json=<project.seed.json contents>, interview_state_json=<answers>, new_features_json="[]")`.
 4. Write merged result to `project.seed.json`.
-5. Run: `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-interview", next_skill="samvil-build")`.
-6. Tell user: "인터뷰 완료! Seed 병합 완료. 다음: `codex samvil-build 실행`"
+5. Scope correction: follow the canonical skill flow through `samvil-seed` so
+   seed persistence and its trusted completion are not skipped; `samvil-build`
+   remains the later implementation target after the seed stage.
+6. Run: `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-interview", next_skill="samvil-seed")`.
+7. Tell user: "인터뷰 완료! Seed 병합 완료. 다음: `codex samvil-seed 실행`"

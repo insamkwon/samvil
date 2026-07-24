@@ -19,7 +19,10 @@ Ensure root `interview-summary.md` exists.
 7. If validation fails, fix errors and re-validate.
 8. Save validated seed to root `project.seed.json` (canonical Seed SSOT).
 9. Run MCP tool `save_seed_version(session_id=<id>, version=1, seed_json=<json>)` to record seed history.
-10. Default: run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-seed", next_skill="samvil-design")`.
+10. Read `<sid>` from root `project.state.json`, then run MCP tool
+    `complete_stage(session_id=<sid>, stage="seed", verdict="pass", council_opt_in=<flags contains --council>)`.
+    Any error halts before writing the next marker.
+11. Default: run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-seed", next_skill="samvil-design")`.
    Only when the user supplied exact `--council` on standard/thorough/full/deep, use `next_skill="samvil-council"` instead.
 
 ## Chain
