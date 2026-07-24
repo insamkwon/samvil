@@ -7,6 +7,7 @@ from pathlib import Path
 from samvil_mcp.chain_markers import (
     write_chain_marker,
     read_chain_marker,
+    resolve_stage_next_skill,
     clear_chain_marker,
     advance_chain,
     get_pipeline_status,
@@ -100,6 +101,23 @@ class TestReadChainMarker:
         marker_path.parent.mkdir(parents=True, exist_ok=True)
         marker_path.write_text("not json{")
         assert read_chain_marker(project_root) is None
+
+
+def test_pm_council_override_is_disabled_for_minimal_tier(project_root):
+    root = Path(project_root)
+    (root / "project.state.json").write_text(
+        json.dumps({"samvil_tier": "minimal"}),
+        encoding="utf-8",
+    )
+    (root / "project.config.json").write_text(
+        json.dumps({"flags": ["--council"]}),
+        encoding="utf-8",
+    )
+
+    assert (
+        resolve_stage_next_skill(project_root, "samvil-pm-interview")
+        == "samvil-design"
+    )
 
 
 class TestClearChainMarker:

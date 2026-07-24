@@ -273,6 +273,7 @@ def test_aggregate_chain_default_engineering_interview(tmp_path: Path) -> None:
     """Fresh + no PM signals → samvil-interview."""
     result = aggregate_orchestrator_state(tmp_path, prompt="todo app")
     assert result["chain"]["next_skill"] == "samvil-interview"
+    assert result["chain"]["state_stage"] == "interview"
     assert result["is_pm_mode"] is False
 
 
@@ -283,6 +284,7 @@ def test_aggregate_chain_pm_mode_routes_to_pm_interview(tmp_path: Path) -> None:
     )
     assert result["is_pm_mode"] is True
     assert result["chain"]["next_skill"] == "samvil-pm-interview"
+    assert result["chain"]["state_stage"] == "pm-interview"
 
 
 def test_aggregate_chain_brownfield_beats_pm_signals(tmp_path: Path) -> None:
@@ -292,6 +294,7 @@ def test_aggregate_chain_brownfield_beats_pm_signals(tmp_path: Path) -> None:
         tmp_path, prompt="add MVP analytics dashboard"
     )
     assert result["chain"]["next_skill"] == "samvil-analyze"
+    assert result["chain"]["state_stage"] == "analyze"
 
 
 def test_aggregate_chain_resume_overrides_pm_default(tmp_path: Path) -> None:

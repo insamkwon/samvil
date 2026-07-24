@@ -297,7 +297,7 @@ from pathlib import Path
 project_root, skill_name = sys.argv[1:3]
 try:
     sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
-    from samvil_mcp.chain_markers import write_chain_marker
+    from samvil_mcp.chain_markers import resolve_stage_next_skill, write_chain_marker
     def _load_json(path):
         try:
             return json.loads(path.read_text())
@@ -316,7 +316,11 @@ try:
         except Exception:
             return None
 
-    next_skill = _qa_next_skill(Path(project_root)) if skill_name == "samvil-qa" else None
+    next_skill = (
+        _qa_next_skill(Path(project_root))
+        if skill_name == "samvil-qa"
+        else resolve_stage_next_skill(project_root, skill_name)
+    )
     marker = write_chain_marker(project_root, "claude_code", skill_name, next_skill=next_skill)
     nxt = marker.get("next_skill", "")
     if nxt:

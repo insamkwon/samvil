@@ -30,7 +30,7 @@
    next_skill="<chain.next_skill>")`.
 8. Initialize `.samvil/` if needed:
    `mkdir -p .samvil` and create default `project.state.json`:
-   `{"current_stage":"interview","completed_stages":[],"samvil_tier":"<chosen>"}`.
+   `{"current_stage":"<chain.state_stage>","completed_stages":[],"samvil_tier":"<chosen>"}`.
 9. Print:
    ```
    [SAMVIL] Starting pipeline for: "<prompt>"

@@ -99,6 +99,43 @@ def read_chain_marker(
         return None
 
 
+def _read_project_json(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def resolve_stage_next_skill(
+    project_root: str | Path,
+    current_skill: str,
+) -> str | None:
+    """Resolve project-aware dynamic routing for stage-end recovery markers."""
+    if current_skill == "samvil-qa":
+        return None
+
+    root = Path(project_root)
+    if current_skill != "samvil-pm-interview":
+        return None
+
+    config = _read_project_json(root / "project.config.json")
+    state = _read_project_json(root / "project.state.json")
+    flags = config.get("flags") or []
+    if isinstance(flags, str):
+        flags = flags.split()
+    tier = str(
+        state.get("samvil_tier")
+        or state.get("selected_tier")
+        or config.get("samvil_tier")
+        or config.get("selected_tier")
+        or "standard"
+    )
+    if isinstance(flags, list) and "--council" in flags and tier != "minimal":
+        return "samvil-council"
+    return "samvil-design"
+
+
 def clear_chain_marker(
     project_root: str,
 ) -> bool:

@@ -225,6 +225,73 @@ def test_pm_interview_stage_end_skips_interview_gate_and_writes_design_marker(
     assert '"subject": "interview_to_seed"' not in claims
 
 
+def test_pm_interview_stage_end_preserves_explicit_council_route(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_json(
+        project / "project.state.json",
+        {"samvil_tier": "standard", "current_stage": "pm-interview"},
+    )
+    _write_json(
+        project / "project.config.json",
+        {"samvil_tier": "standard", "flags": ["--council"]},
+    )
+    _write_json(project / "project.seed.json", {"schema_version": "3.2"})
+
+    subprocess.run(
+        [
+            "bash",
+            str(REPO / "hooks" / "contract-stage-end.sh"),
+            json.dumps({"skill": "samvil-pm-interview"}),
+            "0",
+        ],
+        cwd=project,
+        env=_stage_end_env(tmp_path, project),
+        check=True,
+    )
+
+    marker = json.loads((project / ".samvil" / "next-skill.json").read_text())
+    assert marker["next_skill"] == "samvil-council"
+    assert marker["from_stage"] == "samvil-pm-interview"
+
+
+def test_pm_interview_stage_end_ignores_stale_council_marker_without_flag(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    _write_json(
+        project / "project.state.json",
+        {"samvil_tier": "standard", "current_stage": "pm-interview"},
+    )
+    _write_json(project / "project.config.json", {"flags": []})
+    _write_json(project / "project.seed.json", {"schema_version": "3.2"})
+    _write_json(
+        project / ".samvil" / "next-skill.json",
+        {
+            "from_stage": "samvil-pm-interview",
+            "next_skill": "samvil-council",
+        },
+    )
+
+    subprocess.run(
+        [
+            "bash",
+            str(REPO / "hooks" / "contract-stage-end.sh"),
+            json.dumps({"skill": "samvil-pm-interview"}),
+            "0",
+        ],
+        cwd=project,
+        env=_stage_end_env(tmp_path, project),
+        check=True,
+    )
+
+    marker = json.loads((project / ".samvil" / "next-skill.json").read_text())
+    assert marker["next_skill"] == "samvil-design"
+
+
 def test_qa_stage_end_marker_uses_failed_qa_retro_route(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()

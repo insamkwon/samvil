@@ -211,6 +211,14 @@ def test_pm_and_codex_seed_paths_keep_council_opt_in_only() -> None:
     assert 'next_skill="samvil-council"' in codex
 
 
+def test_codex_orchestrator_initializes_the_selected_stage() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex = (repo / "references" / "codex-commands" / "samvil.md").read_text()
+
+    assert '"current_stage":"<chain.state_stage>"' in codex
+    assert '"current_stage":"interview"' not in codex
+
+
 def test_codex_build_uses_mechanical_build_gate_before_chain() -> None:
     repo = Path(__file__).resolve().parents[2]
     codex = (repo / "references" / "codex-commands" / "samvil-build.md").read_text()

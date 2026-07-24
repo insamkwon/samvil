@@ -605,6 +605,15 @@ def _decide_first_skill(
     }
 
 
+def _state_stage_for_skill(next_skill: str) -> str:
+    """Return the project-state stage represented by a selected skill."""
+    if next_skill.startswith("samvil-"):
+        return next_skill.removeprefix("samvil-")
+    if next_skill == "samvil":
+        return "interview"
+    return "interview"
+
+
 def aggregate_orchestrator_state(
     project_root: str | Path,
     *,
@@ -716,6 +725,9 @@ def aggregate_orchestrator_state(
             "resume_point": "interview",
         }
         errors.append(f"chain: {exc}")
+    chain["state_stage"] = _state_stage_for_skill(
+        str(chain.get("next_skill") or "samvil-interview")
+    )
 
     return {
         "schema_version": ORCHESTRATOR_AGGREGATE_SCHEMA_VERSION,
