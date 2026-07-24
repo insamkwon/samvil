@@ -9,7 +9,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from .models import Event, EventType, Session, SeedVersion, Stage
+from .models import Event, EventType, Session, SeedVersion, Stage, StageTransition
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     project_root TEXT DEFAULT '',
     seed_version INTEGER DEFAULT 1,
     current_stage TEXT DEFAULT 'interview',
+    stage_transition_id TEXT DEFAULT '',
     samvil_tier TEXT DEFAULT 'standard',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -68,6 +69,9 @@ TIER_RENAME_MIGRATION = (
 PROJECT_ROOT_MIGRATION = (
     "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''"
 )
+STAGE_TRANSITION_ID_MIGRATION = (
+    "ALTER TABLE sessions ADD COLUMN stage_transition_id TEXT DEFAULT ''"
+)
 
 
 def _migration_plan(
@@ -84,6 +88,8 @@ def _migration_plan(
         sessions_columns = (sessions_columns - {"agent_tier"}) | {"samvil_tier"}  # glossary-allow: migration projection
     if "project_root" not in sessions_columns:
         plan.append(PROJECT_ROOT_MIGRATION)
+    if "stage_transition_id" not in sessions_columns:
+        plan.append(STAGE_TRANSITION_ID_MIGRATION)
     return plan
 
 
@@ -222,7 +228,7 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("BEGIN")
             await db.execute(
-                "UPDATE sessions SET current_stage = ?, updated_at = ? WHERE id = ?",
+                "UPDATE sessions SET current_stage = ?, stage_transition_id = '', updated_at = ? WHERE id = ?",
                 (stage.value, _now(), session_id),
             )
             await db.commit()
@@ -270,7 +276,7 @@ class EventStore:
         stage: Stage,
         data: dict | None = None,
         token_count: int | None = None,
-    ) -> Event:
+    ) -> StageTransition:
         """Persist an event and its session-stage transition atomically."""
         event = Event(
             id=_uuid(),
@@ -282,7 +288,16 @@ class EventStore:
         )
         async with aiosqlite.connect(self.db_path) as db:
             try:
-                await db.execute("BEGIN")
+                await db.execute("BEGIN IMMEDIATE")
+                session_cursor = await db.execute(
+                    "SELECT current_stage, stage_transition_id FROM sessions WHERE id = ?",
+                    (session_id,),
+                )
+                session_row = await session_cursor.fetchone()
+                if session_row is None:
+                    raise ValueError(f"session {session_id} not found")
+                previous_stage = Stage(str(session_row[0]))
+                previous_transition_id = str(session_row[1] or "")
                 await db.execute(
                     "INSERT INTO events (id, session_id, event_type, stage, data, token_count, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
@@ -296,8 +311,8 @@ class EventStore:
                     ),
                 )
                 cursor = await db.execute(
-                    "UPDATE sessions SET current_stage = ?, updated_at = ? WHERE id = ?",
-                    (stage.value, event.timestamp, session_id),
+                    "UPDATE sessions SET current_stage = ?, stage_transition_id = ?, updated_at = ? WHERE id = ?",
+                    (stage.value, event.id, event.timestamp, session_id),
                 )
                 if cursor.rowcount != 1:
                     raise ValueError(f"session {session_id} not found")
@@ -305,7 +320,11 @@ class EventStore:
             except Exception:
                 await db.rollback()
                 raise
-        return event
+        return StageTransition(
+            event=event,
+            previous_stage=previous_stage,
+            previous_transition_id=previous_transition_id,
+        )
 
     async def delete_event(self, event_id: str) -> bool:
         """Compensate an event insert that could not reach the file SSOT."""
@@ -317,28 +336,26 @@ class EventStore:
 
     async def delete_event_and_restore_stage(
         self,
-        event_id: str,
-        session_id: str,
-        expected_stage: Stage,
-        restore_stage: Stage,
+        transition: StageTransition,
     ) -> bool:
         """Atomically compensate a DB event and its matching stage update.
 
-        The event timestamp is also the session transition token. A newer event
-        may set the same stage, so comparing only the stage is not sufficient to
-        decide whether the failed event still owns the current transition.
+        The unique event id is the transition ownership token. Compensation
+        restores the stage observed inside the original write transaction only
+        while that event still owns the latest transition.
         """
+        event = transition.event
         async with aiosqlite.connect(self.db_path) as db:
             try:
-                await db.execute("BEGIN")
+                await db.execute("BEGIN IMMEDIATE")
                 event_cursor = await db.execute(
-                    "SELECT timestamp FROM events WHERE id = ? AND session_id = ?",
-                    (event_id, session_id),
+                    "SELECT 1 FROM events WHERE id = ? AND session_id = ?",
+                    (event.id, event.session_id),
                 )
                 event_row = await event_cursor.fetchone()
                 session_cursor = await db.execute(
-                    "SELECT current_stage, updated_at FROM sessions WHERE id = ?",
-                    (session_id,),
+                    "SELECT current_stage, stage_transition_id FROM sessions WHERE id = ?",
+                    (event.session_id,),
                 )
                 session_row = await session_cursor.fetchone()
                 if event_row is None or session_row is None:
@@ -346,28 +363,28 @@ class EventStore:
                     return False
                 deleted = await db.execute(
                     "DELETE FROM events WHERE id = ? AND session_id = ?",
-                    (event_id, session_id),
+                    (event.id, event.session_id),
                 )
                 if deleted.rowcount != 1:
                     await db.rollback()
                     return False
-                event_timestamp = str(event_row[0])
                 current_stage = str(session_row[0])
-                current_updated_at = str(session_row[1])
+                current_transition_id = str(session_row[1] or "")
                 if (
-                    current_stage == expected_stage.value
-                    and current_updated_at == event_timestamp
+                    current_stage == event.stage.value
+                    and current_transition_id == event.id
                 ):
                     restored = await db.execute(
                         """UPDATE sessions
-                        SET current_stage = ?, updated_at = ?
-                        WHERE id = ? AND current_stage = ? AND updated_at = ?""",
+                        SET current_stage = ?, stage_transition_id = ?, updated_at = ?
+                        WHERE id = ? AND current_stage = ? AND stage_transition_id = ?""",
                         (
-                            restore_stage.value,
+                            transition.previous_stage.value,
+                            transition.previous_transition_id,
                             _now(),
-                            session_id,
-                            expected_stage.value,
-                            event_timestamp,
+                            event.session_id,
+                            event.stage.value,
+                            event.id,
                         ),
                     )
                     if restored.rowcount != 1:

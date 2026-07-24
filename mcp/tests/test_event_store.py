@@ -88,6 +88,7 @@ async def test_initialize_adds_project_root_to_existing_sessions_table(tmp_path)
     with sqlite3.connect(db_path) as db:
         columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
     assert "project_root" in columns
+    assert "stage_transition_id" in columns
 
 
 def test_migration_plan_only_contains_missing_schema_changes() -> None:
@@ -96,7 +97,10 @@ def test_migration_plan_only_contains_missing_schema_changes() -> None:
         sessions_columns={"id", "samvil_tier"},
     )
 
-    assert plan == ["ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''"]
+    assert plan == [
+        "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''",
+        "ALTER TABLE sessions ADD COLUMN stage_transition_id TEXT DEFAULT ''",
+    ]
 
     legacy = _migration_plan(
         events_columns={"id"},
@@ -106,6 +110,7 @@ def test_migration_plan_only_contains_missing_schema_changes() -> None:
         "ALTER TABLE events ADD COLUMN token_count INTEGER DEFAULT NULL",
         "ALTER TABLE sessions RENAME COLUMN agent_tier TO samvil_tier",  # glossary-allow: expected migration
         "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''",
+        "ALTER TABLE sessions ADD COLUMN stage_transition_id TEXT DEFAULT ''",
     ]
 
 
@@ -149,8 +154,12 @@ async def test_save_and_get_events(store: EventStore):
 @pytest.mark.asyncio
 async def test_compensation_does_not_rewind_a_newer_same_stage_transition(
     store: EventStore,
+    monkeypatch,
 ) -> None:
+    from samvil_mcp import event_store
+
     session = await store.create_session("concurrent-stage")
+    monkeypatch.setattr(event_store, "_now", lambda: "2026-07-25T00:00:00+00:00")
     failed = await store.save_event_and_update_stage(
         session.id,
         EventType.STAGE_END,
@@ -164,18 +173,37 @@ async def test_compensation_does_not_rewind_a_newer_same_stage_transition(
         {"attempt": 2},
     )
 
-    compensated = await store.delete_event_and_restore_stage(
-        failed.id,
-        session.id,
-        Stage.SEED,
-        Stage.INTERVIEW,
-    )
+    compensated = await store.delete_event_and_restore_stage(failed)
 
     current = await store.get_session(session.id)
     events = await store.get_events(session.id)
     assert compensated is True
     assert current is not None and current.current_stage == Stage.SEED
-    assert [event.id for event in events] == [succeeded.id]
+    assert [event.id for event in events] == [succeeded.event.id]
+
+
+@pytest.mark.asyncio
+async def test_transition_captures_previous_stage_inside_write_transaction(
+    store: EventStore,
+) -> None:
+    session = await store.create_session("transaction-stage")
+    await store.save_event_and_update_stage(
+        session.id,
+        EventType.STAGE_END,
+        Stage.SEED,
+    )
+    failed = await store.save_event_and_update_stage(
+        session.id,
+        EventType.STAGE_END,
+        Stage.DESIGN,
+    )
+
+    compensated = await store.delete_event_and_restore_stage(failed)
+
+    current = await store.get_session(session.id)
+    assert compensated is True
+    assert failed.previous_stage == Stage.SEED
+    assert current is not None and current.current_stage == Stage.SEED
 
 
 @pytest.mark.asyncio

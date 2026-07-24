@@ -784,14 +784,14 @@ async def save_event(
                     "error": f"session {session_id} not found",
                 }
             )
-        previous_stage = session.current_stage
-        event = await store.save_event_and_update_stage(
+        transition = await store.save_event_and_update_stage(
             session_id=session_id,
             event_type=event_type_enum,
             stage=stage_enum,
             data=parsed_data,
             token_count=token_count,
         )
+        event = transition.event
         project_path = _session_project_path(session)
         canonical_saved = False
         canonical_evidence = None
@@ -818,12 +818,7 @@ async def save_event(
                 db_rolled_back = False
                 rollback_error = ""
                 try:
-                    db_rolled_back = await store.delete_event_and_restore_stage(
-                        event.id,
-                        session_id,
-                        stage_enum,
-                        previous_stage,
-                    )
+                    db_rolled_back = await store.delete_event_and_restore_stage(transition)
                 except Exception as rollback_exc:
                     rollback_error = str(rollback_exc)
                     _log_mcp_health(
@@ -1043,13 +1038,13 @@ async def complete_stage(
             event_data.setdefault("event_type_raw", plan["event_type"])
         stage_enum = Stage(plan["event_stage"])
 
-        previous_stage = session.current_stage
-        event = await store.save_event_and_update_stage(
+        transition = await store.save_event_and_update_stage(
             session_id=session_id,
             event_type=event_type_enum,
             stage=stage_enum,
             data=event_data,
         )
+        event = transition.event
 
         claim_id = None
         claim_saved = False
@@ -1073,12 +1068,7 @@ async def complete_stage(
                 db_rolled_back = False
                 rollback_error = ""
                 try:
-                    db_rolled_back = await store.delete_event_and_restore_stage(
-                        event.id,
-                        session_id,
-                        stage_enum,
-                        previous_stage,
-                    )
+                    db_rolled_back = await store.delete_event_and_restore_stage(transition)
                 except Exception as rollback_exc:
                     rollback_error = str(rollback_exc)
                     _log_mcp_health(

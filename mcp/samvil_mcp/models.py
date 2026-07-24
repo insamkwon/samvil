@@ -76,6 +76,13 @@ class Event:
 
 
 @dataclass
+class StageTransition:
+    event: Event
+    previous_stage: Stage
+    previous_transition_id: str = ""
+
+
+@dataclass
 class Session:
     id: str
     project_name: str
