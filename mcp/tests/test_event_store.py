@@ -179,9 +179,39 @@ async def test_compensation_does_not_rewind_a_newer_same_stage_transition(
 
     current = await store.get_session(session.id)
     events = await store.get_events(session.id)
-    assert compensated is True
+    assert compensated is False
     assert current is not None and current.current_stage == Stage.SEED
-    assert [event.id for event in events] == [succeeded.event.id]
+    assert [event.id for event in events] == [succeeded.event.id, failed.event.id]
+
+
+@pytest.mark.asyncio
+async def test_compensation_preserves_prerequisite_owned_by_newer_stage(
+    store: EventStore,
+) -> None:
+    session = await store.create_session("dependent-stage")
+    interview = await store.save_event_and_update_stage(
+        session.id,
+        EventType.STAGE_CHANGE,
+        Stage.SEED,
+        {"event_type_raw": "interview_complete", "trusted_transition": True},
+    )
+    seed = await store.save_event_and_update_stage(
+        session.id,
+        EventType.STAGE_CHANGE,
+        Stage.DESIGN,
+        {"event_type_raw": "seed_generated", "trusted_transition": True},
+    )
+
+    compensated = await store.delete_event_and_restore_stage(interview)
+
+    current = await store.get_session(session.id)
+    events = await store.get_orchestration_events(
+        session.id,
+        frozenset({"interview_complete", "seed_generated"}),
+    )
+    assert compensated is False
+    assert current is not None and current.current_stage == Stage.DESIGN
+    assert [event.id for event in events] == [seed.event.id, interview.event.id]
 
 
 @pytest.mark.asyncio

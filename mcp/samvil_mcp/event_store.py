@@ -367,6 +367,14 @@ class EventStore:
                 if event_row is None or session_row is None:
                     await db.rollback()
                     return False
+                current_stage = str(session_row[0])
+                current_transition_id = str(session_row[1] or "")
+                if (
+                    current_stage != event.stage.value
+                    or current_transition_id != event.id
+                ):
+                    await db.rollback()
+                    return False
                 deleted = await db.execute(
                     "DELETE FROM events WHERE id = ? AND session_id = ?",
                     (event.id, event.session_id),
@@ -374,28 +382,22 @@ class EventStore:
                 if deleted.rowcount != 1:
                     await db.rollback()
                     return False
-                current_stage = str(session_row[0])
-                current_transition_id = str(session_row[1] or "")
-                if (
-                    current_stage == event.stage.value
-                    and current_transition_id == event.id
-                ):
-                    restored = await db.execute(
-                        """UPDATE sessions
-                        SET current_stage = ?, stage_transition_id = ?, updated_at = ?
-                        WHERE id = ? AND current_stage = ? AND stage_transition_id = ?""",
-                        (
-                            transition.previous_stage.value,
-                            transition.previous_transition_id,
-                            _now(),
-                            event.session_id,
-                            event.stage.value,
-                            event.id,
-                        ),
-                    )
-                    if restored.rowcount != 1:
-                        await db.rollback()
-                        return False
+                restored = await db.execute(
+                    """UPDATE sessions
+                    SET current_stage = ?, stage_transition_id = ?, updated_at = ?
+                    WHERE id = ? AND current_stage = ? AND stage_transition_id = ?""",
+                    (
+                        transition.previous_stage.value,
+                        transition.previous_transition_id,
+                        _now(),
+                        event.session_id,
+                        event.stage.value,
+                        event.id,
+                    ),
+                )
+                if restored.rowcount != 1:
+                    await db.rollback()
+                    return False
                 await db.commit()
                 return True
             except Exception:
