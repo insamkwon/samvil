@@ -841,7 +841,7 @@ async def save_event(
                     data=parsed_data,
                 )
                 canonical_saved = True
-            except OSError as exc:
+            except Exception as exc:
                 _log_mcp_health("fail", "save_event.events_ssot", str(exc))
                 db_rolled_back = False
                 rollback_error = ""
@@ -1111,7 +1111,7 @@ async def complete_stage(
                     session_id=session_id,
                     data=event_data,
                 )
-            except OSError as exc:
+            except Exception as exc:
                 _log_mcp_health("fail", "complete_stage.events_ssot", str(exc))
                 db_rolled_back = False
                 rollback_error = ""

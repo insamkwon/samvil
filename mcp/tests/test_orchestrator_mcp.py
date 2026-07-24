@@ -207,6 +207,46 @@ def test_complete_stage_fails_closed_when_canonical_event_append_fails(
 
 
 @pytest.mark.parametrize("operation", ["save_event", "complete_stage"])
+def test_canonical_event_non_oserror_still_compensates_database(
+    tmp_path, monkeypatch, operation
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    def fail_decode(*args, **kwargs):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid byte")
+
+    monkeypatch.setattr(srv, "_append_project_event", fail_decode)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                f"canonical-non-oserror-{operation}",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+        if operation == "save_event":
+            result = json.loads(await save_event(sid, "build_started", "build", "{}"))
+            assert result["saved"] is False
+        else:
+            result = json.loads(await complete_stage(sid, "interview", "pass"))
+            assert result["status"] == "error"
+
+        state = json.loads(await get_orchestration_state(sid))
+        stored_events = await (await srv.get_store()).get_events(sid)
+        assert result["db_rolled_back"] is True
+        assert state["current_stage"] == "interview"
+        assert stored_events == []
+
+    _run(runner())
+
+
+@pytest.mark.parametrize("operation", ["save_event", "complete_stage"])
 def test_event_and_stage_update_are_atomic_and_retry_safe(
     tmp_path, monkeypatch, operation
 ) -> None:
