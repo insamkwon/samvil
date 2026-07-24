@@ -1183,6 +1183,76 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/samvil_mcp/server.py:784`, `skills/samvil/SKILL.md:79`,
     `mcp/tests/test_event_sanitizer.py:13`,
     `mcp/tests/test_orchestrator_mcp.py:375`.
+- [x] **4.35 임의 event label을 bounded machine label로 정규화**
+  (호출자가 event_type에 prompt·email·token을 섞어도 DB, JSONL, claim에 원문을
+  남기지 않고 안전한 고정 라벨로 저장한다.)
+  - 완료 증거: `afd5849`; `mcp/samvil_mcp/event_sanitizer.py:78`,
+    `mcp/samvil_mcp/server.py:805`, `mcp/tests/test_event_sanitizer.py:25`.
+- [x] **4.36 명령 없는 redirection과 dev-null overwrite도 SSOT 보호**
+  (`>`, `>>`, `tee`, `dd`, `install`, `cp /dev/null`의 보호 대상 overwrite를
+  동일한 destructive guard에서 fail-closed 처리한다.)
+  - 완료 증거: `84f0f0f`; `hooks/guard_destructive.py:715`,
+    `hooks/guard_destructive.py:727`, `hooks/guard_destructive.py:734`,
+    `hooks/guard_destructive.py:739`, `mcp/tests/test_guard_destructive.py:336`.
+- [x] **4.37 complete_stage의 현재 단계·선행 gate 검증**
+  (현재 session stage와 요청 stage가 다르거나 선행 stage가 완료되지 않았으면
+  trusted transition과 PASS claim을 만들지 않는다.)
+  - 완료 증거: `6f8602c`; `mcp/samvil_mcp/server.py:1080`,
+    `mcp/samvil_mcp/server.py:1085`, `mcp/tests/test_orchestrator_mcp.py:146`.
+- [x] **4.38 stage label·camelCase key·bare token redaction 보강**
+  (`stage_raw`, `accessToken`, `userPassword`, 라벨 없는 ghp/sk token까지 저장 전에
+  정규화·제거한다.)
+  - 완료 증거: `de38af7`; `mcp/samvil_mcp/event_sanitizer.py:19`,
+    `mcp/samvil_mcp/event_sanitizer.py:46`, `mcp/samvil_mcp/event_sanitizer.py:84`,
+    `mcp/samvil_mcp/server.py:819`, `mcp/tests/test_event_sanitizer.py:35`.
+- [x] **4.39 brace 후보가 한도에 정확히 닿아도 미확장 대상을 fail-closed**
+  (32개 후보 생성 뒤 남은 중첩 brace를 안전한 결과로 오인하지 않는다.)
+  - 완료 증거: `4806c9d`; `hooks/guard_destructive.py:607`,
+    `hooks/guard_destructive.py:627`, `mcp/tests/test_guard_destructive.py:322`.
+- [x] **4.40 invalid v3.2 source를 backup·migration 전에 거부**
+  (canonical seed validator가 거부한 원본은 백업도 v3.3 seed도 만들지 않는다.)
+  - 완료 증거: `0b54e34`; `mcp/samvil_mcp/migrate_v3_3.py:77`,
+    `mcp/tests/test_migrate_v3_3.py:123`.
+- [x] **4.41 canonical event의 모든 저장 예외에서 DB 보상**
+  (`UnicodeError` 등 비-`OSError`도 일반 event 삭제 또는 trusted stage 복구 경로로
+  보내 부분 DB 저장을 남기지 않는다.)
+  - 완료 증거: `f519f19`; `mcp/samvil_mcp/server.py:849`,
+    `mcp/samvil_mcp/server.py:860`, `mcp/samvil_mcp/server.py:1134`,
+    `mcp/tests/test_orchestrator_mcp.py:222`.
+- [x] **4.42 canonical append 후 close 실패의 ghost row 보상**
+  (append 전 byte offset을 보존하고 write·flush·fsync·close 중 실패하면 같은 file
+  lock 안에서 원래 길이로 truncate한다.)
+  - 완료 증거: `7b5ee53`; `mcp/samvil_mcp/server.py:653`,
+    `mcp/samvil_mcp/server.py:669`, `mcp/samvil_mcp/server.py:672`,
+    `mcp/tests/test_orchestrator_mcp.py:261`.
+- [x] **4.43 project root 없는 trusted transition을 fail-closed**
+  (canonical events/claims 경로를 해석할 수 없으면 DB stage만 전진시키지 않는다.)
+  - 완료 증거: `53b8af6`; `mcp/samvil_mcp/server.py:1074`,
+    `mcp/tests/test_orchestrator_mcp.py:482`.
+- [x] **4.44 transition timestamp를 DB write lock 뒤에 생성**
+  (동시 호출의 이벤트 시각과 실제 직렬화 순서가 반대로 기록되지 않게 한다.)
+  - 완료 증거: `97a572d`; `mcp/samvil_mcp/event_store.py:281`,
+    `mcp/samvil_mcp/event_store.py:283`, `mcp/tests/test_event_store.py:212`.
+- [x] **4.45 acquire와 worker heartbeat의 rate budget 경로 단일화**
+  (MCP cwd와 대상 프로젝트가 달라도 bundle은 Phase A가 반환한 exact budget path를
+  갱신한다.)
+  - 완료 증거: `8922a8b`; `skills/samvil-build/SKILL.md:52`,
+    `mcp/samvil_mcp/build_phase_b.py:307`, `mcp/samvil_mcp/build_phase_b.py:520`,
+    `mcp/tests/test_build_phase_b.py:222`.
+- [x] **4.46 rate budget reset의 snapshot·unlink 원자화**
+  (통계 lock과 삭제 lock 사이 새로 획득한 정상 worker lease를 지우지 않는다.)
+  - 완료 증거: `caee22b`; `mcp/samvil_mcp/rate_budget.py:163`,
+    `mcp/samvil_mcp/rate_budget.py:197`, `mcp/tests/test_rate_budget.py:166`.
+- [x] **4.47 Codex fresh boot의 session 생성·지속 연결**
+  (다음 skill로 marker를 넘기기 전에 `create_session` 결과를 root state의
+  `session_id`로 보존하며 실패 시 chain을 중단한다.)
+  - 완료 증거: `210f225`; `references/codex-commands/samvil.md:29`,
+    `mcp/tests/test_host_parity.py:55`.
+- [x] **4.48 interview completion을 trusted stage transition으로 연결**
+  (telemetry-only `save_event` 대신 `complete_stage`가 canonical completion event와
+  session stage를 함께 확정해 seed gate가 정상 통과한다.)
+  - 완료 증거: `66954d3`; `skills/samvil-interview/SKILL.md:95`,
+    `mcp/tests/test_skill_wiring.py:144`.
 
 ---
 
