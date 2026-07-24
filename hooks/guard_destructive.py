@@ -772,6 +772,8 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
 def _inline_language_runtime_reason(
     executable: str,
     args: list[str],
+    *,
+    command_context: str = "",
 ) -> str | None:
     runtime = re.sub(r"(?:\d+(?:\.\d+)*)$", "", executable.casefold())
     options = INLINE_LANGUAGE_RUNTIME_OPTIONS.get(runtime)
@@ -788,31 +790,125 @@ def _inline_language_runtime_reason(
                 payloads.append(arg[len(option) :])
                 break
 
+    for payload in payloads:
+        if _language_runtime_payload_mutates(payload, command_context):
+            return "inline language runtime may mutate protected SAMVIL SSOT"
+    return None
+
+
+def _language_runtime_payload_mutates(payload: str, command_context: str = "") -> bool:
+    normalized = payload.replace("\\", "/")
+    previous = None
+    while normalized != previous:
+        previous = normalized
+        normalized = re.sub(r"(['\"])\s*\+\s*\1", "", normalized)
+
+    if INLINE_LANGUAGE_COMMAND_EXECUTION.search(normalized):
+        literals = [
+            match.group(2)
+            for match in re.finditer(r"(['\"])(.*?)(?<!\\)\1", normalized)
+        ]
+        command_candidates = literals + ([shlex.join(literals)] if literals else [])
+        if any(analyze_command(candidate) for candidate in command_candidates):
+            return True
+
     protected_paths = PROTECTED_ROOT_SSOT_PATHS | PROTECTED_SAMVIL_SSOT_PATHS | {
         ".samvil"
     }
-    for payload in payloads:
-        normalized = payload.replace("\\", "/")
-        previous = None
-        while normalized != previous:
-            previous = normalized
-            normalized = re.sub(r"(['\"])\s*\+\s*\1", "", normalized)
+    normalized_context = command_context.replace("\\", "/")
+    protected_context = f"{normalized}\n{normalized_context}"
+    if not any(path in protected_context for path in protected_paths):
+        return False
+    return bool(
+        INLINE_LANGUAGE_MUTATION.search(normalized)
+        or INLINE_LANGUAGE_WRITE_OPEN.search(normalized)
+    )
 
-        if INLINE_LANGUAGE_COMMAND_EXECUTION.search(normalized):
-            literals = [
-                match.group(2)
-                for match in re.finditer(r"(['\"])(.*?)(?<!\\)\1", normalized)
-            ]
-            command_candidates = literals + ([shlex.join(literals)] if literals else [])
-            if any(analyze_command(candidate) for candidate in command_candidates):
-                return "inline language runtime may mutate protected SAMVIL SSOT"
 
-        if not any(path in normalized for path in protected_paths):
+def _language_runtime_script_file_reason(
+    executable: str,
+    args: list[str],
+    command_context: str,
+) -> str | None:
+    runtime = re.sub(r"(?:\d+(?:\.\d+)*)$", "", executable.casefold())
+    inline_options = INLINE_LANGUAGE_RUNTIME_OPTIONS.get(runtime)
+    if not inline_options:
+        return None
+    if any(
+        arg in inline_options
+        or any(arg.startswith(option) and len(arg) > len(option) for option in inline_options)
+        for arg in args
+    ):
+        return None
+
+    script: str | None = None
+    after_options = False
+    for arg in args:
+        if arg == "--":
+            after_options = True
             continue
-        if INLINE_LANGUAGE_MUTATION.search(
-            normalized
-        ) or INLINE_LANGUAGE_WRITE_OPEN.search(normalized):
-            return "inline language runtime may mutate protected SAMVIL SSOT"
+        if arg == "-":
+            return None
+        if not after_options and arg.startswith("-"):
+            continue
+        script = arg
+        break
+    if script is None:
+        return None
+
+    try:
+        script_key = str(Path(script).expanduser().resolve())
+    except RuntimeError:
+        script_key = script
+    if script_key in _SCRIPT_INSPECTION_STACK:
+        return None
+    _SCRIPT_INSPECTION_STACK.append(script_key)
+    try:
+        text, error = _read_inspectable_file(script, "language runtime script")
+        if error:
+            return error
+        if text is None:
+            return None
+        if _language_runtime_payload_mutates(text, command_context):
+            return "language runtime script file with protected SSOT mutation"
+        return None
+    finally:
+        _SCRIPT_INSPECTION_STACK.pop()
+
+
+def _language_runtime_heredoc_reason(command: str) -> str | None:
+    header, separator, remainder = command.partition("\n")
+    if not separator:
+        return None
+    marker = re.search(
+        r"<<(?P<strip>-?)\s*(?P<quote>['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)"
+        r"(?P=quote)",
+        header,
+    )
+    if marker is None:
+        return None
+    try:
+        tokens = shlex.split(header[: marker.start()])
+    except ValueError:
+        return None
+    tokens = _unwrap_prefix(tokens)
+    start = _command_start(tokens)
+    if start >= len(tokens):
+        return None
+    executable = _executable(tokens[start])
+    runtime = re.sub(r"(?:\d+(?:\.\d+)*)$", "", executable.casefold())
+    if runtime not in INLINE_LANGUAGE_RUNTIME_OPTIONS:
+        return None
+
+    tag = marker.group("tag")
+    indentation = r"[\t]*" if marker.group("strip") else ""
+    terminator = re.compile(rf"(?m)^{indentation}{re.escape(tag)}[ \t]*$")
+    end = terminator.search(remainder)
+    if end is None:
+        return "language runtime stdin cannot be inspected"
+    payload = remainder[: end.start()]
+    if _language_runtime_payload_mutates(payload, header):
+        return "language runtime may mutate protected SAMVIL SSOT"
     return None
 
 
@@ -1625,16 +1721,31 @@ def _analyze_command_impl(command: str) -> str | None:
     piped_shell_reason = _piped_shell_reason(command)
     if piped_shell_reason:
         return piped_shell_reason
+    runtime_stdin_reason = _language_runtime_heredoc_reason(command)
+    if runtime_stdin_reason:
+        return runtime_stdin_reason
     for tokens in _segments(command):
+        command_context = shlex.join(tokens)
         tokens = _unwrap_prefix(tokens)
         start = _command_start(tokens)
         if start >= len(tokens):
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
-        interpreter_reason = _inline_language_runtime_reason(executable, args)
+        interpreter_reason = _inline_language_runtime_reason(
+            executable,
+            args,
+            command_context=command_context,
+        )
         if interpreter_reason:
             return interpreter_reason
+        runtime_script_reason = _language_runtime_script_file_reason(
+            executable,
+            args,
+            command_context,
+        )
+        if runtime_script_reason:
+            return runtime_script_reason
         overwrite_reason = _protected_overwrite_reason(executable, args)
         if overwrite_reason:
             return overwrite_reason

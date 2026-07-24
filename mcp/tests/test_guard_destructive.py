@@ -105,6 +105,68 @@ def test_inline_language_runtime_can_read_protected_ssot() -> None:
     assert reason is None
 
 
+def test_language_runtime_heredoc_cannot_mutate_protected_ssot() -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        "Path('project.seed.json').unlink()\n"
+        "PY"
+    )
+
+    assert reason == "language runtime may mutate protected SAMVIL SSOT"
+
+
+def test_language_runtime_script_file_cannot_mutate_protected_ssot(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    script = tmp_path / "mutate.py"
+    script.write_text(
+        "from pathlib import Path\nPath('project.seed.json').unlink()\n",
+        encoding="utf-8",
+    )
+
+    reason = guard.analyze_command(f"python3 {script}")
+
+    assert reason == "language runtime script file with protected SSOT mutation"
+
+
+def test_language_runtime_env_path_cannot_hide_protected_ssot_mutation() -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(
+        "TARGET=project.seed.json "
+        "python3 -c \"import os; os.remove(os.environ['TARGET'])\""
+    )
+
+    assert reason == "inline language runtime may mutate protected SAMVIL SSOT"
+
+
+def test_language_runtime_safe_stdin_and_script_file_pass(tmp_path: Path) -> None:
+    guard = load_guard_module()
+    script = tmp_path / "safe.py"
+    script.write_text("print(open('project.seed.json').read())\n", encoding="utf-8")
+
+    assert guard.analyze_command(f"python3 {script}") is None
+    assert (
+        guard.analyze_command(
+            "python3 - <<'PY'\n"
+            "print(open('project.seed.json').read())\n"
+            "PY"
+        )
+        is None
+    )
+    assert (
+        guard.analyze_command(
+            "TARGET=/tmp/samvil-cache "
+            "python3 -c \"import os; os.remove(os.environ['TARGET'])\""
+        )
+        is None
+    )
+
+
 @pytest.mark.parametrize(
     "command",
     [
