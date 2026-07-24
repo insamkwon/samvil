@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -591,6 +592,52 @@ def _is_protected_ssot_target(target: str) -> bool:
     )
 
 
+def _brace_expansion_candidates(target: str, *, limit: int = 32) -> list[str]:
+    candidates = [target]
+    while len(candidates) < limit:
+        expanded = False
+        next_candidates: list[str] = []
+        for candidate in candidates:
+            match = re.search(r"\{([^{}]+)\}", candidate)
+            if not match or "," not in match.group(1):
+                next_candidates.append(candidate)
+                continue
+            expanded = True
+            for choice in match.group(1).split(","):
+                next_candidates.append(
+                    candidate[: match.start()] + choice + candidate[match.end() :]
+                )
+                if len(next_candidates) >= limit:
+                    break
+        candidates = next_candidates[:limit]
+        if not expanded:
+            break
+    return candidates
+
+
+def _rm_target_may_expand_to_protected_ssot(target: str) -> bool:
+    normalized = _normalized_rm_target(target)
+    allowed_cache = normalized == ".next" or normalized.startswith(".next/")
+    allowed_samvil_cache = normalized == ".samvil/cache" or normalized.startswith(
+        ".samvil/cache/"
+    )
+    if allowed_cache or allowed_samvil_cache:
+        return False
+    if any(marker in target for marker in ("$", "`")):
+        return True
+    protected = PROTECTED_ROOT_SSOT_PATHS | PROTECTED_SAMVIL_SSOT_PATHS | {
+        ".samvil"
+    }
+    for candidate in _brace_expansion_candidates(normalized):
+        if candidate in protected:
+            return True
+        if any(marker in candidate for marker in "*?[") and any(
+            fnmatch.fnmatchcase(path, candidate) for path in protected
+        ):
+            return True
+    return False
+
+
 def _rm_reason(args: list[str]) -> str | None:
     short_flags = "".join(
         token[1:]
@@ -607,6 +654,8 @@ def _rm_reason(args: list[str]) -> str | None:
     targets = [token for token in args if not token.startswith("-")]
     if any(_is_protected_ssot_target(target) for target in targets):
         return "protected SAMVIL SSOT removal"
+    if any(_rm_target_may_expand_to_protected_ssot(target) for target in targets):
+        return "dynamic removal target may match protected SAMVIL SSOT"
     if not (recursive or dynamic_flag):
         return None
     for target in targets:

@@ -261,8 +261,29 @@ def test_protected_ssot_files_cannot_be_removed_non_recursively(command: str) ->
 @pytest.mark.parametrize(
     "command",
     [
+        "rm -f project.seed.*",
+        "rm -f project.{seed,state}.json",
+        'rm -f "$(pwd)/project.seed.json"',
+        'rm -f "$TARGET"',
+        "rm -f .samvil/*.jsonl",
+    ],
+)
+def test_dynamic_or_expanded_targets_cannot_hide_protected_ssot(
+    command: str,
+) -> None:
+    result = run_guard(command)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "rm -f tmp.log",
+        "rm -f *.tmp",
         "rm -f .samvil/cache/tmp.json",
+        "rm -f .samvil/cache/*.tmp",
         "rm -f .next/cache.json",
     ],
 )
