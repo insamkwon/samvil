@@ -25,6 +25,7 @@ def test_event_data_redacts_nested_prompt_credentials_and_email() -> None:
 
 def test_event_label_rejects_arbitrary_sensitive_prose() -> None:
     assert sanitize_event_label("build_pass") == "build_pass"
+    assert sanitize_event_label("ghp_fixture_secret") == "redacted_event_type"
     assert (
         sanitize_event_label("private person@example.com token=fixture-secret")
         == "redacted_event_type"
@@ -47,6 +48,7 @@ def test_event_data_redacts_camel_case_keys_and_unlabelled_tokens() -> None:
 
 def test_stage_label_rejects_arbitrary_sensitive_prose() -> None:
     assert sanitize_stage_label("qa") == "qa"
+    assert sanitize_stage_label("ghp_fixture_secret") == "redacted_stage"
     assert (
         sanitize_stage_label("person@example.com token=fixture-secret")
         == "redacted_stage"

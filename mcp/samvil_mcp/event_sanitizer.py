@@ -78,10 +78,18 @@ def sanitize_event_data(value: Any, *, _depth: int = 0) -> Any:
 def sanitize_event_label(value: str) -> str:
     """Keep stable machine labels only; never persist arbitrary caller prose."""
     normalized = value.strip().casefold()
-    return normalized if _SAFE_EVENT_LABEL.fullmatch(normalized) else "redacted_event_type"
+    return (
+        normalized
+        if _SAFE_EVENT_LABEL.fullmatch(normalized) and not _TOKEN_LITERAL.search(normalized)
+        else "redacted_event_type"
+    )
 
 
 def sanitize_stage_label(value: str) -> str:
     """Keep a bounded stage label without retaining arbitrary caller prose."""
     normalized = value.strip().casefold()
-    return normalized if _SAFE_EVENT_LABEL.fullmatch(normalized) else "redacted_stage"
+    return (
+        normalized
+        if _SAFE_EVENT_LABEL.fullmatch(normalized) and not _TOKEN_LITERAL.search(normalized)
+        else "redacted_stage"
+    )
