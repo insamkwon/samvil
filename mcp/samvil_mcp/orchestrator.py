@@ -300,6 +300,13 @@ def complete_stage_plan(
 def _stage_statuses(events: list[StageEvent]) -> dict[str, str]:
     statuses: dict[str, str] = {}
     for event in events:
+        event_data = (
+            event.get("data", {})
+            if isinstance(event, dict)
+            else getattr(event, "data", {})
+        )
+        if isinstance(event_data, dict) and event_data.get("trusted_transition") is False:
+            continue
         event_type = _as_value(event.event_type)
         stage = _stage_for_event(event_type, _as_value(event.stage))
         if stage not in PIPELINE_STAGES:

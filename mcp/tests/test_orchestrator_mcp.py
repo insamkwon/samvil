@@ -62,6 +62,10 @@ def test_stage_can_proceed_tool_reads_session_events(tmp_path, monkeypatch) -> N
         assert blocked["can_proceed"] is False
 
         await save_event(sid, "interview_complete", "seed", "{}")
+        still_blocked = json.loads(await stage_can_proceed(sid, "seed"))
+        assert still_blocked["can_proceed"] is False
+
+        await complete_stage(sid, "interview", "pass")
         allowed = json.loads(await stage_can_proceed(sid, "seed"))
         assert allowed["can_proceed"] is True
 
@@ -73,8 +77,8 @@ def test_get_orchestration_state_tool_reads_progress(tmp_path, monkeypatch) -> N
     async def runner():
         sess = json.loads(await create_session("orch-state", "minimal"))
         sid = sess["session_id"]
-        await save_event(sid, "interview_complete", "seed", "{}")
-        await save_event(sid, "seed_generated", "design", "{}")
+        await complete_stage(sid, "interview", "pass")
+        await complete_stage(sid, "seed", "pass")
 
         state = json.loads(await get_orchestration_state(sid))
         assert state["current_stage"] == "design"
@@ -207,6 +211,15 @@ def test_event_and_stage_update_are_atomic_and_retry_safe(
 
         state_after_failure = json.loads(await get_orchestration_state(sid))
         events_after_failure = await (await srv.get_store()).get_events(sid)
+
+        if operation == "save_event":
+            assert first["saved"] is True
+            assert first["stage_transitioned"] is False
+            assert state_after_failure["current_stage"] == "interview"
+            assert state_after_failure["completed_stages"] == []
+            assert len(events_after_failure) == 1
+            assert len(read_events(project_root)["entries"]) == 1
+            return
 
         assert first.get("saved", first.get("status") == "ok") is False
         assert state_after_failure["current_stage"] == "interview"
@@ -354,6 +367,7 @@ def test_save_event_writes_project_events_ssot(tmp_path, monkeypatch) -> None:
         "data": {
             "questions_asked": 4,
             "event_type_raw": "interview_complete",
+            "trusted_transition": False,
         },
     }
 
@@ -509,7 +523,7 @@ def test_save_event_auto_claims_current_stage_entry_events(
     assert [claim.type for claim in analyze_claims] == ["evidence_posted"]
 
 
-def test_save_event_stage_exit_verifies_claim_with_canonical_event_evidence(
+def test_save_event_stage_exit_stays_pending_without_gate_or_user_verification(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -541,14 +555,11 @@ def test_save_event_stage_exit_verifies_claim_with_canonical_event_evidence(
         for claim in ledger.query_by_subject("stage:build")
         if claim.type == "evidence_posted"
     ]
-    assert len(evidence_claims) == 1
-    verified = evidence_claims[0]
-    assert verified.status == "verified"
-    assert verified.evidence == [
-        ".samvil/events.jsonl:1",
-        ".samvil/events.jsonl:2",
-    ]
-    assert all(not item.startswith("event:") for item in verified.evidence)
+    assert len(evidence_claims) == 2
+    assert all(claim.status == "pending" for claim in evidence_claims)
+    assert all(claim.verified_by is None for claim in evidence_claims)
+    assert evidence_claims[-1].evidence == [".samvil/events.jsonl:2"]
+    assert ledger.query_by_subject("gate:build_exit") == []
 
 
 def test_save_event_warns_when_project_root_cannot_be_resolved(

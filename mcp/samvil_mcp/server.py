@@ -730,38 +730,17 @@ async def _auto_post_claim_for_event(
                 meta={"via": "save_event", "event_type": event_type_raw},
             )
         elif et in _STAGE_EXIT_EVENTS:
-            # Verify the most recent stage_start claim (if any) and post
-            # a gate_verdict claim if we have enough signal.
-            pending = [
-                c
-                for c in ledger.query_by_subject(subject)
-                if c.status == "pending" and c.type == "evidence_posted"
-            ]
-            if pending and canonical_evidence:
-                target = sorted(pending, key=lambda c: c.ts)[-1]
-                try:
-                    ledger.verify(
-                        target.claim_id,
-                        verified_by="agent:user",
-                        evidence=[canonical_evidence],
-                        project_root=project_path,
-                    )
-                except ClaimLedgerError:
-                    pass
-            # Gate verdict synthesis (light: PASS if event is *_pass /
-            # *_complete, else leave untagged).
-            verdict = "pass" if et.endswith("_pass") or et.endswith("_complete") else "unknown"
             ledger.post(
-                type="gate_verdict",
-                subject=f"gate:{canonical_stage}_exit",
-                statement=f"verdict={verdict} via {event_type_raw}",
-                authority_file="state.json",
+                type="evidence_posted",
+                subject=subject,
+                statement=f"{event_type_raw} reported @ {stage}",
+                authority_file=".samvil/events.jsonl",
                 claimed_by="agent:orchestrator-agent",
-                evidence=["project.state.json"],
+                evidence=[canonical_evidence] if canonical_evidence else [],
                 meta={
-                    "verdict": verdict,
+                    "via": "save_event",
                     "event_type": event_type_raw,
-                    "data": data,
+                    "trusted_transition": False,
                 },
             )
         elif et in _STAGE_FAIL_EVENTS:
@@ -824,14 +803,14 @@ async def save_event(
                     "error": f"session {session_id} not found",
                 }
             )
-        transition = await store.save_event_and_update_stage(
+        parsed_data["trusted_transition"] = False
+        event = await store.save_event(
             session_id=session_id,
             event_type=event_type_enum,
             stage=stage_enum,
             data=parsed_data,
             token_count=token_count,
         )
-        event = transition.event
         project_path = _session_project_path(session)
         canonical_saved = False
         canonical_evidence = None
@@ -858,7 +837,7 @@ async def save_event(
                 db_rolled_back = False
                 rollback_error = ""
                 try:
-                    db_rolled_back = await store.delete_event_and_restore_stage(transition)
+                    db_rolled_back = await store.delete_event(event.id)
                 except Exception as rollback_exc:
                     rollback_error = str(rollback_exc)
                     _log_mcp_health(
@@ -894,6 +873,7 @@ async def save_event(
                 "event_id": event.id,
                 "saved": True,
                 "canonical_saved": canonical_saved,
+                "stage_transitioned": False,
             }
         )
     except Exception as e:
@@ -1071,6 +1051,7 @@ async def complete_stage(
             session, stage, verdict, council_opt_in=council_opt_in
         )
         event_data = dict(plan["event_data"])
+        event_data["trusted_transition"] = True
         try:
             event_type_enum = EventType(plan["event_type"])
         except ValueError:
