@@ -143,10 +143,43 @@ def test_piped_test_log_with_trusted_success_and_clean_log_is_accepted() -> None
         "npm test | tail -20",
         "10 passed\nSAMVIL_EXIT:0\n",
         runner_exit_code=0,
+        trusted_runner=True,
     )
 
     assert result["accepted"] is True
     assert result["risk_level"] == "LOW"
+
+
+def test_caller_supplied_success_status_is_not_trusted() -> None:
+    result = analyze_shell_evidence(
+        "npm test | tail -20",
+        "10 passed\nSAMVIL_EXIT:0\n",
+        runner_exit_code=0,
+    )
+
+    assert result["accepted"] is False
+    assert result["risk_level"] == "HIGH"
+
+
+def test_semantic_check_mcp_rejects_fabricated_clean_success() -> None:
+    from samvil_mcp.server import semantic_check
+
+    result = json.loads(
+        asyncio.run(
+            semantic_check(
+                code="const value = await run();",
+                shell_command="npm test | tail -20",
+                execution_log="10 passed\nSAMVIL_EXIT:0\n",
+                runner_exit_code=0,
+            )
+        )
+    )
+
+    assert result["risk_level"] == "HIGH"
+    assert any(
+        finding["pattern"] == "evidence_form_mismatch"
+        for finding in result["findings"]
+    )
 
 
 def test_piped_test_log_rejects_spoofed_success_marker() -> None:

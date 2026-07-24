@@ -98,8 +98,9 @@ def analyze_shell_evidence(
     execution_log: str,
     *,
     runner_exit_code: int | None = None,
+    trusted_runner: bool = False,
 ) -> dict:
-    """Reject filtered evidence unless the trusted runner reports success."""
+    """Reject shell evidence unless a trusted host supplied the exit status."""
     marker_failures = any(
         int(match.group("code")) != 0 for match in EXIT_MARKER.finditer(execution_log)
     )
@@ -109,7 +110,8 @@ def analyze_shell_evidence(
         or FAILURE_LINE.search(execution_log)
     )
     mismatch = bool(
-        log_reports_failure
+        not trusted_runner
+        or log_reports_failure
         or (PIPE_FILTER.search(command) and runner_exit_code != 0)
     )
     findings = []
@@ -120,8 +122,8 @@ def analyze_shell_evidence(
                 "pattern": "evidence_form_mismatch",
                 "severity": "HIGH",
                 "explanation": (
-                    "test evidence reports failure or is filtered without a "
-                    "trusted successful runner exit status"
+                    "test evidence is not backed by a trusted host runner or "
+                    "reports a failure"
                 ),
             }
         )
