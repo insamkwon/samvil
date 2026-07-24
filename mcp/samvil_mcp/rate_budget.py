@@ -28,7 +28,7 @@ except ImportError:  # pragma: no cover — Windows fallback
     fcntl = None  # type: ignore[assignment]
     _HAS_FLOCK = False
 
-Kind = Literal["acquire", "release"]
+Kind = Literal["acquire", "heartbeat", "release"]
 ACQUIRE_TTL_SECONDS = 30 * 60
 
 
@@ -95,13 +95,20 @@ def _replay(
                 acquired_at = float(ev.get("ts"))
             except (TypeError, ValueError):
                 continue
-            if current_time - acquired_at <= ttl_seconds:
-                active[wid] = acquired_at
-            else:
-                active.pop(wid, None)
+            active[wid] = acquired_at
+        elif kind == "heartbeat" and wid in active:
+            try:
+                active[wid] = float(ev.get("ts"))
+            except (TypeError, ValueError):
+                continue
         elif kind == "release":
             active.pop(wid, None)
-    return set(active), events
+    fresh = {
+        worker_id
+        for worker_id, last_seen_at in active.items()
+        if current_time - last_seen_at <= ttl_seconds
+    }
+    return fresh, events
 
 
 def acquire(budget_path: str, worker_id: str, max_concurrent: int) -> dict:
@@ -142,6 +149,17 @@ def release(budget_path: str, worker_id: str) -> dict:
         return {"released": True, "current": len(active) - 1}
 
 
+def heartbeat(budget_path: str, worker_id: str) -> dict:
+    """Renew a live worker lease without resurrecting expired workers."""
+    p = Path(budget_path)
+    with _locked(p):
+        active, _ = _replay(p)
+        if worker_id not in active:
+            return {"renewed": False, "current": len(active), "note": "not held"}
+        _append_locked(p, "heartbeat", worker_id)
+        return {"renewed": True, "current": len(active)}
+
+
 def stats(budget_path: str) -> dict:
     """Return {active, peak, total_acquired, total_released, active_workers}."""
     p = Path(budget_path)
@@ -151,6 +169,7 @@ def stats(budget_path: str) -> dict:
         running = 0
         total_acq = 0
         total_rel = 0
+        total_heartbeats = 0
         for ev in events:
             if ev.get("kind") == "acquire":
                 running += 1
@@ -159,11 +178,14 @@ def stats(budget_path: str) -> dict:
             elif ev.get("kind") == "release":
                 running = max(0, running - 1)
                 total_rel += 1
+            elif ev.get("kind") == "heartbeat":
+                total_heartbeats += 1
         return {
             "active": len(active),
             "peak": peak,
             "total_acquired": total_acq,
             "total_released": total_rel,
+            "total_heartbeats": total_heartbeats,
             "active_workers": sorted(active),
         }
 

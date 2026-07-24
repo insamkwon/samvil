@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 
-from samvil_mcp.rate_budget import acquire, release, reset, stats
+from samvil_mcp.rate_budget import acquire, heartbeat, release, reset, stats
 
 
 def test_acquire_below_max(tmp_path: Path):
@@ -50,6 +50,38 @@ def test_recent_acquire_still_consumes_slot(tmp_path: Path):
 
     assert r["acquired"] is False
     assert r["current"] == 1
+
+
+def test_heartbeat_renews_live_worker_past_original_acquire_ttl(tmp_path: Path):
+    p = tmp_path / "rb.jsonl"
+    now = time.time()
+    p.write_text(
+        "\n".join(
+            [
+                json.dumps({"ts": now - 1900, "worker_id": "live-worker", "kind": "acquire"}),
+                json.dumps({"ts": now - 60, "worker_id": "live-worker", "kind": "heartbeat"}),
+            ]
+        )
+        + "\n"
+    )
+
+    result = acquire(str(p), "replacement-worker", max_concurrent=1)
+
+    assert result["acquired"] is False
+    assert stats(str(p))["active_workers"] == ["live-worker"]
+
+
+def test_heartbeat_does_not_resurrect_expired_worker(tmp_path: Path):
+    p = tmp_path / "rb.jsonl"
+    p.write_text(json.dumps({
+        "ts": time.time() - (30 * 60 + 1),
+        "worker_id": "expired-worker",
+        "kind": "acquire",
+    }) + "\n")
+
+    result = heartbeat(str(p), "expired-worker")
+
+    assert result["renewed"] is False
 
 
 def test_malformed_acquire_timestamp_does_not_consume_slot(tmp_path: Path):
@@ -115,6 +147,7 @@ def test_stats_empty_log(tmp_path: Path):
         "peak": 0,
         "total_acquired": 0,
         "total_released": 0,
+        "total_heartbeats": 0,
         "active_workers": [],
     }
 

@@ -17,6 +17,7 @@ from samvil_mcp.server import (
     next_buildable_leaves,
     pm_seed_to_eng_seed,
     rate_budget_acquire,
+    rate_budget_heartbeat,
     rate_budget_release,
     rate_budget_reset,
     rate_budget_stats,
@@ -162,6 +163,8 @@ def test_rate_budget_lifecycle(tmp_path: Path):
     assert a["acquired"] is True
     s = json.loads(_run(rate_budget_stats(p)))
     assert s["active"] == 1
+    heartbeat = json.loads(_run(rate_budget_heartbeat(p, "w1")))
+    assert heartbeat["renewed"] is True
     r = json.loads(_run(rate_budget_release(p, "w1")))
     assert r["released"] is True
     reset_out = json.loads(_run(rate_budget_reset(p)))

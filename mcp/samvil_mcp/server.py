@@ -2437,6 +2437,19 @@ async def rate_budget_release(budget_path: str, worker_id: str) -> str:
 
 
 @mcp.tool()
+async def rate_budget_heartbeat(budget_path: str, worker_id: str) -> str:
+    """Renew a live worker lease. Expired or unknown workers stay expired."""
+    try:
+        from .rate_budget import heartbeat as _heartbeat
+        result = _heartbeat(budget_path, worker_id)
+        _log_mcp_health("ok", "rate_budget_heartbeat")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "rate_budget_heartbeat", str(e))
+        return json.dumps({"error": str(e), "renewed": False})
+
+
+@mcp.tool()
 async def rate_budget_stats(budget_path: str) -> str:
     """Return budget stats {active, peak, total_acquired, total_released}."""
     try:

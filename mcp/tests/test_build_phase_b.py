@@ -216,6 +216,7 @@ def test_dispatch_returns_correct_batch_size() -> None:
     )
     assert out["batch"]["count"] == 2  # max_parallel=2
     assert len(out["worker_bundles"]) == 2
+    assert "rate_budget_heartbeat" in out["worker_bundles"][0]["contract"]["rate_budget_heartbeat"]
 
 
 def test_dispatch_skips_completed_leaves() -> None:
