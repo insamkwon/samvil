@@ -80,6 +80,20 @@ def test_apply_migration_replaces_corrupt_partial_backup(tmp_path: Path) -> None
     assert json.loads(seed_path.read_text())["schema_version"] == "3.3"
 
 
+def test_apply_migration_replaces_parseable_but_incomplete_backup(
+    tmp_path: Path,
+) -> None:
+    seed_path = tmp_path / "project.seed.json"
+    original_text = json.dumps(_seed())
+    seed_path.write_text(original_text)
+    backup_path = tmp_path / BACKUP_FILENAME
+    backup_path.write_text(json.dumps({"schema_version": "3.2"}))
+
+    apply_migration(tmp_path)
+
+    assert backup_path.read_text() == original_text
+
+
 def test_apply_migration_preserves_valid_first_backup(tmp_path: Path) -> None:
     seed_path = tmp_path / "project.seed.json"
     seed_path.write_text(json.dumps(_seed()))

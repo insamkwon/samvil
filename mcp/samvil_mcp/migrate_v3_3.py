@@ -20,9 +20,28 @@ def _is_valid_v32_backup(path: Path) -> bool:
         backup = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return False
-    return (
-        isinstance(backup, dict)
-        and str(backup.get("schema_version")) == "3.2"
+    if not isinstance(backup, dict) or str(backup.get("schema_version")) != "3.2":
+        return False
+    if not isinstance(backup.get("name"), str) or not backup["name"].strip():
+        return False
+    if backup.get("solution_type") not in {
+        "web-app",
+        "automation",
+        "game",
+        "mobile-app",
+        "dashboard",
+    }:
+        return False
+    features = backup.get("features")
+    if not isinstance(features, list) or not features:
+        return False
+    return all(
+        isinstance(feature, dict)
+        and isinstance(feature.get("name"), str)
+        and bool(feature["name"].strip())
+        and isinstance(feature.get("acceptance_criteria"), list)
+        and bool(feature["acceptance_criteria"])
+        for feature in features
     )
 
 
