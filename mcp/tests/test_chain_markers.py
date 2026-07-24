@@ -140,6 +140,53 @@ class TestAdvanceChain:
         result = advance_chain(project_with_marker, "codex_cli")
         assert result["next_skill"] == "samvil-build"
 
+    def test_advance_chain_honors_pm_council_project_policy(self, project_root):
+        root = Path(project_root)
+        (root / "project.state.json").write_text(
+            json.dumps({"samvil_tier": "standard"}),
+            encoding="utf-8",
+        )
+        (root / "project.config.json").write_text(
+            json.dumps({"flags": ["--council"]}),
+            encoding="utf-8",
+        )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil",
+            next_skill="samvil-pm-interview",
+        )
+
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["from_stage"] == "samvil-pm-interview"
+        assert result["next_skill"] == "samvil-council"
+
+    def test_advance_chain_honors_failed_qa_project_policy(self, project_root):
+        root = Path(project_root)
+        (root / "project.state.json").write_text("{}", encoding="utf-8")
+        (root / ".samvil").mkdir(exist_ok=True)
+        (root / ".samvil" / "qa-results.json").write_text(
+            json.dumps(
+                {
+                    "synthesis": {"verdict": "FAIL", "pass2": {"counts": {}}},
+                    "convergence": {"verdict": "failed"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["from_stage"] == "samvil-qa"
+        assert result["next_skill"] == "samvil-retro"
+
     def test_pipeline_complete(self, project_root):
         write_chain_marker(project_root, "generic", "samvil-retro")
         result = advance_chain(project_root, "generic")

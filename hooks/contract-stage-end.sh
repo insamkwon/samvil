@@ -61,6 +61,7 @@ project = Path(project_root)
 sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
 
 try:
+    from samvil_mcp.chain_markers import resolve_stage_next_skill
     from samvil_mcp.claim_ledger import ClaimLedger
     from samvil_mcp.gates import (
         GateName,
@@ -119,17 +120,8 @@ def _qa_results() -> dict:
 
 
 def _qa_suggested_next_skill(state: dict) -> str:
-    results = _qa_results_payload()
-    synthesis = results.get("synthesis") or {}
-    if not synthesis:
-        return ""
     try:
-        from samvil_mcp.qa_finalize import _decide_next_skill
-
-        convergence = results.get("convergence") or {}
-        return str(
-            _decide_next_skill(synthesis, state, convergence).get("suggested") or ""
-        )
+        return str(resolve_stage_next_skill(project, "samvil-qa") or "")
     except Exception:
         return ""
 
@@ -301,38 +293,12 @@ esac
 
 if [ "$SHOULD_WRITE_MARKER" = "1" ]; then
   MARKER_RESULT="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
-import json, os, sys
-from pathlib import Path
+import os, sys
 project_root, skill_name = sys.argv[1:3]
 try:
     sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
     from samvil_mcp.chain_markers import resolve_stage_next_skill, write_chain_marker
-    def _load_json(path):
-        try:
-            return json.loads(path.read_text())
-        except Exception:
-            return {}
-
-    def _qa_next_skill(project):
-        results = _load_json(project / ".samvil" / "qa-results.json")
-        synthesis = results.get("synthesis") or {}
-        if not synthesis:
-            return None
-        state = _load_json(project / "project.state.json")
-        try:
-            from samvil_mcp.qa_finalize import _decide_next_skill
-            convergence = results.get("convergence") or {}
-            return str(
-                _decide_next_skill(synthesis, state, convergence).get("suggested") or ""
-            ) or None
-        except Exception:
-            return None
-
-    next_skill = (
-        _qa_next_skill(Path(project_root))
-        if skill_name == "samvil-qa"
-        else resolve_stage_next_skill(project_root, skill_name)
-    )
+    next_skill = resolve_stage_next_skill(project_root, skill_name)
     marker = write_chain_marker(project_root, "claude_code", skill_name, next_skill=next_skill)
     nxt = marker.get("next_skill", "")
     if nxt:

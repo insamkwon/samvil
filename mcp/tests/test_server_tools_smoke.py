@@ -135,8 +135,8 @@ def test_qa_recovery_routing_tools_write_next_skill_marker(tmp_path: Path) -> No
     built = json.loads(_run(build_qa_recovery_routing(project_root=str(tmp_path))))
     materialized = json.loads(_run(materialize_qa_recovery_routing(project_root=str(tmp_path))))
 
-    assert built["primary_route"]["next_skill"] == "samvil-evolve"
-    assert materialized["primary_route"]["next_skill"] == "samvil-evolve"
+    assert built["primary_route"]["next_skill"] == "samvil-retro"
+    assert materialized["primary_route"]["next_skill"] == "samvil-retro"
     assert (tmp_path / ".samvil" / "next-skill.json").exists()
 
 

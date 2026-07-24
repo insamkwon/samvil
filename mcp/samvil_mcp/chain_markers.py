@@ -112,10 +112,20 @@ def resolve_stage_next_skill(
     current_skill: str,
 ) -> str | None:
     """Resolve project-aware dynamic routing for stage-end recovery markers."""
-    if current_skill == "samvil-qa":
-        return None
-
     root = Path(project_root)
+    if current_skill == "samvil-qa":
+        results = _read_project_json(root / ".samvil" / "qa-results.json")
+        synthesis = results.get("synthesis") or {}
+        if not synthesis:
+            return None
+        state = _read_project_json(root / "project.state.json")
+        convergence = results.get("convergence") or {}
+        from .qa_finalize import _decide_next_skill
+
+        return str(
+            _decide_next_skill(synthesis, state, convergence).get("suggested") or ""
+        ) or None
+
     if current_skill != "samvil-pm-interview":
         return None
 
@@ -165,7 +175,13 @@ def advance_chain(
         return {"next_skill": "", "status": "pipeline_complete"}
 
     next_skill = current["next_skill"]
-    new_marker = write_chain_marker(project_root, host_name, next_skill)
+    resolved = resolve_stage_next_skill(project_root, next_skill)
+    new_marker = write_chain_marker(
+        project_root,
+        host_name,
+        next_skill,
+        next_skill=resolved,
+    )
     return new_marker
 
 

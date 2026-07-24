@@ -66,6 +66,15 @@ def build_evolve_context_from_project(project_root: Path | str) -> dict[str, Any
     synthesis = qa_results.get("synthesis") or {}
     convergence = qa_results.get("convergence") or synthesis.get("convergence") or {}
     primary_route = qa_routing.get("primary_route") or {}
+    alternatives = qa_routing.get("alternative_routes") or []
+    selected_route = next(
+        (
+            route
+            for route in alternatives
+            if isinstance(route, dict) and route.get("next_skill") == "samvil-evolve"
+        ),
+        primary_route,
+    )
     context = generate_evolve_context(seed, qa_results or synthesis, seed_history)
     context.update({
         "schema_version": EVOLVE_CONTEXT_SCHEMA_VERSION,
@@ -89,18 +98,18 @@ def build_evolve_context_from_project(project_root: Path | str) -> dict[str, Any
         },
         "routing": {
             "present": bool(qa_routing),
-            "next_skill": primary_route.get("next_skill"),
-            "route_type": primary_route.get("route_type"),
-            "reason": primary_route.get("reason"),
-            "next_action": qa_routing.get("next_action") or primary_route.get("next_action"),
-            "alternatives": qa_routing.get("alternative_routes") or [],
+            "next_skill": selected_route.get("next_skill"),
+            "route_type": selected_route.get("route_type"),
+            "reason": selected_route.get("reason"),
+            "next_action": selected_route.get("next_action"),
+            "alternatives": alternatives,
         },
         "ground_truth": _ground_truth_summary(root),
         "seed_history": {
             "count": len(seed_history),
             "versions": [item.get("version") for item in seed_history],
         },
-        "focus": _evolve_focus(synthesis, convergence, primary_route),
+        "focus": _evolve_focus(synthesis, convergence, selected_route),
     })
     return context
 

@@ -102,8 +102,13 @@ def _issues(seed: dict[str, Any], seed_hash: str, artifacts: dict[str, dict[str,
     run_report = artifacts["run_report"]
 
     primary_route = qa_routing.get("primary_route") or {}
-    if qa_routing and primary_route.get("next_skill") != "samvil-evolve":
-        issues.append("QA routing did not target samvil-evolve")
+    alternative_routes = qa_routing.get("alternative_routes") or []
+    evolve_available = primary_route.get("next_skill") == "samvil-evolve" or any(
+        isinstance(route, dict) and route.get("next_skill") == "samvil-evolve"
+        for route in alternative_routes
+    )
+    if qa_routing and not evolve_available:
+        issues.append("QA routing did not offer samvil-evolve")
     if evolve_apply and evolve_apply.get("status") != "applied":
         issues.append("evolve apply plan is not applied")
     if evolve_rebuild and evolve_rebuild.get("status") != "ready":
