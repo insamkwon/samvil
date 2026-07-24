@@ -118,6 +118,12 @@ def resolve_stage_next_skill(
         synthesis = results.get("synthesis") or {}
         if not synthesis:
             return None
+        if str(synthesis.get("verdict") or "").upper() not in {
+            "PASS",
+            "REVISE",
+            "FAIL",
+        }:
+            return None
         state = _read_project_json(root / "project.state.json")
         convergence = results.get("convergence") or {}
         from .qa_finalize import _decide_next_skill

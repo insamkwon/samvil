@@ -213,6 +213,36 @@ class TestAdvanceChain:
         assert result["command"] == "samvil samvil-qa"
         assert result["status"] == "blocked_missing_qa_results"
 
+    @pytest.mark.parametrize(
+        "synthesis",
+        [
+            {"pass2": {"counts": {}}},
+            {"verdict": "BOGUS", "pass2": {"counts": {}}},
+        ],
+    )
+    def test_advance_chain_keeps_qa_for_untrusted_verdict(
+        self,
+        project_root,
+        synthesis,
+    ):
+        root = Path(project_root)
+        (root / ".samvil").mkdir(exist_ok=True)
+        (root / ".samvil" / "qa-results.json").write_text(
+            json.dumps({"synthesis": synthesis}),
+            encoding="utf-8",
+        )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["next_skill"] == "samvil-qa"
+        assert result["status"] == "blocked_missing_qa_results"
+
     def test_pipeline_complete(self, project_root):
         write_chain_marker(project_root, "generic", "samvil-retro")
         result = advance_chain(project_root, "generic")

@@ -819,6 +819,16 @@ class TestQAFinalize:
         assert "samvil-evolve" in result["next_skill_decision"]["user_options"]
         assert "samvil-retro" in result["next_skill_decision"]["user_options"]
 
+    @pytest.mark.parametrize("verdict", ["", "BOGUS"])
+    def test_cl_7e_unknown_verdict_fails_closed_in_qa(self, verdict: str) -> None:
+        decision = qa_finalize._decide_next_skill(
+            {"verdict": verdict, "pass2": {"counts": {}}},
+            {},
+        )
+
+        assert decision["suggested"] == "samvil-qa"
+        assert decision["user_options"] == ["samvil-qa"]
+
     def test_cl_8_no_state_file_does_not_raise(self, tmp_path: Path) -> None:
         # No project.state.json — graceful (INV-5).
         result = qa_finalize.finalize_qa_verdict(

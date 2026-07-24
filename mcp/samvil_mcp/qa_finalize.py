@@ -335,6 +335,14 @@ def _decide_next_skill(
     qa_history = state.get("qa_history") or []
     build_retries = int(state.get("build_retries") or 0)
 
+    if verdict not in {"PASS", "REVISE", "FAIL"}:
+        return {
+            "verdict": verdict,
+            "suggested": "samvil-qa",
+            "reason": "unknown or missing QA verdict — fail closed in QA",
+            "user_options": ["samvil-qa"],
+        }
+
     if verdict == "REVISE" and convergence_verdict == "continue":
         return {
             "verdict": verdict,
