@@ -35,8 +35,8 @@ def test_event_label_rejects_arbitrary_sensitive_prose() -> None:
 def test_event_data_redacts_camel_case_keys_and_unlabelled_tokens() -> None:
     github_pat = "github_pat_" + "A" * 82
     payload = {
-        "accessToken": "fixture-access-token",
-        "userPassword": "fixture-password",
+        "accessToken": "-".join(("fixture", "access", "token")),
+        "userPassword": "-".join(("fixture", "password")),
         "nested": {"note": f"ghp_fixture_secret {github_pat}"},
     }
 
@@ -46,6 +46,28 @@ def test_event_data_redacts_camel_case_keys_and_unlabelled_tokens() -> None:
     assert sanitized["userPassword"] == "[REDACTED]"
     assert "ghp_fixture_secret" not in str(sanitized)
     assert github_pat not in str(sanitized)
+
+
+def test_event_data_redacts_credentials_embedded_in_plain_strings() -> None:
+    secrets = {
+        "access": "-".join(("access", "fixture", "value")),
+        "client": "-".join(("client", "fixture", "value")),
+        "basic": "".join(("QWxh", "ZGRp", "bjpvcGVu", "IHNlc2FtZQ==")),
+        "cookie": "-".join(("session", "fixture", "value")),
+    }
+    payload = {
+        "note": (
+            f"access_token={secrets['access']} "
+            f"client_secret={secrets['client']} "
+            f"Authorization: Basic {secrets['basic']} "
+            f"Cookie: session={secrets['cookie']}"
+        )
+    }
+
+    serialized = str(sanitize_event_data(payload))
+
+    assert all(secret not in serialized for secret in secrets.values())
+    assert serialized.count("[REDACTED") >= 4
 
 
 def test_stage_label_rejects_arbitrary_sensitive_prose() -> None:

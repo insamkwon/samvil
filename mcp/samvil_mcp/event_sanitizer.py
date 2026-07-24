@@ -12,8 +12,17 @@ _SENSITIVE_KEYS = re.compile(
 )
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
+_AUTHORIZATION_HEADER = re.compile(
+    r"\bAuthorization\s*:\s*(?:Basic|Bearer)\s+[^\s,;]+",
+    re.IGNORECASE,
+)
+_COOKIE_HEADER = re.compile(
+    r"\b(?:Set-Cookie|Cookie)\s*:\s*[^\r\n]*",
+    re.IGNORECASE,
+)
 _CREDENTIAL = re.compile(
-    r"\b(api[_-]?key|secret|token|password)\s*[:=]\s*[^\s,;]+",
+    r"\b(api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|"
+    r"secret|token|password|passwd)(\s*[:=]\s*)[^\s,;]+",
     re.IGNORECASE,
 )
 _TOKEN_LITERAL = re.compile(
@@ -27,8 +36,13 @@ _SAFE_EVENT_LABEL = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
 
 def _redact_string(value: str) -> str:
     redacted = _EMAIL.sub("[REDACTED_EMAIL]", value)
+    redacted = _AUTHORIZATION_HEADER.sub("Authorization: [REDACTED]", redacted)
     redacted = _BEARER.sub("[REDACTED_TOKEN]", redacted)
-    redacted = _CREDENTIAL.sub(lambda match: f"{match.group(1)}=[REDACTED]", redacted)
+    redacted = _CREDENTIAL.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
+        redacted,
+    )
+    redacted = _COOKIE_HEADER.sub("Cookie: [REDACTED]", redacted)
     redacted = _TOKEN_LITERAL.sub("[REDACTED_TOKEN]", redacted)
     if len(redacted) > _MAX_STRING_LENGTH:
         return redacted[:_MAX_STRING_LENGTH] + "...[TRUNCATED]"
