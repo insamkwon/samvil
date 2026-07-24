@@ -33,10 +33,11 @@ def test_event_label_rejects_arbitrary_sensitive_prose() -> None:
 
 
 def test_event_data_redacts_camel_case_keys_and_unlabelled_tokens() -> None:
+    github_pat = "github_pat_" + "A" * 82
     payload = {
         "accessToken": "fixture-access-token",
         "userPassword": "fixture-password",
-        "nested": {"note": "ghp_fixture_secret"},
+        "nested": {"note": f"ghp_fixture_secret {github_pat}"},
     }
 
     sanitized = sanitize_event_data(payload)
@@ -44,6 +45,7 @@ def test_event_data_redacts_camel_case_keys_and_unlabelled_tokens() -> None:
     assert sanitized["accessToken"] == "[REDACTED]"
     assert sanitized["userPassword"] == "[REDACTED]"
     assert "ghp_fixture_secret" not in str(sanitized)
+    assert github_pat not in str(sanitized)
 
 
 def test_stage_label_rejects_arbitrary_sensitive_prose() -> None:

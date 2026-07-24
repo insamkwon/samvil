@@ -17,7 +17,7 @@ _CREDENTIAL = re.compile(
     re.IGNORECASE,
 )
 _TOKEN_LITERAL = re.compile(
-    r"\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|sk-[A-Za-z0-9_-]{8,})\b",
+    r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9_]{8,}|sk-[A-Za-z0-9_-]{8,})\b",
     re.IGNORECASE,
 )
 _MAX_STRING_LENGTH = 4096
