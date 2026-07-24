@@ -239,6 +239,42 @@ def test_destructive_words_inside_sql_string_literal_pass() -> None:
 @pytest.mark.parametrize(
     "command",
     [
+        "rm -f project.seed.json",
+        "rm project.state.json",
+        "rm --force ./project.config.json",
+        "rm -f interview-summary.md",
+        "rm -f .samvil/claims.jsonl",
+        "rm .samvil/next-skill.json",
+        "rm -f .samvil/events.jsonl",
+        "rm -f .samvil/qa-results.json",
+        "rm -f .samvil/handoff.md",
+        "rm -f $PWD/project.seed.json",
+    ],
+)
+def test_protected_ssot_files_cannot_be_removed_non_recursively(command: str) -> None:
+    result = run_guard(command)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "rm -f tmp.log",
+        "rm -f .samvil/cache/tmp.json",
+        "rm -f .next/cache.json",
+    ],
+)
+def test_non_ssot_files_can_be_removed_non_recursively(command: str) -> None:
+    result = run_guard(command)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "rm -rf .next",
         "rm -rf .samvil/cache",
         "rm -r .samvil/cache",

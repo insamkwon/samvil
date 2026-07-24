@@ -23,6 +23,15 @@ PROTECTED_ROOT_SSOT_PATHS = {
     "project.seed.json",
     "project.state.json",
 }
+PROTECTED_SAMVIL_SSOT_PATHS = {
+    ".samvil/claims.jsonl",
+    ".samvil/events.jsonl",
+    ".samvil/handoff.md",
+    ".samvil/next-skill.json",
+    ".samvil/project.seed.json",
+    ".samvil/project.state.json",
+    ".samvil/qa-results.json",
+}
 CHAIN_TOKENS = {";", "&&", "||", "|", "|&", "&", "\n", ";\n", "(", ")", "{", "}"}
 SHELL_CONTROL_PREFIXES = {
     "!",
@@ -558,6 +567,30 @@ def _git_config_reason(args: list[str]) -> str | None:
     return None
 
 
+def _normalized_rm_target(target: str) -> str:
+    for prefix in ("$PWD/", "${PWD}/"):
+        if target.startswith(prefix):
+            target = target[len(prefix) :]
+            break
+    normalized = os.path.normpath(target)
+    path = Path(normalized).expanduser()
+    if path.is_absolute():
+        try:
+            normalized = str(path.resolve(strict=False).relative_to(Path.cwd().resolve()))
+        except ValueError:
+            pass
+    return normalized
+
+
+def _is_protected_ssot_target(target: str) -> bool:
+    normalized = _normalized_rm_target(target)
+    return (
+        normalized == ".samvil"
+        or normalized in PROTECTED_ROOT_SSOT_PATHS
+        or normalized in PROTECTED_SAMVIL_SSOT_PATHS
+    )
+
+
 def _rm_reason(args: list[str]) -> str | None:
     short_flags = "".join(
         token[1:]
@@ -571,11 +604,13 @@ def _rm_reason(args: list[str]) -> str | None:
         and any(marker in token for marker in ("$", "`"))
         for token in args
     )
+    targets = [token for token in args if not token.startswith("-")]
+    if any(_is_protected_ssot_target(target) for target in targets):
+        return "protected SAMVIL SSOT removal"
     if not (recursive or dynamic_flag):
         return None
-    targets = [token for token in args if not token.startswith("-")]
     for target in targets:
-        normalized = os.path.normpath(target)
+        normalized = _normalized_rm_target(target)
         allowed_cache = normalized == ".next" or normalized.startswith(".next/")
         allowed_samvil_cache = normalized == ".samvil/cache" or normalized.startswith(
             ".samvil/cache/"
