@@ -1030,6 +1030,8 @@ async def complete_stage(
         )
 
         claim_id = None
+        claim_saved = False
+        claim_error = ""
         project_path = _session_project_path(session)
         if project_path is not None:
             try:
@@ -1075,17 +1077,22 @@ async def complete_stage(
 
             await store.update_session_stage(session_id, stage_enum)
             claim_data = plan["claim"]
-            ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
-            claim = ledger.post(
-                type=claim_data["type"],
-                subject=claim_data["subject"],
-                statement=claim_data["statement"],
-                authority_file=claim_data["authority_file"],
-                claimed_by="agent:orchestrator-agent",
-                evidence=claim_data["evidence"],
-                meta=claim_data["meta"],
-            )
-            claim_id = claim.claim_id
+            try:
+                ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
+                claim = ledger.post(
+                    type=claim_data["type"],
+                    subject=claim_data["subject"],
+                    statement=claim_data["statement"],
+                    authority_file=claim_data["authority_file"],
+                    claimed_by="agent:orchestrator-agent",
+                    evidence=claim_data["evidence"],
+                    meta=claim_data["meta"],
+                )
+                claim_id = claim.claim_id
+                claim_saved = True
+            except Exception as exc:
+                claim_error = str(exc)
+                _log_mcp_health("fail", "complete_stage.claim", claim_error)
         else:
             await store.update_session_stage(session_id, stage_enum)
 
@@ -1094,6 +1101,8 @@ async def complete_stage(
             "status": "ok",
             "event_id": event.id,
             "claim_id": claim_id,
+            "claim_saved": claim_saved,
+            **({"claim_error": claim_error} if claim_error else {}),
             "next_stage": plan["next_stage"],
         })
     except (OrchestratorError, ClaimLedgerError) as e:

@@ -102,6 +102,7 @@ def test_complete_stage_tool_emits_event_and_claim(tmp_path, monkeypatch) -> Non
         assert result["next_stage"] == "seed"
         assert result["event_id"]
         assert result["claim_id"]
+        assert result["claim_saved"] is True
 
         state = json.loads(await get_orchestration_state(sid))
         assert state["current_stage"] == "seed"
@@ -163,6 +164,47 @@ def test_complete_stage_fails_closed_when_canonical_event_append_fails(
     claims = ClaimLedger(project_root / ".samvil" / "claims.jsonl")
     assert claims.query_by_subject("gate:interview_exit") == []
     assert read_events(project_root)["entries"] == []
+
+
+def test_complete_stage_reports_claim_degradation_without_reversing_completion(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    def fail_post(self, **kwargs):
+        raise OSError("claims disk unavailable")
+
+    monkeypatch.setattr(ClaimLedger, "post", fail_post)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "orch-claim-degradation",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+
+        result = json.loads(await complete_stage(sid, "interview", "pass"))
+        state = json.loads(await get_orchestration_state(sid))
+        stored_events = await (await srv.get_store()).get_events(sid)
+
+        assert result["status"] == "ok"
+        assert result["claim_id"] is None
+        assert result["claim_saved"] is False
+        assert result["claim_error"] == "claims disk unavailable"
+        assert state["current_stage"] == "seed"
+        assert state["completed_stages"] == ["interview"]
+        assert len(stored_events) == 1
+
+    _run(runner())
+
+    assert len(read_events(project_root)["entries"]) == 1
 
 
 def test_save_event_file_lock_work_is_offloaded(tmp_path, monkeypatch) -> None:

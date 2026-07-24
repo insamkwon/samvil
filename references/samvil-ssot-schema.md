@@ -473,6 +473,12 @@ rather than raising through MCP transport. If the project path cannot
 be resolved, `complete_stage` still records the event and returns
 `claim_id=null`.
 
+If the canonical event and stage transition succeed but the claim ledger
+append fails, the completion remains successful and returns
+`claim_id=null`, `claim_saved=false`, and `claim_error`. The failure is also
+written to MCP health evidence. Callers must not retry an already-completed
+stage merely to recreate this observational claim.
+
 ---
 
 ## Layer 3 — Host capability
