@@ -1086,19 +1086,23 @@ def test_concurrent_stage_completion_creates_only_one_trusted_transition(
 
         store = await srv.get_store()
         original_get_events = store.get_events
+        original_get_orchestration_events = store.get_orchestration_events
         both_prechecked = asyncio.Event()
         arrivals = 0
 
-        async def synchronized_get_events(*args, **kwargs):
+        async def synchronized_get_orchestration_events(*args, **kwargs):
             nonlocal arrivals
-            if kwargs.get("limit") is None:
-                arrivals += 1
-                if arrivals == 2:
-                    both_prechecked.set()
-                await both_prechecked.wait()
-            return await original_get_events(*args, **kwargs)
+            arrivals += 1
+            if arrivals == 2:
+                both_prechecked.set()
+            await both_prechecked.wait()
+            return await original_get_orchestration_events(*args, **kwargs)
 
-        monkeypatch.setattr(store, "get_events", synchronized_get_events)
+        monkeypatch.setattr(
+            store,
+            "get_orchestration_events",
+            synchronized_get_orchestration_events,
+        )
         results = [
             json.loads(item)
             for item in await asyncio.gather(
@@ -1107,6 +1111,7 @@ def test_concurrent_stage_completion_creates_only_one_trusted_transition(
             )
         ]
 
+        assert arrivals == 2
         assert sorted(item["status"] for item in results) == ["error", "ok"]
         stored_events = await original_get_events(sid, limit=None)
         assert [event.data["event_type_raw"] for event in stored_events].count(
