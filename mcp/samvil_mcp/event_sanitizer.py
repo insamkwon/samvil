@@ -22,11 +22,20 @@ _COOKIE_HEADER = re.compile(
     r"(?P<quote>['\"]?)[^\r\n]*(?P=quote)",
     re.IGNORECASE,
 )
+_CREDENTIAL_KEY = (
+    r"\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|"
+    r"secret|token|password|passwd)\b"
+)
+_QUOTED_CREDENTIAL = re.compile(
+    rf"(?P<key_quote>['\"]?)(?P<key>{_CREDENTIAL_KEY})(?P=key_quote)"
+    r"(?P<separator>\s*[:=]\s*)(?P<value_quote>['\"])"
+    r"(?:\\.|(?!(?P=value_quote))[^\r\n])*(?P=value_quote)",
+    re.IGNORECASE,
+)
 _CREDENTIAL = re.compile(
-    r"(?P<key_quote>['\"]?)(?P<key>\b(?:api[_-]?key|access[_-]?token|"
-    r"auth[_-]?token|client[_-]?secret|secret|token|password|passwd)\b)"
+    rf"(?P<key_quote>['\"]?)(?P<key>{_CREDENTIAL_KEY})"
     r"(?P=key_quote)(?P<separator>\s*[:=]\s*)"
-    r"(?P<value_quote>['\"]?)[^'\"\s,;}]+(?P=value_quote)",
+    r"(?P<value>[^'\"\s,;}]+)",
     re.IGNORECASE,
 )
 _TOKEN_LITERAL = re.compile(
@@ -42,15 +51,8 @@ def _redact_string(value: str) -> str:
     redacted = _EMAIL.sub("[REDACTED_EMAIL]", value)
     redacted = _AUTHORIZATION_HEADER.sub(_redact_header_match, redacted)
     redacted = _BEARER.sub("[REDACTED_TOKEN]", redacted)
-    redacted = _CREDENTIAL.sub(
-        lambda match: (
-            f"{match.group('key_quote')}{match.group('key')}"
-            f"{match.group('key_quote')}{match.group('separator')}"
-            f"{match.group('value_quote')}[REDACTED]"
-            f"{match.group('value_quote')}"
-        ),
-        redacted,
-    )
+    redacted = _QUOTED_CREDENTIAL.sub(_redact_credential_match, redacted)
+    redacted = _CREDENTIAL.sub(_redact_credential_match, redacted)
     redacted = _COOKIE_HEADER.sub(_redact_header_match, redacted)
     redacted = _TOKEN_LITERAL.sub("[REDACTED_TOKEN]", redacted)
     if len(redacted) > _MAX_STRING_LENGTH:
@@ -61,6 +63,15 @@ def _redact_string(value: str) -> str:
 def _redact_header_match(match: re.Match[str]) -> str:
     quote = match.group("quote")
     return f"{match.group('label')}{quote}[REDACTED]{quote}"
+
+
+def _redact_credential_match(match: re.Match[str]) -> str:
+    value_quote = match.groupdict().get("value_quote") or ""
+    return (
+        f"{match.group('key_quote')}{match.group('key')}"
+        f"{match.group('key_quote')}{match.group('separator')}"
+        f"{value_quote}[REDACTED]{value_quote}"
+    )
 
 
 def sanitize_event_data(value: Any, *, _depth: int = 0) -> Any:

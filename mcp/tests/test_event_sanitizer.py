@@ -96,6 +96,26 @@ def test_event_data_redacts_quoted_json_and_any_authorization_scheme() -> None:
     assert all(secret not in serialized for secret in secrets.values())
 
 
+def test_event_data_redacts_quoted_credentials_with_spaces_and_delimiters() -> None:
+    secrets = {
+        "password": "correct horse battery staple",
+        "client": "alpha,beta;gamma",
+        "access": "alpha beta",
+    }
+    payload = {
+        "note": (
+            f'password="{secrets["password"]}" '
+            f"client_secret='{secrets['client']}' "
+            f'access_token:"{secrets["access"]}"'
+        )
+    }
+
+    serialized = str(sanitize_event_data(payload))
+
+    assert all(secret not in serialized for secret in secrets.values())
+    assert serialized.count("[REDACTED]") == 3
+
+
 def test_stage_label_rejects_arbitrary_sensitive_prose() -> None:
     assert sanitize_stage_label("qa") == "qa"
     assert sanitize_stage_label("ghp_fixture_secret") == "redacted_stage"
