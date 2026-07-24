@@ -90,6 +90,23 @@ SQL_COMMAND_OPTIONS_WITH_VALUE = {
     "--command",
     "--execute",
 }
+INLINE_LANGUAGE_RUNTIME_OPTIONS = {
+    "node": {"-e", "--eval"},
+    "perl": {"-e"},
+    "php": {"-r"},
+    "python": {"-c"},
+    "ruby": {"-e"},
+}
+INLINE_LANGUAGE_MUTATION = re.compile(
+    r"\b(?:delete|file_put_contents|remove|rename|replace|rmSync|rmtree|"
+    r"truncate|truncateSync|unlink|unlinkSync|write_bytes|write_text|"
+    r"writeFile|writeFileSync)\b",
+    re.IGNORECASE,
+)
+INLINE_LANGUAGE_WRITE_OPEN = re.compile(
+    r"\bopen\b[^\r\n]*(?:['\"](?:w|a|x|>|>>|\+>)[^'\"]*['\"])",
+    re.IGNORECASE,
+)
 UNINSPECTABLE_PATH_CHARS = "`$*?[{"
 _SCRIPT_INSPECTION_STACK: list[str] = []
 _ANALYSIS_DEPTH: ContextVar[int] = ContextVar("guard_analysis_depth", default=0)
@@ -743,6 +760,39 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
             and _is_protected_ssot_target(options.get("of", ""))
         ):
             return "protected SAMVIL SSOT overwrite from /dev/null"
+    return None
+
+
+def _inline_language_runtime_reason(
+    executable: str,
+    args: list[str],
+) -> str | None:
+    runtime = re.sub(r"(?:\d+(?:\.\d+)*)$", "", executable.casefold())
+    options = INLINE_LANGUAGE_RUNTIME_OPTIONS.get(runtime)
+    if not options:
+        return None
+
+    payloads: list[str] = []
+    for index, arg in enumerate(args):
+        if arg in options and index + 1 < len(args):
+            payloads.append(args[index + 1])
+            continue
+        for option in options:
+            if arg.startswith(option) and len(arg) > len(option):
+                payloads.append(arg[len(option) :])
+                break
+
+    protected_paths = PROTECTED_ROOT_SSOT_PATHS | PROTECTED_SAMVIL_SSOT_PATHS | {
+        ".samvil"
+    }
+    for payload in payloads:
+        normalized = payload.replace("\\", "/")
+        if not any(path in normalized for path in protected_paths):
+            continue
+        if INLINE_LANGUAGE_MUTATION.search(payload) or INLINE_LANGUAGE_WRITE_OPEN.search(
+            payload
+        ):
+            return "inline language runtime may mutate protected SAMVIL SSOT"
     return None
 
 
@@ -1562,6 +1612,9 @@ def _analyze_command_impl(command: str) -> str | None:
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
+        interpreter_reason = _inline_language_runtime_reason(executable, args)
+        if interpreter_reason:
+            return interpreter_reason
         overwrite_reason = _protected_overwrite_reason(executable, args)
         if overwrite_reason:
             return overwrite_reason
