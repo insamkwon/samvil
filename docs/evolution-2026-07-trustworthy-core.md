@@ -396,6 +396,46 @@ v4.31이 시작한 방향의 완성이다.
     `mcp/samvil_mcp/qa_finalize.py:338`, `hooks/contract-stage-end.sh:109`,
     `hooks/contract-stage-end.sh:217`, `mcp/tests/test_qa_smoke.py:793`,
     `mcp/tests/test_qa_smoke.py:806`, `mcp/tests/test_contract_hooks.py:336`.
+- [x] **종료 R3: glob·brace·동적 삭제 대상도 SSOT 보호 정책으로 판정**
+  (스코프 보정: exact path allow/deny 뒤에 사례를 추가하지 않고, brace 후보와 glob이
+  보호 경로에 매치되는지 계산하며 해석 불가능한 변수·command substitution target은
+  fail-closed 처리한다.)
+  - 완료 증거: `8cdf012`; `hooks/guard_destructive.py:630`,
+    `hooks/guard_destructive.py:669`, `mcp/tests/test_guard_destructive.py:303`.
+- [x] **종료 R3: 동적 SQL·client meta command·방언별 DELETE를 같은 실행 계층에서 차단**
+  SQL client의 command payload를 먼저 분리하고 PREPARE/EXECUTE, psql `\gexec`/`\!`,
+  T-SQL DELETE와 MERGE-DELETE를 판정하되 safe PREPARE·GRANT는 허용한다.
+  - 완료 증거: `d62d32a`; `hooks/guard_destructive.py:708`,
+    `hooks/guard_destructive.py:721`, `hooks/guard_destructive.py:744`,
+    `hooks/guard_destructive.py:1005`, `mcp/tests/test_guard_destructive.py:250`.
+- [x] **종료 R3: host continuation과 QA recovery의 다음 단계 권한 단일화**
+  `resolve_stage_next_skill`을 PM/QA/`advance_chain`/stage-end가 공유하고, blocked QA는
+  retro를 기본으로 쓰되 evolve/build를 명시적 대안으로 남긴다. evolve가 실제 호출되면
+  evolve context가 그 선택 경로를 소비한다.
+  - 완료 증거: `794c5a5`; `mcp/samvil_mcp/chain_markers.py:110`,
+    `mcp/samvil_mcp/chain_markers.py:178`, `mcp/samvil_mcp/qa_routing.py:131`,
+    `mcp/samvil_mcp/qa_routing.py:138`, `mcp/samvil_mcp/evolve_loop.py:70`,
+    `mcp/tests/test_chain_markers.py:143`, `mcp/tests/test_chain_markers.py:165`.
+- [x] **종료 R3: canonical events 원장 기록 실패를 fail-closed 처리**
+  `.samvil/events.jsonl` append가 실패하면 성공 응답·stage 전진·claim 후속 처리를 멈추고
+  `saved=false`, `canonical_saved=false`와 원인을 반환한다.
+  - 완료 증거: `aaa1b07`; `mcp/samvil_mcp/server.py:782`,
+    `mcp/samvil_mcp/server.py:800`, `mcp/samvil_mcp/server.py:807`,
+    `mcp/tests/test_orchestrator_mcp.py:206`.
+- [x] **종료 R3: 중첩 명령 분석에 재진입 깊이 한도 적용**
+  모든 재귀 분석 경로가 ContextVar 기반 깊이 예산을 공유해 중첩 `eval` 등에서
+  quadratic 지연과 RecursionError 대신 빠른 fail-closed 판정을 낸다.
+  - 완료 증거: `e34f2a9`; `hooks/guard_destructive.py:19`,
+    `hooks/guard_destructive.py:1480`, `hooks/guard_destructive.py:1482`,
+    `mcp/tests/test_guard_destructive.py:589`.
+- [x] **종료 R3: filtered test output의 exit/log 모순을 성공 증거에서 제외**
+  trusted runner exit 0이어도 로그의 non-zero `SAMVIL_EXIT`, failure count,
+  FAILED/ERROR marker가 있으면 HIGH risk로 거절하고 clean log만 승인한다.
+  - 완료 증거: `bc021a7`; `mcp/samvil_mcp/semantic_checker.py:73`,
+    `mcp/samvil_mcp/semantic_checker.py:96`,
+    `mcp/samvil_mcp/semantic_checker.py:106`,
+    `mcp/tests/test_semantic_checker.py:130`,
+    `mcp/tests/test_semantic_checker.py:141`.
 
 ---
 
