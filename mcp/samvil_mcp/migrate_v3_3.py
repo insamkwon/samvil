@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from .ac_verification import prepare_seed_verify_contracts
+from .claim_ledger import _locked
 from .seed_manager import validate_seed
-from .ssot_io import atomic_write_text
+from .ssot_io import atomic_write_text, atomic_write_text_unlocked
 
 
 V33_SCHEMA_VERSION = "3.3"
@@ -72,26 +73,37 @@ def _migrate_seed_dict(seed: dict[str, Any]) -> tuple[dict[str, Any], list[str]]
 def apply_migration(project_root: str | Path) -> dict[str, Any]:
     root = Path(project_root).expanduser().resolve()
     seed_path = root / "project.seed.json"
-    seed_text = seed_path.read_text(encoding="utf-8")
-    seed = json.loads(seed_text)
-    if str(seed.get("schema_version") or "") == "3.2":
-        validation = validate_seed(copy.deepcopy(seed))
-        if not validation["valid"]:
-            details = "; ".join(str(error) for error in validation.get("errors", []))
-            raise ValueError(f"source seed is invalid: {details or 'validation failed'}")
-    migrated, changes = _migrate_seed_dict(seed)
-    if not changes:
-        return {"changed": False, "changes": [], "schema_version": V33_SCHEMA_VERSION}
+    with _locked(seed_path):
+        seed_text = seed_path.read_text(encoding="utf-8")
+        seed = json.loads(seed_text)
+        if str(seed.get("schema_version") or "") == "3.2":
+            validation = validate_seed(copy.deepcopy(seed))
+            if not validation["valid"]:
+                details = "; ".join(
+                    str(error) for error in validation.get("errors", [])
+                )
+                raise ValueError(
+                    f"source seed is invalid: {details or 'validation failed'}"
+                )
+        migrated, changes = _migrate_seed_dict(seed)
+        if not changes:
+            return {
+                "changed": False,
+                "changes": [],
+                "schema_version": V33_SCHEMA_VERSION,
+            }
 
-    backup_path = root / BACKUP_FILENAME
-    _ensure_verified_backup(backup_path, seed_text, seed)
-    atomic_write_text(
-        seed_path,
-        json.dumps(migrated, indent=2, ensure_ascii=False) + "\n",
-    )
-    return {
-        "changed": True,
-        "changes": changes,
-        "schema_version": V33_SCHEMA_VERSION,
-        "backup": BACKUP_FILENAME,
-    }
+        backup_path = root / BACKUP_FILENAME
+        _ensure_verified_backup(backup_path, seed_text, seed)
+        if seed_path.read_text(encoding="utf-8") != seed_text:
+            raise RuntimeError("seed changed during migration; retry from current state")
+        atomic_write_text_unlocked(
+            seed_path,
+            json.dumps(migrated, indent=2, ensure_ascii=False) + "\n",
+        )
+        return {
+            "changed": True,
+            "changes": changes,
+            "schema_version": V33_SCHEMA_VERSION,
+            "backup": BACKUP_FILENAME,
+        }

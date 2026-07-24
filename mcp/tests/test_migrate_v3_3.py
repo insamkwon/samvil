@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -172,6 +174,73 @@ def test_apply_migration_does_not_change_seed_when_backup_write_fails(
 
     assert seed_path.read_text() == original_text
     assert not (tmp_path / BACKUP_FILENAME).exists()
+
+
+def test_apply_migration_does_not_overwrite_seed_changed_during_backup(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from samvil_mcp import migrate_v3_3 as migration
+
+    seed_path = tmp_path / "project.seed.json"
+    original_text = json.dumps(_seed())
+    seed_path.write_text(original_text)
+    concurrent_seed = _seed()
+    concurrent_seed["name"] = "written-by-concurrent-owner"
+    concurrent_text = json.dumps(concurrent_seed)
+    real_ensure_backup = migration._ensure_verified_backup
+
+    def backup_then_concurrent_write(backup_path, seed_text, seed):
+        real_ensure_backup(backup_path, seed_text, seed)
+        seed_path.write_text(concurrent_text)
+
+    monkeypatch.setattr(migration, "_ensure_verified_backup", backup_then_concurrent_write)
+
+    with pytest.raises(RuntimeError, match="seed changed during migration"):
+        apply_migration(tmp_path)
+
+    assert seed_path.read_text() == concurrent_text
+    assert (tmp_path / BACKUP_FILENAME).read_text() == original_text
+
+
+def test_apply_migration_holds_seed_lock_until_atomic_replace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from samvil_mcp import migrate_v3_3 as migration
+    from samvil_mcp.ssot_io import atomic_write_text as concurrent_atomic_write
+
+    seed_path = tmp_path / "project.seed.json"
+    seed_path.write_text(json.dumps(_seed()))
+    concurrent_seed = _seed()
+    concurrent_seed["name"] = "serialized-concurrent-owner"
+    concurrent_text = json.dumps(concurrent_seed)
+    backup_ready = Event()
+    release_migration = Event()
+    writer_started = Event()
+    real_ensure_backup = migration._ensure_verified_backup
+
+    def pause_after_backup(backup_path, seed_text, seed):
+        real_ensure_backup(backup_path, seed_text, seed)
+        backup_ready.set()
+        assert release_migration.wait(timeout=2)
+
+    def write_concurrently() -> None:
+        writer_started.set()
+        concurrent_atomic_write(seed_path, concurrent_text)
+
+    monkeypatch.setattr(migration, "_ensure_verified_backup", pause_after_backup)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        migration_future = executor.submit(apply_migration, tmp_path)
+        assert backup_ready.wait(timeout=2)
+        writer_future = executor.submit(write_concurrently)
+        assert writer_started.wait(timeout=2)
+        with pytest.raises(FutureTimeoutError):
+            writer_future.result(timeout=0.1)
+        release_migration.set()
+        assert migration_future.result(timeout=2)["changed"] is True
+        writer_future.result(timeout=2)
+
+    assert seed_path.read_text() == concurrent_text
 
 
 def test_migrate_seed_v3_3_mcp_tool(tmp_path: Path) -> None:
