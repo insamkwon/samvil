@@ -1331,6 +1331,79 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   API routes·state management·auth strategy 구조를 모두 검증한다.)
   - 완료 증거: `8fa3b42`; `mcp/samvil_mcp/server.py:1235`,
     `mcp/samvil_mcp/server.py:1295`, `mcp/tests/test_orchestrator_mcp.py:538`.
+  - 스코프 보정: 이 커밋은 web-app 최소 계약의 최초 차단이었다. 현재의
+    solution type별·중첩 계약은 4.62와 4.73에서 완성했다.
+- [x] **4.62 solution type별 blueprint 계약 분기**
+  (web-app 단일 형태를 모든 앱에 강제하지 않고 dashboard·mobile-app·automation·
+  game의 documented top-level 계약을 각각 검증한다.)
+  - 완료 증거: `e9cc6c2`; `mcp/samvil_mcp/server.py:1307`,
+    `mcp/tests/test_orchestrator_mcp.py:779`.
+- [x] **4.63 일반 문자열 내부 자격증명 redaction**
+  (dict key가 아닌 prompt·message 문자열에 포함된 token·password·Authorization도
+  canonical event 저장 전에 제거한다.)
+  - 완료 증거: `a7ff262`; `mcp/samvil_mcp/event_sanitizer.py:41`,
+    `mcp/tests/test_event_sanitizer.py:51`.
+- [x] **4.64 inline language runtime의 직접 SSOT 변경 차단**
+  (`python -c`, `node -e`, Ruby·Perl·PHP inline payload가 보호 SSOT를 직접
+  unlink·truncate·write하지 못하도록 pre-tool guard에 포함한다.)
+  - 완료 증거: `ebce756`; `hooks/guard_destructive.py:772`,
+    `mcp/tests/test_guard_destructive.py:90`.
+- [x] **4.65 parseable QA 구조 손상의 fail-closed routing**
+  (유효 JSON이라도 synthesis·convergence 구조가 계약과 다르면 deploy로 진행하지
+  않고 `resolve_stage_next_skill=None` 계약을 유지한다.)
+  - 완료 증거: `e0a02a5`; `mcp/samvil_mcp/chain_markers.py:110`,
+    `mcp/tests/test_chain_markers.py:267`.
+- [x] **4.66 orchestration precheck의 transition-only 조회**
+  (대량 telemetry 전체를 materialize하지 않고 stage 결정에 필요한 신뢰 전환
+  후보만 EventStore에서 조회한다.)
+  - 완료 증거: `8c457cd`; `mcp/samvil_mcp/event_store.py:451`,
+    `mcp/tests/test_orchestrator_mcp.py:210`.
+- [x] **4.67 최신 전환이 선행 이벤트를 소유할 때 보상 중단**
+  (오래된 canonical append 보상이 더 최신 stage transition의 선행 증거를 삭제하거나
+  session stage를 되감지 않도록 transition ownership을 재검증한다.)
+  - 완료 증거: `08fdc64`; `mcp/samvil_mcp/event_store.py:345`,
+    `mcp/tests/test_event_store.py:188`.
+- [x] **4.68 quoted JSON credential·임의 Authorization scheme redaction**
+  (따옴표로 직렬화된 credential key와 Basic·AWS4 등 bearer 외 Authorization
+  scheme도 값 전체를 저장 전에 제거한다.)
+  - 완료 증거: `f6d5129`; `mcp/samvil_mcp/event_sanitizer.py:16`,
+    `mcp/tests/test_event_sanitizer.py:73`.
+- [x] **4.69 inline runtime 간접 명령·표준 write API 차단**
+  (`os.system`·`subprocess`·`execSync`, 문자열 결합 경로, copyfile·File.write·
+  createWriteStream·fopen 우회를 보호 SSOT guard가 재귀 검사한다.)
+  - 완료 증거: `68ecaec`; `hooks/guard_destructive.py:107`,
+    `hooks/guard_destructive.py:801`, `mcp/tests/test_guard_destructive.py:90`.
+- [x] **4.70 v3.3 migration의 동시 seed 변경 보호**
+  (seed lock을 read→backup→replace 전체에 유지하고, 비협력적 외부 변경도 최종
+  replace 직전에 검출해 concurrent writer의 내용을 덮어쓰지 않는다.)
+  - 완료 증거: `dfd5206`; `mcp/samvil_mcp/migrate_v3_3.py:73`,
+    `mcp/samvil_mcp/migrate_v3_3.py:99`, `mcp/tests/test_migrate_v3_3.py:205`.
+- [x] **4.71 명시적 trusted transition만 gate 입력으로 승인**
+  (`trusted_transition=true`가 없는 legacy/model-authored event는 인식 가능한 label을
+  가져도 orchestration prerequisite를 충족하지 못한다.)
+  - 완료 증거: `4977da0`; `mcp/samvil_mcp/event_store.py:451`,
+    `mcp/tests/test_event_store.py:218`.
+- [x] **4.72 QA nested 구조·encoding 손상의 fail-closed 보강**
+  (`convergence=[]`, 비정상 `pass2/counts`, invalid UTF-8 결과 모두 예외나 deploy
+  진행 없이 현재 QA marker를 유지한다.)
+  - 완료 증거: `88d4d6f`; `mcp/samvil_mcp/chain_markers.py:110`,
+    `mcp/tests/test_chain_markers.py:267`, `mcp/tests/test_chain_markers.py:291`.
+- [x] **4.73 blueprint nested canonical 구조 검증**
+  (빈 dict/list만 배치한 blueprint를 거부하고 routing·navigation·modules·fixtures·
+  game config·dashboard source 등 solution type별 내부 계약까지 확인한다.)
+  - 완료 증거: `7412853`; `mcp/samvil_mcp/server.py:1307`,
+    `mcp/samvil_mcp/server.py:1433`, `mcp/tests/test_orchestrator_mcp.py:692`,
+    `mcp/tests/test_orchestrator_mcp.py:779`.
+- [x] **4.74 trusted transition 조회 전용 expression index**
+  (orchestration query가 session telemetry 후보 전체를 읽지 않고 trusted-transition
+  expression index를 사용하도록 실제 query plan으로 고정한다.)
+  - 완료 증거: `891ee7d`; `mcp/samvil_mcp/event_store.py:51`,
+    `mcp/samvil_mcp/event_store.py:462`, `mcp/tests/test_event_store.py:245`.
+- [x] **4.75 동시 완료 회귀 테스트의 실제 precheck 경합 보장**
+  (폐기된 `get_events` monkeypatch 대신 production `get_orchestration_events`에서
+  두 호출이 모두 barrier에 도달했음을 확인한 뒤 transaction CAS를 검증한다.)
+  - 완료 증거: `5c3639e`; `mcp/tests/test_orchestrator_mcp.py:1063`,
+    `mcp/tests/test_orchestrator_mcp.py:1114`.
 
 ---
 
