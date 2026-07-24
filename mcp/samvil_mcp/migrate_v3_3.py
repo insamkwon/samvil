@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import json
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,36 @@ from .ssot_io import atomic_write_text
 
 V33_SCHEMA_VERSION = "3.3"
 BACKUP_FILENAME = "project.v3-2.backup.json"
+
+
+def _is_valid_v32_backup(path: Path) -> bool:
+    try:
+        backup = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(backup, dict)
+        and str(backup.get("schema_version")) == "3.2"
+    )
+
+
+def _ensure_verified_backup(
+    backup_path: Path,
+    seed_text: str,
+    seed: dict[str, Any],
+) -> None:
+    """Preserve the first valid backup or atomically replace an invalid one."""
+    if _is_valid_v32_backup(backup_path):
+        return
+
+    atomic_write_text(backup_path, seed_text)
+    try:
+        written_text = backup_path.read_text(encoding="utf-8")
+        written_seed = json.loads(written_text)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise OSError(f"backup verification failed: {exc}") from exc
+    if written_text != seed_text or written_seed != seed:
+        raise OSError("backup verification failed: content mismatch")
 
 
 def _migrate_seed_dict(seed: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -41,14 +70,14 @@ def _migrate_seed_dict(seed: dict[str, Any]) -> tuple[dict[str, Any], list[str]]
 def apply_migration(project_root: str | Path) -> dict[str, Any]:
     root = Path(project_root).expanduser().resolve()
     seed_path = root / "project.seed.json"
-    seed = json.loads(seed_path.read_text(encoding="utf-8"))
+    seed_text = seed_path.read_text(encoding="utf-8")
+    seed = json.loads(seed_text)
     migrated, changes = _migrate_seed_dict(seed)
     if not changes:
         return {"changed": False, "changes": [], "schema_version": V33_SCHEMA_VERSION}
 
     backup_path = root / BACKUP_FILENAME
-    if not backup_path.exists():
-        shutil.copy2(seed_path, backup_path)
+    _ensure_verified_backup(backup_path, seed_text, seed)
     atomic_write_text(
         seed_path,
         json.dumps(migrated, indent=2, ensure_ascii=False) + "\n",
