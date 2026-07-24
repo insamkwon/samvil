@@ -1130,6 +1130,7 @@ async def complete_stage(
             event_type=event_type_enum,
             stage=stage_enum,
             data=event_data,
+            expected_stage=Stage(stage),
         )
         event = transition.event
 

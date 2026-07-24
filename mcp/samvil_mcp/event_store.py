@@ -276,6 +276,7 @@ class EventStore:
         stage: Stage,
         data: dict | None = None,
         token_count: int | None = None,
+        expected_stage: Stage | None = None,
     ) -> StageTransition:
         """Persist an event and its session-stage transition atomically."""
         async with aiosqlite.connect(self.db_path) as db:
@@ -298,6 +299,11 @@ class EventStore:
                     raise ValueError(f"session {session_id} not found")
                 previous_stage = Stage(str(session_row[0]))
                 previous_transition_id = str(session_row[1] or "")
+                if expected_stage is not None and previous_stage != expected_stage:
+                    raise ValueError(
+                        "stage transition conflict: "
+                        f"expected {expected_stage.value}, found {previous_stage.value}"
+                    )
                 await db.execute(
                     "INSERT INTO events (id, session_id, event_type, stage, data, token_count, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (

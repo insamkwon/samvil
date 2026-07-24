@@ -661,6 +661,66 @@ def test_event_and_stage_update_are_atomic_and_retry_safe(
     _run(runner())
 
 
+def test_concurrent_stage_completion_creates_only_one_trusted_transition(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "concurrent-completion"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+    _write_valid_seed(project_root)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "concurrent-completion",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+        assert json.loads(await complete_stage(sid, "interview", "pass"))[
+            "status"
+        ] == "ok"
+
+        store = await srv.get_store()
+        original_get_events = store.get_events
+        both_prechecked = asyncio.Event()
+        arrivals = 0
+
+        async def synchronized_get_events(*args, **kwargs):
+            nonlocal arrivals
+            if kwargs.get("limit") is None:
+                arrivals += 1
+                if arrivals == 2:
+                    both_prechecked.set()
+                await both_prechecked.wait()
+            return await original_get_events(*args, **kwargs)
+
+        monkeypatch.setattr(store, "get_events", synchronized_get_events)
+        results = [
+            json.loads(item)
+            for item in await asyncio.gather(
+                complete_stage(sid, "seed", "pass"),
+                complete_stage(sid, "seed", "pass"),
+            )
+        ]
+
+        assert sorted(item["status"] for item in results) == ["error", "ok"]
+        stored_events = await original_get_events(sid, limit=None)
+        assert [event.data["event_type_raw"] for event in stored_events].count(
+            "seed_generated"
+        ) == 1
+
+    _run(runner())
+    canonical = read_events(project_root)["entries"]
+    assert [item["event_type"] for item in canonical].count("seed_generated") == 1
+    claims = ClaimLedger(project_root / ".samvil" / "claims.jsonl")
+    assert len(claims.query_by_subject("gate:seed_exit")) == 1
+
+
 def test_complete_stage_reports_claim_degradation_without_reversing_completion(
     tmp_path, monkeypatch
 ) -> None:
