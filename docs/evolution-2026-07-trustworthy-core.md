@@ -459,6 +459,15 @@ v4.31이 시작한 방향의 완성이다.
     `mcp/samvil_mcp/qa_routing.py:42`, `mcp/samvil_mcp/qa_routing.py:132`,
     `mcp/samvil_mcp/qa_routing.py:150`,
     `mcp/tests/test_qa_routing.py:76`, `mcp/tests/test_qa_routing.py:91`.
+- [x] **종료 R3 재검수: complete_stage도 canonical event 실패를 성공으로 확정하지 않음**
+  stage 완료 DB event를 만든 뒤 `.samvil/events.jsonl` append가 실패하면 event를 보상 삭제하고,
+  stage 전진과 gate claim 게시 전에 `status=error`로 종료해 파일 SSOT와 보조 DB의 분기를 막는다.
+  - 완료 증거: `1c5993e`; `mcp/samvil_mcp/server.py:1047`,
+    `mcp/samvil_mcp/server.py:1052`, `mcp/samvil_mcp/server.py:1060`,
+    `mcp/samvil_mcp/server.py:1076`,
+    `mcp/tests/test_orchestrator_mcp.py:126`,
+    `mcp/tests/test_orchestrator_mcp.py:154`,
+    `mcp/tests/test_orchestrator_mcp.py:163`.
 
 ---
 
