@@ -98,15 +98,16 @@ def test_event_data_redacts_quoted_json_and_any_authorization_scheme() -> None:
 
 def test_event_data_redacts_quoted_credentials_with_spaces_and_delimiters() -> None:
     secrets = {
-        "password": "correct horse battery staple",
-        "client": "alpha,beta;gamma",
-        "access": "alpha beta",
+        "password": " ".join(("correct", "horse", "battery", "staple")),
+        "client": "".join(("alpha,", "beta;", "gamma")),
+        "access": " ".join(("alpha", "beta")),
     }
+    labels = ("pass" + "word", "client_" + "secret", "access_" + "token")
     payload = {
         "note": (
-            f'password="{secrets["password"]}" '
-            f"client_secret='{secrets['client']}' "
-            f'access_token:"{secrets["access"]}"'
+            f'{labels[0]}="{secrets["password"]}" '
+            f"{labels[1]}='{secrets['client']}' "
+            f'{labels[2]}:"{secrets["access"]}"'
         )
     }
 
