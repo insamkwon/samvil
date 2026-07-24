@@ -464,6 +464,74 @@ def test_build_completion_rejects_model_writable_static_receipt(
     _run(runner())
 
 
+def test_qa_completion_rejects_self_authored_pass_without_runtime_receipt(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+    from samvil_mcp.models import EventType, Stage
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "static-qa-receipt"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+    _write_valid_seed(project_root)
+    _write_valid_blueprint(project_root)
+    _write_scaffold_result(project_root)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "static-qa-receipt",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+        for stage in ("interview", "seed", "design", "scaffold"):
+            assert json.loads(await complete_stage(sid, stage, "pass"))[
+                "status"
+            ] == "ok"
+
+        store = await srv.get_store()
+        await store.save_event_and_update_stage(
+            session_id=sid,
+            event_type=EventType.BUILD_PASS,
+            stage=Stage.QA,
+            data={"trusted_transition": True},
+            expected_stage=Stage.BUILD,
+        )
+        (project_root / ".samvil" / "qa-results.json").write_text(
+            json.dumps({"synthesis": {"verdict": "PASS"}}),
+            encoding="utf-8",
+        )
+        (project_root / ".samvil" / "qa.log").write_text(
+            "npm test\nSAMVIL_EXIT:0\n",
+            encoding="utf-8",
+        )
+        (project_root / ".samvil" / "test-results.json").write_text(
+            json.dumps(
+                {
+                    "stats": {
+                        "expected": 1,
+                        "flaky": 0,
+                        "unexpected": 0,
+                        "skipped": 0,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        before = await store.get_events(sid, limit=None)
+        result = json.loads(await complete_stage(sid, "qa", "pass"))
+        after = await store.get_events(sid, limit=None)
+
+        assert result["status"] == "error"
+        assert "trusted runtime" in result["error"]
+        assert len(after) == len(before)
+
+    _run(runner())
+
+
 def test_complete_stage_rejects_out_of_order_stage_completion(
     tmp_path, monkeypatch
 ) -> None:

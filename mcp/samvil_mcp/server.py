@@ -1273,6 +1273,18 @@ def _require_stage_exit_evidence(project_path: Path, stage: str) -> None:
             raise OrchestratorError(
                 "qa exit evidence requires synthesis.verdict=PASS"
             )
+        from .stage_evidence import collect_stage_evidence
+
+        evidence = collect_stage_evidence(project_path, "qa")
+        qa = evidence.get("qa") or {}
+        if qa.get("artifact_runtime_passed") is not True:
+            raise OrchestratorError(
+                "qa exit evidence requires a passing runtime test artifact"
+            )
+        if qa.get("runtime_verified") is not True:
+            raise OrchestratorError(
+                "qa exit evidence requires trusted runtime verification"
+            )
 
 
 def _read_stage_exit_json(project_path: Path, relative: str, stage: str) -> dict:
