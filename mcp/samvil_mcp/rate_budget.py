@@ -160,41 +160,45 @@ def heartbeat(budget_path: str, worker_id: str) -> dict:
         return {"renewed": True, "current": len(active)}
 
 
+def _stats_unlocked(path: Path) -> dict:
+    active, events = _replay(path)
+    peak = 0
+    running = 0
+    total_acq = 0
+    total_rel = 0
+    total_heartbeats = 0
+    for ev in events:
+        if ev.get("kind") == "acquire":
+            running += 1
+            total_acq += 1
+            peak = max(peak, running)
+        elif ev.get("kind") == "release":
+            running = max(0, running - 1)
+            total_rel += 1
+        elif ev.get("kind") == "heartbeat":
+            total_heartbeats += 1
+    return {
+        "active": len(active),
+        "peak": peak,
+        "total_acquired": total_acq,
+        "total_released": total_rel,
+        "total_heartbeats": total_heartbeats,
+        "active_workers": sorted(active),
+    }
+
+
 def stats(budget_path: str) -> dict:
     """Return {active, peak, total_acquired, total_released, active_workers}."""
     p = Path(budget_path)
     with _locked(p):
-        active, events = _replay(p)
-        peak = 0
-        running = 0
-        total_acq = 0
-        total_rel = 0
-        total_heartbeats = 0
-        for ev in events:
-            if ev.get("kind") == "acquire":
-                running += 1
-                total_acq += 1
-                peak = max(peak, running)
-            elif ev.get("kind") == "release":
-                running = max(0, running - 1)
-                total_rel += 1
-            elif ev.get("kind") == "heartbeat":
-                total_heartbeats += 1
-        return {
-            "active": len(active),
-            "peak": peak,
-            "total_acquired": total_acq,
-            "total_released": total_rel,
-            "total_heartbeats": total_heartbeats,
-            "active_workers": sorted(active),
-        }
+        return _stats_unlocked(p)
 
 
 def reset(budget_path: str) -> dict:
     """Truncate the budget log. Returns stats before reset."""
     p = Path(budget_path)
-    before = stats(budget_path)
     with _locked(p):
+        before = _stats_unlocked(p)
         if p.exists():
             p.unlink()
     return {"reset": True, "previous": before}

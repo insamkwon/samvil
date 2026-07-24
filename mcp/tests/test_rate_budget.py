@@ -2,6 +2,7 @@
 
 import json
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from samvil_mcp.rate_budget import acquire, heartbeat, release, reset, stats
@@ -160,3 +161,30 @@ def test_reset_wipes_log(tmp_path: Path):
     assert res["previous"]["active"] == 1
     st = stats(str(p))
     assert st["active"] == 0
+
+
+def test_reset_does_not_delete_worker_acquired_after_its_snapshot(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from samvil_mcp import rate_budget
+
+    p = tmp_path / "rb.jsonl"
+    original_locked = rate_budget._locked
+    completed_locks = 0
+
+    @contextmanager
+    def inject_acquire_after_first_lock(path):
+        nonlocal completed_locks
+        with original_locked(path):
+            yield
+        completed_locks += 1
+        if completed_locks == 1:
+            rate_budget._append_locked(path, "acquire", "late-worker")
+
+    monkeypatch.setattr(rate_budget, "_locked", inject_acquire_after_first_lock)
+    result = rate_budget.reset(str(p))
+    monkeypatch.setattr(rate_budget, "_locked", original_locked)
+
+    assert result["previous"]["active"] == 0
+    assert rate_budget.stats(str(p))["active_workers"] == ["late-worker"]
