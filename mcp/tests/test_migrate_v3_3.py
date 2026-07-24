@@ -120,6 +120,22 @@ def test_apply_migration_replaces_backup_rejected_by_canonical_validator(
     assert backup_path.read_text() == original_text
 
 
+def test_apply_migration_rejects_invalid_source_before_backup_or_seed_write(
+    tmp_path: Path,
+) -> None:
+    seed_path = tmp_path / "project.seed.json"
+    invalid_seed = _seed()
+    invalid_seed["tech_stack"] = {"framework": "unsupported"}
+    original_text = json.dumps(invalid_seed)
+    seed_path.write_text(original_text)
+
+    with pytest.raises(ValueError, match="source seed is invalid"):
+        apply_migration(tmp_path)
+
+    assert seed_path.read_text() == original_text
+    assert not (tmp_path / BACKUP_FILENAME).exists()
+
+
 def test_apply_migration_preserves_valid_first_backup(tmp_path: Path) -> None:
     seed_path = tmp_path / "project.seed.json"
     seed_path.write_text(json.dumps(_seed()))

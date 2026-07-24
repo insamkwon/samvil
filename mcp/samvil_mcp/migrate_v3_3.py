@@ -74,6 +74,11 @@ def apply_migration(project_root: str | Path) -> dict[str, Any]:
     seed_path = root / "project.seed.json"
     seed_text = seed_path.read_text(encoding="utf-8")
     seed = json.loads(seed_text)
+    if str(seed.get("schema_version") or "") == "3.2":
+        validation = validate_seed(copy.deepcopy(seed))
+        if not validation["valid"]:
+            details = "; ".join(str(error) for error in validation.get("errors", []))
+            raise ValueError(f"source seed is invalid: {details or 'validation failed'}")
     migrated, changes = _migrate_seed_dict(seed)
     if not changes:
         return {"changed": False, "changes": [], "schema_version": V33_SCHEMA_VERSION}
