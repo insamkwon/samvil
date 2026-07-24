@@ -1043,6 +1043,16 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `scripts/generate-host-commands.py:77`,
     `scripts/check-host-parity.py:65`, `scripts/check-host-parity.py:339`,
     `mcp/tests/test_host_parity.py:203`, `mcp/tests/test_host_parity.py:221`.
+- [x] **4.17 클린 검수 재시작에서 확인된 단계 완료 claim 저하 의미론 보정**
+  (스코프 보정: canonical event와 stage transition은 완료 진실이고 gate claim은 그
+  진실의 관측 채널이다. claim append 실패를 전체 완료 실패로 반환하면 이미 완료된
+  단계를 재시도해 event를 중복시킬 수 있으므로, 완료는 유지하고 `claim_saved=false`
+  및 `claim_error`와 health evidence로 저하를 명시한다.)
+  - 완료 증거: `c0445c4`; `mcp/samvil_mcp/server.py:1078`,
+    `mcp/samvil_mcp/server.py:1093`, `mcp/samvil_mcp/server.py:1103`,
+    `mcp/tests/test_orchestrator_mcp.py:169`,
+    `mcp/tests/test_orchestrator_mcp.py:197`,
+    `references/samvil-ssot-schema.md:476`.
 
 ---
 
