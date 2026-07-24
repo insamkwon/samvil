@@ -115,8 +115,8 @@ def resolve_stage_next_skill(
     root = Path(project_root)
     if current_skill == "samvil-qa":
         results = _read_project_json(root / ".samvil" / "qa-results.json")
-        synthesis = results.get("synthesis") or {}
-        if not synthesis:
+        synthesis = results.get("synthesis")
+        if not isinstance(synthesis, dict) or not synthesis:
             return None
         if str(synthesis.get("verdict") or "").upper() not in {
             "PASS",
@@ -126,6 +126,8 @@ def resolve_stage_next_skill(
             return None
         state = _read_project_json(root / "project.state.json")
         convergence = results.get("convergence") or {}
+        if not isinstance(convergence, dict):
+            return None
         from .qa_finalize import _decide_next_skill
 
         return str(

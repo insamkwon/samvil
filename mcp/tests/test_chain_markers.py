@@ -243,6 +243,40 @@ class TestAdvanceChain:
         assert result["next_skill"] == "samvil-qa"
         assert result["status"] == "blocked_missing_qa_results"
 
+    @pytest.mark.parametrize(
+        "qa_results",
+        [
+            {"synthesis": "corrupt"},
+            {
+                "synthesis": {"verdict": "PASS", "pass2": {"counts": {}}},
+                "convergence": ["corrupt"],
+            },
+        ],
+    )
+    def test_advance_chain_keeps_qa_for_parseable_structural_corruption(
+        self,
+        project_root,
+        qa_results,
+    ):
+        root = Path(project_root)
+        (root / ".samvil").mkdir(exist_ok=True)
+        (root / ".samvil" / "qa-results.json").write_text(
+            json.dumps(qa_results),
+            encoding="utf-8",
+        )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        assert resolve_stage_next_skill(project_root, "samvil-qa") is None
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["next_skill"] == "samvil-qa"
+        assert result["status"] == "blocked_missing_qa_results"
+
     def test_pipeline_complete(self, project_root):
         write_chain_marker(project_root, "generic", "samvil-retro")
         result = advance_chain(project_root, "generic")
