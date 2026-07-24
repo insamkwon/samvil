@@ -1246,6 +1246,56 @@ def test_save_event_redacts_credentials_embedded_in_plain_strings(
         assert secret not in canonical
 
 
+def test_save_event_redacts_quoted_json_and_nonstandard_authorization(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    secrets = {
+        "access": "-".join(("json", "access", "value")),
+        "credential": "".join(("AKIA", "FIXTURE", "CREDENTIAL")),
+        "signature": "".join(("dead", "beef", "fixture")),
+    }
+    raw_note = (
+        '{"access_token":"'
+        + secrets["access"]
+        + '","Authorization":"Digest Credential='
+        + secrets["credential"]
+        + ", Signature="
+        + secrets["signature"]
+        + '"}'
+    )
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "quoted-credentials",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        await save_event(
+            sess["session_id"],
+            "build_started",
+            "build",
+            json.dumps({"note": raw_note}),
+        )
+        stored = await (await srv.get_store()).get_events(sess["session_id"])
+        return json.dumps(stored[0].data)
+
+    stored_data = _run(runner())
+    canonical = (project_root / ".samvil" / "events.jsonl").read_text(
+        encoding="utf-8"
+    )
+    for secret in secrets.values():
+        assert secret not in stored_data
+        assert secret not in canonical
+
+
 def test_save_event_uses_valid_line_index_without_rescanning_jsonl(
     tmp_path,
     monkeypatch,

@@ -13,16 +13,20 @@ _SENSITIVE_KEYS = re.compile(
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 _AUTHORIZATION_HEADER = re.compile(
-    r"\bAuthorization\s*:\s*(?:Basic|Bearer)\s+[^\s,;]+",
+    r"(?P<label>['\"]?\bAuthorization\b['\"]?\s*[:=]\s*)"
+    r"(?P<quote>['\"]?)[^\r\n]*(?P=quote)",
     re.IGNORECASE,
 )
 _COOKIE_HEADER = re.compile(
-    r"\b(?:Set-Cookie|Cookie)\s*:\s*[^\r\n]*",
+    r"(?P<label>['\"]?\b(?:Set-Cookie|Cookie)\b['\"]?\s*[:=]\s*)"
+    r"(?P<quote>['\"]?)[^\r\n]*(?P=quote)",
     re.IGNORECASE,
 )
 _CREDENTIAL = re.compile(
-    r"\b(api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|"
-    r"secret|token|password|passwd)(\s*[:=]\s*)[^\s,;]+",
+    r"(?P<key_quote>['\"]?)(?P<key>\b(?:api[_-]?key|access[_-]?token|"
+    r"auth[_-]?token|client[_-]?secret|secret|token|password|passwd)\b)"
+    r"(?P=key_quote)(?P<separator>\s*[:=]\s*)"
+    r"(?P<value_quote>['\"]?)[^'\"\s,;}]+(?P=value_quote)",
     re.IGNORECASE,
 )
 _TOKEN_LITERAL = re.compile(
@@ -36,17 +40,27 @@ _SAFE_EVENT_LABEL = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
 
 def _redact_string(value: str) -> str:
     redacted = _EMAIL.sub("[REDACTED_EMAIL]", value)
-    redacted = _AUTHORIZATION_HEADER.sub("Authorization: [REDACTED]", redacted)
+    redacted = _AUTHORIZATION_HEADER.sub(_redact_header_match, redacted)
     redacted = _BEARER.sub("[REDACTED_TOKEN]", redacted)
     redacted = _CREDENTIAL.sub(
-        lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
+        lambda match: (
+            f"{match.group('key_quote')}{match.group('key')}"
+            f"{match.group('key_quote')}{match.group('separator')}"
+            f"{match.group('value_quote')}[REDACTED]"
+            f"{match.group('value_quote')}"
+        ),
         redacted,
     )
-    redacted = _COOKIE_HEADER.sub("Cookie: [REDACTED]", redacted)
+    redacted = _COOKIE_HEADER.sub(_redact_header_match, redacted)
     redacted = _TOKEN_LITERAL.sub("[REDACTED_TOKEN]", redacted)
     if len(redacted) > _MAX_STRING_LENGTH:
         return redacted[:_MAX_STRING_LENGTH] + "...[TRUNCATED]"
     return redacted
+
+
+def _redact_header_match(match: re.Match[str]) -> str:
+    quote = match.group("quote")
+    return f"{match.group('label')}{quote}[REDACTED]{quote}"
 
 
 def sanitize_event_data(value: Any, *, _depth: int = 0) -> Any:

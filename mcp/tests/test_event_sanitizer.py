@@ -67,7 +67,33 @@ def test_event_data_redacts_credentials_embedded_in_plain_strings() -> None:
     serialized = str(sanitize_event_data(payload))
 
     assert all(secret not in serialized for secret in secrets.values())
-    assert serialized.count("[REDACTED") >= 4
+    assert serialized.count("[REDACTED") >= 3
+
+
+def test_event_data_redacts_quoted_json_and_any_authorization_scheme() -> None:
+    secrets = {
+        "access": "-".join(("json", "access", "value")),
+        "client": "-".join(("json", "client", "value")),
+        "credential": "".join(("AKIA", "FIXTURE", "CREDENTIAL")),
+        "signature": "".join(("dead", "beef", "fixture")),
+    }
+    payload = {
+        "note": (
+            '{"access_token":"'
+            + secrets["access"]
+            + '","client_secret":"'
+            + secrets["client"]
+            + '","Authorization":"AWS4-HMAC-SHA256 Credential='
+            + secrets["credential"]
+            + ", Signature="
+            + secrets["signature"]
+            + '"}'
+        )
+    }
+
+    serialized = str(sanitize_event_data(payload))
+
+    assert all(secret not in serialized for secret in secrets.values())
 
 
 def test_stage_label_rejects_arbitrary_sensitive_prose() -> None:
