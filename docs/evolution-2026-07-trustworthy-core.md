@@ -581,7 +581,7 @@ SQLite 보조 인덱스를 조회하는 것 확인 (증거 스샷/로그).
   - 완료 증거: `3f3a157`; `mcp/samvil_mcp/stage_evidence.py:15`,
     `mcp/samvil_mcp/stage_evidence.py:37`,
     `mcp/samvil_mcp/stage_evidence.py:70`,
-    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4792`,
+    `mcp/samvil_mcp/stage_evidence.py:129`, `mcp/samvil_mcp/server.py:4899`,
     `mcp/samvil_mcp/test_deliverable.py:180`,
     `mcp/tests/test_stage_evidence.py:18`, `mcp/tests/test_stage_evidence.py:73`,
     `skills/samvil-build/SKILL.md:73`, `skills/samvil-qa/SKILL.md:61`.
