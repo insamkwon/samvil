@@ -246,6 +246,64 @@ def test_canonical_event_non_oserror_still_compensates_database(
     _run(runner())
 
 
+def test_canonical_event_close_failure_removes_written_ghost_row(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    events_path = project_root / ".samvil" / "events.jsonl"
+    original_open = Path.open
+
+    class FailAfterClose:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            self.handle.__exit__(exc_type, exc, traceback)
+            raise OSError("close failed after write")
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
+        def __iter__(self):
+            return iter(self.handle)
+
+    def open_with_close_failure(path, mode="r", *args, **kwargs):
+        handle = original_open(path, mode, *args, **kwargs)
+        if Path(path) == events_path and mode == "a+":
+            return FailAfterClose(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", open_with_close_failure)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "canonical-close-failure",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        result = json.loads(
+            await complete_stage(sess["session_id"], "interview", "pass")
+        )
+        stored_events = await (await srv.get_store()).get_events(sess["session_id"])
+
+        assert result["status"] == "error"
+        assert result["db_rolled_back"] is True
+        assert stored_events == []
+
+    _run(runner())
+    assert events_path.read_bytes() == b""
+
+
 @pytest.mark.parametrize("operation", ["save_event", "complete_stage"])
 def test_event_and_stage_update_are_atomic_and_retry_safe(
     tmp_path, monkeypatch, operation

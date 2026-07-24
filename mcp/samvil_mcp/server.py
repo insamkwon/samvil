@@ -651,18 +651,34 @@ def _append_project_event(
         "data": data,
     }
     with _file_locked(path):
-        with path.open("a+", encoding="utf-8") as handle:
-            handle.seek(0, os.SEEK_END)
-            current_size = handle.tell()
-            line_count = _indexed_event_line_count(
-                handle,
-                index_path,
-                current_size=current_size,
-            )
-            line_number = line_count + 1
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-            handle.flush()
-            new_size = handle.tell()
+        current_size: int | None = None
+        try:
+            with path.open("a+", encoding="utf-8") as handle:
+                handle.seek(0, os.SEEK_END)
+                current_size = handle.tell()
+                line_count = _indexed_event_line_count(
+                    handle,
+                    index_path,
+                    current_size=current_size,
+                )
+                line_number = line_count + 1
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+                new_size = handle.tell()
+        except Exception as exc:
+            if current_size is not None:
+                try:
+                    with path.open("r+b") as rollback_handle:
+                        rollback_handle.truncate(current_size)
+                        rollback_handle.flush()
+                        os.fsync(rollback_handle.fileno())
+                except Exception as rollback_exc:
+                    raise OSError(
+                        "canonical event append failed and file rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            raise
         try:
             atomic_write_text(
                 index_path,
