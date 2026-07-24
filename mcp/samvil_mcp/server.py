@@ -4447,6 +4447,7 @@ async def dispatch_build_batch(
     config_json: str = "",
     consecutive_fail_batches: int = 0,
     project_root: str = ".",
+    rate_budget_path: str = "",
 ) -> str:
     """Per-batch dispatch aggregator for samvil-build Phase B (T4.8).
 
@@ -4489,6 +4490,7 @@ async def dispatch_build_batch(
             completed_ids=completed_ids,
             consecutive_fail_batches=int(consecutive_fail_batches),
             project_root=project_root,
+            rate_budget_path=rate_budget_path,
         )
         _log_mcp_health("ok", "dispatch_build_batch")
         return json.dumps(result)

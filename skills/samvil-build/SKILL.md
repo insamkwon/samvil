@@ -49,7 +49,7 @@ For each feature in `seed.features` not in `resume_hint.completed_features`:
    ```
    mcp__samvil_mcp__dispatch_build_batch(seed_json=<seed>, feature_json=<feature>, feature_num=<i+1>,
      tree_json=<current tree>, completed_ids_json=<json>, blueprint_json=<bp or "">,
-     config_json=<cfg or "">, consecutive_fail_batches=<int from prior iter or checkpoint>)
+     config_json=<cfg or "">, consecutive_fail_batches=<int from prior iter or checkpoint>, project_root=".", rate_budget_path="<paths.rate_budget>")
    ```
    Returns `max_parallel`, `parallel_meta`, `batch {leaves[], count}`, `worker_bundles[]` (≤2000 tok: persona pointer + ≤400-tok context + leaf + contract), `independence`, `circuit_breaker {consecutive_fail_batches, max_retries, halt}`, `notes`, `errors`.
    **BM25 leaf fetch** (best-effort, INV-5): `mcp__samvil_mcp__search_ac_tree_by_feature(project_root=".", feature_id="<feature.id>")` — use instead of full tree JSON for large (10+ feature) seeds.

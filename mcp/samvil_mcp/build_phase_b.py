@@ -245,6 +245,7 @@ def render_worker_context(
     fts_sibling_leaves: list[dict[str, Any]] | None = None,
     cross_feature_related: list[dict[str, Any]] | None = None,
     project_root: str = ".",
+    rate_budget_path: str = "",
 ) -> dict[str, Any]:
     """Render the ≤2000-token Worker Agent context for one leaf.
 
@@ -303,7 +304,7 @@ def render_worker_context(
             "no_full_build": "Do NOT run `npm run build` — integration build is the main session's job",
             "rate_budget_heartbeat": (
                 "Every 10 minutes while working, call "
-                f"mcp__samvil_mcp__rate_budget_heartbeat(budget_path={str(Path(project_root) / '.samvil' / 'rate-budget.jsonl')!r}, "
+                f"mcp__samvil_mcp__rate_budget_heartbeat(budget_path={(rate_budget_path or str(Path(project_root) / '.samvil' / 'rate-budget.jsonl'))!r}, "
                 f"worker_id={'build-' + leaf_id!r}); if renewed=false, stop and report the lost lease"
             ),
         },
@@ -416,6 +417,7 @@ def dispatch_build_batch(
     cpu_cores: int | None = None,
     memory_pct: float | None = None,
     project_root: str = ".",
+    rate_budget_path: str = "",
 ) -> dict[str, Any]:
     """Compose the next build batch for one feature.
 
@@ -515,6 +517,7 @@ def dispatch_build_batch(
             fts_sibling_leaves=fts_feature_leaves,
             cross_feature_related=cross_feature,
             project_root=project_root,
+            rate_budget_path=rate_budget_path,
         )
         bundle["leaf_id"] = str(leaf.get("id", ""))
         report.worker_bundles.append(bundle)

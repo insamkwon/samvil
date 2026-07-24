@@ -219,6 +219,30 @@ def test_dispatch_returns_correct_batch_size() -> None:
     assert "rate_budget_heartbeat" in out["worker_bundles"][0]["contract"]["rate_budget_heartbeat"]
 
 
+def test_dispatch_uses_the_same_explicit_rate_budget_path_for_heartbeat() -> None:
+    seed = {
+        "name": "demo",
+        "tech_stack": {"framework": "nextjs"},
+        "features": [{"name": "f"}],
+    }
+    budget_path = "/target/project/.samvil/rate-budget.jsonl"
+
+    out = build_phase_b.dispatch_build_batch(
+        seed=seed,
+        blueprint=None,
+        config={"max_parallel": 1},
+        feature=seed["features"][0],
+        feature_num=1,
+        tree_json=_tree_json(1),
+        completed_ids=[],
+        project_root="/different/mcp/cwd",
+        rate_budget_path=budget_path,
+    )
+
+    heartbeat = out["worker_bundles"][0]["contract"]["rate_budget_heartbeat"]
+    assert f"budget_path={budget_path!r}" in heartbeat
+
+
 def test_dispatch_skips_completed_leaves() -> None:
     seed = {"name": "demo", "tech_stack": {"framework": "nextjs"}, "features": [{"name": "f"}]}
     feature = seed["features"][0]
