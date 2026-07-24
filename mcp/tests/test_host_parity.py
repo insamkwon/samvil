@@ -65,7 +65,12 @@ def test_fresh_codex_boot_creates_and_persists_session_before_chaining() -> None
 
 @pytest.mark.parametrize(
     ("command_name", "stage"),
-    [("samvil-interview.md", "interview"), ("samvil-seed.md", "seed")],
+    [
+        ("samvil-interview.md", "interview"),
+        ("samvil-seed.md", "seed"),
+        ("samvil-scaffold.md", "scaffold"),
+        ("samvil-build.md", "build"),
+    ],
 )
 def test_codex_stage_commands_complete_trusted_stage_before_marker(
     command_name: str,

@@ -20,7 +20,8 @@ Ensure `project.seed.json` exists and scaffold is complete.
 8. Run MCP tool `finalize_build_phase_z(project_path="${PWD}", rate_budget_stats_json=<stats JSON or "">, failed_features_json=<JSON array or "[]">, retries=<total retries>)`.
 9. From the Phase Z result, post each `ac_verdict_claims[]` entry with `claim_post(**entry)` and verify `stage_claim_id` with `claim_verify(claim_id=<id>, verified_by="agent:user")` when present.
 10. Run MCP tool `gate_check(gate_name="build_to_qa", samvil_tier=<phase_z.samvil_tier>, metrics_json=<phase_z.gate_input.metrics>, project_root=".", evidence_mode="mechanical")`. Any tool error or non-`pass` verdict halts; no marker is written. Current hosts fail closed unless trusted mechanical build evidence exists.
-11. Only after gate PASS, run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-build")`.
+11. Only after gate PASS, read `<sid>` from root `project.state.json` and run MCP tool `complete_stage(session_id=<sid>, stage="build", verdict="pass")`; any error halts.
+12. Only after completion succeeds, run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-build")`.
 
 ## Chain
 

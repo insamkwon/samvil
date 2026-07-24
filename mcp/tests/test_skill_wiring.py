@@ -275,6 +275,23 @@ def test_codex_build_uses_mechanical_build_gate_before_chain() -> None:
     assert codex.index("gate_check") < codex.index("write_chain_marker")
 
 
+def test_scaffold_and_build_skills_complete_trusted_stage_before_chain() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    scaffold = (repo / "skills" / "samvil-scaffold" / "SKILL.md").read_text()
+    build = (repo / "skills" / "samvil-build" / "SKILL.md").read_text()
+
+    scaffold_complete = scaffold.index(
+        'complete_stage(session_id="<sid>", stage="scaffold", verdict="pass")'
+    )
+    build_complete = build.index(
+        'complete_stage(session_id="<sid>", stage="build", verdict="pass")'
+    )
+    assert scaffold.index("scaffold-results.json") < scaffold_complete
+    assert scaffold_complete < scaffold.index("invoke the Skill tool")
+    assert build.index("gate_check") < build_complete
+    assert build_complete < build.index("HostCapability")
+
+
 def test_codex_interview_respects_question_budget_action() -> None:
     repo = Path(__file__).resolve().parents[2]
     codex = (
