@@ -102,7 +102,7 @@ def read_chain_marker(
 def _read_project_json(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, UnicodeError):
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -124,9 +124,18 @@ def resolve_stage_next_skill(
             "FAIL",
         }:
             return None
+        pass2 = synthesis.get("pass2")
+        if pass2 is not None and not isinstance(pass2, dict):
+            return None
+        if isinstance(pass2, dict):
+            counts = pass2.get("counts")
+            if counts is not None and not isinstance(counts, dict):
+                return None
         state = _read_project_json(root / "project.state.json")
-        convergence = results.get("convergence") or {}
-        if not isinstance(convergence, dict):
+        convergence = results.get("convergence")
+        if convergence is None:
+            convergence = {}
+        elif not isinstance(convergence, dict):
             return None
         from .qa_finalize import _decide_next_skill
 
