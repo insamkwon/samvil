@@ -319,6 +319,16 @@ def test_brace_expansion_limit_cannot_hide_protected_ssot() -> None:
     assert "BLOCKED" in result.stderr
 
 
+def test_exact_brace_expansion_limit_cannot_leave_nested_ssot_unchecked() -> None:
+    first_brace = ",".join(["", *(f"x{index}" for index in range(31))])
+    command = f"rm -f {{{first_brace}}}{{project.seed.json,safe}}"
+
+    result = run_guard(command)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+
+
 @pytest.mark.parametrize(
     "command",
     [

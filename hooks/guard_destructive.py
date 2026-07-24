@@ -624,6 +624,8 @@ def _brace_expansion_candidates(target: str, *, limit: int = 32) -> list[str] | 
         candidates = next_candidates
         if not expanded:
             break
+    if any(re.search(r"\{[^{}]*,[^{}]*\}", candidate) for candidate in candidates):
+        return None
     return candidates
 
 
