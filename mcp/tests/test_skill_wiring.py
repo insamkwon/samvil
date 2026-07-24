@@ -346,6 +346,31 @@ def test_qa_skill_records_trusted_completion_before_host_chain() -> None:
     assert qa.index(complete_call) < qa.index("HostCapability")
 
 
+def test_council_paths_record_trusted_completion_before_design_chain() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    skill = (repo / "skills" / "samvil-council" / "SKILL.md").read_text()
+    codex = (
+        repo / "references" / "codex-commands" / "samvil-council.md"
+    ).read_text()
+    gemini = (
+        repo / "references" / "gemini-commands" / "samvil-council.toml"
+    ).read_text()
+    skill_call = (
+        'complete_stage(session_id="<sid>", stage="council", verdict="pass", '
+        'council_opt_in=true)'
+    )
+    host_call = (
+        'complete_stage(session_id=<sid>, stage="council", verdict="pass", '
+        'council_opt_in=true)'
+    )
+
+    assert skill_call in skill
+    assert skill.index(skill_call) < skill.index("invoke Skill tool")
+    for command in (codex, gemini):
+        assert host_call in command
+        assert command.index(host_call) < command.index("write_chain_marker")
+
+
 def test_codex_commands_use_root_seed_ssot_and_deploy_fails_closed() -> None:
     repo = Path(__file__).resolve().parents[2]
     command_dir = repo / "references" / "codex-commands"

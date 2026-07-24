@@ -19,7 +19,8 @@ Ensure root `project.seed.json` exists.
    - Flag any deal-breaker issues
 5. Save council results to `.samvil/council-results.md`.
 6. If council rejects, report issues to user for revision.
-7. Run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-council")`.
+7. For an approved council, run `complete_stage(session_id=<sid>, stage="council", verdict="pass", council_opt_in=true)` and require exact `status="ok"`; error halts.
+8. Run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-council")`.
 
 ## Chain
 

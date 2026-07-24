@@ -11,7 +11,8 @@ If `next_skill` is not `samvil-council`, skip and report the expected stage.
 1. Use MCP tool `read_chain_marker` with project_root to confirm stage.
 2. Read `project.seed.json` for seed context.
 3. Execute the samvil-council stage logic (see Codex command reference for details).
-4. On completion, use MCP tool `write_chain_marker` to advance pipeline.
+4. For an approved council, call `complete_stage(session_id=<sid>, stage="council", verdict="pass", council_opt_in=true)` and require exact status="ok".
+5. On trusted completion, use MCP tool `write_chain_marker` to advance pipeline.
 
 ## Chain
 

@@ -100,7 +100,7 @@ MCP fail → decisions.log is fallback truth (P8/INV-5); log warning, continue. 
 ```
 mcp__samvil_mcp__save_event(session_id="<sid>", event_type="council_verdict", stage="design", data='{"verdict":"<PROCEED|PROCEED_WITH_CHANGES|HOLD>","agents_count":<N>}')
 ```
-Append Council section to `.samvil/handoff.md` via Bash `cat >>` or Edit (never Write tool): tier · consensus N/M (%) · verdict · changes applied · dissenting summary. Print `[SAMVIL] Gate A complete. Proceeding to design...` and invoke Skill tool with skill `samvil-design`.
+For PROCEED or approved PROCEED_WITH_CHANGES, require `complete_stage(session_id="<sid>", stage="council", verdict="pass", council_opt_in=true)` to return exact `status="ok"`; error halts. Append Council section to `.samvil/handoff.md` via Bash `cat >>` or Edit (never Write tool): tier · consensus N/M (%) · verdict · changes applied · dissenting summary. Print `[SAMVIL] Gate A complete. Proceeding to design...` and invoke Skill tool with skill `samvil-design`.
 
 ## Anti-Patterns
 

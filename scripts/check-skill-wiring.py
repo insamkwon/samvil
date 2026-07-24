@@ -107,6 +107,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "council-retirement-migration",
             "--council",
             "synthesize_council_verdicts",
+            "complete_stage",
             "SKILL.legacy.md",
         ),
     ),

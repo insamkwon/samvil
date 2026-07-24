@@ -77,6 +77,8 @@ Read `.samvil/next-skill.json`. If `next_skill` is not `{skill_name}`, skip this
 def _gemini_template(skill_name: str, next_skill: str) -> str:
     if skill_name == "samvil-qa":
         return _gemini_qa_template()
+    if skill_name == "samvil-council":
+        return _gemini_council_template()
     desc = _SKILL_DESCRIPTIONS.get(skill_name, skill_name)
     chain_note = f'Read `.samvil/next-skill.json` for the next stage ({next_skill}) and report to the user.' if next_skill else "This is a terminal skill — no automatic chain continuation."
     return f"""prompt = \"\"\"
@@ -131,6 +133,31 @@ If `next_skill` is not `samvil-qa`, skip and report the expected stage.
 
 Read `.samvil/next-skill.json` for the finalized dynamic Deploy/Evolve/Retro route
 and report the next command to the user.
+"""
+'''
+
+
+def _gemini_council_template() -> str:
+    return '''prompt = """
+SAMVIL pipeline stage: samvil-council.
+
+## Prerequisites
+
+Read `.samvil/next-skill.json` to check current pipeline position.
+If `next_skill` is not `samvil-council`, skip and report the expected stage.
+
+## Execution
+
+1. Use MCP tool `read_chain_marker` with project_root to confirm stage.
+2. Read `project.seed.json` for seed context.
+3. Execute the samvil-council stage logic (see Codex command reference for details).
+4. For an approved council, call `complete_stage(session_id=<sid>, stage="council", verdict="pass", council_opt_in=true)` and require exact status="ok".
+5. On trusted completion, use MCP tool `write_chain_marker` to advance pipeline.
+
+## Chain
+
+Read `.samvil/next-skill.json` for the next stage.
+Report to the user what the next command should be.
 """
 '''
 
