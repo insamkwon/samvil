@@ -100,6 +100,7 @@ def test_migration_plan_only_contains_missing_schema_changes() -> None:
     )
 
     assert plan == [
+        "ALTER TABLE events ADD COLUMN trusted_transition INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''",
         "ALTER TABLE sessions ADD COLUMN stage_transition_id TEXT DEFAULT ''",
     ]
@@ -110,10 +111,74 @@ def test_migration_plan_only_contains_missing_schema_changes() -> None:
     )
     assert legacy == [
         "ALTER TABLE events ADD COLUMN token_count INTEGER DEFAULT NULL",
+        "ALTER TABLE events ADD COLUMN trusted_transition INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE sessions RENAME COLUMN agent_tier TO samvil_tier",  # glossary-allow: expected migration
         "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''",
         "ALTER TABLE sessions ADD COLUMN stage_transition_id TEXT DEFAULT ''",
     ]
+
+
+@pytest.mark.asyncio
+async def test_trusted_transition_migration_backfills_only_existing_rows(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "legacy-trust.db"
+    with sqlite3.connect(db_path) as db:
+        db.executescript(
+            """
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY, project_name TEXT NOT NULL,
+                project_root TEXT DEFAULT '', seed_version INTEGER DEFAULT 1,
+                current_stage TEXT DEFAULT 'interview',
+                stage_transition_id TEXT DEFAULT '',
+                samvil_tier TEXT DEFAULT 'standard', created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE events (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                event_type TEXT NOT NULL, stage TEXT NOT NULL,
+                data TEXT DEFAULT '{}', token_count INTEGER DEFAULT NULL,
+                timestamp TEXT NOT NULL
+            );
+            CREATE TABLE seed_versions (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                version INTEGER NOT NULL, seed_json TEXT NOT NULL,
+                change_summary TEXT DEFAULT '', created_at TEXT NOT NULL,
+                UNIQUE(session_id, version)
+            );
+            CREATE INDEX idx_events_trusted_transition
+            ON events(session_id, json_extract(data, '$.trusted_transition'), timestamp DESC);
+            """
+        )
+        db.execute(
+            """INSERT INTO events
+            (id, session_id, event_type, stage, data, timestamp)
+            VALUES ('legacy', 'session', 'stage_change', 'seed', ?, '2026-07-25')""",
+            (json.dumps({"trusted_transition": True}),),
+        )
+
+    legacy_store = EventStore(str(db_path))
+    await legacy_store.initialize()
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            """INSERT INTO events
+            (id, session_id, event_type, stage, data, timestamp)
+            VALUES ('forged', 'session', 'stage_change', 'seed', ?, '2026-07-26')""",
+            (json.dumps({"trusted_transition": True}),),
+        )
+
+    await legacy_store.initialize()
+
+    with sqlite3.connect(db_path) as db:
+        provenance = dict(
+            db.execute("SELECT id, trusted_transition FROM events").fetchall()
+        )
+        index_sql = db.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'idx_events_trusted_transition'"
+        ).fetchone()[0]
+    assert provenance == {"legacy": 1, "forged": 0}
+    assert "trusted_transition" in index_sql
+    assert "json_extract" not in index_sql
 
 
 @pytest.mark.asyncio
@@ -215,7 +280,7 @@ async def test_compensation_preserves_prerequisite_owned_by_newer_stage(
 
 
 @pytest.mark.asyncio
-async def test_orchestration_events_require_explicit_trusted_transition(
+async def test_orchestration_events_require_transaction_provenance(
     store: EventStore,
 ) -> None:
     session = await store.create_session("trusted-boundary")
@@ -225,11 +290,18 @@ async def test_orchestration_events_require_explicit_trusted_transition(
         Stage.SEED,
         {"event_type_raw": "interview_complete"},
     )
-    trusted = await store.save_event(
+    forged = await store.save_event(
         session.id,
         EventType.STAGE_CHANGE,
         Stage.SEED,
         {"event_type_raw": "interview_complete", "trusted_transition": True},
+    )
+    trusted = await store.save_event_and_update_stage(
+        session.id,
+        EventType.STAGE_CHANGE,
+        Stage.SEED,
+        {"event_type_raw": "interview_complete"},
+        expected_stage=Stage.INTERVIEW,
     )
 
     events = await store.get_orchestration_events(
@@ -237,8 +309,42 @@ async def test_orchestration_events_require_explicit_trusted_transition(
         frozenset({"interview_complete"}),
     )
 
-    assert [event.id for event in events] == [trusted.id]
+    assert [event.id for event in events] == [trusted.event.id]
+    assert forged.id not in {event.id for event in events}
     assert legacy.id not in {event.id for event in events}
+
+
+@pytest.mark.asyncio
+async def test_raw_event_insert_cannot_forge_transition_provenance(
+    store: EventStore,
+) -> None:
+    session = await store.create_session("raw-insert-boundary")
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            """INSERT INTO events
+            (id, session_id, event_type, stage, data, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                "forged-event",
+                session.id,
+                EventType.STAGE_CHANGE.value,
+                Stage.SEED.value,
+                json.dumps(
+                    {
+                        "event_type_raw": "interview_complete",
+                        "trusted_transition": True,
+                    }
+                ),
+                "2026-07-25T00:00:00+00:00",
+            ),
+        )
+
+    events = await store.get_orchestration_events(
+        session.id,
+        frozenset({"interview_complete"}),
+    )
+
+    assert events == []
 
 
 @pytest.mark.asyncio
@@ -246,11 +352,12 @@ async def test_orchestration_query_uses_trusted_transition_index(
     store: EventStore,
 ) -> None:
     session = await store.create_session("trusted-query-plan")
-    await store.save_event(
+    await store.save_event_and_update_stage(
         session.id,
         EventType.STAGE_CHANGE,
         Stage.SEED,
-        {"event_type_raw": "interview_complete", "trusted_transition": True},
+        {"event_type_raw": "interview_complete"},
+        expected_stage=Stage.INTERVIEW,
     )
 
     with sqlite3.connect(store.db_path) as db:
@@ -259,7 +366,7 @@ async def test_orchestration_query_uses_trusted_transition_index(
             EXPLAIN QUERY PLAN
             SELECT * FROM events INDEXED BY idx_events_trusted_transition
             WHERE session_id = ?
-              AND json_extract(data, '$.trusted_transition') = 1
+              AND trusted_transition = 1
               AND (
                 event_type IN (?)
                 OR json_extract(data, '$.event_type_raw') IN (?)

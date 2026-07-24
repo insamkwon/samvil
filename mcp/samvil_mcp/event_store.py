@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS events (
     stage TEXT NOT NULL,
     data TEXT DEFAULT '{}',
     token_count INTEGER DEFAULT NULL,
+    trusted_transition INTEGER NOT NULL DEFAULT 0,
     timestamp TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
@@ -48,8 +49,6 @@ CREATE TABLE IF NOT EXISTS seed_versions (
 
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(session_id, event_type);
-CREATE INDEX IF NOT EXISTS idx_events_trusted_transition
-ON events(session_id, json_extract(data, '$.trusted_transition'), timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_name);
 CREATE INDEX IF NOT EXISTS idx_seed_versions_session ON seed_versions(session_id, version);
 """
@@ -74,6 +73,13 @@ PROJECT_ROOT_MIGRATION = (
 STAGE_TRANSITION_ID_MIGRATION = (
     "ALTER TABLE sessions ADD COLUMN stage_transition_id TEXT DEFAULT ''"
 )
+TRUSTED_TRANSITION_MIGRATION = (
+    "ALTER TABLE events ADD COLUMN trusted_transition INTEGER NOT NULL DEFAULT 0"
+)
+TRUSTED_TRANSITION_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_events_trusted_transition
+ON events(session_id, trusted_transition, timestamp DESC)
+"""
 
 
 def _migration_plan(
@@ -85,6 +91,8 @@ def _migration_plan(
     plan: list[str] = []
     if "token_count" not in events_columns:
         plan.append(TOKEN_COUNT_MIGRATION)
+    if "trusted_transition" not in events_columns:
+        plan.append(TRUSTED_TRANSITION_MIGRATION)
     if "samvil_tier" not in sessions_columns and "agent_tier" in sessions_columns:  # glossary-allow: legacy column detection
         plan.append(TIER_RENAME_MIGRATION)
         sessions_columns = (sessions_columns - {"agent_tier"}) | {"samvil_tier"}  # glossary-allow: migration projection
@@ -116,14 +124,32 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(SCHEMA)
-            events_columns = await _table_columns(db, "events")
-            sessions_columns = await _table_columns(db, "sessions")
-            for migration in _migration_plan(
-                events_columns=events_columns,
-                sessions_columns=sessions_columns,
-            ):
-                await db.execute(migration)
-            await db.commit()
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                events_columns = await _table_columns(db, "events")
+                sessions_columns = await _table_columns(db, "sessions")
+                for migration in _migration_plan(
+                    events_columns=events_columns,
+                    sessions_columns=sessions_columns,
+                ):
+                    await db.execute(migration)
+                    if migration == TRUSTED_TRANSITION_MIGRATION:
+                        await db.execute(
+                            """UPDATE events SET trusted_transition = 1
+                            WHERE json_extract(data, '$.trusted_transition') = 1"""
+                        )
+                index_cursor = await db.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+                    ("idx_events_trusted_transition",),
+                )
+                index_row = await index_cursor.fetchone()
+                if index_row is not None and "json_extract" in str(index_row[0]):
+                    await db.execute("DROP INDEX idx_events_trusted_transition")
+                await db.execute(TRUSTED_TRANSITION_INDEX)
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
 
     # ── Sessions ──────────────────────────────────────────
 
@@ -307,7 +333,7 @@ class EventStore:
                         f"expected {expected_stage.value}, found {previous_stage.value}"
                     )
                 await db.execute(
-                    "INSERT INTO events (id, session_id, event_type, stage, data, token_count, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO events (id, session_id, event_type, stage, data, token_count, trusted_transition, timestamp) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
                     (
                         event.id,
                         event.session_id,
@@ -461,7 +487,7 @@ class EventStore:
         query = f"""
             SELECT * FROM events INDEXED BY idx_events_trusted_transition
             WHERE session_id = ?
-              AND json_extract(data, '$.trusted_transition') = 1
+              AND trusted_transition = 1
               AND (
                 event_type IN ({placeholders})
                 OR json_extract(data, '$.event_type_raw') IN ({placeholders})

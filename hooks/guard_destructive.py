@@ -90,6 +90,13 @@ SQL_COMMAND_OPTIONS_WITH_VALUE = {
     "--command",
     "--execute",
 }
+SAMVIL_EVENT_STORE_SUFFIX = "/.samvil/samvil.db"
+SAMVIL_EVENT_STORE_RELATIVE = ".samvil/samvil.db"
+SQL_WRITE_STATEMENT = re.compile(
+    r"\b(?:ALTER|ATTACH|CREATE|DELETE|DETACH|DROP|INSERT|REINDEX|REPLACE|"
+    r"UPDATE|VACUUM)\b",
+    re.IGNORECASE,
+)
 INLINE_LANGUAGE_RUNTIME_OPTIONS = {
     "node": {"-e", "--eval"},
     "perl": {"-e"},
@@ -791,6 +798,8 @@ def _inline_language_runtime_reason(
                 break
 
     for payload in payloads:
+        if _language_runtime_event_store_mutates(payload, command_context):
+            return "direct SAMVIL EventStore mutation"
         if _language_runtime_payload_mutates(payload, command_context):
             return "inline language runtime may mutate protected SAMVIL SSOT"
     return None
@@ -822,6 +831,27 @@ def _language_runtime_payload_mutates(payload: str, command_context: str = "") -
     return bool(
         INLINE_LANGUAGE_MUTATION.search(normalized)
         or INLINE_LANGUAGE_WRITE_OPEN.search(normalized)
+    )
+
+
+def _language_runtime_event_store_mutates(
+    payload: str,
+    command_context: str = "",
+) -> bool:
+    normalized = payload.replace("\\", "/")
+    normalized_context = command_context.replace("\\", "/")
+    literals = [
+        match.group(2)
+        for match in re.finditer(r"(['\"])(.*?)(?<!\\)\1", normalized)
+    ]
+    path_context = "\n".join(
+        (normalized, normalized_context, "/".join(literals))
+    )
+    if re.search(r"\bsave_event_and_update_stage\s*\(", normalized):
+        return True
+    return bool(
+        SAMVIL_EVENT_STORE_RELATIVE in path_context
+        and SQL_WRITE_STATEMENT.search(f"{normalized}\n{normalized_context}")
     )
 
 
@@ -869,6 +899,8 @@ def _language_runtime_script_file_reason(
             return error
         if text is None:
             return None
+        if _language_runtime_event_store_mutates(text, command_context):
+            return "direct SAMVIL EventStore mutation"
         if _language_runtime_payload_mutates(text, command_context):
             return "language runtime script file with protected SSOT mutation"
         return None
@@ -907,6 +939,8 @@ def _language_runtime_heredoc_reason(command: str) -> str | None:
     if end is None:
         return "language runtime stdin cannot be inspected"
     payload = remainder[: end.start()]
+    if _language_runtime_event_store_mutates(payload, header):
+        return "direct SAMVIL EventStore mutation"
     if _language_runtime_payload_mutates(payload, header):
         return "language runtime may mutate protected SAMVIL SSOT"
     return None
@@ -915,6 +949,8 @@ def _language_runtime_heredoc_reason(command: str) -> str | None:
 def _sql_reason(executable: str, args: list[str]) -> str | None:
     if executable not in SQL_CLIENTS:
         return None
+    if executable == "sqlite3" and _direct_samvil_event_store_reason(args):
+        return "direct SAMVIL EventStore mutation"
     payloads = _sql_command_payloads(args) or [" ".join(args)]
     for payload in payloads:
         meta_reason = _sql_meta_shell_reason(payload)
@@ -926,6 +962,34 @@ def _sql_reason(executable: str, args: list[str]) -> str | None:
     if file_reason:
         return file_reason
     return None
+
+
+def _direct_samvil_event_store_reason(args: list[str]) -> bool:
+    database_index: int | None = None
+    for index, token in enumerate(args):
+        normalized = token.replace("\\", "/")
+        if normalized.startswith("file:"):
+            normalized = normalized.removeprefix("file:").split("?", 1)[0]
+        try:
+            normalized = str(Path(normalized).expanduser()).replace("\\", "/")
+        except RuntimeError:
+            pass
+        if normalized.endswith(SAMVIL_EVENT_STORE_SUFFIX):
+            database_index = index
+            break
+    if database_index is None:
+        return False
+    statement = " ".join(args[database_index + 1 :]).strip()
+    if not statement:
+        return True
+    return (
+        re.match(
+            r"^(?:SELECT\b|EXPLAIN\s+(?:QUERY\s+PLAN\s+)?SELECT\b)",
+            statement,
+            re.IGNORECASE,
+        )
+        is None
+    )
 
 
 def _sql_command_payloads(args: list[str]) -> list[str]:

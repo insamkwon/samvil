@@ -183,14 +183,14 @@ def test_stage_history_is_not_truncated_by_large_telemetry_volume(
     async def runner():
         sess = json.loads(await create_session("long-history", "standard"))
         store = await srv.get_store()
-        await store.save_event(
+        await store.save_event_and_update_stage(
             sess["session_id"],
             EventType.STAGE_CHANGE,
             Stage.SEED,
             {
                 "event_type_raw": "interview_complete",
-                "trusted_transition": True,
             },
+            expected_stage=Stage.INTERVIEW,
         )
         for index in range(1001):
             await store.save_event(
@@ -270,17 +270,15 @@ def test_same_timestamp_uses_later_inserted_stage_outcome(
     async def runner():
         sess = json.loads(await create_session("same-timestamp", "standard"))
         store = await srv.get_store()
-        await store.save_event(
+        await store.save_event_and_update_stage(
             sess["session_id"],
             EventType.BUILD_FAIL,
             Stage.BUILD,
-            {"trusted_transition": True},
         )
-        await store.save_event(
+        await store.save_event_and_update_stage(
             sess["session_id"],
             EventType.BUILD_PASS,
             Stage.QA,
-            {"trusted_transition": True},
         )
 
         state = json.loads(await get_orchestration_state(sess["session_id"]))

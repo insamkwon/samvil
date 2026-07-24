@@ -170,6 +170,51 @@ def test_language_runtime_safe_stdin_and_script_file_pass(tmp_path: Path) -> Non
 @pytest.mark.parametrize(
     "command",
     [
+        "sqlite3 ~/.samvil/samvil.db \"INSERT INTO events VALUES ('forged')\"",
+        (
+            "python3 -c \"import sqlite3; "
+            "sqlite3.connect('/tmp/home/.samvil/samvil.db')"
+            ".execute('UPDATE events SET trusted_transition=1')\""
+        ),
+        (
+            "python3 - <<'PY'\n"
+            "import sqlite3\n"
+            "from pathlib import Path\n"
+            "db = Path.home() / '.samvil' / 'samvil.db'\n"
+            "sqlite3.connect(db).execute('INSERT INTO events DEFAULT VALUES')\n"
+            "PY"
+        ),
+        (
+            "python3 -c \"store.save_event_and_update_stage("
+            "session_id, event_type, stage)\""
+        ),
+        (
+            "sqlite3 'file:/tmp/home/.samvil/samvil.db?mode=rw' "
+            "\"REPLACE INTO events VALUES ('forged')\""
+        ),
+    ],
+)
+def test_direct_samvil_event_store_mutation_is_blocked(command: str) -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(command)
+
+    assert reason == "direct SAMVIL EventStore mutation"
+
+
+def test_read_only_samvil_event_store_query_passes() -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(
+        "sqlite3 ~/.samvil/samvil.db \"SELECT id FROM events LIMIT 1\""
+    )
+
+    assert reason is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "rm  -rf /",
         "rm -fr /",
         "rm -r -f $TARGET",
