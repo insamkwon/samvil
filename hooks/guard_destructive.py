@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shlex
+from contextvars import ContextVar
 from pathlib import Path, PurePath
 from typing import Any
 
@@ -15,6 +16,8 @@ from typing import Any
 MALFORMED_TOOL_INPUT_REASON = "malformed tool input"
 SHELL_PARSE_ERROR_REASON = "shell parse error"
 FILE_INSPECTION_LIMIT_BYTES = 1_000_000
+MAX_ANALYSIS_DEPTH = 64
+NESTED_ANALYSIS_LIMIT_REASON = "nested command depth exceeds inspection limit"
 SQL_CLIENTS = {"mariadb", "mysql", "psql", "sqlite3", "sqlcmd"}
 SHELLS = {"bash", "dash", "sh", "zsh"}
 SOURCE_BUILTINS = {".", "source"}
@@ -89,6 +92,7 @@ SQL_COMMAND_OPTIONS_WITH_VALUE = {
 }
 UNINSPECTABLE_PATH_CHARS = "`$*?[{"
 _SCRIPT_INSPECTION_STACK: list[str] = []
+_ANALYSIS_DEPTH: ContextVar[int] = ContextVar("guard_analysis_depth", default=0)
 
 
 def _normalize_shell_source(command: str) -> str:
@@ -1474,6 +1478,17 @@ def _dynamic_rm_flag_reason(command: str) -> str | None:
 
 
 def analyze_command(command: str) -> str | None:
+    depth = _ANALYSIS_DEPTH.get()
+    if depth >= MAX_ANALYSIS_DEPTH:
+        return NESTED_ANALYSIS_LIMIT_REASON
+    token = _ANALYSIS_DEPTH.set(depth + 1)
+    try:
+        return _analyze_command_impl(command)
+    finally:
+        _ANALYSIS_DEPTH.reset(token)
+
+
+def _analyze_command_impl(command: str) -> str | None:
     command = _normalize_shell_source(command)
     if command == MALFORMED_TOOL_INPUT_REASON:
         return MALFORMED_TOOL_INPUT_REASON

@@ -586,6 +586,22 @@ def test_long_shell_pipeline_blocks_without_recursive_analyzer_failure() -> None
     assert "analyzer failed" not in result.stderr.casefold()
 
 
+def test_deep_eval_nesting_fails_closed_without_analyzer_crash() -> None:
+    command = "eval " * 200 + "echo safe"
+
+    result = run_guard(command, timeout=2)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "BLOCKED" in result.stderr
+    assert "analyzer failed" not in result.stderr.casefold()
+
+
+def test_shallow_safe_eval_passes() -> None:
+    result = run_guard("eval 'echo safe'")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_block_message_does_not_echo_sensitive_tool_input() -> None:
     sensitive_value = "token=" + "fixture-value"
     result = run_guard(f"rm -fr /tmp/{sensitive_value}")
