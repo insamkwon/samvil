@@ -297,7 +297,7 @@ class EventStore:
                 )
                 cursor = await db.execute(
                     "UPDATE sessions SET current_stage = ?, updated_at = ? WHERE id = ?",
-                    (stage.value, _now(), session_id),
+                    (stage.value, event.timestamp, session_id),
                 )
                 if cursor.rowcount != 1:
                     raise ValueError(f"session {session_id} not found")
@@ -324,12 +324,26 @@ class EventStore:
     ) -> bool:
         """Atomically compensate a DB event and its matching stage update.
 
-        The stage comparison prevents an older failed write from rewinding a
-        session that has already moved on through another concurrent event.
+        The event timestamp is also the session transition token. A newer event
+        may set the same stage, so comparing only the stage is not sufficient to
+        decide whether the failed event still owns the current transition.
         """
         async with aiosqlite.connect(self.db_path) as db:
             try:
                 await db.execute("BEGIN")
+                event_cursor = await db.execute(
+                    "SELECT timestamp FROM events WHERE id = ? AND session_id = ?",
+                    (event_id, session_id),
+                )
+                event_row = await event_cursor.fetchone()
+                session_cursor = await db.execute(
+                    "SELECT current_stage, updated_at FROM sessions WHERE id = ?",
+                    (session_id,),
+                )
+                session_row = await session_cursor.fetchone()
+                if event_row is None or session_row is None:
+                    await db.rollback()
+                    return False
                 deleted = await db.execute(
                     "DELETE FROM events WHERE id = ? AND session_id = ?",
                     (event_id, session_id),
@@ -337,20 +351,28 @@ class EventStore:
                 if deleted.rowcount != 1:
                     await db.rollback()
                     return False
-                restored = await db.execute(
-                    """UPDATE sessions
-                    SET current_stage = ?, updated_at = ?
-                    WHERE id = ? AND current_stage = ?""",
-                    (
-                        restore_stage.value,
-                        _now(),
-                        session_id,
-                        expected_stage.value,
-                    ),
-                )
-                if restored.rowcount != 1:
-                    await db.rollback()
-                    return False
+                event_timestamp = str(event_row[0])
+                current_stage = str(session_row[0])
+                current_updated_at = str(session_row[1])
+                if (
+                    current_stage == expected_stage.value
+                    and current_updated_at == event_timestamp
+                ):
+                    restored = await db.execute(
+                        """UPDATE sessions
+                        SET current_stage = ?, updated_at = ?
+                        WHERE id = ? AND current_stage = ? AND updated_at = ?""",
+                        (
+                            restore_stage.value,
+                            _now(),
+                            session_id,
+                            expected_stage.value,
+                            event_timestamp,
+                        ),
+                    )
+                    if restored.rowcount != 1:
+                        await db.rollback()
+                        return False
                 await db.commit()
                 return True
             except Exception:

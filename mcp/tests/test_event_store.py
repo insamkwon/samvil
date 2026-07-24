@@ -147,6 +147,38 @@ async def test_save_and_get_events(store: EventStore):
 
 
 @pytest.mark.asyncio
+async def test_compensation_does_not_rewind_a_newer_same_stage_transition(
+    store: EventStore,
+) -> None:
+    session = await store.create_session("concurrent-stage")
+    failed = await store.save_event_and_update_stage(
+        session.id,
+        EventType.STAGE_END,
+        Stage.SEED,
+        {"attempt": 1},
+    )
+    succeeded = await store.save_event_and_update_stage(
+        session.id,
+        EventType.STAGE_END,
+        Stage.SEED,
+        {"attempt": 2},
+    )
+
+    compensated = await store.delete_event_and_restore_stage(
+        failed.id,
+        session.id,
+        Stage.SEED,
+        Stage.INTERVIEW,
+    )
+
+    current = await store.get_session(session.id)
+    events = await store.get_events(session.id)
+    assert compensated is True
+    assert current is not None and current.current_stage == Stage.SEED
+    assert [event.id for event in events] == [succeeded.id]
+
+
+@pytest.mark.asyncio
 async def test_save_and_get_seed_versions(store: EventStore):
     session = await store.create_session("test-app")
 
