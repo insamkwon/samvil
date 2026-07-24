@@ -1028,7 +1028,6 @@ async def complete_stage(
             stage=stage_enum,
             data=event_data,
         )
-        await store.update_session_stage(session_id, stage_enum)
 
         claim_id = None
         project_path = _session_project_path(session)
@@ -1047,7 +1046,34 @@ async def complete_stage(
                 )
             except OSError as exc:
                 _log_mcp_health("fail", "complete_stage.events_ssot", str(exc))
+                db_rolled_back = False
+                rollback_error = ""
+                try:
+                    db_rolled_back = await store.delete_event(event.id)
+                except Exception as rollback_exc:
+                    rollback_error = str(rollback_exc)
+                    _log_mcp_health(
+                        "fail",
+                        "complete_stage.events_ssot_rollback",
+                        rollback_error,
+                    )
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "event_id": event.id,
+                        "canonical_saved": False,
+                        "db_rolled_back": db_rolled_back,
+                        "partial_persistence": not db_rolled_back,
+                        "error": str(exc),
+                        **(
+                            {"rollback_error": rollback_error}
+                            if rollback_error
+                            else {}
+                        ),
+                    }
+                )
 
+            await store.update_session_stage(session_id, stage_enum)
             claim_data = plan["claim"]
             ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
             claim = ledger.post(
@@ -1060,6 +1086,8 @@ async def complete_stage(
                 meta=claim_data["meta"],
             )
             claim_id = claim.claim_id
+        else:
+            await store.update_session_stage(session_id, stage_enum)
 
         _log_mcp_health("ok", "complete_stage")
         return json.dumps({

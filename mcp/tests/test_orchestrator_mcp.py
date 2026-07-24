@@ -123,6 +123,48 @@ def test_complete_stage_tool_emits_event_and_claim(tmp_path, monkeypatch) -> Non
     assert rows["entries"][0]["data"]["verdict"] == "pass"
 
 
+def test_complete_stage_fails_closed_when_canonical_event_append_fails(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    def fail_append(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(srv, "_append_project_event", fail_append)
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "orch-complete-failure",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+
+        result = json.loads(await complete_stage(sid, "interview", "pass"))
+        state = json.loads(await get_orchestration_state(sid))
+        stored_events = await (await srv.get_store()).get_events(sid)
+
+        assert result["status"] == "error"
+        assert result["canonical_saved"] is False
+        assert result["db_rolled_back"] is True
+        assert state["current_stage"] == "interview"
+        assert state["completed_stages"] == []
+        assert stored_events == []
+
+    _run(runner())
+
+    claims = ClaimLedger(project_root / ".samvil" / "claims.jsonl")
+    assert claims.query_by_subject("gate:interview_exit") == []
+    assert read_events(project_root)["entries"] == []
+
+
 def test_save_event_file_lock_work_is_offloaded(tmp_path, monkeypatch) -> None:
     from samvil_mcp import server as srv
 
