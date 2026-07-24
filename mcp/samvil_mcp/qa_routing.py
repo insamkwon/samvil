@@ -36,9 +36,10 @@ def build_qa_recovery_routing(
     results = qa_results if qa_results is not None else read_qa_results(root) or {}
     synthesis = results.get("synthesis") or {}
     convergence = results.get("convergence") or synthesis.get("convergence") or {}
+    state = _load_json(root / "project.state.json")
     issue_ids = [str(item) for item in (convergence.get("issue_ids") or synthesis.get("issue_ids") or [])]
     issue_families = _issue_families(issue_ids)
-    primary = _primary_route(synthesis, convergence, issue_families)
+    primary = _primary_route(synthesis, convergence, issue_families, state)
     alternatives = _alternatives(primary, synthesis, convergence, issue_families)
     routing = {
         "schema_version": QA_ROUTING_SCHEMA_VERSION,
@@ -132,10 +133,11 @@ def _primary_route(
     synthesis: dict[str, Any],
     convergence: dict[str, Any],
     issue_families: dict[str, int],
+    state: dict[str, Any],
 ) -> dict[str, Any]:
     conv = str(convergence.get("verdict") or "")
     reason = str(convergence.get("reason") or synthesis.get("reason") or "")
-    decision = _decide_next_skill(synthesis, {}, convergence)
+    decision = _decide_next_skill(synthesis, state, convergence)
     suggested = str(decision.get("suggested") or "")
     if conv not in {"blocked", "failed"}:
         return _route(
@@ -145,9 +147,14 @@ def _primary_route(
             "continue QA revise loop",
             confidence="medium",
         )
+    recovery_skill = (
+        suggested
+        if suggested in {"samvil-evolve", "samvil-build", "samvil-retro"}
+        else "samvil-retro"
+    )
     return _route(
-        suggested or "samvil-retro",
-        "retro" if suggested == "samvil-retro" else "qa_recovery",
+        recovery_skill,
+        "retro" if recovery_skill == "samvil-retro" else "qa_recovery",
         str(decision.get("reason") or reason or "QA recovery requires user choice"),
         "review evolve, retro, or manual-fix options before continuing",
         confidence="high",

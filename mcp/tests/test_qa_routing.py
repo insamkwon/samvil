@@ -71,3 +71,30 @@ def test_materialize_qa_recovery_routing_writes_marker(tmp_path):
     summary = qa_routing_summary(tmp_path)
     assert summary["present"] is True
     assert summary["next_skill"] == "samvil-retro"
+
+
+def test_blocked_recovery_uses_project_state_for_canonical_evolve_trigger(
+    tmp_path,
+) -> None:
+    (tmp_path / "project.state.json").write_text(
+        json.dumps({"build_retries": 5, "qa_history": []}),
+        encoding="utf-8",
+    )
+    results = _results(["other:manual-review"])
+    results["synthesis"]["verdict"] = "PASS"
+
+    routing = build_qa_recovery_routing(tmp_path, results)
+
+    assert routing["primary_route"]["next_skill"] == "samvil-evolve"
+
+
+def test_blocked_recovery_never_routes_forward_from_inconsistent_pass(
+    tmp_path,
+) -> None:
+    results = _results(["other:manual-review"])
+    results["synthesis"]["verdict"] = "PASS"
+
+    routing = build_qa_recovery_routing(tmp_path, results)
+
+    assert routing["primary_route"]["next_skill"] == "samvil-retro"
+    assert routing["primary_route"]["route_type"] == "retro"
