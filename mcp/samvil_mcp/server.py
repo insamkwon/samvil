@@ -74,7 +74,11 @@ from .scaffold_targets import (
     evaluate_scaffold_target as _evaluate_scaffold_target,
 )
 from .ssot_io import atomic_write_text
-from .event_sanitizer import sanitize_event_data, sanitize_event_label
+from .event_sanitizer import (
+    sanitize_event_data,
+    sanitize_event_label,
+    sanitize_stage_label,
+)
 from .build_phase_a import (
     aggregate_build_phase_a as _aggregate_build_phase_a,
 )
@@ -796,7 +800,7 @@ async def save_event(
             stage_enum = Stage(stage)
         except ValueError:
             stage_enum = Stage.INTERVIEW  # default rather than crash
-            parsed_data.setdefault("stage_raw", stage)
+            parsed_data.setdefault("stage_raw", sanitize_stage_label(stage))
 
         store = await get_store()
         session = await store.get_session(session_id)

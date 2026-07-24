@@ -423,13 +423,14 @@ def test_save_event_never_persists_raw_prompt_email_or_token(
         result = json.loads(await save_event(
             sess["session_id"],
             raw_prompt,
-            "interview",
+            raw_prompt,
             json.dumps({"app": raw_prompt, "note": raw_prompt}),
         ))
         assert result["saved"] is True
         stored = await (await srv.get_store()).get_events(sess["session_id"])
         assert len(stored) == 1
         assert raw_prompt not in json.dumps(stored[0].data)
+        assert stored[0].data["stage_raw"] == "redacted_stage"
 
     _run(runner())
 
