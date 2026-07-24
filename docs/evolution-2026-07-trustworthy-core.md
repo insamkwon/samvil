@@ -1114,6 +1114,75 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `scripts/check-skill-wiring.py:43`, `scripts/check-skill-wiring.py:357`,
     `scripts/check-skill-wiring.py:382`, `scripts/check-skill-wiring.py:385`,
     `mcp/tests/test_skill_wiring.py:62`, `mcp/tests/test_skill_wiring.py:80`.
+- [x] **4.24 동시 stage 보상 소유권을 고유 전이 토큰으로 교정**
+  (초기 timestamp 기반 보상은 최신 전이를 되감지 않도록 좁혔지만 동일 timestamp와
+  트랜잭션 밖 previous stage 읽기가 남았다. 최종적으로 session row를 write
+  transaction 안에서 읽고 event id를 전이 소유권으로 저장·복원한다.)
+  - 중간 보정: `cdd2b01`; 최종 완료: `d18ac93`;
+    `mcp/samvil_mcp/event_store.py:293`, `mcp/samvil_mcp/event_store.py:314`,
+    `mcp/samvil_mcp/event_store.py:323`, `mcp/samvil_mcp/event_store.py:339`,
+    `mcp/samvil_mcp/event_store.py:379`, `mcp/tests/test_event_store.py:155`,
+    `mcp/tests/test_event_store.py:186`.
+- [x] **4.25 v3.3 백업 판정을 canonical seed 계약과 단일화**
+  (중간 수동 구조 검사는 parseable partial을 거부했지만 정식 validator와 다른
+  허용·거부 집합을 만들었다. 백업 판정도 `validate_seed`를 사용해 drift를 없앴다.)
+  - 중간 보정: `2980e38`; 최종 완료: `bd4d985`;
+    `mcp/samvil_mcp/migrate_v3_3.py:19`, `mcp/samvil_mcp/migrate_v3_3.py:27`,
+    `mcp/tests/test_migrate_v3_3.py:107`.
+- [x] **4.26 보호 SSOT 삭제 guard의 bounded expansion fail-closed**
+  (brace expansion 후보가 검사 상한을 넘으면 뒤쪽 보호 경로가 누락되지 않도록
+  전체 명령을 동적 위험 대상으로 차단한다.)
+  - 완료 증거: `672eda3`; `hooks/guard_destructive.py:607`,
+    `hooks/guard_destructive.py:643`, `mcp/tests/test_guard_destructive.py:312`.
+- [x] **4.27 rm 외 보호 SSOT 파괴 경로 차단**
+  (`truncate`, `/dev/null` 복사, shell output redirection으로 root/.samvil SSOT를
+  비우거나 덮어쓰는 명령을 동일 guard 경계에서 차단한다.)
+  - 완료 증거: `8ac1900`; `hooks/guard_destructive.py:708`,
+    `hooks/guard_destructive.py:1546`, `mcp/tests/test_guard_destructive.py:331`.
+- [x] **4.28 PM seed conversion의 MCP-free 복구 완료 의미론 보강**
+  (`pm_seed_converted`를 seed 성공 이벤트로 분류해 state 파일이 없을 때 진행 중으로
+  오인하지 않는다.)
+  - 완료 증거: `294f18b`; `mcp/samvil_mcp/event_store_reader.py:45`,
+    `mcp/tests/test_event_store_reader.py:238`.
+- [x] **4.29 알 수 없는 QA verdict의 이중 fail-closed**
+  (`resolve_stage_next_skill`은 기존 `None` 계약을 유지하고, 내부 decision helper도
+  missing/unknown verdict를 QA 잔류로 제한해 deploy 기본값으로 떨어지지 않는다.)
+  - 완료 증거: `8ad743f`; `mcp/samvil_mcp/chain_markers.py:117`,
+    `mcp/samvil_mcp/chain_markers.py:121`, `mcp/samvil_mcp/qa_finalize.py:338`,
+    `mcp/tests/test_chain_markers.py:223`, `mcp/tests/test_qa_smoke.py:823`.
+- [x] **4.30 대용량 semantic 검사 event-loop offload**
+  (코드와 실행 로그 분석을 worker thread로 보내 다른 MCP 요청의 이벤트 루프를
+  점유하지 않는다.)
+  - 완료 증거: `b55dace`; `mcp/samvil_mcp/server.py:1780`,
+    `mcp/tests/test_async_file_offload.py:142`.
+- [x] **4.31 rate budget worker lease heartbeat**
+  (장시간 살아 있는 build worker가 최초 acquire 시각만으로 만료되지 않도록 heartbeat
+  이벤트와 MCP tool을 추가하고, worker contract가 10분마다 lease를 갱신하게 한다.)
+  - 완료 증거: `70274c3`; `mcp/samvil_mcp/rate_budget.py:99`,
+    `mcp/samvil_mcp/rate_budget.py:152`, `mcp/samvil_mcp/server.py:2465`,
+    `mcp/samvil_mcp/build_phase_b.py:304`, `skills/samvil-build/SKILL.md:59`,
+    `mcp/tests/test_rate_budget.py:55`, `mcp/tests/test_rate_budget.py:74`.
+- [x] **4.32 canonical events JSONL line index로 누적 O(n²) 제거**
+  (파일 크기와 줄 수를 작은 sidecar index로 보존하고, size mismatch일 때만 전체
+  재계산해 file:line 증거의 정확성과 정상 경로 O(1) append를 함께 유지한다.)
+  - 완료 증거: `f12e17a`; `mcp/samvil_mcp/server.py:653`,
+    `mcp/samvil_mcp/server.py:663`, `mcp/samvil_mcp/server.py:678`,
+    `mcp/tests/test_orchestrator_mcp.py:411`.
+- [x] **4.33 일반 event와 trusted stage transition 신뢰 경계 분리**
+  (`save_event`는 telemetry-only로 저장하고 session stage를 바꾸지 않으며, user
+  verification 또는 PASS gate claim을 합성하지 않는다. orchestration 상태는
+  `complete_stage`의 trusted transition만 새 성공·실패로 인정한다.)
+  - 완료 증거: `5abe17d`; `mcp/samvil_mcp/server.py:733`,
+    `mcp/samvil_mcp/server.py:744`, `mcp/samvil_mcp/server.py:810`,
+    `mcp/samvil_mcp/server.py:1058`, `mcp/samvil_mcp/orchestrator.py:308`,
+    `mcp/tests/test_orchestrator_mcp.py:562`.
+- [x] **4.34 event payload 개인정보·자격증명 redaction**
+  (raw prompt를 event 호출에서 제거하고, DB/JSONL 저장 전 payload를 재귀 순회해
+  prompt·email·token·secret·oversized text를 bounded redaction한다.)
+  - 완료 증거: `d4130c2`; `mcp/samvil_mcp/event_sanitizer.py:32`,
+    `mcp/samvil_mcp/server.py:784`, `skills/samvil/SKILL.md:79`,
+    `mcp/tests/test_event_sanitizer.py:13`,
+    `mcp/tests/test_orchestrator_mcp.py:375`.
 
 ---
 
