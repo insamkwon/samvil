@@ -1261,15 +1261,15 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 - [x] **4.50 동일 timestamp event의 결정적 최신 결과 복원**
   (SQLite rowid로 newest-first total order를 만들고 orchestrator 입력에서 정확히
   뒤집어, 같은 시각의 후속 성공·실패 결과가 삽입 순서대로 최종 판정된다.)
-  - 완료 증거: `c0c68f4`; `mcp/samvil_mcp/event_store.py:409`,
-    `mcp/samvil_mcp/event_store.py:419`, `mcp/samvil_mcp/server.py:972`,
-    `mcp/tests/test_orchestrator_mcp.py:157`.
+  - 완료 증거: `c0c68f4`; `mcp/samvil_mcp/event_store.py:415`,
+    `mcp/samvil_mcp/event_store.py:425`, `mcp/samvil_mcp/server.py:972`,
+    `mcp/tests/test_orchestrator_mcp.py:189`.
 - [x] **4.51 Codex interview·seed 명령의 trusted completion 연결**
   (marker를 쓰기 전에 각 stage의 `complete_stage`가 성공해야 하며, 실패하면 다음
   skill로 진행하지 않는다.)
   - 완료 증거: `58661d5`; `references/codex-commands/samvil-interview.md:139`,
-    `references/codex-commands/samvil-seed.md:23`, `mcp/tests/test_host_parity.py:70`,
-    `mcp/tests/test_host_parity.py:77`.
+    `references/codex-commands/samvil-seed.md:23`, `mcp/tests/test_host_parity.py:75`,
+    `mcp/tests/test_host_parity.py:82`.
 - [x] **4.52 GitHub fine-grained PAT payload redaction**
   (`github_pat_` 장형 토큰도 중첩 payload 어디에서든 저장 전에 제거한다.)
   - 완료 증거: `75d0271`; `mcp/samvil_mcp/event_sanitizer.py:19`,
@@ -1278,23 +1278,43 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 - [x] **4.53 대량 telemetry 뒤의 stage 완료 이력 보존**
   (공개 조회 기본 limit은 유지하고 orchestration·completion 판정만 전체 session
   이력을 읽어 1,000건 이전 trusted transition을 잃지 않는다.)
-  - 완료 증거: `63421f1`; `mcp/samvil_mcp/event_store.py:399`,
-    `mcp/samvil_mcp/event_store.py:419`, `mcp/samvil_mcp/server.py:989`,
-    `mcp/samvil_mcp/server.py:1102`, `mcp/tests/test_orchestrator_mcp.py:98`.
+  - 완료 증거: `63421f1`; `mcp/samvil_mcp/event_store.py:405`,
+    `mcp/samvil_mcp/event_store.py:425`, `mcp/samvil_mcp/server.py:989`,
+    `mcp/samvil_mcp/server.py:1103`, `mcp/tests/test_orchestrator_mcp.py:129`.
 - [x] **4.54 줄바꿈 없는 canonical JSONL tail 안전 append**
   (기존 마지막 행이 newline 없이 끝나도 구분 newline을 같은 lock·rollback 경계에서
   추가해 새 이벤트가 독립 행과 정확한 file:line 증거를 유지한다.)
   - 완료 증거: `b138098`; `mcp/samvil_mcp/server.py:659`,
-    `mcp/samvil_mcp/server.py:696`, `mcp/tests/test_orchestrator_mcp.py:790`.
+    `mcp/samvil_mcp/server.py:696`, `mcp/tests/test_orchestrator_mcp.py:948`.
 - [x] **4.55 인터뷰 trusted completion의 실제 exit evidence 검증**
   (빈 프로젝트나 요약만 있는 프로젝트는 전진시키지 않고, non-empty summary와 최신
   `interview_to_seed` pass claim이 함께 있어야 canonical event·stage를 확정한다.
   스코프 보정으로 Codex 명령도 gate→claim→complete 순서를 명시했다.)
   - 완료 증거: `2c509dd`; `mcp/samvil_mcp/server.py:1099`,
-    `mcp/samvil_mcp/server.py:1213`, `mcp/tests/test_orchestrator_mcp.py:235`,
-    `mcp/tests/test_orchestrator_mcp.py:268`,
+    `mcp/samvil_mcp/server.py:1215`, `mcp/tests/test_orchestrator_mcp.py:267`,
+    `mcp/tests/test_orchestrator_mcp.py:300`,
     `references/codex-commands/samvil-interview.md:126`,
     `mcp/tests/test_skill_wiring.py:154`.
+- [x] **4.56 성공 stage completion의 canonical artifact 검증**
+  (seed·design·scaffold·build·QA는 각 단계의 정식 seed, blueprint, sanity 결과,
+  종료 코드, PASS qa-results가 없거나 손상되면 trusted event와 stage를 만들지 않는다.)
+  - 완료 증거: `89e5b17`; `mcp/samvil_mcp/server.py:1099`,
+    `mcp/samvil_mcp/server.py:1215`, `mcp/samvil_mcp/server.py:1274`,
+    `mcp/tests/test_orchestrator_mcp.py:345`.
+- [x] **4.57 scaffold·build canonical completion과 chain 순서 정렬**
+  (scaffold sanity 결과와 build gate PASS 뒤 각각 `complete_stage`가 성공해야만
+  다음 skill marker 또는 native chain을 실행해 session과 실행 흐름이 갈라지지 않는다.)
+  - 완료 증거: `3018ecf`; `skills/samvil-scaffold/SKILL.md:102`,
+    `skills/samvil-build/SKILL.md:102`,
+    `references/codex-commands/samvil-scaffold.md:20`,
+    `references/codex-commands/samvil-build.md:23`,
+    `mcp/tests/test_host_parity.py:75`, `mcp/tests/test_skill_wiring.py:278`.
+- [x] **4.58 동시 동일 stage completion의 transaction CAS**
+  (transaction 밖 precheck를 함께 통과해도 DB write lock 안에서 expected stage를
+  다시 비교해 정확히 한 호출만 event·JSONL·claim을 생성한다.)
+  - 완료 증거: `7928fa9`; `mcp/samvil_mcp/event_store.py:279`,
+    `mcp/samvil_mcp/event_store.py:302`, `mcp/samvil_mcp/server.py:1133`,
+    `mcp/tests/test_orchestrator_mcp.py:664`.
 
 ---
 
