@@ -77,6 +77,14 @@ def test_shell_c_safe_positional_arguments_pass() -> None:
         "perl -e \"unlink 'project.config.json'\"",
         "node -e \"require('fs').truncateSync('.samvil/claims.jsonl', 0)\"",
         "php -r \"unlink('interview-summary.md');\"",
+        "python3 -c \"import os; os.system('rm project.seed.json')\"",
+        "python3 -c \"import subprocess; subprocess.run(['rm', '.samvil/events.jsonl'])\"",
+        "node -e \"require('child_process').execSync('rm project.state.json')\"",
+        "python3 -c \"from pathlib import Path; Path('project.' + 'seed.json').unlink()\"",
+        "python3 -c \"import shutil; shutil.copyfile('/dev/null', 'project.seed.json')\"",
+        "ruby -e \"File.write('project.state.json', '')\"",
+        "node -e \"require('fs').createWriteStream('.samvil/claims.jsonl')\"",
+        "php -r \"fopen('interview-summary.md', 'w');\"",
     ],
 )
 def test_inline_language_runtime_cannot_mutate_protected_ssot(command: str) -> None:

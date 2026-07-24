@@ -98,9 +98,15 @@ INLINE_LANGUAGE_RUNTIME_OPTIONS = {
     "ruby": {"-e"},
 }
 INLINE_LANGUAGE_MUTATION = re.compile(
-    r"\b(?:delete|file_put_contents|remove|rename|replace|rmSync|rmtree|"
+    r"(?:\bFile\.write\b|\b(?:copyfile|createWriteStream|delete|file_put_contents|"
+    r"fopen|remove|rename|replace|rmSync|rmtree|"
     r"truncate|truncateSync|unlink|unlinkSync|write_bytes|write_text|"
-    r"writeFile|writeFileSync)\b",
+    r"writeFile|writeFileSync)\b)",
+    re.IGNORECASE,
+)
+INLINE_LANGUAGE_COMMAND_EXECUTION = re.compile(
+    r"\b(?:call|check_call|check_output|exec|execSync|popen|Popen|run|spawn|"
+    r"spawnSync|system)\b",
     re.IGNORECASE,
 )
 INLINE_LANGUAGE_WRITE_OPEN = re.compile(
@@ -787,11 +793,25 @@ def _inline_language_runtime_reason(
     }
     for payload in payloads:
         normalized = payload.replace("\\", "/")
+        previous = None
+        while normalized != previous:
+            previous = normalized
+            normalized = re.sub(r"(['\"])\s*\+\s*\1", "", normalized)
+
+        if INLINE_LANGUAGE_COMMAND_EXECUTION.search(normalized):
+            literals = [
+                match.group(2)
+                for match in re.finditer(r"(['\"])(.*?)(?<!\\)\1", normalized)
+            ]
+            command_candidates = literals + ([shlex.join(literals)] if literals else [])
+            if any(analyze_command(candidate) for candidate in command_candidates):
+                return "inline language runtime may mutate protected SAMVIL SSOT"
+
         if not any(path in normalized for path in protected_paths):
             continue
-        if INLINE_LANGUAGE_MUTATION.search(payload) or INLINE_LANGUAGE_WRITE_OPEN.search(
-            payload
-        ):
+        if INLINE_LANGUAGE_MUTATION.search(
+            normalized
+        ) or INLINE_LANGUAGE_WRITE_OPEN.search(normalized):
             return "inline language runtime may mutate protected SAMVIL SSOT"
     return None
 
