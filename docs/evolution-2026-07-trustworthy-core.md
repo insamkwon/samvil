@@ -361,6 +361,41 @@ v4.31이 시작한 방향의 완성이다.
     `mcp/samvil_mcp/benchmark.py:71`, `mcp/tests/test_benchmark.py:82`,
     `mcp/tests/test_benchmark.py:93`, `mcp/tests/test_benchmark.py:98`,
     `mcp/tests/test_benchmark.py:111`.
+- [x] **종료 검수: `bash -c` 위치 인자 우회 경로를 명령 의미 단위로 차단**
+  (스코프 보정: 개별 `rm`/`git`/SQL 문자열을 추가하는 대신 실제 shell의 `$0`, `$1`,
+  `$@` 위치 인자 의미를 먼저 복원한 뒤 기존 파괴 명령 분석기로 전달한다. 정적으로
+  해석할 수 없는 위치 인자 확장은 fail-closed 처리한다.)
+  - 완료 증거: `8f50896`; `hooks/guard_destructive.py:955`,
+    `hooks/guard_destructive.py:998`, `hooks/guard_destructive.py:1350`,
+    `hooks/guard_destructive.py:1359`, `mcp/tests/test_guard_destructive.py:56`.
+- [x] **종료 검수: SQL 주석·리터럴·방언을 토큰화해 파괴 구문을 판별**
+  (스코프 보정: `#` 주석이나 `DROP FOREIGN KEY` 재현만 정규식에 덧붙이지 않고,
+  주석과 문자열 리터럴을 제거한 토큰 스트림에서 DROP/TRUNCATE/DELETE/ALTER-DROP
+  문장군을 판정한다.)
+  - 완료 증거: `d50b137`; `hooks/guard_destructive.py:772`,
+    `hooks/guard_destructive.py:848`, `mcp/tests/test_guard_destructive.py:226`,
+    `mcp/tests/test_guard_destructive.py:233`.
+- [x] **종료 검수: 핵심 SSOT 삭제를 `rm` 옵션과 독립된 보호 정책으로 승격**
+  재귀 여부를 보기 전에 root SSOT와 `.samvil` 원장 경로를 판정해 `rm`, `rm -f`,
+  `$PWD/...` 형식을 동일하게 차단하고 cache 예외는 유지한다.
+  - 완료 증거: `07bc6a2`; `hooks/guard_destructive.py:26`,
+    `hooks/guard_destructive.py:585`, `hooks/guard_destructive.py:608`,
+    `mcp/tests/test_guard_destructive.py:254`.
+- [x] **종료 검수: 첫 stage state와 recovery marker의 동적 라우팅을 단일화**
+  orchestrator가 선택한 skill에서 state stage를 계산하고, PM interview recovery는 현재
+  config의 `--council`과 tier를 읽어 stale marker가 현재 결정을 덮지 못하게 한다.
+  - 완료 증거: `b097264`; `mcp/samvil_mcp/orchestrator.py:608`,
+    `mcp/samvil_mcp/orchestrator.py:728`, `mcp/samvil_mcp/chain_markers.py:110`,
+    `mcp/samvil_mcp/chain_markers.py:134`,
+    `references/codex-commands/samvil.md:33`,
+    `mcp/tests/test_contract_hooks.py:228`, `mcp/tests/test_contract_hooks.py:260`.
+- [x] **종료 검수: QA verdict와 convergence를 하나의 다음 단계 결정표로 통합**
+  `REVISE + continue`는 Ralph loop 안의 `samvil-qa`로 유지해 cross-stage gate와 marker를
+  쓰지 않고, failed/blocked convergence만 종료 경로로 보낸다.
+  - 완료 증거: `2be3b33`; `mcp/samvil_mcp/qa_finalize.py:323`,
+    `mcp/samvil_mcp/qa_finalize.py:338`, `hooks/contract-stage-end.sh:109`,
+    `hooks/contract-stage-end.sh:217`, `mcp/tests/test_qa_smoke.py:793`,
+    `mcp/tests/test_qa_smoke.py:806`, `mcp/tests/test_contract_hooks.py:336`.
 
 ---
 
