@@ -1313,34 +1313,104 @@ def _validate_blueprint_exit_evidence(
 
     if solution_type in {"web-app", "dashboard"}:
         _require_blueprint_name_list(blueprint, "screens", errors)
-        _require_blueprint_type(blueprint, "data_model", dict, errors)
+        _require_blueprint_nonempty_dict(blueprint, "data_model", errors)
         _require_blueprint_type(blueprint, "api_routes", list, errors)
         _require_blueprint_text(blueprint, "state_management", errors)
         _require_blueprint_text(blueprint, "auth_strategy", errors)
+        _require_blueprint_name_list(blueprint, "key_libraries", errors)
+        _require_component_structure(blueprint, errors)
+        _require_blueprint_nonempty_dict(blueprint, "routing", errors)
+        routing = blueprint.get("routing")
+        if isinstance(routing, dict) and any(
+            not isinstance(route, str)
+            or not route.strip()
+            or not isinstance(target, str)
+            or not target.strip()
+            for route, target in routing.items()
+        ):
+            errors.append("routing must map non-empty routes to non-empty targets")
+        if solution_type == "dashboard":
+            _require_blueprint_name_list(blueprint, "chart_components", errors)
+            data_sources = blueprint.get("data_sources")
+            if (
+                not isinstance(data_sources, list)
+                or not data_sources
+                or any(
+                    not isinstance(source, dict)
+                    or not isinstance(source.get("name"), str)
+                    or not source["name"].strip()
+                    or not isinstance(source.get("type"), str)
+                    or not source["type"].strip()
+                    for source in data_sources
+                )
+            ):
+                errors.append("data_sources must describe at least one named source")
+            if "refresh_interval" not in blueprint:
+                errors.append("refresh_interval is required")
+            _require_blueprint_type(blueprint, "alert_thresholds", list, errors)
     elif solution_type == "mobile-app":
         _require_blueprint_name_list(blueprint, "screens", errors)
-        _require_blueprint_type(blueprint, "navigation", dict, errors)
-        _require_blueprint_type(blueprint, "data_model", dict, errors)
+        _require_blueprint_nonempty_dict(blueprint, "navigation", errors)
+        navigation = blueprint.get("navigation")
+        if isinstance(navigation, dict):
+            _require_nested_text(navigation, "navigation", "type", errors)
+            _require_nested_type(navigation, "navigation", "tabs", list, errors)
+        _require_blueprint_nonempty_dict(blueprint, "data_model", errors)
         _require_blueprint_text(blueprint, "state_management", errors)
         _require_blueprint_type(blueprint, "native_modules", list, errors)
-        _require_blueprint_type(blueprint, "key_libraries", list, errors)
-        _require_blueprint_type(blueprint, "component_structure", dict, errors)
+        _require_blueprint_name_list(blueprint, "key_libraries", errors)
+        _require_component_structure(blueprint, errors)
     elif solution_type == "automation":
         _require_blueprint_text(blueprint, "entry_point", errors)
-        _require_blueprint_type(blueprint, "modules", dict, errors)
-        _require_blueprint_type(blueprint, "fixtures", dict, errors)
+        _require_blueprint_nonempty_dict(blueprint, "modules", errors)
+        modules = blueprint.get("modules")
+        if isinstance(modules, dict):
+            _require_nested_name_list(modules, "modules", "core", errors)
+            _require_nested_type(modules, "modules", "utils", list, errors)
+        _require_blueprint_nonempty_dict(blueprint, "fixtures", errors)
+        fixtures = blueprint.get("fixtures")
+        if isinstance(fixtures, dict):
+            _require_nested_text(fixtures, "fixtures", "input", errors)
+            _require_nested_text(fixtures, "fixtures", "expected", errors)
         _require_blueprint_type(blueprint, "dependencies", list, errors)
         _require_blueprint_text(blueprint, "error_handling", errors)
-        _require_blueprint_type(blueprint, "execution", dict, errors)
+        _require_blueprint_nonempty_dict(blueprint, "execution", errors)
+        execution = blueprint.get("execution")
+        if isinstance(execution, dict):
+            _require_nested_text(execution, "execution", "type", errors)
+            if "schedule" not in execution:
+                errors.append("execution.schedule is required")
     elif solution_type == "game":
         _require_blueprint_name_list(blueprint, "scenes", errors)
-        _require_blueprint_type(blueprint, "entities", list, errors)
-        _require_blueprint_type(blueprint, "game_config", dict, errors)
-        _require_blueprint_type(blueprint, "assets", dict, errors)
-        _require_blueprint_type(blueprint, "scene_flow", dict, errors)
-        _require_blueprint_type(blueprint, "key_libraries", list, errors)
+        _require_blueprint_name_list(blueprint, "entities", errors)
+        _require_blueprint_nonempty_dict(blueprint, "game_config", errors)
+        game_config = blueprint.get("game_config")
+        if isinstance(game_config, dict):
+            for dimension in ("width", "height"):
+                value = game_config.get(dimension)
+                if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                    errors.append(f"game_config.{dimension} must be a positive number")
+            _require_nested_text(game_config, "game_config", "physics", errors)
+            _require_nested_text(game_config, "game_config", "input", errors)
+        _require_blueprint_nonempty_dict(blueprint, "assets", errors)
+        assets = blueprint.get("assets")
+        if isinstance(assets, dict):
+            _require_nested_type(assets, "assets", "sprites", list, errors)
+            _require_nested_type(assets, "assets", "audio", list, errors)
+        _require_blueprint_nonempty_dict(blueprint, "scene_flow", errors)
+        _require_blueprint_name_list(blueprint, "key_libraries", errors)
         _require_blueprint_text(blueprint, "state_management", errors)
-        _require_blueprint_type(blueprint, "component_structure", dict, errors)
+        component_structure = blueprint.get("component_structure")
+        _require_blueprint_nonempty_dict(blueprint, "component_structure", errors)
+        if isinstance(component_structure, dict):
+            for field in ("scenes", "entities", "config"):
+                _require_nested_type(
+                    component_structure,
+                    "component_structure",
+                    field,
+                    list,
+                    errors,
+                )
     else:
         errors.append(f"unsupported solution_type: {solution_type or '<missing>'}")
 
@@ -1358,6 +1428,70 @@ def _require_blueprint_type(
 ) -> None:
     if not isinstance(blueprint.get(field), expected_type):
         errors.append(f"{field} must be a {expected_type.__name__}")
+
+
+def _require_blueprint_nonempty_dict(
+    blueprint: dict[str, Any],
+    field: str,
+    errors: list[str],
+) -> None:
+    value = blueprint.get(field)
+    if not isinstance(value, dict) or not value:
+        errors.append(f"{field} must be a non-empty dict")
+
+
+def _require_nested_type(
+    container: dict[str, Any],
+    parent: str,
+    field: str,
+    expected_type: type,
+    errors: list[str],
+) -> None:
+    if not isinstance(container.get(field), expected_type):
+        errors.append(f"{parent}.{field} must be a {expected_type.__name__}")
+
+
+def _require_nested_text(
+    container: dict[str, Any],
+    parent: str,
+    field: str,
+    errors: list[str],
+) -> None:
+    value = container.get(field)
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{parent}.{field} must be a non-empty string")
+
+
+def _require_nested_name_list(
+    container: dict[str, Any],
+    parent: str,
+    field: str,
+    errors: list[str],
+) -> None:
+    value = container.get(field)
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+    ):
+        errors.append(f"{parent}.{field} must be a non-empty list of names")
+
+
+def _require_component_structure(
+    blueprint: dict[str, Any],
+    errors: list[str],
+) -> None:
+    _require_blueprint_nonempty_dict(blueprint, "component_structure", errors)
+    value = blueprint.get("component_structure")
+    if isinstance(value, dict):
+        _require_nested_type(value, "component_structure", "shared_ui", list, errors)
+        _require_nested_type(
+            value,
+            "component_structure",
+            "feature_components",
+            dict,
+            errors,
+        )
 
 
 def _require_blueprint_text(

@@ -107,6 +107,12 @@ def _write_valid_blueprint(project_root: Path) -> None:
                 "api_routes": [],
                 "state_management": "useState",
                 "auth_strategy": "none",
+                "key_libraries": ["react"],
+                "component_structure": {
+                    "shared_ui": ["Button"],
+                    "feature_components": {"tasks": ["TaskList"]},
+                },
+                "routing": {"/": "TaskBoard"},
             }
         ),
         encoding="utf-8",
@@ -619,6 +625,111 @@ def test_design_completion_rejects_nonempty_but_invalid_blueprint(
 @pytest.mark.parametrize(
     ("solution_type", "blueprint"),
     [
+        (
+            "web-app",
+            {
+                "screens": ["Home"],
+                "data_model": {},
+                "api_routes": [],
+                "state_management": "useState",
+                "auth_strategy": "none",
+                "key_libraries": [],
+                "component_structure": {},
+                "routing": {},
+            },
+        ),
+        (
+            "dashboard",
+            {
+                "screens": ["Dashboard"],
+                "data_model": {},
+                "api_routes": [],
+                "state_management": "useState",
+                "auth_strategy": "none",
+                "key_libraries": [],
+                "component_structure": {},
+                "routing": {},
+            },
+        ),
+        (
+            "mobile-app",
+            {
+                "screens": ["HomeScreen"],
+                "navigation": {},
+                "data_model": {},
+                "state_management": "zustand",
+                "native_modules": [],
+                "key_libraries": [],
+                "component_structure": {},
+            },
+        ),
+        (
+            "automation",
+            {
+                "entry_point": "src/main.py",
+                "modules": {},
+                "fixtures": {},
+                "dependencies": [],
+                "error_handling": "retry_with_logging",
+                "execution": {},
+            },
+        ),
+        (
+            "game",
+            {
+                "scenes": ["GameScene"],
+                "entities": [],
+                "game_config": {},
+                "assets": {},
+                "scene_flow": {},
+                "key_libraries": [],
+                "state_management": "phaser-scene",
+                "component_structure": {},
+            },
+        ),
+    ],
+)
+def test_blueprint_validator_rejects_empty_nested_contracts(
+    solution_type, blueprint
+) -> None:
+    from samvil_mcp.server import (
+        OrchestratorError,
+        _validate_blueprint_exit_evidence,
+    )
+
+    with pytest.raises(OrchestratorError, match="design exit evidence is invalid"):
+        _validate_blueprint_exit_evidence(blueprint, solution_type)
+
+
+@pytest.mark.parametrize(
+    ("solution_type", "blueprint"),
+    [
+        (
+            "dashboard",
+            {
+                "screens": ["DashboardOverview"],
+                "data_model": {"Metric": {"value": "number"}},
+                "api_routes": [],
+                "state_management": "useState",
+                "auth_strategy": "none",
+                "key_libraries": ["recharts"],
+                "component_structure": {
+                    "shared_ui": ["Card"],
+                    "feature_components": {"charts": ["LineChart"]},
+                },
+                "routing": {"/": "DashboardOverview"},
+                "chart_components": ["LineChart"],
+                "data_sources": [
+                    {
+                        "name": "primary",
+                        "type": "localStorage",
+                        "refresh_interval": None,
+                    }
+                ],
+                "refresh_interval": None,
+                "alert_thresholds": [],
+            },
+        ),
         (
             "automation",
             {
