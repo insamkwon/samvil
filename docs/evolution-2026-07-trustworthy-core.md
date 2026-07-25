@@ -1693,9 +1693,9 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 - [x] **4.125 migration 비협력 writer의 교체 직전 seed 덮어쓰기 복구**
   (기대 seed inode를 snapshot으로 보존하고, 교체 후 snapshot 변경을 감지하면
   동시 writer의 원문을 복원한 뒤 재시도를 요구한다.)
-  - 완료 증거: `4f43bca`, `5935cfa`; `mcp/samvil_mcp/migrate_v3_3.py:85`,
-    `mcp/samvil_mcp/migrate_v3_3.py:101`, `mcp/samvil_mcp/migrate_v3_3.py:183`,
-    `mcp/tests/test_migrate_v3_3.py:348`, `mcp/tests/test_migrate_v3_3.py:375`.
+  - 완료 증거: `5935cfa`, `375f404`; `mcp/samvil_mcp/migrate_v3_3.py:90`,
+    `mcp/samvil_mcp/migrate_v3_3.py:122`, `mcp/samvil_mcp/migrate_v3_3.py:241`,
+    `mcp/tests/test_migrate_v3_3.py:402`, `mcp/tests/test_migrate_v3_3.py:491`.
 - [x] **4.126 brace-expanded directory EventStore 별칭 추적 보강**
   (mkdir 인자에 쉘 brace expansion이 있어도 실제 directory 후보를 모두 기록해
   후속 symlink destination과 canonical EventStore overwrite를 놓치지 않는다.)
@@ -1704,8 +1704,8 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/tests/test_guard_destructive.py:852`.
 - [x] **4.127 깊은 eval 입력의 fail-closed 시간 경계 보강**
   (분석 깊이 제한을 넘는 반복 eval을 즉시 거절해 보호 hook이 timeout으로 우회되지 않는다.)
-  - 완료 증거: `a456225`; `hooks/guard_destructive.py:2468`,
-    `mcp/tests/test_guard_destructive.py:1288`.
+  - 완료 증거: `a456225`; `hooks/guard_destructive.py:2518`,
+    `mcp/tests/test_guard_destructive.py:1419`.
 - [x] **4.128 outbox canonical event 의미 보존**
   (crash 복구 시 pending DB enum이 아니라 원래 event_type_raw와 canonical stage mapping을
   사용해 정상 경로와 동일한 audit event를 append한다.)
@@ -1738,29 +1738,29 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 - [x] **4.133 migration backup 검증과 seed 교체의 crash-safe 원자성**
   (검증된 backup을 잠금 안에서 보존하고 결과 파일을 단일 atomic replace로 반영하며,
   최종 backup 변조가 감지되면 원본 seed를 복구한다.)
-  - 완료 증거: `5935cfa`; `mcp/samvil_mcp/migrate_v3_3.py:37`,
-    `mcp/samvil_mcp/migrate_v3_3.py:85`, `mcp/samvil_mcp/migrate_v3_3.py:189`,
-    `mcp/tests/test_migrate_v3_3.py:375`.
+  - 완료 증거: `5935cfa`, `8fc4990`; `mcp/samvil_mcp/migrate_v3_3.py:90`,
+    `mcp/samvil_mcp/migrate_v3_3.py:122`, `mcp/samvil_mcp/migrate_v3_3.py:241`,
+    `mcp/tests/test_migrate_v3_3.py:433`.
 - [x] **4.134 기존 SSOT hard-link와 brace-expanded sed/perl overwrite 차단**
   (canonical seed와 동일 inode인 기존 alias 및 쉘 brace 확장으로 숨긴 in-place 편집 대상도
   protected SSOT overwrite로 판정해 destructive guard 우회를 막는다.)
-  - 완료 증거: `2c32f78`; `hooks/guard_destructive.py:667`,
-    `hooks/guard_destructive.py:1358`, `hooks/guard_destructive.py:1370`,
-    `mcp/tests/test_guard_destructive.py:785`, `mcp/tests/test_guard_destructive.py:970`.
+  - 완료 증거: `2c32f78`, `ac96c56`; `hooks/guard_destructive.py:675`,
+    `hooks/guard_destructive.py:1414`, `hooks/guard_destructive.py:1406`,
+    `mcp/tests/test_guard_destructive.py:785`, `mcp/tests/test_guard_destructive.py:1051`.
 - [x] **4.135 command-local cwd와 oversized brace mutation의 fail-closed 보호**
   (cd/env -C로 바뀐 작업 디렉터리를 보호 경로 해석에 반영하고, expansion limit을 넘는
   redirection·truncate·sed·perl·tee 대상은 원문 하나로 축소하지 않고 차단한다.)
-  - 완료 증거: `b51ab9c`, `ac96c56`; `hooks/guard_destructive.py:483`,
-    `hooks/guard_destructive.py:1195`, `hooks/guard_destructive.py:1340`,
-    `mcp/tests/test_guard_destructive.py:800`, `mcp/tests/test_guard_destructive.py:817`,
-    `mcp/tests/test_guard_destructive.py:980`.
+  - 완료 증거: `8d4eb54`, `ac96c56`; `hooks/guard_destructive.py:485`,
+    `hooks/guard_destructive.py:1199`, `hooks/guard_destructive.py:1344`,
+    `mcp/tests/test_guard_destructive.py:800`, `mcp/tests/test_guard_destructive.py:842`,
+    `mcp/tests/test_guard_destructive.py:1061`.
 - [x] **4.136 migration journal 기반 중단 복구와 최초 backup identity 보존**
   (seed 교체 전 journal에 원본·결과·backup 원문을 durable하게 남기고, 재시작 시 불일치를
   복구하며, 기존 valid backup이 다른 valid seed로 바뀌어도 최초 원문을 덮어쓰지 않는다.)
-  - 완료 증거: `375f404`; `mcp/samvil_mcp/migrate_v3_3.py:90`,
-    `mcp/samvil_mcp/migrate_v3_3.py:214`, `mcp/samvil_mcp/migrate_v3_3.py:240`,
+  - 완료 증거: `8fc4990`; `mcp/samvil_mcp/migrate_v3_3.py:90`,
+    `mcp/samvil_mcp/migrate_v3_3.py:217`, `mcp/samvil_mcp/migrate_v3_3.py:241`,
     `mcp/tests/test_migrate_v3_3.py:402`, `mcp/tests/test_migrate_v3_3.py:433`,
-    `mcp/tests/test_migrate_v3_3.py:463`.
+    `mcp/tests/test_migrate_v3_3.py:491`.
 
 ---
 
