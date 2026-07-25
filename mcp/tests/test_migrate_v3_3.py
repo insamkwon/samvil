@@ -284,6 +284,36 @@ def test_apply_migration_holds_backup_lock_through_seed_replace(
     assert json.loads(seed_path.read_text())["schema_version"] == "3.3"
 
 
+def test_apply_migration_does_not_overwrite_seed_changed_between_check_and_replace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from samvil_mcp import migrate_v3_3 as migration
+
+    seed_path = tmp_path / "project.seed.json"
+    original_text = json.dumps(_seed())
+    seed_path.write_text(original_text)
+    concurrent_seed = _seed()
+    concurrent_seed["name"] = "written-after-final-check"
+    concurrent_text = json.dumps(concurrent_seed)
+    real_atomic_write = migration.atomic_write_text_unlocked
+    seed_write_calls = 0
+
+    def race_on_seed_replace(path, text, **kwargs):
+        nonlocal seed_write_calls
+        if Path(path) == seed_path:
+            seed_write_calls += 1
+            if seed_write_calls == 1:
+                seed_path.write_text(concurrent_text)
+        return real_atomic_write(path, text, **kwargs)
+
+    monkeypatch.setattr(migration, "atomic_write_text_unlocked", race_on_seed_replace)
+
+    with pytest.raises(RuntimeError, match="seed changed during migration"):
+        apply_migration(tmp_path)
+
+    assert seed_path.read_text() == concurrent_text
+
+
 def test_migrate_seed_v3_3_mcp_tool(tmp_path: Path) -> None:
     from samvil_mcp.server import migrate_seed_v3_3
 

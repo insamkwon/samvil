@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +59,31 @@ def _ensure_verified_backup(
         raise OSError(f"backup verification failed: {exc}") from exc
     if written_text != seed_text or written_seed != seed:
         raise OSError("backup verification failed: content mismatch")
+
+
+def _replace_seed_if_unchanged(
+    seed_path: Path,
+    expected_text: str,
+    migrated_text: str,
+) -> None:
+    """Replace the seed only if an in-place writer did not mutate its inode."""
+    snapshot_path = seed_path.with_name(
+        f".{seed_path.name}.migration-snapshot-{uuid.uuid4().hex}"
+    )
+    try:
+        os.link(seed_path, snapshot_path)
+        if snapshot_path.read_text(encoding="utf-8") != expected_text:
+            raise RuntimeError("seed changed during migration; retry from current state")
+        atomic_write_text_unlocked(seed_path, migrated_text)
+        snapshot_text = snapshot_path.read_text(encoding="utf-8")
+        if snapshot_text != expected_text:
+            atomic_write_text_unlocked(seed_path, snapshot_text)
+            raise RuntimeError("seed changed during migration; retry from current state")
+    finally:
+        try:
+            snapshot_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _migrate_seed_dict(seed: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -113,8 +140,9 @@ def apply_migration(project_root: str | Path) -> dict[str, Any]:
                     raise RuntimeError(
                         "seed changed during migration; retry from current state"
                     )
-                atomic_write_text_unlocked(
+                _replace_seed_if_unchanged(
                     seed_path,
+                    seed_text,
                     json.dumps(migrated, indent=2, ensure_ascii=False) + "\n",
                 )
             finally:
