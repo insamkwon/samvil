@@ -351,7 +351,10 @@ async def test_rootless_legacy_migration_waits_for_project_attach_before_rewind(
     ) is False
 
 
-@pytest.mark.parametrize("failure_mode", ["marker", "database"])
+@pytest.mark.parametrize(
+    "failure_mode",
+    ["marker", "marker_persistent", "database"],
+)
 @pytest.mark.asyncio
 async def test_trusted_transition_migration_restores_file_ssot_when_recovery_fails(
     tmp_path,
@@ -400,6 +403,20 @@ async def test_trusted_transition_migration_restores_file_ssot_when_recovery_fai
             fail_recovery_marker,
         )
         expected_error = "injected recovery marker failure"
+    elif failure_mode == "marker_persistent":
+        real_atomic_write = event_store_module.atomic_write_text_unlocked
+
+        def fail_recovery_marker_persistently(path, text, **kwargs):
+            if path.name == "next-skill.json":
+                raise OSError("injected persistent recovery marker failure")
+            return real_atomic_write(path, text, **kwargs)
+
+        monkeypatch.setattr(
+            event_store_module,
+            "atomic_write_text_unlocked",
+            fail_recovery_marker_persistently,
+        )
+        expected_error = "injected persistent recovery marker failure"
     else:
         real_execute = aiosqlite.Connection.execute
 

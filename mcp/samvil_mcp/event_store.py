@@ -125,11 +125,20 @@ def _restore_legacy_recovery_files(
     backups: dict[Path, str | None],
 ) -> None:
     """Restore file contents while the caller still holds each file lock."""
+    failures: list[Exception] = []
     for path, original in reversed(list(backups.items())):
-        if original is None:
-            path.unlink(missing_ok=True)
-        else:
-            atomic_write_text_unlocked(path, original)
+        try:
+            if original is None:
+                path.unlink(missing_ok=True)
+            else:
+                atomic_write_text_unlocked(path, original)
+        except Exception as exc:
+            failures.append(exc)
+    if failures:
+        details = "; ".join(str(failure) for failure in failures)
+        raise RuntimeError(
+            f"legacy recovery compensation failed: {details}"
+        ) from ExceptionGroup("legacy recovery compensation failures", failures)
 
 
 def _prepare_legacy_recovery_files(
@@ -195,8 +204,17 @@ def _prepare_legacy_recovery_files(
                         host_name = raw_host
             marker = _build_chain_marker(host_name, "samvil")
             atomic_write_text_unlocked(marker_path, json.dumps(marker, indent=2))
-    except Exception:
-        _restore_legacy_recovery_files(backups)
+    except Exception as recovery_error:
+        try:
+            _restore_legacy_recovery_files(backups)
+        except Exception as compensation_error:
+            raise RuntimeError(
+                "legacy recovery failed and compensation was incomplete: "
+                f"{recovery_error}; {compensation_error}"
+            ) from ExceptionGroup(
+                "legacy recovery and compensation failures",
+                [recovery_error, compensation_error],
+            )
         raise
     return backups
 
