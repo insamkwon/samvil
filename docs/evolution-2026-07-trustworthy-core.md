@@ -1773,6 +1773,11 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   - 완료 증거: `c5c1a1e`; `hooks/guard_destructive.py:2613`,
     `hooks/guard_destructive.py:2631`, `hooks/guard_destructive.py:2647`,
     `mcp/tests/test_guard_destructive.py:907`.
+- [x] **4.139 모델링하지 않은 directory-stack index fail-closed**
+  (pushd/popd의 +0·+N·-N처럼 현재 분석기가 정확히 재현하지 못하는 stack index 문법은
+  추정 경로로 진행하지 않고 명시적 inspection failure로 차단한다.)
+  - 완료 증거: `8c20cad`; `hooks/guard_destructive.py:2598`,
+    `hooks/guard_destructive.py:2604`, `mcp/tests/test_guard_destructive.py:935`.
 
 ---
 
