@@ -710,13 +710,19 @@ def test_blueprint_validator_rejects_empty_nested_contracts(
         ("web-app", "missing_mobile_considerations"),
         ("web-app", "invalid_state_management"),
         ("web-app", "invalid_api_route"),
+        ("web-app", "unknown_routing_target"),
         ("dashboard", "invalid_data_source_type"),
+        ("dashboard", "unknown_routing_target"),
         ("mobile-app", "invalid_navigation_type"),
         ("mobile-app", "invalid_tab"),
+        ("mobile-app", "empty_tabs"),
+        ("mobile-app", "unknown_tab_screen"),
         ("automation", "invalid_dependency"),
         ("automation", "invalid_execution_type"),
         ("automation", "invalid_error_handling"),
         ("game", "invalid_scene_flow"),
+        ("game", "unknown_scene_source"),
+        ("game", "unknown_scene_target"),
         ("game", "invalid_asset"),
     ],
 )
@@ -813,12 +819,18 @@ def test_blueprint_validator_rejects_invalid_leaf_contracts(
         blueprint["state_management"] = "redux-ish"
     elif case == "invalid_api_route":
         blueprint["api_routes"] = [42]
+    elif case == "unknown_routing_target":
+        blueprint["routing"]["/"] = "MissingScreen"
     elif case == "invalid_data_source_type":
         blueprint["data_sources"][0]["type"] = "spreadsheet-ish"
     elif case == "invalid_navigation_type":
         blueprint["navigation"]["type"] = "carousel"
     elif case == "invalid_tab":
         blueprint["navigation"]["tabs"] = [{"name": "Home"}]
+    elif case == "empty_tabs":
+        blueprint["navigation"]["tabs"] = []
+    elif case == "unknown_tab_screen":
+        blueprint["navigation"]["tabs"][0]["screen"] = "MissingScreen"
     elif case == "invalid_dependency":
         blueprint["dependencies"] = [42]
     elif case == "invalid_execution_type":
@@ -827,6 +839,10 @@ def test_blueprint_validator_rejects_invalid_leaf_contracts(
         blueprint["error_handling"] = "ignore_everything"
     elif case == "invalid_scene_flow":
         blueprint["scene_flow"] = {"BootScene": 42}
+    elif case == "unknown_scene_source":
+        blueprint["scene_flow"] = {"MissingScene": "GameScene"}
+    elif case == "unknown_scene_target":
+        blueprint["scene_flow"] = {"BootScene": "MissingScene"}
     elif case == "invalid_asset":
         blueprint["assets"]["sprites"] = [42]
 

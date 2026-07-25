@@ -1384,6 +1384,27 @@ def _validate_blueprint_exit_evidence(
             for route, target in routing.items()
         ):
             errors.append("routing must map non-empty routes to non-empty targets")
+        screens = blueprint.get("screens")
+        if isinstance(routing, dict) and isinstance(screens, list):
+            screen_names = {
+                screen.strip()
+                for screen in screens
+                if isinstance(screen, str) and screen.strip()
+            }
+            unknown_targets = sorted(
+                {
+                    target.strip()
+                    for target in routing.values()
+                    if isinstance(target, str)
+                    and target.strip()
+                    and target.strip() not in screen_names
+                }
+            )
+            if unknown_targets:
+                errors.append(
+                    "routing targets must reference screens: "
+                    + ", ".join(unknown_targets)
+                )
         if solution_type == "dashboard":
             _require_blueprint_name_list(blueprint, "chart_components", errors)
             data_sources = blueprint.get("data_sources")
@@ -1419,6 +1440,8 @@ def _validate_blueprint_exit_evidence(
             )
             _require_nested_type(navigation, "navigation", "tabs", list, errors)
             tabs = navigation.get("tabs")
+            if navigation.get("type") == "tabs" and isinstance(tabs, list) and not tabs:
+                errors.append("navigation.tabs must be non-empty for tabs navigation")
             if isinstance(tabs, list) and any(
                 not isinstance(tab, dict)
                 or any(
@@ -1431,6 +1454,28 @@ def _validate_blueprint_exit_evidence(
                 errors.append(
                     "navigation.tabs must contain named screen and icon mappings"
                 )
+            screens = blueprint.get("screens")
+            if isinstance(tabs, list) and isinstance(screens, list):
+                screen_names = {
+                    screen.strip()
+                    for screen in screens
+                    if isinstance(screen, str) and screen.strip()
+                }
+                unknown_tab_screens = sorted(
+                    {
+                        str(tab.get("screen")).strip()
+                        for tab in tabs
+                        if isinstance(tab, dict)
+                        and isinstance(tab.get("screen"), str)
+                        and str(tab["screen"]).strip()
+                        and str(tab["screen"]).strip() not in screen_names
+                    }
+                )
+                if unknown_tab_screens:
+                    errors.append(
+                        "navigation tab screens must reference screens: "
+                        + ", ".join(unknown_tab_screens)
+                    )
         _require_blueprint_nonempty_dict(blueprint, "data_model", errors)
         _validate_blueprint_data_model(blueprint, errors)
         _require_blueprint_enum(
@@ -1510,6 +1555,28 @@ def _validate_blueprint_exit_evidence(
             for scene, target in scene_flow.items()
         ):
             errors.append("scene_flow must map non-empty scenes to non-empty targets")
+        scenes = blueprint.get("scenes")
+        if isinstance(scene_flow, dict) and isinstance(scenes, list):
+            scene_names = {
+                scene.strip()
+                for scene in scenes
+                if isinstance(scene, str) and scene.strip()
+            }
+            unknown_scenes = sorted(
+                {
+                    scene_name.strip()
+                    for source, target in scene_flow.items()
+                    for scene_name in (source, target)
+                    if isinstance(scene_name, str)
+                    and scene_name.strip()
+                    and scene_name.strip() not in scene_names
+                }
+            )
+            if unknown_scenes:
+                errors.append(
+                    "scene_flow entries must reference scenes: "
+                    + ", ".join(unknown_scenes)
+                )
         _require_blueprint_name_list(blueprint, "key_libraries", errors)
         _require_blueprint_enum(
             blueprint,
