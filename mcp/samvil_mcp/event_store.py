@@ -363,6 +363,13 @@ class EventStore:
                 )
                 trusted_count = int((await trusted_cursor.fetchone())[0])
                 current_stage = str(row[1] or "interview")
+                trusted_file_mismatch = trusted_count > 0 and (
+                    (file_stage and file_stage != current_stage)
+                    or marker_skill != f"samvil-{current_stage}"
+                )
+                if trusted_file_mismatch:
+                    await db.rollback()
+                    return False
                 needs_revalidation = trusted_count == 0 and (
                     current_stage != "interview"
                     or (file_stage and file_stage != "interview")

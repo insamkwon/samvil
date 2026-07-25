@@ -413,6 +413,47 @@ async def test_rootless_attach_revalidates_a_stale_chain_marker(tmp_path) -> Non
     assert json.loads(marker_path.read_text())["next_skill"] == "samvil-interview"
 
 
+@pytest.mark.asyncio
+async def test_rootless_attach_rejects_file_marker_mismatch_after_trusted_transition(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "rootless-trusted-mismatch.db"
+    project_root = tmp_path / "legacy-project"
+    (project_root / ".samvil").mkdir(parents=True)
+    state_path = project_root / "project.state.json"
+    marker_path = project_root / ".samvil" / "next-skill.json"
+    state_path.write_text(
+        json.dumps({"session_id": "session", "current_stage": "build"}),
+        encoding="utf-8",
+    )
+    marker_path.write_text(
+        json.dumps({"next_skill": "samvil-build", "from_stage": "samvil-scaffold"}),
+        encoding="utf-8",
+    )
+    _create_rootless_legacy_trust_db(db_path)
+
+    store = EventStore(str(db_path))
+    await store.initialize()
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE sessions SET current_stage = 'seed', stage_transition_id = 'trusted' "
+            "WHERE id = 'session'"
+        )
+        db.execute(
+            "UPDATE events SET trusted_transition = 1 WHERE id = 'legacy'"
+        )
+
+    assert await store.recover_legacy_session_project_root(
+        "session",
+        str(project_root),
+    ) is False
+    recovered = await store.get_session("session")
+    assert recovered is not None
+    assert recovered.project_root == ""
+    assert json.loads(state_path.read_text())["current_stage"] == "build"
+    assert json.loads(marker_path.read_text())["next_skill"] == "samvil-build"
+
+
 @pytest.mark.parametrize(
     "failure_mode",
     ["marker", "marker_persistent", "database"],
