@@ -731,6 +731,19 @@ def test_new_event_store_symlink_directory_destination_cannot_bypass_guard(
     assert reason == "protected SAMVIL EventStore overwrite"
 
 
+def test_event_store_hard_link_cannot_create_an_unprotected_write_alias(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    alias = tmp_path / "event-store-hard-link.db"
+
+    reason = guard.analyze_command(
+        f"ln ~/.samvil/samvil.db {alias} && cp /tmp/forged {alias}"
+    )
+
+    assert reason == "protected SAMVIL EventStore hard link"
+
+
 @pytest.mark.parametrize(
     "creator",
     [

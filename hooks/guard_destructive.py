@@ -680,14 +680,8 @@ def _literal_path_key(target: str) -> str | None:
         return None
 
 
-def _register_literal_symlink_alias(
-    executable: str,
-    args: list[str],
-    aliases: dict[str, str],
-    alias_literals: dict[str, str],
-    known_directories: set[str],
-) -> bool:
-    if executable != "ln" or not any(
+def _ln_is_symbolic(args: list[str]) -> bool:
+    return any(
         token == "--symbolic"
         or (
             token.startswith("-")
@@ -695,7 +689,45 @@ def _register_literal_symlink_alias(
             and "s" in token[1:]
         )
         for token in args
-    ):
+    )
+
+
+def _literal_ln_sources(args: list[str]) -> list[str]:
+    target_directory: str | None = None
+    operands: list[str] = []
+    literal_operands = False
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if literal_operands:
+            operands.append(token)
+        elif token == "--":
+            literal_operands = True
+        elif token in {"-t", "--target-directory"} and index + 1 < len(args):
+            target_directory = args[index + 1]
+            index += 1
+        elif token.startswith("--target-directory="):
+            target_directory = token.split("=", 1)[1]
+        elif token.startswith("-t") and len(token) > 2:
+            target_directory = token[2:]
+        elif token in {"-S", "--suffix"}:
+            index += 1
+        elif not token.startswith("-") or token == "-":
+            operands.append(token)
+        index += 1
+    if target_directory is not None:
+        return operands
+    return operands[:-1] if len(operands) >= 2 else []
+
+
+def _register_literal_symlink_alias(
+    executable: str,
+    args: list[str],
+    aliases: dict[str, str],
+    alias_literals: dict[str, str],
+    known_directories: set[str],
+) -> bool:
+    if executable != "ln" or not _ln_is_symbolic(args):
         return False
     target_directory: str | None = None
     operands: list[str] = []
@@ -1155,6 +1187,13 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
                 reason = _protected_mutation_reason(token)
                 if reason:
                     return reason
+
+    if executable == "ln" and not _ln_is_symbolic(args):
+        for source in _literal_ln_sources(args):
+            if _is_samvil_event_store_target(source):
+                return "protected SAMVIL EventStore hard link"
+            if _is_protected_ssot_target(source):
+                return "protected SAMVIL SSOT hard link"
 
     if executable in {"cp", "install", "ln", "mv", "rsync"} and len(args) >= 2:
         for target in _copy_like_mutation_targets(args):
