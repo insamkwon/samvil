@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -765,6 +766,22 @@ def test_event_store_hard_link_cannot_create_an_unprotected_write_alias(
     assert reason == "protected SAMVIL EventStore hard link"
 
 
+def test_existing_event_store_hard_link_cannot_be_overwritten(
+    tmp_path: Path, monkeypatch
+) -> None:
+    guard = load_guard_module()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    canonical = tmp_path / ".samvil" / "samvil.db"
+    canonical.parent.mkdir()
+    canonical.write_text("ORIGINAL")
+    alias = tmp_path / "existing-hard-link.db"
+    alias.hardlink_to(canonical)
+
+    reason = guard.analyze_command(f"cp /tmp/forged {alias}")
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
 @pytest.mark.parametrize(
     "creator",
     [
@@ -804,6 +821,21 @@ def test_removed_same_command_directory_is_not_used_for_symlink_destination(
     reason = guard.analyze_command(
         f"mkdir {alias_dir} && rmdir {alias_dir} && "
         f"ln -s ~/.samvil/samvil.db {alias_dir} && cp /tmp/forged {alias_dir}"
+    )
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
+def test_brace_removed_directory_is_not_used_for_symlink_destination(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    alias_root = tmp_path / "removed-brace"
+    alias = alias_root
+
+    reason = guard.analyze_command(
+        f"mkdir {alias_root}{{,-other}} && rmdir {alias_root}{{,-other}} && "
+        f"ln -s ~/.samvil/samvil.db {alias} && cp /tmp/forged {alias}"
     )
 
     assert reason == "protected SAMVIL EventStore overwrite"
@@ -853,6 +885,30 @@ def test_runtime_string_concatenation_cannot_bypass_event_store_alias(
     )
 
     assert reason == "protected SAMVIL EventStore overwrite"
+
+
+def test_runtime_mixed_quote_string_concatenation_cannot_mutate_seed(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    payload = (
+        "from pathlib import Path; "
+        "Path('project.seed' + \".json\").write_text('FORGED')"
+    )
+
+    reason = guard.analyze_command(shlex.join(["python3", "-c", payload]))
+
+    assert reason == "inline language runtime may mutate protected SAMVIL SSOT"
+
+
+def test_brace_expanded_tee_cannot_mutate_protected_seed() -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(
+        "printf FORGED | tee {safe.txt,project.seed.json} >/dev/null"
+    )
+
+    assert reason == "protected SAMVIL SSOT overwrite"
 
 
 def test_new_event_store_symlink_nested_read_only_query_still_passes(

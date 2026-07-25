@@ -651,6 +651,9 @@ def _is_samvil_event_store_target(target: str) -> bool:
         path = Path(normalized).expanduser()
         candidates.add(str(path).replace("\\", "/"))
         candidates.add(str(path.resolve(strict=False)).replace("\\", "/"))
+        canonical = Path("~/.samvil/samvil.db").expanduser()
+        if path.exists() and canonical.exists() and os.path.samefile(path, canonical):
+            return True
     except (OSError, RuntimeError):
         pass
     return any(
@@ -838,9 +841,17 @@ def _register_literal_directory_removal(
     for token in args:
         if token.startswith("-") and token != "-":
             continue
-        directory_key = _literal_path_key(token)
-        if directory_key:
-            known_directories.discard(directory_key)
+        candidates = (
+            _brace_expansion_candidates(token)
+            if "{" in token and "," in token
+            else [token]
+        )
+        if candidates is None:
+            candidates = [token]
+        for candidate in candidates:
+            directory_key = _literal_path_key(candidate)
+            if directory_key:
+                known_directories.discard(directory_key)
     return True
 
 
@@ -1343,9 +1354,13 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
     if executable == "tee":
         for token in args:
             if not token.startswith("-"):
-                reason = _protected_mutation_reason(token)
-                if reason:
-                    return reason
+                targets = _brace_expansion_candidates(token)
+                if targets is None:
+                    targets = [token]
+                for target in targets:
+                    reason = _protected_mutation_reason(target)
+                    if reason:
+                        return reason
 
     if executable == "dd":
         options = dict(token.split("=", 1) for token in args if "=" in token)
@@ -1405,7 +1420,11 @@ def _language_runtime_payload_mutates(payload: str, command_context: str = "") -
         SAMVIL_EVENT_STORE_RELATIVE,
     }
     normalized_context = command_context.replace("\\", "/")
-    protected_context = f"{normalized}\n{normalized_context}"
+    literals = [
+        match.group(2)
+        for match in re.finditer(r"(['\"])(.*?)(?<!\\)\1", normalized)
+    ]
+    protected_context = f"{normalized}\n{normalized_context}\n{''.join(literals)}"
     if not any(path in protected_context for path in protected_paths):
         return False
     return bool(
