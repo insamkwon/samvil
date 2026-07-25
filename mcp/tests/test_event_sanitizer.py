@@ -122,12 +122,16 @@ def test_event_data_redacts_namespaced_env_credentials_and_multiline_values() ->
         "OPENAI_" + "API_KEY",
         "AWS_" + "SECRET_ACCESS_KEY",
         "DATABASE_" + "URL",
+        "STRIPE_" + "SECRET_KEY",
+        "SUPABASE_" + "SERVICE_ROLE_KEY",
         "pass" + "word",
     )
     secrets = (
         "-".join(("fixture", "openai", "value")),
         "-".join(("fixture", "aws", "value")),
         "".join(("postgres://fixture:", "value@localhost/db")),
+        "-".join(("fixture", "stripe", "value")),
+        "-".join(("fixture", "service", "role", "value")),
         "\n".join(("line one", "line two")),
     )
     payload = {
@@ -135,7 +139,9 @@ def test_event_data_redacts_namespaced_env_credentials_and_multiline_values() ->
             f"{labels[0]}={secrets[0]} "
             f"{labels[1]}={secrets[1]} "
             f"{labels[2]}={secrets[2]} "
-            f'{labels[3]}="{secrets[3]}"'
+            f"{labels[3]}={secrets[3]} "
+            f"{labels[4]}={secrets[4]} "
+            f'{labels[5]}="{secrets[5]}"'
         )
     }
 
