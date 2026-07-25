@@ -839,6 +839,10 @@ def _language_runtime_event_store_mutates(
     command_context: str = "",
 ) -> bool:
     normalized = payload.replace("\\", "/")
+    previous = None
+    while normalized != previous:
+        previous = normalized
+        normalized = re.sub(r"(['\"])\s*\+\s*\1", "", normalized)
     normalized_context = command_context.replace("\\", "/")
     literals = [
         match.group(2)
@@ -849,8 +853,12 @@ def _language_runtime_event_store_mutates(
     )
     if re.search(r"\bsave_event_and_update_stage\s*\(", normalized):
         return True
-    return bool(
+    event_store_reference = bool(
         SAMVIL_EVENT_STORE_RELATIVE in path_context
+        or re.search(r"\b(?:DB_PATH|get_store)\b", normalized)
+    )
+    return bool(
+        event_store_reference
         and SQL_WRITE_STATEMENT.search(f"{normalized}\n{normalized_context}")
     )
 
@@ -981,6 +989,8 @@ def _direct_samvil_event_store_reason(args: list[str]) -> bool:
         return False
     statement = " ".join(args[database_index + 1 :]).strip()
     if not statement:
+        return True
+    if SQL_WRITE_STATEMENT.search(statement):
         return True
     return (
         re.match(

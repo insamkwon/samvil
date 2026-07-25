@@ -192,6 +192,19 @@ def test_language_runtime_safe_stdin_and_script_file_pass(tmp_path: Path) -> Non
             "sqlite3 'file:/tmp/home/.samvil/samvil.db?mode=rw' "
             "\"REPLACE INTO events VALUES ('forged')\""
         ),
+        (
+            "sqlite3 ~/.samvil/samvil.db "
+            "\"SELECT id FROM events; UPDATE events SET trusted_transition=1\""
+        ),
+        (
+            "python3 -c \"import sqlite3; "
+            "sqlite3.connect('/tmp/home/.samvil/samvil.db')"
+            ".execute('UP' + 'DATE events SET trusted_transition=1')\""
+        ),
+        (
+            "python3 -c \"from samvil_mcp.server import DB_PATH; import sqlite3; "
+            "sqlite3.connect(DB_PATH).execute('INSERT INTO events DEFAULT VALUES')\""
+        ),
     ],
 )
 def test_direct_samvil_event_store_mutation_is_blocked(command: str) -> None:
