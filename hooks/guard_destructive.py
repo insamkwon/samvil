@@ -1106,7 +1106,7 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
 
     if executable == "perl" and any(
         token == "-i"
-        or re.match(r"^-[0-9acdlnpsStTuvwxWX]*i.*$", token)
+        or re.match(r"^-[0-9acdlnpsStTuvUwxWX]*i.*$", token)
         for token in args
     ):
         for token in args:

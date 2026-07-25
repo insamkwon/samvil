@@ -545,6 +545,7 @@ def test_non_rm_overwrites_cannot_destroy_protected_ssot(command: str) -> None:
         "perl -i0 -pe 's/old/forged/' project.seed.json",
         "perl -piABC -e 's/old/forged/' project.seed.json",
         "perl -0777pi0 -e 's/old/forged/' project.seed.json",
+        "perl -Upi0 -e 's/old/forged/' project.seed.json",
         "sed -i 's/old/forged/' project.config.json",
     ],
 )
