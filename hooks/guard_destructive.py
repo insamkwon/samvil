@@ -26,6 +26,7 @@ PROTECTED_ROOT_SSOT_PATHS = {
     "project.config.json",
     "project.seed.json",
     "project.state.json",
+    ".project.seed.json.migration-journal",
 }
 PROTECTED_SAMVIL_SSOT_PATHS = {
     ".samvil/claims.jsonl",
@@ -130,6 +131,7 @@ INLINE_LANGUAGE_WRITE_OPEN = re.compile(
 UNINSPECTABLE_PATH_CHARS = "`$*?[{"
 _SCRIPT_INSPECTION_STACK: list[str] = []
 _ANALYSIS_DEPTH: ContextVar[int] = ContextVar("guard_analysis_depth", default=0)
+_ANALYSIS_CWD: ContextVar[Path | None] = ContextVar("guard_analysis_cwd", default=None)
 
 
 def _normalize_shell_source(command: str) -> str:
@@ -684,7 +686,7 @@ def _is_protected_ssot_target(target: str, cwd: Path | None = None) -> bool:
     )
 
 
-def _is_samvil_event_store_target(target: str) -> bool:
+def _is_samvil_event_store_target(target: str, cwd: Path | None = None) -> bool:
     """Recognize the canonical EventStore through URI, home, or symlink aliases."""
     normalized = target.replace("\\", "/")
     if normalized.startswith("file:"):
@@ -692,6 +694,8 @@ def _is_samvil_event_store_target(target: str) -> bool:
     candidates = {normalized}
     try:
         path = Path(normalized).expanduser()
+        if not path.is_absolute():
+            path = (cwd or Path.cwd()) / path
         candidates.add(str(path).replace("\\", "/"))
         candidates.add(str(path.resolve(strict=False)).replace("\\", "/"))
         canonical = Path("~/.samvil/samvil.db").expanduser()
@@ -709,7 +713,7 @@ def _is_samvil_event_store_target(target: str) -> bool:
 def _protected_mutation_reason(
     target: str, cwd: Path | None = None
 ) -> str | None:
-    if _is_samvil_event_store_target(target):
+    if _is_samvil_event_store_target(target, cwd):
         return "protected SAMVIL EventStore overwrite"
     if _is_protected_ssot_target(target, cwd):
         return "protected SAMVIL SSOT overwrite"
@@ -1384,10 +1388,14 @@ def _protected_overwrite_reason(
     ):
         hard_link_sources = _literal_link_sources(args)
     for source in hard_link_sources:
-        if _is_samvil_event_store_target(source):
-            return "protected SAMVIL EventStore hard link"
-        if _is_protected_ssot_target(source):
-            return "protected SAMVIL SSOT hard link"
+        candidates = _protected_mutation_targets(source)
+        if candidates is None:
+            return "uninspectable brace expansion in protected mutation target"
+        for candidate in candidates:
+            if _is_samvil_event_store_target(candidate, cwd):
+                return "protected SAMVIL EventStore hard link"
+            if _is_protected_ssot_target(candidate, cwd):
+                return "protected SAMVIL SSOT hard link"
 
     if executable in {"cp", "install", "ln", "mv", "rsync"} and len(args) >= 2:
         for target in _copy_like_mutation_targets(args):
@@ -2507,16 +2515,19 @@ def _dynamic_rm_flag_reason(command: str) -> str | None:
     return None
 
 
-def analyze_command(command: str) -> str | None:
+def analyze_command(command: str, cwd: Path | None = None) -> str | None:
     if command.count("eval ") >= MAX_ANALYSIS_DEPTH:
         return NESTED_ANALYSIS_LIMIT_REASON
     depth = _ANALYSIS_DEPTH.get()
+    analysis_cwd = cwd or _ANALYSIS_CWD.get() or Path.cwd()
     if depth >= MAX_ANALYSIS_DEPTH:
         return NESTED_ANALYSIS_LIMIT_REASON
     token = _ANALYSIS_DEPTH.set(depth + 1)
+    cwd_token = _ANALYSIS_CWD.set(analysis_cwd)
     try:
         return _analyze_command_impl(command)
     finally:
+        _ANALYSIS_CWD.reset(cwd_token)
         _ANALYSIS_DEPTH.reset(token)
 
 
@@ -2552,7 +2563,7 @@ def _analyze_command_impl(command: str) -> str | None:
     runtime_stdin_reason = _language_runtime_heredoc_reason(command)
     if runtime_stdin_reason:
         return runtime_stdin_reason
-    analysis_cwd = Path.cwd()
+    analysis_cwd = _ANALYSIS_CWD.get() or Path.cwd()
     for tokens in _segments(command):
         command_context = shlex.join(tokens)
         segment_cwd = _env_command_cwd(tokens, analysis_cwd)
@@ -2583,10 +2594,17 @@ def _analyze_command_impl(command: str) -> str | None:
         )
         if runtime_script_reason:
             return runtime_script_reason
-        if executable == "cd":
-            cd_args = [token for token in args if token != "--"]
+        if executable in {"cd", "pushd"}:
+            cd_args = [
+                token
+                for token in args
+                if token not in {"--", ">", ">>", ">|", "<", "<>"}
+                and not token.startswith((">", "<"))
+            ]
             if cd_args:
-                target = Path(cd_args[-1]).expanduser()
+                target = Path(
+                    cd_args[0] if executable == "pushd" else cd_args[-1]
+                ).expanduser()
                 analysis_cwd = (
                     target if target.is_absolute() else analysis_cwd / target
                 ).resolve(strict=False)
@@ -2615,7 +2633,7 @@ def _analyze_command_impl(command: str) -> str | None:
                 return "dynamic executable with destructive SQL arguments"
         wrapped = _wrapped_tokens(executable, args)
         if wrapped:
-            nested = analyze_command(shlex.join(wrapped))
+            nested = analyze_command(shlex.join(wrapped), cwd=segment_cwd)
             if nested:
                 return nested
         if executable in SHELLS:
@@ -2629,7 +2647,7 @@ def _analyze_command_impl(command: str) -> str | None:
                 )
                 if unresolved:
                     return "shell positional expansion cannot be inspected"
-                nested = analyze_command(expanded_command)
+                nested = analyze_command(expanded_command, cwd=segment_cwd)
                 if nested:
                     return nested
             script_file_reason = _shell_script_file_reason(args)
@@ -2644,7 +2662,7 @@ def _analyze_command_impl(command: str) -> str | None:
                 return source_reason
         if executable == "eval" and args:
             nested_args = args[1:] if args and args[0] == "--" else args
-            nested = analyze_command(" ".join(nested_args))
+            nested = analyze_command(" ".join(nested_args), cwd=segment_cwd)
             if nested:
                 return nested
         if executable == "git":

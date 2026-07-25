@@ -832,6 +832,87 @@ def test_env_chdir_cannot_bypass_existing_ssot_hard_link(
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        "env -C sub sh -c 'cp ../forged seed-alias.json'",
+        "cd outer && sh -c 'cd sub && cp ../../forged seed-alias.json'",
+        "pushd sub >/dev/null && cp ../forged seed-alias.json",
+    ],
+)
+def test_nested_working_directory_cannot_bypass_existing_ssot_hard_link(
+    tmp_path: Path, monkeypatch, command: str
+) -> None:
+    guard = load_guard_module()
+    monkeypatch.chdir(tmp_path)
+    canonical = Path("project.seed.json")
+    canonical.write_text("ORIGINAL")
+    sub = Path("sub")
+    sub.mkdir()
+    (sub / "seed-alias.json").hardlink_to(canonical)
+    outer = Path("outer")
+    outer.mkdir()
+    (outer / "sub").mkdir()
+    (outer / "sub" / "seed-alias.json").hardlink_to(canonical)
+
+    reason = guard.analyze_command(command)
+
+    assert reason == "protected SAMVIL SSOT overwrite"
+
+
+def test_nested_working_directory_cannot_bypass_event_store_hard_link(
+    tmp_path: Path, monkeypatch
+) -> None:
+    guard = load_guard_module()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    canonical = Path.home() / ".samvil" / "samvil.db"
+    canonical.parent.mkdir()
+    canonical.write_text("ORIGINAL")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "alias.db").hardlink_to(canonical)
+
+    reason = guard.analyze_command("cd sub && cp ../forged alias.db")
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
+def test_brace_expanded_hard_link_source_cannot_alias_protected_seed() -> None:
+    guard = load_guard_module()
+    choices = ["safe.txt", "project.seed.json"]
+
+    reason = guard.analyze_command(
+        "ln {" + ",".join(choices) + "} destination"
+    )
+
+    assert reason == "protected SAMVIL SSOT hard link"
+
+
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        (
+            "rm -f .project.seed.json.migration-journal",
+            "protected SAMVIL SSOT removal",
+        ),
+        (
+            "truncate -s 0 .project.seed.json.migration-journal",
+            "protected SAMVIL SSOT overwrite",
+        ),
+        (
+            "printf corrupt > .project.seed.json.migration-journal",
+            "protected SAMVIL SSOT overwrite",
+        ),
+    ],
+)
+def test_migration_journal_is_protected_ssot(command: str, expected: str) -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(command)
+
+    assert reason == expected
+
+
+@pytest.mark.parametrize(
     "creator",
     [
         "mkdir {alias_dir} && ln -s ~/.samvil/samvil.db {alias_dir}",
