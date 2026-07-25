@@ -809,6 +809,21 @@ def test_removed_same_command_directory_is_not_used_for_symlink_destination(
     assert reason == "protected SAMVIL EventStore overwrite"
 
 
+def test_brace_created_directory_is_used_for_symlink_destination(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    alias_dir = tmp_path / "brace-alias"
+    alias = alias_dir / "samvil.db"
+
+    reason = guard.analyze_command(
+        f"mkdir {alias_dir}{{,-other}} && ln -s ~/.samvil/samvil.db {alias_dir} "
+        f"&& cp /tmp/forged {alias}"
+    )
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
 def test_moved_symlink_alias_keeps_event_store_provenance(
     tmp_path: Path,
 ) -> None:

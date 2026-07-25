@@ -814,9 +814,13 @@ def _register_literal_directory_creation(
             continue
         if not literal_operands and token.startswith("-"):
             continue
-        directory_key = _literal_path_key(token)
-        if directory_key:
-            known_directories.add(directory_key)
+        candidates = _brace_expansion_candidates(token)
+        if candidates is None:
+            candidates = [token]
+        for candidate in candidates:
+            directory_key = _literal_path_key(candidate)
+            if directory_key:
+                known_directories.add(directory_key)
     return True
 
 
