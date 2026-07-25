@@ -23,13 +23,14 @@ _COOKIE_HEADER = re.compile(
     re.IGNORECASE,
 )
 _CREDENTIAL_KEY = (
-    r"\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|"
-    r"secret|token|password|passwd)\b"
+    r"\b(?:(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?token|"
+    r"auth[_-]?token|client[_-]?secret|secret[_-]?access[_-]?key|"
+    r"private[_-]?key|secret|token|password|passwd)|database[_-]?url)\b"
 )
 _QUOTED_CREDENTIAL = re.compile(
     rf"(?P<key_quote>['\"]?)(?P<key>{_CREDENTIAL_KEY})(?P=key_quote)"
     r"(?P<separator>\s*[:=]\s*)(?P<value_quote>['\"])"
-    r"(?:\\.|(?!(?P=value_quote))[^\r\n])*(?P=value_quote)",
+    r"(?:\\.|(?!(?P=value_quote))[\s\S])*(?P=value_quote)",
     re.IGNORECASE,
 )
 _CREDENTIAL = re.compile(

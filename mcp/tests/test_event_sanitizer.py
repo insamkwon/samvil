@@ -117,6 +117,33 @@ def test_event_data_redacts_quoted_credentials_with_spaces_and_delimiters() -> N
     assert serialized.count("[REDACTED]") == 3
 
 
+def test_event_data_redacts_namespaced_env_credentials_and_multiline_values() -> None:
+    labels = (
+        "OPENAI_" + "API_KEY",
+        "AWS_" + "SECRET_ACCESS_KEY",
+        "DATABASE_" + "URL",
+        "pass" + "word",
+    )
+    secrets = (
+        "-".join(("fixture", "openai", "value")),
+        "-".join(("fixture", "aws", "value")),
+        "".join(("postgres://fixture:", "value@localhost/db")),
+        "\n".join(("line one", "line two")),
+    )
+    payload = {
+        "note": (
+            f"{labels[0]}={secrets[0]} "
+            f"{labels[1]}={secrets[1]} "
+            f"{labels[2]}={secrets[2]} "
+            f'{labels[3]}="{secrets[3]}"'
+        )
+    }
+
+    serialized = str(sanitize_event_data(payload))
+
+    assert all(secret not in serialized for secret in secrets)
+
+
 def test_stage_label_rejects_arbitrary_sensitive_prose() -> None:
     assert sanitize_stage_label("qa") == "qa"
     assert sanitize_stage_label("ghp_fixture_secret") == "redacted_stage"
