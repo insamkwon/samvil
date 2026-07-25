@@ -40,12 +40,12 @@ jobs:
       - name: Run release check runner
         run: |
           set -o pipefail
-          python3 scripts/run-release-checks.py --format json | tee /tmp/samvil-release-runner.json
+          mcp/.venv/bin/python scripts/run-release-checks.py --format json | tee /tmp/samvil-release-runner.json
 
       - name: Build release evidence bundle
         run: |
           set -o pipefail
-          python3 scripts/build-release-bundle.py --format json | tee /tmp/samvil-release-bundle.json
+          mcp/.venv/bin/python scripts/build-release-bundle.py --format json | tee /tmp/samvil-release-bundle.json
 
       - name: Collect release artifacts
         if: always()

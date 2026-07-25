@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from samvil_mcp.inspection import build_inspection_report, write_inspection_report
@@ -14,6 +15,7 @@ from samvil_mcp.repair import (
     write_repair_report,
 )
 from samvil_mcp.release import (
+    DEFAULT_RELEASE_COMMANDS,
     build_release_evidence_bundle,
     build_release_report,
     evaluate_release_gate,
@@ -26,6 +28,18 @@ from samvil_mcp.release import (
     write_release_evidence_bundle,
     write_release_report,
 )
+
+
+def test_default_release_commands_use_current_python_interpreter() -> None:
+    script_commands = [
+        row["command"]
+        for row in DEFAULT_RELEASE_COMMANDS
+        if " scripts/" in str(row.get("command"))
+        and "python" in str(row.get("command"))
+    ]
+
+    assert script_commands
+    assert all(command.startswith(f"{sys.executable} scripts/") for command in script_commands)
 
 
 def _checks(status: str = "pass") -> list[dict]:
