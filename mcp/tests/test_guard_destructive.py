@@ -928,6 +928,7 @@ def test_pushd_stack_variants_cannot_bypass_ssot_hard_link(
     [
         "pushd +0 && cp forged alias.json",
         "pushd +1 && cp forged alias.json",
+        "pushd -1 && cp forged alias.json",
         "pushd sub >/dev/null && popd +0 && cp forged alias.json",
         "pushd sub >/dev/null && popd -1 && cp forged alias.json",
     ],

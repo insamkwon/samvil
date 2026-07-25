@@ -2595,7 +2595,9 @@ def _analyze_command_impl(command: str) -> str | None:
         )
         if runtime_script_reason:
             return runtime_script_reason
-        if executable == "pushd" and any(token.startswith("+") for token in args):
+        if executable == "pushd" and any(
+            token.startswith(("+", "-")) and token != "-n" for token in args
+        ):
             return "uninspectable directory stack operation"
         if executable == "popd" and any(
             (token.startswith("-") and token != "-n") or token == "+0"
