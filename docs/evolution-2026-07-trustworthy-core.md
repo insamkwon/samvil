@@ -1639,69 +1639,97 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 - [x] **4.115 legacy `.samvil/state.json` fallback 복구 보존**
   (서버가 지원하는 구형 state 경로도 root state와 동일하게 잠그고 session 소유자를
   재검증한 뒤 canonical `project.state.json`과 marker를 interview로 복구한다.)
-  - 완료 증거: `faec61d`; `mcp/samvil_mcp/event_store.py:309`,
-    `mcp/samvil_mcp/event_store.py:328`, `mcp/tests/test_orchestrator_mcp.py:176`.
+  - 완료 증거: `faec61d`; `mcp/samvil_mcp/event_store.py:300`,
+    `mcp/samvil_mcp/event_store.py:326`, `mcp/tests/test_orchestrator_mcp.py:176`.
 - [x] **4.116 hard-link EventStore alias 생성 차단**
   (symbolic link뿐 아니라 일반 `ln`으로 canonical DB의 쓰기 inode alias를 만드는
   명령도 source 단계에서 차단한다.)
-  - 완료 증거: `635c853`; `hooks/guard_destructive.py:1288`,
-    `mcp/tests/test_guard_destructive.py:754`.
+  - 완료 증거: `635c853`; `hooks/guard_destructive.py:1307`,
+    `hooks/guard_destructive.py:1321`, `mcp/tests/test_guard_destructive.py:755`.
 - [x] **4.117 link·cp hard-link 동등 primitive 차단**
   (`link`와 `cp -l`·`cp --link`도 canonical EventStore를 우회하는 hard-link 생성으로
   판정해 같은 보호 경계를 적용한다.)
-  - 완료 증거: `9124bd2`; `hooks/guard_destructive.py:1292`,
-    `hooks/guard_destructive.py:1302`, `mcp/tests/test_guard_destructive.py:754`.
+  - 완료 증거: `9124bd2`; `hooks/guard_destructive.py:1310`,
+    `hooks/guard_destructive.py:1312`, `mcp/tests/test_guard_destructive.py:755`.
 - [x] **4.118 제거된 directory의 stale alias 상태 무효화**
   (`mkdir` 뒤 `rmdir`된 경로를 계속 directory로 간주하지 않아 이후 `ln source dir`의
   실제 file형 alias와 canonical EventStore overwrite를 놓치지 않는다.)
-  - 완료 증거: `3e39794`; `hooks/guard_destructive.py:823`,
-    `hooks/guard_destructive.py:928`, `mcp/tests/test_guard_destructive.py:798`.
+  - 완료 증거: `3e39794`; `hooks/guard_destructive.py:834`,
+    `hooks/guard_destructive.py:851`, `mcp/tests/test_guard_destructive.py:815`.
 - [x] **4.119 debugger 결합 Perl 옵션의 in-place 가능성 fail-closed**
   (`-di0`·`-di.bak`처럼 환경에 따라 debugger와 in-place가 결합될 수 있는 옵션은
   안전하다고 단정하지 않고 보호 SSOT overwrite로 차단한다.)
-  - 완료 증거: `5d67920`; `hooks/guard_destructive.py:1211`,
-    `mcp/tests/test_guard_destructive.py:588`.
+  - 완료 증거: `5d67920`; `hooks/guard_destructive.py:1230`,
+    `hooks/guard_destructive.py:1265`, `mcp/tests/test_guard_destructive.py:588`.
 - [x] **4.120 DB 전환 후 canonical JSONL crash 복구 outbox**
   (SQLite event·stage commit과 같은 transaction에 pending canonical event를 기록하고,
   다음 stage 요청에서 event_id idempotency로 JSONL을 복구·ack해 process crash 뒤에도
   중복 없이 재시도 가능하게 한다.)
-  - 완료 증거: `ec26fba`; `mcp/samvil_mcp/event_store.py:622`,
+  - 완료 증거: `ec26fba`; `mcp/samvil_mcp/event_store.py:594`,
     `mcp/samvil_mcp/server.py:709`, `mcp/samvil_mcp/server.py:1193`,
     `mcp/tests/test_orchestrator_mcp.py:1223`.
 - [x] **4.121 rootless recovery rejection public fail-closed**
   (소유권 불일치나 복구 거절을 내부에서만 반환하지 않고 public marker/resume API가
   stale build 응답을 중단하도록 오류를 반환한다.)
-  - 완료 증거: `efc0874`; `mcp/samvil_mcp/server.py:5555`,
-    `mcp/samvil_mcp/server.py:5580`, `mcp/samvil_mcp/server.py:6292`,
+  - 완료 증거: `efc0874`; `mcp/samvil_mcp/server.py:5593`,
+    `mcp/samvil_mcp/server.py:5595`, `mcp/samvil_mcp/server.py:6307`,
     `mcp/tests/test_orchestrator_mcp.py:140`.
 - [x] **4.122 Expo mobile Playwright harness 실행 연결**
   (mobile-app AC command만 생성하지 않고 Expo dependency를 감지해 Playwright config,
   `@playwright/test`, test script, Expo web server 8081을 실제 scaffold에 연결한다.)
   - 완료 증거: `9e17bcf`; `mcp/samvil_mcp/test_deliverable.py:169`,
-    `mcp/samvil_mcp/server.py:5777`, `skills/samvil-scaffold/SKILL.md:95`,
+    `mcp/samvil_mcp/server.py:5744`, `skills/samvil-scaffold/SKILL.md:95`,
     `mcp/tests/test_test_deliverable.py:147`.
 - [x] **4.123 이동한 symlink alias provenance 전파**
   (same-command `mv alias before after`도 새 destination에 canonical EventStore provenance를
   이어서 후속 copy/write가 실제 DB inode를 덮지 못하게 한다.)
-  - 완료 증거: `67c55cc`; `hooks/guard_destructive.py:839`,
-    `hooks/guard_destructive.py:1023`, `mcp/tests/test_guard_destructive.py:812`.
+  - 완료 증거: `67c55cc`; `hooks/guard_destructive.py:858`,
+    `hooks/guard_destructive.py:1042`, `mcp/tests/test_guard_destructive.py:859`.
 - [x] **4.124 runtime 문자열 결합 alias 우회 차단**
   (Python/Node runtime payload가 alias 경로를 문자열 조각으로 결합해도 write API와
   alias stem/suffix를 함께 분석해 canonical EventStore overwrite를 fail-closed한다.)
-  - 완료 증거: `cb5c6c9`; `hooks/guard_destructive.py:866`,
-    `hooks/guard_destructive.py:1038`, `mcp/tests/test_guard_destructive.py:828`.
+  - 완료 증거: `cb5c6c9`; `hooks/guard_destructive.py:1057`,
+    `hooks/guard_destructive.py:1402`, `mcp/tests/test_guard_destructive.py:875`.
 - [x] **4.125 migration 비협력 writer의 교체 직전 seed 덮어쓰기 복구**
   (기대 seed inode를 snapshot으로 보존하고, 교체 후 snapshot 변경을 감지하면
   동시 writer의 원문을 복원한 뒤 재시도를 요구한다.)
-  - 완료 증거: `088775b`; `mcp/samvil_mcp/migrate_v3_3.py:64`,
-    `mcp/samvil_mcp/migrate_v3_3.py:77`, `mcp/samvil_mcp/migrate_v3_3.py:80`,
-    `mcp/tests/test_migrate_v3_3.py:289`, `mcp/tests/test_migrate_v3_3.py:314`.
+  - 완료 증거: `4f43bca`; `mcp/samvil_mcp/migrate_v3_3.py:85`,
+    `mcp/samvil_mcp/migrate_v3_3.py:113`, `mcp/samvil_mcp/migrate_v3_3.py:128`,
+    `mcp/tests/test_migrate_v3_3.py:319`, `mcp/tests/test_migrate_v3_3.py:349`.
 - [x] **4.126 brace-expanded directory EventStore 별칭 추적 보강**
   (mkdir 인자에 쉘 brace expansion이 있어도 실제 directory 후보를 모두 기록해
   후속 symlink destination과 canonical EventStore overwrite를 놓치지 않는다.)
-  - 완료 증거: `bba57ec`; `hooks/guard_destructive.py:817`,
-    `hooks/guard_destructive.py:820`, `mcp/tests/test_guard_destructive.py:812`,
-    `mcp/tests/test_guard_destructive.py:824`.
+  - 완료 증거: `bba57ec`; `hooks/guard_destructive.py:820`,
+    `hooks/guard_destructive.py:827`, `mcp/tests/test_guard_destructive.py:844`,
+    `mcp/tests/test_guard_destructive.py:852`.
+- [x] **4.127 깊은 eval 입력의 fail-closed 시간 경계 보강**
+  (분석 깊이 제한을 넘는 반복 eval을 즉시 거절해 보호 hook이 timeout으로 우회되지 않는다.)
+  - 완료 증거: `a456225`; `hooks/guard_destructive.py:2431`,
+    `mcp/tests/test_guard_destructive.py:1203`.
+- [x] **4.128 outbox canonical event 의미 보존**
+  (crash 복구 시 pending DB enum이 아니라 원래 event_type_raw와 canonical stage mapping을
+  사용해 정상 경로와 동일한 audit event를 append한다.)
+  - 완료 증거: `1166eb3`; `mcp/samvil_mcp/server.py:725`,
+    `mcp/samvil_mcp/server.py:728`, `mcp/tests/test_orchestrator_mcp.py:1259`.
+- [x] **4.129 기존 hard-link·stale brace·runtime·tee alias 경계 보강**
+  (기존 inode hard-link, brace-expanded rmdir stale state, mixed-quote runtime path,
+  brace-expanded tee target을 모두 canonical SSOT 보호 대상으로 판정한다.)
+  - 완료 증거: `8b78f2c`; `hooks/guard_destructive.py:654`,
+    `hooks/guard_destructive.py:844`, `hooks/guard_destructive.py:1357`,
+    `hooks/guard_destructive.py:1423`, `mcp/tests/test_guard_destructive.py:769`,
+    `mcp/tests/test_guard_destructive.py:829`, `mcp/tests/test_guard_destructive.py:890`,
+    `mcp/tests/test_guard_destructive.py:904`.
+- [x] **4.130 trusted rootless attach의 DB·file·marker 불일치 거절**
+  (이미 trusted transition이 있는 session은 file stage나 marker가 DB current_stage와
+  다르면 root를 attach하지 않고 public recovery가 fail-closed로 중단된다.)
+  - 완료 증거: `85c58e0`; `mcp/samvil_mcp/event_store.py:366`,
+    `mcp/samvil_mcp/event_store.py:370`, `mcp/tests/test_event_store.py:446`.
+- [x] **4.131 Codex scaffold 문서의 mobile/browser harness 실행 연결**
+  (Codex host의 scaffold 실행 절차에도 `scaffold_test_harness`와 Expo 8081 경계를 명시해
+  실제 Playwright deliverable 생성이 누락되지 않는다.)
+  - 완료 증거: `a71e89d`; `references/codex-commands/samvil-scaffold.md:19`,
+    `references/codex-commands/samvil-scaffold.md:21`,
+    `mcp/tests/test_skill_wiring.py:438`.
 
 ---
 
