@@ -98,7 +98,7 @@ Apply in order (best-effort except the evidence-backed `gate_check`, INV-5):
 
 ## Chain to QA (INV-4)
 
-1. Append `handoff_block` to `.samvil/handoff.md` via Bash `cat >>` or Edit (**never Write tool**); **TaskUpdate** "Build" → `completed` and print `[SAMVIL] Stage 5/5: Running QA verification...`.
+1. Append `handoff_block` to `.samvil/handoff.md` via Edit (**never Write tool or Bash redirection**); **TaskUpdate** "Build" → `completed` and print `[SAMVIL] Stage 5/5: Running QA verification...`.
 2. `mcp__samvil_mcp__complete_stage(session_id="<sid>", stage="build", verdict="pass")`; any error halts before chaining.
 3. **HostCapability**: claude-code → invoke the Skill tool with `samvil-qa`. Codex → write `.samvil/next-skill.json` `{"skill":"samvil-qa"}` and read `skills/samvil-qa/SKILL.md`.
 

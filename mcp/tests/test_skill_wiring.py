@@ -499,3 +499,17 @@ def test_numeric_drift_check_rejects_one_sided_constant(tmp_path: Path) -> None:
     assert wiring.find_skill_numeric_drift(tmp_path) == [
         "samvil-build: MAX_RETRIES missing from legacy"
     ]
+
+
+def test_active_skills_do_not_instruct_blocked_handoff_shell_append() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    offenders = []
+    for path in sorted((repo / "skills").glob("*/SKILL.md")):
+        text = path.read_text(encoding="utf-8")
+        if any(
+            "cat >>" in line and "handoff" in line
+            for line in text.splitlines()
+        ):
+            offenders.append(path.relative_to(repo).as_posix())
+
+    assert offenders == []

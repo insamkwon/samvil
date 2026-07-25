@@ -83,7 +83,7 @@ In both paths: validate against `references/seed-schema.json`, present, and ask 
 
 1. Write approved JSON to `project.seed.json`.
 2. `mcp__samvil_mcp__save_seed_version(session_id, version=1, seed_json=<escaped>, change_summary="Initial seed from interview")` + `mcp__samvil_mcp__complete_stage(session_id, stage="seed", verdict="pass", council_opt_in=<flags contains --council>)`.
-3. Append `.samvil/handoff.md` (cat >> or Edit, never Write).
+3. Append `.samvil/handoff.md` via Edit (never Write or Bash redirection).
 4. Best-effort `mcp__samvil_mcp__clear_interview_progress(project_root=".")` — interview-summary.md remains narrative record.
 
 ## Chain

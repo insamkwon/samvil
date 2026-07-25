@@ -78,7 +78,7 @@ mcp__samvil_mcp__record_qa_failure(project_path=".", ac_id=<id>, ac_description=
 
 ## Step 7 — Chain (terminal or loop)
 
-`save_event(event_type="evolve_converge", stage="evolve", data='{"final_version":<N+1>,"total_generations":<N>}')` if converged, else `event_type="stage_change"` with reason. Append Evolve section to `.samvil/handoff.md` via Bash `cat >>` or Edit (never Write tool).
+`save_event(event_type="evolve_converge", stage="evolve", data='{"final_version":<N+1>,"total_generations":<N>}')` if converged, else `event_type="stage_change"` with reason. Append Evolve section to `.samvil/handoff.md` via Edit (never Write tool or Bash redirection).
 
 After QA pass: `mcp__samvil_mcp__snapshot_generation(project_root=".", generation_id="gen-<cycle>")` — best-effort. Records passing ACs for future regression checks.
 

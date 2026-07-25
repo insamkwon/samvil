@@ -104,7 +104,7 @@ Both modes skip deploy/retro chain — pure evaluation output. Use cases: seed m
 
 ## Chain on PASS / FAIL / BLOCKED (INV-4)
 
-1. Append `finalize.handoff_block` to `<boot.paths.handoff>` via Bash `cat >>` or Edit (**never Write tool**).
+1. Append `finalize.handoff_block` to `<boot.paths.handoff>` via Edit (**never Write tool or Bash redirection**).
 2. Render console output per legacy `## On PASS — Offer Evolve or Chain to Retro` (PASS) or `## On FAIL (after 3 iterations)` (FAIL/BLOCKED) — Try-it line, 배포 방법, 배포 전 체크리스트, 3 user options.
 3. `save_event(event_type="qa_verdict", data='{"verdict":"<PASS|REVISE|FAIL>","iteration":<N>,"pass1":"...","pass2":"...","pass3":"..."}')`.
 4. Record the authoritative terminal result with `complete_stage(session_id="<sid>", stage="qa", verdict="<pass|fail|blocked>")`: map synthesis PASS→`pass`, FAIL→`fail`, and convergence BLOCKED→`blocked`. Exact `status="ok"` is required before any cross-stage marker or Skill invocation; error halts. `REVISE + continue` remains inside QA and does not call `complete_stage`. On success, **TaskUpdate** "QA" → `completed` and print `[SAMVIL] Stage 5/5: QA complete`.

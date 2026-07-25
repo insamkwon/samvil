@@ -100,11 +100,11 @@ MCP fail → decisions.log is fallback truth (P8/INV-5); log warning, continue. 
 ```
 mcp__samvil_mcp__save_event(session_id="<sid>", event_type="council_verdict", stage="design", data='{"verdict":"<PROCEED|PROCEED_WITH_CHANGES|HOLD>","agents_count":<N>}')
 ```
-For PROCEED or approved PROCEED_WITH_CHANGES, require `complete_stage(session_id="<sid>", stage="council", verdict="pass", council_opt_in=true)` to return exact `status="ok"`; error halts. Append Council section to `.samvil/handoff.md` via Bash `cat >>` or Edit (never Write tool): tier · consensus N/M (%) · verdict · changes applied · dissenting summary. Print `[SAMVIL] Gate A complete. Proceeding to design...` and invoke Skill tool with skill `samvil-design`.
+For PROCEED or approved PROCEED_WITH_CHANGES, require `complete_stage(session_id="<sid>", stage="council", verdict="pass", council_opt_in=true)` to return exact `status="ok"`; error halts. Append Council section to `.samvil/handoff.md` via Edit (never Write tool or Bash redirection): tier · consensus N/M (%) · verdict · changes applied · dissenting summary. Print `[SAMVIL] Gate A complete. Proceeding to design...` and invoke Skill tool with skill `samvil-design`.
 
 ## Anti-Patterns
 
-1. Auto-modifying seed without user approval on PROCEED_WITH_CHANGES. 2. Spawning agents the tier doesn't include. 3. Skipping Step 3 (Round 1 synthesis) before Round 2 — R2 must see debate points. 4. Dropping dissenting opinions — `sections[*].dissenting` MUST appear in Devil's Advocate block and decisions.log. 5. Proceeding past `HOLD` without user input (P5 Blind convergence). 6. Using Write tool for handoff.md (Bash `cat >>` or Edit only). 7. Spawning agents serially when MAX_PARALLEL allows — chunk-parallel non-negotiable. 8. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
+1. Auto-modifying seed without user approval on PROCEED_WITH_CHANGES. 2. Spawning agents the tier doesn't include. 3. Skipping Step 3 (Round 1 synthesis) before Round 2 — R2 must see debate points. 4. Dropping dissenting opinions — `sections[*].dissenting` MUST appear in Devil's Advocate block and decisions.log. 5. Proceeding past `HOLD` without user input (P5 Blind convergence). 6. Using Write tool or Bash redirection for handoff.md (Edit only). 7. Spawning agents serially when MAX_PARALLEL allows — chunk-parallel non-negotiable. 8. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

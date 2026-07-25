@@ -98,7 +98,7 @@ Browser solution_types (`web-app`/`dashboard`/`game`): `mcp__samvil_mcp__scaffol
 
 ## Step 6 — Persist + Chain
 
-1. Append Scaffold block to `.samvil/handoff.md` via Bash `cat >>` or Edit (never Write tool), then atomically persist the successful `sanity_result` as `.samvil/scaffold-results.json` with `all_passed=true`.
+1. Append Scaffold block to `.samvil/handoff.md` via Edit (never Write tool or Bash redirection), then atomically persist the successful `sanity_result` as `.samvil/scaffold-results.json` with `all_passed=true`.
 2. `mcp__samvil_mcp__complete_stage(session_id="<sid>", stage="scaffold", verdict="pass")` emits canonical `scaffold_complete`; any error halts before chaining.
 3. Print `[SAMVIL] Stage 4/5: Building core experience...`, then invoke the Skill tool with `samvil-build`. Codex CLI fallback: read `skills/samvil-build/SKILL.md`.
 

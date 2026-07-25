@@ -81,11 +81,11 @@ AskUserQuestion (multiSelect) `이 프로젝트에서 뭘 하고 싶으세요?`:
 5. Write the merged seed to `project.seed.json` (AskUserQuestion `병합된 seed를 저장할까요?` yes/cancel). Then `mcp__samvil_mcp__save_seed_version(...)` best-effort.
 6. Set `state._brownfield_seed_merged: true` in `project.state.json`. Invoke `samvil-seed` via Skill tool (seed already written — samvil-seed will enter presentation-only mode, show the merged seed for user approval, then chain to samvil-council → samvil-scaffold → samvil-build).
 
-Append Analyze section to `.samvil/handoff.md` via Bash `cat >>` or Edit (never Write tool): framework · feature_count · warnings count · chosen route. Print `[SAMVIL] Analyze complete. Routing to <skill>...` and invoke Skill tool with the chosen skill name.
+Append Analyze section to `.samvil/handoff.md` via Edit (never Write tool or Bash redirection): framework · feature_count · warnings count · chosen route. Print `[SAMVIL] Analyze complete. Routing to <skill>...` and invoke Skill tool with the chosen skill name.
 
 ## Anti-Patterns
 
-1. Modifying or deleting existing source files during analyze — read-only phase. Write only to `project.seed.json` / `decisions.log` / `interview-summary.md` / `.samvil/`. 2. Forcing framework conversion (e.g., React→Next.js auto-rewrite) — not analyze's job. 3. Skipping the user-review checkpoint after Step 2 — features inferred from heuristics MUST be confirmed (P2 Description vs Prescription). 4. Proceeding with `solution_type_confidence: low` without re-asking the user. 5. Dropping `warnings` from the render block — every warning must surface. 6. Using Write tool for handoff.md (Bash `cat >>` or Edit only). 7. Persisting seed before user approval (INV-1, irreversibility-aware P10). 8. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
+1. Modifying or deleting existing source files during analyze — read-only phase. Write only to `project.seed.json` / `decisions.log` / `interview-summary.md` / `.samvil/`. 2. Forcing framework conversion (e.g., React→Next.js auto-rewrite) — not analyze's job. 3. Skipping the user-review checkpoint after Step 2 — features inferred from heuristics MUST be confirmed (P2 Description vs Prescription). 4. Proceeding with `solution_type_confidence: low` without re-asking the user. 5. Dropping `warnings` from the render block — every warning must surface. 6. Using Write tool or Bash redirection for handoff.md (Edit only). 7. Persisting seed before user approval (INV-1, irreversibility-aware P10). 8. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 
