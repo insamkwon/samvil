@@ -836,6 +836,33 @@ def _register_literal_directory_removal(
     return True
 
 
+def _register_literal_alias_move(
+    executable: str,
+    args: list[str],
+    aliases: dict[str, str],
+    alias_literals: dict[str, str],
+) -> bool:
+    if executable != "mv":
+        return False
+    operands = [token for token in args if token == "-" or not token.startswith("-")]
+    if len(operands) < 2:
+        return False
+    source, destination = operands[-2:]
+    protected_source = aliases.get(_literal_path_key(source) or "")
+    if protected_source is None:
+        return False
+    destination_key = _literal_path_key(destination)
+    if destination_key is None:
+        return False
+    aliases[destination_key] = protected_source
+    spellings = {destination, destination_key}
+    if not Path(destination).is_absolute() and not destination.startswith("./"):
+        spellings.add(f"./{destination}")
+    for spelling in spellings:
+        alias_literals[spelling] = protected_source
+    return True
+
+
 def _nested_alias_commands(executable: str, args: list[str]) -> list[str]:
     if executable in SHELLS:
         invocation = _shell_command_invocation(args)
@@ -882,6 +909,12 @@ def _collect_literal_symlink_aliases(
             known_directories,
         ):
             continue
+        _register_literal_alias_move(
+            executable,
+            args,
+            aliases,
+            alias_literals,
+        )
         if _register_literal_symlink_alias(
             executable,
             args,
@@ -959,6 +992,12 @@ def _chained_protected_alias_reason(command: str) -> str | None:
             known_directories,
         ):
             continue
+        _register_literal_alias_move(
+            executable,
+            args,
+            aliases,
+            alias_literals,
+        )
         if _register_literal_symlink_alias(
             executable,
             args,
