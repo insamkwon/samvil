@@ -797,6 +797,23 @@ def test_existing_ssot_hard_link_cannot_be_overwritten(
     assert reason == "protected SAMVIL SSOT overwrite"
 
 
+def test_command_local_cd_cannot_bypass_existing_ssot_hard_link(
+    tmp_path: Path, monkeypatch
+) -> None:
+    guard = load_guard_module()
+    monkeypatch.chdir(tmp_path)
+    canonical = Path("project.seed.json")
+    canonical.write_text("ORIGINAL")
+    nested = Path("sub")
+    nested.mkdir()
+    alias = nested / "seed-alias.json"
+    alias.hardlink_to(canonical)
+
+    reason = guard.analyze_command("cd sub && cp ../forged seed-alias.json")
+
+    assert reason == "protected SAMVIL SSOT overwrite"
+
+
 @pytest.mark.parametrize(
     "creator",
     [

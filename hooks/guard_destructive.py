@@ -632,10 +632,12 @@ def _normalized_rm_target(target: str) -> str:
     return normalized
 
 
-def _is_protected_ssot_target(target: str) -> bool:
+def _is_protected_ssot_target(target: str, cwd: Path | None = None) -> bool:
     normalized = _normalized_rm_target(target)
     try:
         path = Path(normalized).expanduser()
+        if not path.is_absolute():
+            path = (cwd or Path.cwd()) / path
         if path.exists():
             for protected in PROTECTED_ROOT_SSOT_PATHS | PROTECTED_SAMVIL_SSOT_PATHS:
                 canonical = Path(protected).expanduser()
@@ -672,10 +674,12 @@ def _is_samvil_event_store_target(target: str) -> bool:
     )
 
 
-def _protected_mutation_reason(target: str) -> str | None:
+def _protected_mutation_reason(
+    target: str, cwd: Path | None = None
+) -> str | None:
     if _is_samvil_event_store_target(target):
         return "protected SAMVIL EventStore overwrite"
-    if _is_protected_ssot_target(target):
+    if _is_protected_ssot_target(target, cwd):
         return "protected SAMVIL SSOT overwrite"
     return None
 
@@ -1294,22 +1298,24 @@ def _perl_option_enables_in_place_edit(token: str) -> bool:
     return False
 
 
-def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
+def _protected_overwrite_reason(
+    executable: str, args: list[str], cwd: Path | None = None
+) -> str | None:
     if executable in {">", ">>", ">|", "<>", "&>", "&>>"} and args:
-        reason = _protected_mutation_reason(args[0])
+        reason = _protected_mutation_reason(args[0], cwd)
         if reason:
             return reason
 
     for index, token in enumerate(args[:-1]):
         if token in {">", ">>", ">|", "<>", "&>", "&>>"}:
-            reason = _protected_mutation_reason(args[index + 1])
+            reason = _protected_mutation_reason(args[index + 1], cwd)
             if reason:
                 return reason
 
     if executable == "truncate":
         for token in args:
             if not token.startswith("-"):
-                reason = _protected_mutation_reason(token)
+                reason = _protected_mutation_reason(token, cwd)
                 if reason:
                     return reason
 
@@ -1336,7 +1342,7 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
 
     if executable in {"cp", "install", "ln", "mv", "rsync"} and len(args) >= 2:
         for target in _copy_like_mutation_targets(args):
-            reason = _protected_mutation_reason(target)
+            reason = _protected_mutation_reason(target, cwd)
             if reason:
                 return reason
 
@@ -1348,7 +1354,7 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
             if targets is None:
                 targets = [token]
             for target in targets:
-                reason = _protected_mutation_reason(target)
+                reason = _protected_mutation_reason(target, cwd)
                 if reason:
                     return reason
 
@@ -1364,7 +1370,7 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
             if targets is None:
                 targets = [token]
             for target in targets:
-                reason = _protected_mutation_reason(target)
+                reason = _protected_mutation_reason(target, cwd)
                 if reason:
                     return reason
 
@@ -1375,7 +1381,7 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
                 if targets is None:
                     targets = [token]
                 for target in targets:
-                    reason = _protected_mutation_reason(target)
+                    reason = _protected_mutation_reason(target, cwd)
                     if reason:
                         return reason
 
@@ -2509,6 +2515,7 @@ def _analyze_command_impl(command: str) -> str | None:
     runtime_stdin_reason = _language_runtime_heredoc_reason(command)
     if runtime_stdin_reason:
         return runtime_stdin_reason
+    analysis_cwd = Path.cwd()
     for tokens in _segments(command):
         command_context = shlex.join(tokens)
         tokens = _unwrap_prefix(tokens)
@@ -2538,7 +2545,17 @@ def _analyze_command_impl(command: str) -> str | None:
         )
         if runtime_script_reason:
             return runtime_script_reason
-        overwrite_reason = _protected_overwrite_reason(executable, args)
+        if executable == "cd":
+            cd_args = [token for token in args if token != "--"]
+            if cd_args:
+                target = Path(cd_args[-1]).expanduser()
+                analysis_cwd = (
+                    target if target.is_absolute() else analysis_cwd / target
+                ).resolve(strict=False)
+            continue
+        overwrite_reason = _protected_overwrite_reason(
+            executable, args, analysis_cwd
+        )
         if overwrite_reason:
             return overwrite_reason
         if any(char in executable for char in "`$*?[{"):
