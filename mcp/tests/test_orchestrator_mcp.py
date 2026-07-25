@@ -1250,8 +1250,10 @@ def test_complete_stage_reconciles_db_committed_event_after_process_crash(
         )
 
         result = json.loads(await complete_stage(sid, "interview", "pass"))
-        assert result["status"] == "error"
-        assert "current stage is seed" in result["error"]
+        assert result["status"] == "ok"
+        assert result["recovered"] is True
+        assert result["next_stage"] == "seed"
+        assert result["event_id"] == transition.event.id
         assert await store.get_pending_project_events(sid) == []
         events = read_events(project_root)["entries"]
         assert len(events) == 1
@@ -2082,6 +2084,25 @@ def test_save_event_rejects_malformed_jsonl_prefix_instead_of_appending(
         )
 
     assert events_path.read_text(encoding="utf-8") == malformed
+
+
+def test_canonical_event_lookup_rejects_malformed_prefix_before_matching_id(
+    tmp_path,
+) -> None:
+    from samvil_mcp import server as srv
+
+    project_root = tmp_path / "project"
+    events_path = project_root / ".samvil" / "events.jsonl"
+    events_path.parent.mkdir(parents=True)
+    events_path.write_text(
+        '{"partial":\n'
+        + json.dumps({"event_id": "matching-id", "event_type": "build_pass"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(OSError, match="malformed canonical event log"):
+        srv._canonical_project_event_exists(project_root, "matching-id")
 
 
 def test_save_event_fails_closed_when_project_events_append_fails(

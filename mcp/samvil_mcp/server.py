@@ -692,6 +692,7 @@ def _canonical_project_event_exists(project_root: Path, event_id: str) -> bool:
     if not path.exists():
         return False
     with _file_locked(path):
+        _validate_existing_event_log(path)
         try:
             with path.open(encoding="utf-8") as handle:
                 for line in handle:
@@ -710,11 +711,12 @@ async def _reconcile_pending_project_events(
     store: EventStore,
     session_id: str,
     project_path: Path,
-) -> None:
+) -> list[dict[str, Any]]:
+    reconciled: list[dict[str, Any]] = []
     async with _AsyncFileLock(_stage_transition_lock_path(store, session_id)):
         pending = await store.get_pending_project_events(session_id)
         if not pending:
-            return
+            return reconciled
         for item in pending:
             event_id = str(item["event_id"])
             if not await asyncio.to_thread(
@@ -740,6 +742,8 @@ async def _reconcile_pending_project_events(
                     event_id=event_id,
                 )
             await store.acknowledge_pending_project_event(event_id)
+            reconciled.append(item)
+    return reconciled
 
 
 def _validate_existing_event_log(path: Path) -> None:
@@ -1227,10 +1231,29 @@ async def complete_stage(
             raise OrchestratorError(
                 f"project root unresolved for session {session_id}"
             )
-        await _reconcile_pending_project_events(store, session_id, project_path)
+        reconciled = await _reconcile_pending_project_events(
+            store, session_id, project_path
+        )
 
+        session = await store.get_session(session_id)
+        if session is None:
+            return json.dumps({"status": "error", "error": f"session {session_id} not found"})
         current_stage = session.current_stage.value
         if current_stage != stage:
+            for item in reversed(reconciled):
+                event_type = str(
+                    item["data"].get("event_type_raw") or item["event_type"]
+                )
+                if _canonical_stage_for_event(event_type, str(item["stage"])) == stage:
+                    return json.dumps(
+                        {
+                            "status": "ok",
+                            "event_id": str(item["event_id"]),
+                            "claim_saved": False,
+                            "recovered": True,
+                            "next_stage": current_stage,
+                        }
+                    )
             raise OrchestratorError(
                 f"cannot complete stage {stage!r}; current stage is {current_stage}"
             )
