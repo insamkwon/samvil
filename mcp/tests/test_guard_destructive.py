@@ -784,6 +784,20 @@ def test_same_command_created_directory_symlink_destination_cannot_bypass_guard(
     assert reason == "protected SAMVIL EventStore overwrite"
 
 
+def test_removed_same_command_directory_is_not_used_for_symlink_destination(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    alias_dir = tmp_path / "removed-alias-dir"
+
+    reason = guard.analyze_command(
+        f"mkdir {alias_dir} && rmdir {alias_dir} && "
+        f"ln -s ~/.samvil/samvil.db {alias_dir} && cp /tmp/forged {alias_dir}"
+    )
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
 def test_new_event_store_symlink_nested_read_only_query_still_passes(
     tmp_path: Path,
 ) -> None:

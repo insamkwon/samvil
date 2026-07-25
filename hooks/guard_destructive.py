@@ -820,6 +820,22 @@ def _register_literal_directory_creation(
     return True
 
 
+def _register_literal_directory_removal(
+    executable: str,
+    args: list[str],
+    known_directories: set[str],
+) -> bool:
+    if executable != "rmdir":
+        return False
+    for token in args:
+        if token.startswith("-") and token != "-":
+            continue
+        directory_key = _literal_path_key(token)
+        if directory_key:
+            known_directories.discard(directory_key)
+    return True
+
+
 def _nested_alias_commands(executable: str, args: list[str]) -> list[str]:
     if executable in SHELLS:
         invocation = _shell_command_invocation(args)
@@ -854,6 +870,12 @@ def _collect_literal_symlink_aliases(
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
+        if _register_literal_directory_removal(
+            executable,
+            args,
+            known_directories,
+        ):
+            continue
         if _register_literal_directory_creation(
             executable,
             args,
@@ -925,6 +947,12 @@ def _chained_protected_alias_reason(command: str) -> str | None:
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
+        if _register_literal_directory_removal(
+            executable,
+            args,
+            known_directories,
+        ):
+            continue
         if _register_literal_directory_creation(
             executable,
             args,
