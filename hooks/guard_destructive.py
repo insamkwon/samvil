@@ -680,6 +680,138 @@ def _literal_path_key(target: str) -> str | None:
         return None
 
 
+def _register_literal_symlink_alias(
+    executable: str,
+    args: list[str],
+    aliases: dict[str, str],
+    alias_literals: dict[str, str],
+) -> bool:
+    if executable != "ln" or not any(
+        token == "--symbolic"
+        or (
+            token.startswith("-")
+            and not token.startswith("--")
+            and "s" in token[1:]
+        )
+        for token in args
+    ):
+        return False
+    operands = [
+        token
+        for token in args
+        if token == "-" or not token.startswith("-")
+    ]
+    if len(operands) < 2:
+        return True
+    source, destination = operands[-2:]
+    source_key = _literal_path_key(source)
+    protected_source = aliases.get(source_key or "", source)
+    if not (
+        _is_samvil_event_store_target(protected_source)
+        or _is_protected_ssot_target(protected_source)
+    ):
+        return True
+    try:
+        destination_path = Path(destination).expanduser()
+        if destination_path.is_dir():
+            destination = str(destination_path / Path(source).name)
+    except (OSError, RuntimeError):
+        pass
+    destination_key = _literal_path_key(destination)
+    if destination_key:
+        aliases[destination_key] = protected_source
+        spellings = {destination, destination_key}
+        if not Path(destination).is_absolute() and not destination.startswith("./"):
+            spellings.add(f"./{destination}")
+        for spelling in spellings:
+            alias_literals[spelling] = protected_source
+    return True
+
+
+def _nested_alias_commands(executable: str, args: list[str]) -> list[str]:
+    if executable in SHELLS:
+        invocation = _shell_command_invocation(args)
+        if invocation:
+            shell_command, argv0, positional = invocation
+            expanded, unresolved = _expand_shell_positional_parameters(
+                shell_command,
+                argv0=argv0,
+                positional=positional,
+            )
+            return [] if unresolved else [expanded]
+    if executable == "eval" and args:
+        nested_args = args[1:] if args[0] == "--" else args
+        return [" ".join(nested_args)]
+    return []
+
+
+def _collect_literal_symlink_aliases(
+    command: str,
+    aliases: dict[str, str],
+    alias_literals: dict[str, str],
+    *,
+    depth: int = 0,
+) -> None:
+    if depth >= MAX_ANALYSIS_DEPTH:
+        return
+    for segment in _segments(command):
+        tokens = _unwrap_prefix(segment)
+        start = _command_start(tokens)
+        if start >= len(tokens):
+            continue
+        executable = _executable(tokens[start])
+        args = tokens[start + 1 :]
+        if _register_literal_symlink_alias(
+            executable,
+            args,
+            aliases,
+            alias_literals,
+        ):
+            continue
+        for nested in _nested_alias_commands(executable, args):
+            _collect_literal_symlink_aliases(
+                nested,
+                aliases,
+                alias_literals,
+                depth=depth + 1,
+            )
+
+
+def _rewrite_chained_alias_token(
+    token: str,
+    aliases: dict[str, str],
+    alias_literals: dict[str, str],
+) -> tuple[str, bool]:
+    alias_target = aliases.get(_literal_path_key(token) or "")
+    if alias_target is not None:
+        return alias_target, True
+    try:
+        nested_tokens = shlex.split(token)
+    except ValueError:
+        nested_tokens = []
+    nested_changed = False
+    for index, nested_token in enumerate(nested_tokens):
+        nested_target = aliases.get(_literal_path_key(nested_token) or "")
+        if nested_target is not None:
+            nested_tokens[index] = nested_target
+            nested_changed = True
+    if nested_changed:
+        token = shlex.join(nested_tokens)
+    changed = nested_changed
+    for alias_literal, protected_source in sorted(
+        alias_literals.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        pattern = (
+            rf"(?<![A-Za-z0-9_./~-]){re.escape(alias_literal)}"
+            r"(?![A-Za-z0-9_./~-])"
+        )
+        token, replacements = re.subn(pattern, protected_source, token)
+        changed = changed or bool(replacements)
+    return token, changed
+
+
 def _chained_protected_alias_reason(command: str) -> str | None:
     """Track literal symlinks created earlier in the same shell command."""
     aliases: dict[str, str] = {}
@@ -691,64 +823,33 @@ def _chained_protected_alias_reason(command: str) -> str | None:
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
-        if executable == "ln" and any(
-            token == "--symbolic"
-            or (
-                token.startswith("-")
-                and not token.startswith("--")
-                and "s" in token[1:]
-            )
-            for token in args
+        if _register_literal_symlink_alias(
+            executable,
+            args,
+            aliases,
+            alias_literals,
         ):
-            operands = [
-                token
-                for token in args
-                if token == "-" or not token.startswith("-")
-            ]
-            if len(operands) >= 2:
-                source, destination = operands[-2:]
-                source_key = _literal_path_key(source)
-                protected_source = aliases.get(source_key or "", source)
-                destination_key = _literal_path_key(destination)
-                if destination_key and (
-                    _is_samvil_event_store_target(protected_source)
-                    or _is_protected_ssot_target(protected_source)
-                ):
-                    aliases[destination_key] = protected_source
-                    alias_literals[destination] = protected_source
-                    alias_literals[destination_key] = protected_source
             continue
-        if not aliases:
-            continue
-        rewritten = list(tokens[start:])
-        changed = False
-        for index, token in enumerate(rewritten):
-            alias_target = aliases.get(_literal_path_key(token) or "")
-            if alias_target is not None:
-                rewritten[index] = alias_target
-                changed = True
-                continue
-            for alias_literal, protected_source in sorted(
-                alias_literals.items(),
-                key=lambda item: len(item[0]),
-                reverse=True,
-            ):
-                pattern = (
-                    rf"(?<![A-Za-z0-9_./~-]){re.escape(alias_literal)}"
-                    r"(?![A-Za-z0-9_./~-])"
+        if aliases:
+            rewritten = list(tokens[start:])
+            changed = False
+            for index, command_token in enumerate(rewritten):
+                rewritten[index], token_changed = _rewrite_chained_alias_token(
+                    command_token,
+                    aliases,
+                    alias_literals,
                 )
-                rewritten_token, replacements = re.subn(
-                    pattern,
-                    protected_source,
-                    rewritten[index],
-                )
-                if replacements:
-                    rewritten[index] = rewritten_token
-                    changed = True
-        if changed:
-            reason = analyze_command(shlex.join(rewritten))
-            if reason:
-                return reason
+                changed = changed or token_changed
+            if changed:
+                reason = analyze_command(shlex.join(rewritten))
+                if reason:
+                    return reason
+        for nested in _nested_alias_commands(executable, args):
+            _collect_literal_symlink_aliases(
+                nested,
+                aliases,
+                alias_literals,
+            )
     return None
 
 

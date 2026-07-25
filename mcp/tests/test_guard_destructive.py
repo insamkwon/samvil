@@ -658,6 +658,58 @@ def test_new_event_store_symlink_in_nested_payload_cannot_bypass_guard(
     }
 
 
+@pytest.mark.parametrize(
+    "creator",
+    [
+        "sh -c 'ln -s ~/.samvil/samvil.db {alias}'",
+        "eval 'ln -s ~/.samvil/samvil.db {alias}'",
+    ],
+)
+def test_nested_payload_created_event_store_alias_cannot_escape_to_outer_command(
+    tmp_path: Path,
+    creator: str,
+) -> None:
+    guard = load_guard_module()
+    alias = tmp_path / "nested-created-event-store-alias.db"
+
+    reason = guard.analyze_command(
+        creator.format(alias=alias) + f" && cp /tmp/forged {alias}"
+    )
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
+def test_new_event_store_symlink_relative_spelling_cannot_bypass_nested_guard(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    guard = load_guard_module()
+    monkeypatch.chdir(tmp_path)
+    alias = "relative-event-store-alias.db"
+
+    reason = guard.analyze_command(
+        f"ln -s ~/.samvil/samvil.db {alias} && "
+        f"sh -c 'cp /tmp/forged ./{alias}'"
+    )
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
+def test_new_event_store_symlink_directory_destination_cannot_bypass_guard(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    alias_dir = tmp_path / "aliases"
+    alias_dir.mkdir()
+    alias = alias_dir / "samvil.db"
+
+    reason = guard.analyze_command(
+        f"ln -s ~/.samvil/samvil.db {alias_dir} && cp /tmp/forged {alias}"
+    )
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
 def test_new_event_store_symlink_nested_read_only_query_still_passes(
     tmp_path: Path,
 ) -> None:
