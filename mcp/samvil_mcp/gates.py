@@ -10,10 +10,11 @@ Per HANDOFF-v3.2-DECISIONS.md §3.⑥ and §6.3:
   * The boundary between ⑥ and P8 Graceful Degradation: if the failure
     changes the truth of a claim, it's a gate failure. If it only slows down
     observation of a known-true claim, it's graceful degradation.
-    (See references/gate-vs-degradation.md.)
+    (See references/graceful-degradation.md.)
 
-This module is intentionally pure: no I/O except reading `gate_config.yaml`.
-Skills import `gate_check(...)` and branch on the verdict.
+`gate_check` is pure except for reading `gate_config.yaml`. `gate_override`
+currently fails closed because no supported host exposes a non-model-callable,
+replay-protected user approval attestation.
 """
 
 from __future__ import annotations
@@ -22,7 +23,10 @@ import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
+
+if TYPE_CHECKING:
+    from .claim_ledger import Claim, ClaimLedger
 
 try:
     import yaml  # optional runtime dep; fall back to embedded defaults if missing
@@ -102,11 +106,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "interview_to_seed": {
             "policy": "hard",
             "thresholds": {
-                "minimal": {"seed_readiness": 0.80},
-                "standard": {"seed_readiness": 0.88},
-                "thorough": {"seed_readiness": 0.93},
-                "full": {"seed_readiness": 0.96},
-                "deep": {"seed_readiness": 0.985},
+                "minimal": {"seed_readiness": 0.80, "ambiguity_converged": True},
+                "standard": {"seed_readiness": 0.88, "ambiguity_converged": True},
+                "thorough": {"seed_readiness": 0.93, "ambiguity_converged": True},
+                "full": {"seed_readiness": 0.96, "ambiguity_converged": True},
+                "deep": {"seed_readiness": 0.985, "ambiguity_converged": True},
             },
         },
         "seed_to_council": {
@@ -164,11 +168,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "qa_to_deploy": {
             "policy": "hard",
             "thresholds": {
-                "minimal": {"three_pass_pass": True, "zero_stubs": True},
-                "standard": {"three_pass_pass": True, "zero_stubs": True},
-                "thorough": {"three_pass_pass": True, "zero_stubs": True},
-                "full": {"three_pass_pass": True, "zero_stubs": True},
-                "deep": {"three_pass_pass": True, "zero_stubs": True},
+                "minimal": {"three_pass_pass": True, "zero_stubs": True, "runtime_verified": True},
+                "standard": {"three_pass_pass": True, "zero_stubs": True, "runtime_verified": True},
+                "thorough": {"three_pass_pass": True, "zero_stubs": True, "runtime_verified": True},
+                "full": {"three_pass_pass": True, "zero_stubs": True, "runtime_verified": True},
+                "deep": {"three_pass_pass": True, "zero_stubs": True, "runtime_verified": True},
             },
         },
         "qa_to_evolve": {
@@ -418,10 +422,60 @@ def _required_action_for(
             type="fix_schema",
             payload={"reason": "Seed/blueprint schema invalid", "checks": failed},
         )
+    if "runtime_verified" in failed or "verification_mode" in failed:
+        return RequiredAction(
+            type="ask_user",
+            payload={
+                "question": "runtime 검증 없이 배포하시겠어요?",
+                "risk": "실제 브라우저 실행 증거 없이 static 분석 결과만으로 배포됩니다.",
+                "checks": failed,
+            },
+        )
     return RequiredAction(
         type="ask_user",
         payload={"checks": failed, "metrics_snapshot": dict(metrics)},
     )
+
+
+# ── Explicit user override ───────────────────────────────────────────
+
+
+def active_gate_override(ledger: "ClaimLedger", gate: str) -> "Claim | None":
+    """Return no override until trusted host attestations are implemented."""
+    return ledger.consume_gate_override(gate)
+
+
+def gate_override(
+    project_root: str | Path,
+    *,
+    gate: str,
+    reason: str,
+    approval_claim_id: str,
+) -> dict[str, Any]:
+    """Fail closed until a trusted host approval adapter is installed."""
+    from .claim_ledger import ClaimLedger, ClaimLedgerError
+
+    if gate not in {item.value for item in GateName}:
+        raise ValueError(f"unknown gate: {gate!r}")
+    if not reason.strip():
+        raise ValueError("gate override reason is required")
+
+    ledger = ClaimLedger(Path(project_root) / ".samvil" / "claims.jsonl")
+    try:
+        claim = ledger.record_gate_override(
+            gate=gate,
+            reason=reason,
+            approval_claim_id=approval_claim_id,
+        )
+    except ClaimLedgerError as exc:
+        raise ValueError(str(exc)) from exc
+    return {
+        "claim_id": claim.claim_id,
+        "status": claim.status,
+        "gate": gate,
+        "overridden_by": "user",
+        "reason": reason.strip(),
+    }
 
 
 # ── Escalation safety ─────────────────────────────────────────────────

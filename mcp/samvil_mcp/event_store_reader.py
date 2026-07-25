@@ -38,6 +38,24 @@ IN_FLIGHT_STAGES = frozenset({
     "interview", "seed", "council", "design",
     "scaffold", "build", "qa", "deploy", "evolve",
 })
+SUCCESS_EVENT_TO_COMPLETED_STAGE = {
+    "interview_complete": "interview",
+    "seed_generated": "seed",
+    "pm_seed_complete": "seed",
+    "pm_seed_converted": "seed",
+    "council_complete": "council",
+    "council_verdict": "council",
+    "design_complete": "design",
+    "blueprint_generated": "design",
+    "scaffold_complete": "scaffold",
+    "build_pass": "build",
+    "build_stage_complete": "build",
+    "feature_tree_complete": "build",
+    "qa_pass": "qa",
+    "deploy_complete": "deploy",
+    "retro_complete": "retro",
+    "evolve_converge": "evolve",
+}
 
 
 def _project_paths(project_root: str | Path) -> tuple[Path, Path]:
@@ -46,6 +64,16 @@ def _project_paths(project_root: str | Path) -> tuple[Path, Path]:
         root / SAMVIL_DIR / EVENTS_FILENAME,
         root / STATE_FILENAME,
     )
+
+
+def _event_timestamp(entry: dict) -> str:
+    """Read the canonical timestamp while accepting legacy ``ts`` rows."""
+    value = entry.get("timestamp")
+    if value is None or value == "":
+        value = entry.get("ts")
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else str(value)
 
 
 def read_events(project_root: str | Path) -> dict:
@@ -105,7 +133,7 @@ def read_events(project_root: str | Path) -> dict:
             result["by_session"].setdefault(session_id, []).append(entry)
 
     if result["entries"]:
-        timestamps = [e.get("timestamp", "") for e in result["entries"] if e.get("timestamp")]
+        timestamps = [timestamp for e in result["entries"] if (timestamp := _event_timestamp(e))]
         if timestamps:
             timestamps.sort()
             result["first_ts"] = timestamps[0]
@@ -179,34 +207,50 @@ def list_in_flight_sessions(project_root: str | Path) -> dict:
     if not state["ok"]:
         notes.append(f"state.json could not be read: {state.get('error', 'missing')}")
         current_stage_from_state = None
+        current_session_from_state = None
     else:
         current_stage_from_state = state["state"].get("current_stage")
+        current_session_from_state = state["state"].get("session_id")
 
     in_flight: list[dict] = []
     for session_id, entries in events["by_session"].items():
         if not entries:
             continue
         # Sort by timestamp to find last event
-        sorted_entries = sorted(entries, key=lambda e: e.get("timestamp", ""))
+        sorted_entries = sorted(entries, key=_event_timestamp)
         last = sorted_entries[-1]
         last_event_type = last.get("event_type", "")
         last_stage = last.get("stage", "")
         stages = sorted({e.get("stage", "") for e in entries if e.get("stage")})
 
-        # Heuristic: in-flight if last stage is in IN_FLIGHT_STAGES and
-        # last event is not a *_complete pointing to a terminal stage
-        is_in_flight = (
-            last_stage in IN_FLIGHT_STAGES
-            and not (last_event_type.endswith("_complete") and last_stage in {"retro", "complete"})
+        state_applies_to_session = bool(current_stage_from_state) and (
+            current_session_from_state == session_id
         )
+        active_stage = last_stage
+        completed_stage = SUCCESS_EVENT_TO_COMPLETED_STAGE.get(last_event_type)
+        if state_applies_to_session and current_stage_from_state in IN_FLIGHT_STAGES:
+            active_stage = str(current_stage_from_state)
+            is_in_flight = True
+        elif completed_stage is not None:
+            is_in_flight = (
+                last_stage in IN_FLIGHT_STAGES
+                and completed_stage != last_stage
+            )
+        elif last_event_type.endswith("_complete"):
+            is_in_flight = last_stage in IN_FLIGHT_STAGES
+        else:
+            # Heuristic: in-flight if the last observed event points at a
+            # non-terminal stage. Completed-stage rows record the stage that
+            # finished, so they must not be mistaken for the resume target.
+            is_in_flight = last_stage in IN_FLIGHT_STAGES
         if not is_in_flight:
             continue
 
         in_flight.append({
             "session_id": session_id,
-            "current_stage": last_stage,
+            "current_stage": active_stage,
             "last_event_type": last_event_type,
-            "last_event_ts": last.get("timestamp", ""),
+            "last_event_ts": _event_timestamp(last),
             "event_count": len(entries),
             "stages_touched": stages,
         })

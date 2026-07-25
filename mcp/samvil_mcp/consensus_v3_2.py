@@ -189,8 +189,8 @@ def build_judge_prompt(
 
 
 DEPRECATION_WARNING = (
-    "Council Gate A is opt-in in v3.2 and removed in v3.3. Running "
-    "with --council enables the legacy always-on pipeline. Prefer "
+    "Council Gate A is default-off and runs only because --council was "
+    "supplied. This is a legacy compatibility path. Prefer "
     "automatic consensus invocation via ⑨ triggers. See "
     "references/council-retirement-migration.md."
 )

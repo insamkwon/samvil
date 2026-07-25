@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,13 @@ from .repair import evaluate_repair_gate
 
 RELEASE_REPORT_SCHEMA_VERSION = "1.0"
 RELEASE_BUNDLE_SCHEMA_VERSION = "1.0"
+
+
+def _python_script_command(script: str) -> str:
+    """Run release scripts with the interpreter executing this runner."""
+    return f"{shlex.quote(sys.executable)} {script}"
+
+
 DEFAULT_REQUIRED_CHECKS: tuple[str, ...] = (
     "phase30_final_e2e_bundle",
     "phase29_evolve_cycle_closure",
@@ -39,103 +47,103 @@ DEFAULT_RELEASE_COMMANDS: tuple[dict[str, Any], ...] = (
     {
         "name": "phase30_final_e2e_bundle",
         "label": "Phase 30 final E2E bundle dogfood",
-        "command": "python3 scripts/phase30-final-e2e-bundle-dogfood.py",
+        "command": _python_script_command("scripts/phase30-final-e2e-bundle-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase29_evolve_cycle_closure",
         "label": "Phase 29 evolve cycle closure dogfood",
-        "command": "python3 scripts/phase29-evolve-cycle-closure-dogfood.py",
+        "command": _python_script_command("scripts/phase29-evolve-cycle-closure-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase28_post_rebuild_qa",
         "label": "Phase 28 post-rebuild QA dogfood",
-        "command": "python3 scripts/phase28-post-rebuild-qa-dogfood.py",
+        "command": _python_script_command("scripts/phase28-post-rebuild-qa-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase27_rebuild_reentry",
         "label": "Phase 27 rebuild reentry dogfood",
-        "command": "python3 scripts/phase27-rebuild-reentry-dogfood.py",
+        "command": _python_script_command("scripts/phase27-rebuild-reentry-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase26_evolve_rebuild",
         "label": "Phase 26 evolve rebuild handoff dogfood",
-        "command": "python3 scripts/phase26-evolve-rebuild-dogfood.py",
+        "command": _python_script_command("scripts/phase26-evolve-rebuild-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase25_evolve_apply",
         "label": "Phase 25 evolve apply dogfood",
-        "command": "python3 scripts/phase25-evolve-apply-dogfood.py",
+        "command": _python_script_command("scripts/phase25-evolve-apply-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase24_evolve_proposal",
         "label": "Phase 24 evolve proposal dogfood",
-        "command": "python3 scripts/phase24-evolve-proposal-dogfood.py",
+        "command": _python_script_command("scripts/phase24-evolve-proposal-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase23_evolve_intake_context",
         "label": "Phase 23 evolve intake context dogfood",
-        "command": "python3 scripts/phase23-evolve-intake-context-dogfood.py",
+        "command": _python_script_command("scripts/phase23-evolve-intake-context-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase22_qa_recovery_routing",
         "label": "Phase 22 QA recovery routing dogfood",
-        "command": "python3 scripts/phase22-qa-recovery-routing-dogfood.py",
+        "command": _python_script_command("scripts/phase22-qa-recovery-routing-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase21_qa_convergence_gate",
         "label": "Phase 21 QA convergence gate dogfood",
-        "command": "python3 scripts/phase21-qa-convergence-gate-dogfood.py",
+        "command": _python_script_command("scripts/phase21-qa-convergence-gate-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase20_qa_materialization",
         "label": "Phase 20 QA materialization dogfood",
-        "command": "python3 scripts/phase20-qa-materialization-dogfood.py",
+        "command": _python_script_command("scripts/phase20-qa-materialization-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase19_qa_synthesis_gate",
         "label": "Phase 19 QA synthesis gate dogfood",
-        "command": "python3 scripts/phase19-qa-synthesis-gate-dogfood.py",
+        "command": _python_script_command("scripts/phase19-qa-synthesis-gate-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase18_independent_evidence",
         "label": "Phase 18 independent evidence contract dogfood",
-        "command": "python3 scripts/phase18-independent-evidence-dogfood.py",
+        "command": _python_script_command("scripts/phase18-independent-evidence-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase12_release_readiness",
         "label": "Phase 12 release readiness dogfood",
-        "command": "python3 scripts/phase12-release-readiness-dogfood.py",
+        "command": _python_script_command("scripts/phase12-release-readiness-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase11_repair_orchestration",
         "label": "Phase 11 repair orchestration regression",
-        "command": "python3 scripts/phase11-repair-orchestration-dogfood.py",
+        "command": _python_script_command("scripts/phase11-repair-orchestration-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase10_repair_regression",
         "label": "Phase 10 repair regression",
-        "command": "python3 scripts/phase10-inspection-repair-dogfood.py",
+        "command": _python_script_command("scripts/phase10-inspection-repair-dogfood.py"),
         "timeout_seconds": 60,
     },
     {
         "name": "phase8_browser_inspection",
         "label": "Phase 8 browser inspection regression",
-        "command": "python3 scripts/phase8-real-app-inspection.py",
+        "command": _python_script_command("scripts/phase8-real-app-inspection.py"),
         "timeout_seconds": 180,
     },
     {

@@ -288,6 +288,27 @@ def test_four_dim_baseline_full_inputs(tmp_path: Path) -> None:
     assert baseline["ac_partial_count"] == 2
 
 
+def test_four_dim_baseline_accepts_canonical_uppercase_qa_counts(tmp_path: Path) -> None:
+    """QA synthesis writes uppercase count keys; evolve must preserve them."""
+    _write_seed(tmp_path)
+    _write_state(tmp_path)
+    _write_qa_results(tmp_path, verdict="PARTIAL", pass_n=6, fail_n=2, partial_n=3)
+    qa_path = tmp_path / ".samvil" / "qa-results.json"
+    qa = json.loads(qa_path.read_text(encoding="utf-8"))
+    qa["synthesis"]["pass2"]["counts"] = {
+        "PASS": 6,
+        "FAIL": 2,
+        "PARTIAL": 3,
+    }
+    qa_path.write_text(json.dumps(qa), encoding="utf-8")
+
+    baseline = evolve_aggregate.aggregate_evolve_context(str(tmp_path))["four_dim_baseline"]
+
+    assert baseline["ac_pass_count"] == 6
+    assert baseline["ac_fail_count"] == 2
+    assert baseline["ac_partial_count"] == 3
+
+
 def test_four_dim_baseline_english_header(tmp_path: Path) -> None:
     """English 'Core problem' header also detected."""
     _write_seed(tmp_path)

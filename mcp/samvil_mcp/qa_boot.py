@@ -26,7 +26,7 @@ What stays in the skill body (CC-bound, P8):
   - Actual Playwright MCP calls (browser_navigate, browser_snapshot,
     browser_click, browser_take_screenshot, etc.).
   - Spawning independent `Agent()` calls for Pass 2/3 in
-    standard/thorough/full tiers.
+    standard/thorough/full/deep tiers.
   - Per-leaf semantic_check + validate_evidence calls during Pass 2.5
     (already first-class MCP tools — adapter would be redundant).
   - Ralph Loop iteration counter + BLOCKED detection (control flow).

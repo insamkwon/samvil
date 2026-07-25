@@ -76,9 +76,17 @@ class Event:
 
 
 @dataclass
+class StageTransition:
+    event: Event
+    previous_stage: Stage
+    previous_transition_id: str = ""
+
+
+@dataclass
 class Session:
     id: str
     project_name: str
+    project_root: str = ""
     seed_version: int = 1
     current_stage: Stage = Stage.INTERVIEW
     samvil_tier: str = "standard"

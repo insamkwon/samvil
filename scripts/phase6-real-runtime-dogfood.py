@@ -37,6 +37,12 @@ from samvil_mcp.telemetry import (  # noqa: E402
 )
 
 
+NODE_FALLBACK_DIRS = (
+    Path("/opt/homebrew/bin"),
+    Path("/usr/local/bin"),
+)
+
+
 @dataclass(frozen=True)
 class RuntimeScenario:
     name: str
@@ -304,24 +310,51 @@ def _write_events_and_claims(root: Path, scenario: RuntimeScenario) -> None:
 
 
 def _run_build(root: Path) -> str:
+    npm = _resolve_runtime_executable("npm")
     result = subprocess.run(
-        ["npm", "run", "build"],
+        [npm, "run", "build"],
         cwd=root,
         text=True,
         capture_output=True,
         check=False,
         timeout=20,
+        env=_runtime_env(npm),
     )
     if result.returncode != 0:
         raise AssertionError(f"npm run build failed in {root}\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}")
     return result.stdout + result.stderr
 
 
+def _resolve_runtime_executable(name: str) -> str:
+    if resolved := shutil.which(name):
+        return resolved
+    checked: list[str] = []
+    for directory in NODE_FALLBACK_DIRS:
+        candidate = directory / name
+        checked.append(str(candidate))
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    raise AssertionError(
+        f"{name} executable not found on PATH or fallback dirs: {', '.join(checked)}"
+    )
+
+
+def _runtime_env(executable: str) -> dict[str, str]:
+    env = dict(os.environ)
+    executable_dir = str(Path(executable).parent)
+    path = env.get("PATH", "")
+    parts = [part for part in path.split(os.pathsep) if part]
+    if executable_dir not in parts:
+        env["PATH"] = os.pathsep.join([executable_dir, *parts])
+    return env
+
+
 def _start_and_fetch(root: Path, scenario: RuntimeScenario) -> dict[str, Any]:
     port = _free_port()
-    env = {**os.environ, "PORT": str(port)}
+    npm = _resolve_runtime_executable("npm")
+    env = {**_runtime_env(npm), "PORT": str(port)}
     proc = subprocess.Popen(
-        ["npm", "start"],
+        [npm, "start"],
         cwd=root,
         text=True,
         stdout=subprocess.PIPE,

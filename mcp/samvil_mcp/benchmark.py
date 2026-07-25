@@ -39,6 +39,17 @@ DEFAULT_TARGETS = [
         "why": "Open competitor — what's the community converging on?",
     },
 ]
+MAX_CHANGELOG_BYTES = 1_000_000
+MIN_FETCH_TIMEOUT_SECONDS = 0.5
+MAX_FETCH_TIMEOUT_SECONDS = 10.0
+
+
+def _bounded_timeout(timeout: float) -> float:
+    try:
+        value = float(timeout)
+    except (TypeError, ValueError):
+        value = 5.0
+    return max(MIN_FETCH_TIMEOUT_SECONDS, min(value, MAX_FETCH_TIMEOUT_SECONDS))
 
 
 def fetch_external_changelog(url: str, timeout: float = 5.0) -> dict:
@@ -56,8 +67,14 @@ def fetch_external_changelog(url: str, timeout: float = 5.0) -> dict:
         return {"ok": False, "error": "url is required"}
     try:
         request = urllib.request.Request(url, headers={"User-Agent": "samvil-benchmark/1.0"})
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read()
+        with urllib.request.urlopen(request, timeout=_bounded_timeout(timeout)) as response:
+            raw = response.read(MAX_CHANGELOG_BYTES + 1)
+            if len(raw) > MAX_CHANGELOG_BYTES:
+                return {
+                    "ok": False,
+                    "error": f"response too large: limit={MAX_CHANGELOG_BYTES} bytes",
+                    "url": url,
+                }
             try:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError:

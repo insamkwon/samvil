@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -68,6 +70,43 @@ def test_deep_tier_has_higher_floor() -> None:
         metrics={"implementation_rate": 0.96},
     )
     assert v.verdict == Verdict.BLOCK.value
+
+
+def test_qa_to_deploy_requires_runtime_verification() -> None:
+    blocked = gate_check(
+        GateName.QA_TO_DEPLOY.value,
+        samvil_tier="standard",
+        metrics={"three_pass_pass": True, "zero_stubs": True},
+    )
+    passed = gate_check(
+        GateName.QA_TO_DEPLOY.value,
+        samvil_tier="standard",
+        metrics={
+            "three_pass_pass": True,
+            "zero_stubs": True,
+            "runtime_verified": True,
+        },
+    )
+
+    assert blocked.verdict == Verdict.BLOCK.value
+    assert "runtime_verified" in blocked.failed_checks
+    assert passed.verdict == Verdict.PASS.value
+
+
+def test_interview_gate_requires_engine_convergence() -> None:
+    blocked = gate_check(
+        GateName.INTERVIEW_TO_SEED.value,
+        samvil_tier="standard",
+        metrics={"seed_readiness": 0.99, "ambiguity_converged": False},
+    )
+    passed = gate_check(
+        GateName.INTERVIEW_TO_SEED.value,
+        samvil_tier="standard",
+        metrics={"seed_readiness": 0.99, "ambiguity_converged": True},
+    )
+    assert blocked.verdict == Verdict.BLOCK.value
+    assert "ambiguity_converged" in blocked.failed_checks
+    assert passed.verdict == Verdict.PASS.value
 
 
 # ── Skip + boolean thresholds ─────────────────────────────────────────
@@ -352,3 +391,179 @@ def test_all_gate_names_in_enum_exist_in_default_config() -> None:
 
 def test_escalation_checks_set_matches_config() -> None:
     assert set(DEFAULT_CONFIG["escalation"]["checks"]) == ESCALATION_CHECKS
+
+
+# ── Mechanical evidence mode ─────────────────────────────────────────
+
+
+def test_mcp_build_gate_overwrites_reported_build_ok(tmp_path: Path, monkeypatch) -> None:
+    from samvil_mcp import server
+
+    samvil = tmp_path / ".samvil"
+    samvil.mkdir()
+    (samvil / "build.log").write_text("failed\nSAMVIL_EXIT:1\n")
+    health: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        server,
+        "_log_mcp_health",
+        lambda status, tool, error="": health.append((status, tool, error)),
+    )
+
+    result = json.loads(
+        asyncio.run(
+            server.gate_check(
+                gate_name="build_to_qa",
+                samvil_tier="standard",
+                metrics_json=json.dumps(
+                    {"implementation_rate": 1.0, "build_ok": True}
+                ),
+                project_root=str(tmp_path),
+                evidence_mode="mechanical",
+                allow_warn=True,
+            )
+        )
+    )
+
+    assert result["verdict"] == "block"
+    assert result["metrics"]["build_ok"] is False
+    assert result["reported_metrics"]["build_ok"] is True
+    assert result["mechanical_metrics"] == {"build_ok": False}
+    assert result["allow_warn_ignored"] is True
+    assert result["metric_mismatches"] == [
+        {"metric": "build_ok", "reported": True, "mechanical": False}
+    ]
+    assert "build_ok" in result["failed_checks"]
+    assert any(item[:2] == ("warn", "gate_check.metric_mismatch") for item in health)
+
+
+def test_mcp_build_gate_rejects_model_writable_success_log(tmp_path: Path) -> None:
+    from samvil_mcp.server import gate_check as gate_check_tool
+
+    samvil = tmp_path / ".samvil"
+    samvil.mkdir()
+    (samvil / "build.log").write_text("compiled\nSAMVIL_EXIT:0\n")
+
+    result = json.loads(
+        asyncio.run(
+            gate_check_tool(
+                gate_name="build_to_qa",
+                samvil_tier="standard",
+                metrics_json=json.dumps(
+                    {"implementation_rate": 1.0, "build_ok": True}
+                ),
+                project_root=str(tmp_path),
+                evidence_mode="mechanical",
+            )
+        )
+    )
+
+    assert result["verdict"] == "block"
+    assert result["metrics"]["build_ok"] is False
+    assert result["mechanical_metrics"] == {"build_ok": False}
+    assert result["stage_evidence"]["build"]["artifact_build_passed"] is True
+    assert result["stage_evidence"]["build"]["runtime_verified"] is False
+    assert "build_ok" in result["failed_checks"]
+
+
+def test_mcp_qa_gate_uses_reported_test_counts(tmp_path: Path) -> None:
+    from samvil_mcp.server import gate_check as gate_check_tool
+
+    samvil = tmp_path / ".samvil"
+    samvil.mkdir()
+    (samvil / "qa.log").write_text("tests failed\nSAMVIL_EXIT:1\n")
+    (samvil / "test-results.json").write_text(
+        json.dumps(
+            {"stats": {"expected": 3, "unexpected": 1, "flaky": 0, "skipped": 2}}
+        )
+    )
+
+    result = json.loads(
+        asyncio.run(
+            gate_check_tool(
+                gate_name="qa_to_deploy",
+                samvil_tier="standard",
+                metrics_json=json.dumps(
+                    {
+                        "three_pass_pass": True,
+                        "zero_stubs": True,
+                        "test_pass_rate": 1.0,
+                        "runtime_verified": True,
+                    }
+                ),
+                project_root=str(tmp_path),
+                evidence_mode="mechanical",
+            )
+        )
+    )
+
+    assert result["verdict"] == "block"
+    assert result["metrics"]["test_pass_rate"] == 0.75
+    assert result["metrics"]["runtime_verified"] is False
+    assert "test_pass_rate" in result["failed_checks"]
+
+
+def test_mcp_qa_gate_fails_closed_when_artifacts_are_missing(tmp_path: Path) -> None:
+    from samvil_mcp.server import gate_check as gate_check_tool
+
+    result = json.loads(
+        asyncio.run(
+            gate_check_tool(
+                gate_name="qa_to_deploy",
+                samvil_tier="standard",
+                metrics_json=json.dumps(
+                    {
+                        "three_pass_pass": True,
+                        "zero_stubs": True,
+                        "test_pass_rate": 1.0,
+                        "runtime_verified": True,
+                    }
+                ),
+                project_root=str(tmp_path),
+                evidence_mode="mechanical",
+            )
+        )
+    )
+
+    assert result["verdict"] == "block"
+    assert result["metrics"]["test_pass_rate"] == 0.0
+    assert result["metrics"]["runtime_verified"] is False
+    assert result["metrics"]["verification_mode"] == "static"
+    assert "verification_mode" in result["failed_checks"]
+    assert result["required_action"]["type"] == "ask_user"
+    assert "runtime 검증 없이 배포하시겠어요?" in result["required_action"]["payload"]["question"]
+    assert result["required_action"]["payload"]["risk"]
+    assert result["stage_evidence"]["missing"] == [
+        ".samvil/qa.log",
+        ".samvil/test-results.json",
+    ]
+
+
+def test_mcp_qa_gate_rejects_model_writable_runtime_evidence(tmp_path: Path) -> None:
+    from samvil_mcp.server import gate_check as gate_check_tool
+
+    samvil = tmp_path / ".samvil"
+    samvil.mkdir()
+    (samvil / "qa.log").write_text("SAMVIL_EXIT:0\n")
+    (samvil / "test-results.json").write_text(
+        json.dumps({"stats": {"expected": 4, "unexpected": 0, "skipped": 1}})
+    )
+
+    result = json.loads(
+        asyncio.run(
+            gate_check_tool(
+                gate_name="qa_to_deploy",
+                samvil_tier="standard",
+                metrics_json=json.dumps(
+                    {"three_pass_pass": True, "zero_stubs": True}
+                ),
+                project_root=str(tmp_path),
+                evidence_mode="mechanical",
+            )
+        )
+    )
+
+    assert result["verdict"] == "block"
+    assert result["metrics"]["test_pass_rate"] == 1.0
+    assert result["metrics"]["runtime_verified"] is False
+    assert result["metrics"]["verification_mode"] == "static"
+    assert result["stage_evidence"]["qa"]["artifact_runtime_passed"] is True

@@ -1,6 +1,6 @@
 ---
 name: samvil-design
-description: "MCP-driven design stage: turn project.seed.json into project.blueprint.json and chain portably."
+description: "MCP-driven design stage: turn project.seed.json into project.blueprint.json and chain portably. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # SAMVIL Design - Thin Orchestrated Entry
@@ -12,7 +12,8 @@ This is the v3.4 Phase 2 ultra-thin migration. Full blueprint rules live in
 
 1. Read `project.state.json` for `session_id`, `current_stage`, and host name
    (`host`, `runtime`, or `agent_host`; default `generic`).
-2. Read `project.config.json` for `selected_tier` / `samvil_tier`.
+2. Read `project.config.json` for `selected_tier` / `samvil_tier` and exact
+   `"--council"` membership in `flags` as `council_opt_in`.
 3. Read `project.seed.json`; it is the design authority.
 4. Read `interview-summary.md` and `.samvil/decisions/*.md` if present.
 5. Read `.samvil/manifest.json` if present; if absent, build or refresh it.
@@ -23,8 +24,8 @@ This is the v3.4 Phase 2 ultra-thin migration. Full blueprint rules live in
 Call:
 
 ```
-mcp__samvil_mcp__get_orchestration_state(session_id="<session_id>")
-mcp__samvil_mcp__stage_can_proceed(session_id="<session_id>", target_stage="design")
+mcp__samvil_mcp__get_orchestration_state(session_id="<session_id>", council_opt_in=<flags contains --council>)
+mcp__samvil_mcp__stage_can_proceed(session_id="<session_id>", target_stage="design", council_opt_in=<flags contains --council>)
 mcp__samvil_mcp__resolve_host_capability(host_name="<host>")
 mcp__samvil_mcp__host_chain_strategy(host_name="<host>")
 ```
@@ -65,7 +66,7 @@ Using `SKILL.legacy.md`, create a valid `project.blueprint.json` for the seed's
 - simplest architecture that satisfies the seed
 - no screens/features outside the seed
 - accepted ADRs override preferences
-- Gate B only for thorough/full tiers
+- Gate B only for thorough/full/deep tiers
 - feasibility review before user checkpoint
 - mobile considerations for form-heavy apps
 
@@ -81,7 +82,8 @@ revise and re-present.
 mcp__samvil_mcp__complete_stage(
   session_id="<session_id>",
   stage="design",
-  verdict="pass"
+  verdict="pass",
+  council_opt_in=<flags contains --council>
 )
 ```
 

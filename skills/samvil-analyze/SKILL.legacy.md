@@ -631,7 +631,7 @@ multiSelect: true
 4. `interview-summary.md` — 분석 결과를 인터뷰 요약 형태로 저장 (INV-3)
 5. **MCP (best-effort):** Create session and save analysis:
    ```
-   mcp__samvil_mcp__create_session(project_name="<project-name>", samvil_tier="<tier>")
+   mcp__samvil_mcp__create_session(project_name="<project-name>", samvil_tier="<tier>", project_root=".")
    → Parse session_id, update state.json
 
    mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="analyze_complete", stage="<next_stage>", data='{"framework":"<detected>","existing_features":<N>,"quality_score":"<score>"}')

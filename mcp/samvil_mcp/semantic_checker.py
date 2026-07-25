@@ -68,6 +68,11 @@ SAMPLE_DATA = re.compile(
     re.IGNORECASE,
 )
 
+PIPE_FILTER = re.compile(r"\|\s*(?:tail|grep)\b", re.IGNORECASE)
+EXIT_MARKER = re.compile(r"^SAMVIL_EXIT:(?P<code>-?\d+)\s*$", re.MULTILINE)
+FAILURE_COUNT = re.compile(r"\b[1-9]\d*\s+failed\b", re.IGNORECASE)
+FAILURE_LINE = re.compile(r"^(?:FAILED|FAIL|ERROR|npm ERR!)\b", re.IGNORECASE | re.MULTILINE)
+
 
 @dataclass
 class SemanticFinding:
@@ -88,7 +93,54 @@ class SemanticFinding:
         }
 
 
-def analyze_code_snippet(code: str, context_hint: str = "") -> dict:
+def analyze_shell_evidence(
+    command: str,
+    execution_log: str,
+    *,
+    runner_exit_code: int | None = None,
+    trusted_runner: bool = False,
+) -> dict:
+    """Reject shell evidence unless a trusted host supplied the exit status."""
+    marker_failures = any(
+        int(match.group("code")) != 0 for match in EXIT_MARKER.finditer(execution_log)
+    )
+    log_reports_failure = bool(
+        marker_failures
+        or FAILURE_COUNT.search(execution_log)
+        or FAILURE_LINE.search(execution_log)
+    )
+    mismatch = bool(
+        not trusted_runner
+        or log_reports_failure
+        or (PIPE_FILTER.search(command) and runner_exit_code != 0)
+    )
+    findings = []
+    if mismatch:
+        findings.append(
+            {
+                "code": "EVIDENCE_FORM_MISMATCH",
+                "pattern": "evidence_form_mismatch",
+                "severity": "HIGH",
+                "explanation": (
+                    "test evidence is not backed by a trusted host runner or "
+                    "reports a failure"
+                ),
+            }
+        )
+    return {
+        "accepted": not mismatch,
+        "risk_level": "HIGH" if mismatch else "LOW",
+        "findings": findings,
+    }
+
+
+def analyze_code_snippet(
+    code: str,
+    context_hint: str = "",
+    shell_command: str = "",
+    execution_log: str = "",
+    runner_exit_code: int | None = None,
+) -> dict:
     """Analyze a code snippet for reward hacking signals.
 
     Args:
@@ -180,6 +232,23 @@ def analyze_code_snippet(code: str, context_hint: str = "") -> dict:
                 code_excerpt=stripped[:120],
                 explanation="Sample/mock/dummy data constant detected",
             ))
+
+    if shell_command:
+        shell_result = analyze_shell_evidence(
+            shell_command,
+            execution_log,
+            runner_exit_code=runner_exit_code,
+        )
+        if not shell_result["accepted"]:
+            findings.append(
+                SemanticFinding(
+                    pattern="evidence_form_mismatch",
+                    severity="HIGH",
+                    line_number=0,
+                    code_excerpt=shell_command[:120],
+                    explanation=shell_result["findings"][0]["explanation"],
+                )
+            )
 
     # Aggregate risk level
     risk_level: Risk = "LOW"

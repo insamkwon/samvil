@@ -92,12 +92,7 @@ Spawn research agents **in controlled parallel batches**:
 if config.max_parallel is set:
     MAX_PARALLEL = config.max_parallel
 else:
-    CPU_CORES = sysctl -n hw.ncpu (macOS) or nproc (Linux)
-    if CPU_CORES <= 4:   MAX_PARALLEL = 1
-    elif CPU_CORES >= 8: MAX_PARALLEL = 3
-    else:                MAX_PARALLEL = 2
-    MEM_USAGE = 현재 메모리 사용률 (%)
-    if MEM_USAGE > 80%:  MAX_PARALLEL = max(1, MAX_PARALLEL - 1)
+    MAX_PARALLEL = resolve CPU/memory watermarks from references/decision-boundaries.md
 ```
 
 Split Round 1 agents into chunks of `MAX_PARALLEL`. Spawn each chunk in ONE message (parallel). Wait for all agents in a chunk to complete before spawning the next chunk.
@@ -150,7 +145,7 @@ Between batches, probe for stall:
 ```
 verdict = mcp__samvil_mcp__is_state_stalled(
     state_path="project.state.json",
-    threshold_seconds=300,
+    threshold_seconds=STALL_TIMEOUT_SECONDS,  # references/decision-boundaries.md
 )
 if verdict["stalled"]:
     count = mcp__samvil_mcp__increment_stall_recovery_count(state_path="project.state.json")
@@ -158,7 +153,7 @@ if verdict["stalled"]:
     # Print the reawake message AND continue — don't block the next batch.
 ```
 
-If `count >= MAX_REAWAKES` (3), stop spawning further batches and surface the escalation message with a skip/abort/retry AskUserQuestion.
+If `count >= MAX_REAWAKES`, stop spawning further batches and surface the escalation message with a skip/abort/retry AskUserQuestion. The value lives in `references/decision-boundaries.md`.
 
 After all Round 1 agents return, collect their outputs as `round1_context`.
 
@@ -226,12 +221,7 @@ Spawn review agents **in controlled parallel batches**:
 if config.max_parallel is set:
     MAX_PARALLEL = config.max_parallel
 else:
-    CPU_CORES = sysctl -n hw.ncpu (macOS) or nproc (Linux)
-    if CPU_CORES <= 4:   MAX_PARALLEL = 1
-    elif CPU_CORES >= 8: MAX_PARALLEL = 3
-    else:                MAX_PARALLEL = 2
-    MEM_USAGE = 현재 메모리 사용률 (%)
-    if MEM_USAGE > 80%:  MAX_PARALLEL = max(1, MAX_PARALLEL - 1)
+    MAX_PARALLEL = resolve CPU/memory watermarks from references/decision-boundaries.md
 ```
 
 Split Round 2 agents into chunks of `MAX_PARALLEL`. Spawn each chunk in ONE message (parallel). Wait for all agents in a chunk to complete before spawning the next chunk.
@@ -530,7 +520,7 @@ Invoke the Skill tool with skill: `samvil-design`
 ## Rules
 
 1. **Read agent .md files before spawning** — the agent's persona must be in its prompt
-2. **All agents in a chunk spawn in ONE message** — parallel within chunk, sequential between chunks. MAX_PARALLEL은 CPU/메모리 기반으로 동적 결정 (기본 2, CPU ≤4 → 1, CPU ≥8 → 3, 메모리 80% 초과 시 -1). `config.max_parallel` 설정 시 override.
+2. **All agents in a chunk spawn in ONE message** — parallel within chunk, sequential between chunks. MAX_PARALLEL은 `references/decision-boundaries.md` CPU/메모리 임계로 동적 결정. `config.max_parallel` 설정 시 override.
 3. **500 word limit per agent** — prevent context bloat
 4. **Respect tier boundaries** — never spawn agents the tier doesn't include
 5. **decisions.log is append-only** — never delete previous decisions

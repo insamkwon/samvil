@@ -14,6 +14,26 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .claim_ledger import _locked
+from .ssot_io import atomic_write_text_unlocked
+
+
+def _load_failure_list(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return data
+        raise ValueError("failure list root must be a JSON array")
+    except (json.JSONDecodeError, ValueError):
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup = path.with_name(f"{path.name}.corrupt-{stamp}")
+        path.replace(backup)
+        return []
+    except OSError:
+        return []
+
 
 def record_qa_failure(
     project_path: str,
@@ -31,24 +51,19 @@ def record_qa_failure(
     samvil_dir.mkdir(parents=True, exist_ok=True)
 
     failures_path = samvil_dir / "qa-failures.json"
-    if failures_path.exists():
-        try:
-            failures = json.loads(failures_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            failures = []
-    else:
-        failures = []
-
-    failures.append({
-        "ac_id": ac_id,
-        "ac_description": ac_description,
-        "cycle": cycle,
-        "reason": reason,
-        "suggestions": suggestions or [],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
-
-    failures_path.write_text(json.dumps(failures, indent=2, ensure_ascii=False))
+    with _locked(failures_path):
+        failures = _load_failure_list(failures_path)
+        failures.append({
+            "ac_id": ac_id,
+            "ac_description": ac_description,
+            "cycle": cycle,
+            "reason": reason,
+            "suggestions": suggestions or [],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        atomic_write_text_unlocked(
+            failures_path, json.dumps(failures, indent=2, ensure_ascii=False)
+        )
     return {"path": str(failures_path), "total_failures": len(failures)}
 
 
@@ -61,16 +76,13 @@ def accumulate_failed_acs(project_path: str, qa_failures: list[dict]) -> dict:
     samvil_dir.mkdir(parents=True, exist_ok=True)
 
     accumulator_path = samvil_dir / "failed_acs.json"
-    if accumulator_path.exists():
-        try:
-            accumulator = json.loads(accumulator_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            accumulator = []
-    else:
-        accumulator = []
-
-    accumulator.extend(qa_failures)
-    accumulator_path.write_text(json.dumps(accumulator, indent=2, ensure_ascii=False))
+    with _locked(accumulator_path):
+        accumulator = _load_failure_list(accumulator_path)
+        accumulator.extend(qa_failures)
+        atomic_write_text_unlocked(
+            accumulator_path,
+            json.dumps(accumulator, indent=2, ensure_ascii=False),
+        )
     return {"path": str(accumulator_path), "total_accumulated": len(accumulator)}
 
 
@@ -83,10 +95,10 @@ def load_failed_acs_for_wonder(project_path: str) -> list[dict]:
     if not accumulator_path.exists():
         return []
 
-    try:
-        failures = json.loads(accumulator_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
+    with _locked(accumulator_path):
+        failures = _load_failure_list(accumulator_path)
+        if not accumulator_path.exists():
+            atomic_write_text_unlocked(accumulator_path, "[]")
 
     return sorted(failures, key=lambda f: f.get("cycle", 0), reverse=True)
 

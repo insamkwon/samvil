@@ -306,13 +306,11 @@ def parse_env_example(env_path: Path) -> dict[str, Any]:
 
 
 def evaluate_qa_gate(state: dict[str, Any]) -> dict[str, Any]:
-    """Return the QA-gate verdict for deploy.
+    """Fail closed because persisted QA state is model-writable.
 
-    Reads `qa_status` (or nested `qa.status`) from the project state and
-    returns a structured pass/blocked decision the skill can branch on
-    without re-implementing the lookup. Anything other than `PASS` (case
-    insensitive) blocks deploy — matches the legacy skill's contract:
-    "QA status가 PASS가 아니면 배포 중단".
+    Direct deploy invocation cannot establish a trusted runtime receipt from
+    ``state.json``. Keep the parsed status for diagnostics, but never turn it
+    into deploy authority until a host-signed receipt adapter exists.
     """
     qa_status = state.get("qa_status")
     if qa_status is None:
@@ -321,20 +319,14 @@ def evaluate_qa_gate(state: dict[str, Any]) -> dict[str, Any]:
             qa_status = qa.get("status") or qa.get("verdict")
 
     raw = str(qa_status or "").strip().upper()
-    passed = raw == "PASS"
     return {
-        "verdict": "pass" if passed else "blocked",
+        "verdict": "blocked",
         "qa_status": raw or None,
         "reason": (
-            "QA verdict is PASS"
-            if passed
-            else f"QA verdict must be PASS to deploy (current: {raw or 'missing'})"
+            "trusted runtime receipt is required for deploy; persisted QA "
+            f"status is diagnostic only (current: {raw or 'missing'})"
         ),
-        "next_action": (
-            "proceed to platform selection"
-            if passed
-            else "run /samvil:samvil-qa until verdict is PASS, then re-invoke deploy"
-        ),
+        "next_action": "halt and obtain a trusted host runtime receipt",
     }
 
 

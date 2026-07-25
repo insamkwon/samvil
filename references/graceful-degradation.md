@@ -4,6 +4,28 @@ MCP 서버가 다운되거나 응답하지 않을 때 파일 기반으로 폴백
 
 **핵심 원칙:** `project.state.json`, `.samvil/metrics.json`, `.samvil/events.jsonl`은 항상 파일에 먼저 기록. MCP는 보조 채널.
 
+## Gate와 degradation의 경계
+
+실패가 claim의 진실성을 바꾸면 **hard gate**, 이미 확인된 진실의 관측만
+지연시키면 **graceful degradation**이다. 분류할 수 없는 새 사례는 retro에
+`category=gate_vs_p8_boundary`, `severity=high`로 남기고 이 표를 갱신한다.
+
+| Scenario | Category | Required behavior |
+|---|---|---|
+| `save_event`/telemetry MCP unavailable | Degradation | file-first write + health log, continue |
+| file-first `claim_verify` transport unavailable | Degradation | ledger row/queue preserved, retry later |
+| build/test command fails | Hard gate | block and repair; truth is false |
+| gate metric is below its floor | Hard or typed escalation | follow gate policy; never relabel as fallback |
+| runtime probe is unavailable | Degradation with evidence downgrade | record static/PARTIAL; runtime-required deploy gate stays blocked |
+| required seed or evidence artifact is absent | Hard gate | block; there is no truth to verify |
+| one optional reviewer in a valid quorum times out | Degradation | log missing context and use valid quorum |
+| the only required reviewer times out | Hard gate | no verdict exists, so block |
+| deploy partially fails | Hard gate | stop for explicit user decision |
+
+Anti-patterns: degradation must never hide a failed contract, telemetry failure
+must not block product truth, and every degradation must be visible in
+`.samvil/mcp-health.jsonl` or equivalent project evidence.
+
 ## Dual-Write Pattern (모든 스킬 공통)
 
 각 스킬이 상태를 변경할 때마다 다음 순서로 이벤트를 기록:

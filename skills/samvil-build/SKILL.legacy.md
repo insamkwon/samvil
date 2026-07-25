@@ -167,7 +167,7 @@ npm run build > .samvil/build.log 2>&1
 echo "Exit code: $?"
 ```
 
-**Circuit Breaker (MAX_RETRIES=2):**
+**Circuit Breaker (`MAX_RETRIES`, defined in `references/decision-boundaries.md`):**
 - On build success, **MCP (best-effort):**
   ```
   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="build_pass", stage="build", data='{"attempt":1,"scope":"core"}')
@@ -217,7 +217,7 @@ The seed's `core_experience` defines the game's core mechanic. **Build the core 
    npx tsc --noEmit > .samvil/build.log 2>&1
    echo "Exit code: $?"
    ```
-   Circuit Breaker: MAX_RETRIES=2. Same as web-app.
+   Circuit Breaker: use `MAX_RETRIES` from `references/decision-boundaries.md`. Same as web-app.
 
 7. Update `project.state.json`: note core game mechanic complete
 
@@ -259,7 +259,7 @@ The seed's `core_flow` defines the main processing pipeline. **Build this first.
 
    **CC skill:** No build step. Verify `SKILL.md` exists and references correct modules.
 
-   **Circuit Breaker (MAX_RETRIES=2):** Same as web-app.
+   **Circuit Breaker (`MAX_RETRIES`):** Same as web-app; value from `references/decision-boundaries.md`.
    On every build failure, append to `.samvil/fix-log.md`:
    ```
    [core:automation] <에러 내용> → <해결 방법>
@@ -304,7 +304,7 @@ The seed's `core_experience` defines what the user does in the first 30 seconds.
    echo "Exit code: $?"
    ```
 
-   **Circuit Breaker (MAX_RETRIES=2):** Same as web-app.
+   **Circuit Breaker (`MAX_RETRIES`):** Same as web-app; value from `references/decision-boundaries.md`.
    On every build failure, append to `.samvil/fix-log.md`:
    ```
    [core:mobile] <에러 내용> → <해결 방법>
@@ -341,7 +341,7 @@ Dashboard is a web-app subset. The seed's `core_experience` defines the primary 
    npm run build > .samvil/build.log 2>&1
    echo "Exit code: $?"
    ```
-   Circuit Breaker: MAX_RETRIES=2. Same as web-app.
+   Circuit Breaker: use `MAX_RETRIES` from `references/decision-boundaries.md`. Same as web-app.
 
 7. Update `project.state.json`: note core dashboard experience complete
 
@@ -853,7 +853,7 @@ Automation features map to modules, not UI components. Each feature becomes a pr
 4. **Build verify**: `py_compile` / `tsc --noEmit`
 5. **Dry-run verify**: `python src/main.py --dry-run` (must still pass after each module)
 
-**Circuit breaker**: Same MAX_RETRIES=2 per module.
+**Circuit breaker**: Same `MAX_RETRIES` per module; see `references/decision-boundaries.md`.
 
 ### solution_type: "game" — Mechanic-based Build
 
@@ -884,7 +884,7 @@ Game features map to game mechanics within Phaser scenes. Each feature modifies 
 - Keyboard input: `this.input.keyboard!.createCursorKeys()` or `this.input.keyboard!.addKey()`
 - Touch/mouse: `this.input.on("pointerdown", callback)`
 
-**Circuit breaker**: MAX_RETRIES=2 per mechanic. TypeScript strict — no `any`.
+**Circuit breaker**: `MAX_RETRIES` per mechanic; see `references/decision-boundaries.md`. TypeScript strict — no `any`.
 
 ### solution_type: "mobile-app" — Screen-based Build
 
@@ -916,7 +916,7 @@ Mobile features map to screens/components. Each feature adds a screen or modifie
 - Touch targets: minimum 44x44 points for interactive elements
 - State: `const items = useAppStore((s) => s.items)` — Zustand selectors
 
-**Circuit breaker**: MAX_RETRIES=2 per feature. TypeScript strict — no `any`.
+**Circuit breaker**: `MAX_RETRIES` per feature; see `references/decision-boundaries.md`. TypeScript strict — no `any`.
 
 ### solution_type: "dashboard" — Chart-based Build
 
@@ -948,7 +948,7 @@ Dashboard is a web-app subset. Dashboard features map to chart components, data 
 - Chart colors: use CSS variables or Tailwind color classes for theme consistency
 - Date formatting: always use date-fns (`format(date, 'yyyy-MM-dd')`) — never manual string manipulation
 
-**Circuit breaker**: MAX_RETRIES=2 per feature. TypeScript strict — no `any`.
+**Circuit breaker**: `MAX_RETRIES` per feature; see `references/decision-boundaries.md`. TypeScript strict — no `any`.
 
 ### solution_type: "web-app" — Component-based Build (기존)
 
@@ -1025,7 +1025,7 @@ If SOME ACs are satisfied → build only unsatisfied ACs.
    )
    [SAMVIL] ⟳ Checkpoint saved
    ```
-   Circuit Breaker: MAX_RETRIES=2. 2 failures on a feature → mark as `failed`, continue to next feature.
+   Circuit Breaker: use `MAX_RETRIES` from `references/decision-boundaries.md`. At the boundary, mark the feature `failed` and continue.
    **Stall Detection (v2.6.0+, #24)**: Before each Worker spawn, check for stall:
    ```
    stall = mcp__samvil_mcp__check_stall(events_path=".samvil/events.jsonl", timeout=300.0, retry_count=<N>)
@@ -1088,15 +1088,8 @@ Determine `MAX_PARALLEL` at runtime based on system resources:
 if config.max_parallel is set:
     MAX_PARALLEL = config.max_parallel
 else:
-    # 2) CPU 코어 기반 기본값
-    CPU_CORES = sysctl -n hw.ncpu (macOS) or nproc (Linux)
-    if CPU_CORES <= 4:   MAX_PARALLEL = 1
-    elif CPU_CORES >= 8: MAX_PARALLEL = 3
-    else:                MAX_PARALLEL = 2  # 기본값
-
-    # 3) 메모리 압박 시 감소
-    MEM_USAGE = 현재 메모리 사용률 (%)
-    if MEM_USAGE > 80%:  MAX_PARALLEL = max(1, MAX_PARALLEL - 1)
+    # 2) CPU/메모리 임계 적용
+    MAX_PARALLEL = resolve watermarks from references/decision-boundaries.md
 
 # 최종값 출력
 [SAMVIL] MAX_PARALLEL = <N> (CPU: <cores> cores, Memory: <usage>%)
@@ -1234,7 +1227,7 @@ Key: shadcn/ui 우선 | cn() 사용 | 'use client' 필수 | TypeScript strict | 
 - Agent가 완료되면 즉시 결과 라인 출력
 - 실패 시 로그 파일 경로 안내
 
-**Example with MAX_PARALLEL=2 and 5 independent features:**
+**Example with MAX_PARALLEL set to 2 and 5 independent features:**
 - Chunk 1: spawn agents for feature A + feature B (parallel) → wait
 - Chunk 2: spawn agents for feature C + feature D (parallel) → wait
 - Chunk 3: spawn agent for feature E (single) → wait

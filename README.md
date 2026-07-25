@@ -1,17 +1,20 @@
-# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.32.1`
+# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.32.2`
 
 > **코딩 몰라도 괜찮아요. AI가 대신 만들어드려요.**
 
-[![버전](https://img.shields.io/badge/버전-v4.10.0-blue)](CHANGELOG.md)
-[![Claude Code](https://img.shields.io/badge/Claude_Code-지원-green)](https://claude.ai/code)
-[![Codex CLI](https://img.shields.io/badge/Codex_CLI-지원-blueviolet)](https://github.com/openai/codex)
+[![버전](https://img.shields.io/badge/버전-v4.32.2-blue)](CHANGELOG.md)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-네이티브-green)](https://claude.ai/code)
+[![Codex CLI](https://img.shields.io/badge/Codex_CLI-모델_라우팅-yellow)](https://github.com/openai/codex)
+[![Gemini CLI](https://img.shields.io/badge/Gemini_CLI-실험적_stub-lightgrey)](https://github.com/google-gemini/gemini-cli)
 [![라이선스](https://img.shields.io/badge/라이선스-UNLICENSED-lightgrey)]()
 
 ---
 
 ## 이게 뭐예요?
 
-SAMVIL은 **Claude Code와 Codex CLI에서 쓰는 AI 앱 개발 도우미**예요.
+SAMVIL은 **Claude Code 네이티브 AI 앱 개발 도우미**예요. Codex CLI는 MCP·모델
+라우팅과 파일 기반 continuation을 연결하지만 네이티브 전체 파이프라인 실행 동등성은
+아직 검증하지 않았고, Gemini CLI 어댑터는 실험적 stub 단계입니다.
 
 "할일 관리 앱 만들어줘" 한 마디면, AI가 알아서 물어보고, 설계하고, 코드를 짜고, 테스트까지 해요.
 당신은 질문에 답하고 기다리기만 하면 돼요.
@@ -45,8 +48,8 @@ SAMVIL은 **Claude Code와 Codex CLI에서 쓰는 AI 앱 개발 도우미**예�
 
 | 방법 | 대상 | 설치 |
 |---|---|---|
-| **Claude Code** | Anthropic Claude 사용자 | 명령어 1줄 |
-| **Codex CLI** | OpenAI Codex 사용자 | 스크립트 1개 |
+| **Claude Code (native)** | 전체 파이프라인 실행 | 명령어 1줄 |
+| **Codex CLI (integration)** | MCP·모델 라우팅·continuation 실험 | 스크립트 1개 |
 
 ---
 
@@ -81,6 +84,10 @@ npm run dev    # → 브라우저에서 localhost:3000
 
 ### Codex CLI로 시작하기
 
+> 현재 지원 경계: 아래 설치는 SAMVIL MCP, 모델 라우팅, AGENTS 지침과 chain
+> marker를 연결합니다. Claude Code와 같은 네이티브 stage 실행 parity는 아직
+> 검증되지 않았습니다.
+
 **1단계 — 저장소 받기**
 
 ```bash
@@ -109,9 +116,9 @@ codex "SAMVIL로 할일 관리 앱 만들어줘"
 문제 생기면: `bash scripts/setup-codex.sh` 다시 실행하면 돼요 (중복 없이 안전).
 
 <details>
-<summary>⚙️ OpenCode / Gemini CLI에서도 쓸 수 있어요</summary>
+<summary>⚙️ OpenCode / Gemini CLI 실험적 어댑터</summary>
 
-동일한 스크립트로 설치해요:
+설정 stub을 설치할 수 있지만 네이티브 E2E 실행은 검증되지 않았습니다:
 
 ```bash
 bash scripts/setup-codex.sh opencode  # OpenCode

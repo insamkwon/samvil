@@ -40,6 +40,11 @@ def qa_events_path(project_root: Path | str) -> Path:
 
 def synthesize_qa_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
     """Return the central QA verdict from independently collected evidence."""
+    verification_mode = (
+        "runtime"
+        if str(evidence.get("verification_mode") or "").casefold() == "runtime"
+        else "static"
+    )
     pass1 = _normalize_pass1(evidence.get("pass1") or {})
     pass2_items = [_normalize_pass2_item(item) for item in evidence.get("pass2", {}).get("items", [])]
     pass3 = _normalize_pass3(evidence.get("pass3") or {})
@@ -70,6 +75,7 @@ def synthesize_qa_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
             "pass1": pass1["status"],
             "pass2": _pass2_status(counts),
             "pass3": pass3["verdict"],
+            "verification_mode": verification_mode,
         },
     })
 
@@ -77,6 +83,7 @@ def synthesize_qa_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
         "schema_version": QA_SYNTHESIS_SCHEMA_VERSION,
         "gate": "qa_synthesis",
         "verdict": verdict,
+        "verification_mode": verification_mode,
         "reason": reason,
         "next_action": next_action,
         "issue_ids": _issue_ids(pass1=pass1, pass2_items=pass2_items, pass3=pass3, ownership=ownership),
@@ -97,19 +104,35 @@ def synthesize_qa_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
 
 def render_qa_synthesis(synthesis: dict[str, Any]) -> str:
     """Render a concise markdown QA synthesis report."""
+    verdict = synthesis.get("verdict") or "?"
+    verification_mode = synthesis.get("verification_mode") or "static"
+    verdict_label = (
+        f"{verdict}({verification_mode})" if verdict == "PASS" else str(verdict)
+    )
     lines = [
         "# QA Synthesis",
         "",
-        f"- Verdict: {synthesis.get('verdict') or '?'}",
+        f"- Verdict: {verdict_label}",
         f"- Reason: {synthesis.get('reason') or '?'}",
         f"- Next action: {synthesis.get('next_action') or '?'}",
         f"- Iteration: {synthesis.get('iteration')}/{synthesis.get('max_iterations')}",
+    ]
+    runtime = synthesis.get("runtime_evidence") or {}
+    if runtime.get("ran") is True:
+        lines.append(
+            "- Runtime tests: "
+            f"passed={runtime.get('passed', 0)}, "
+            f"failed={runtime.get('failed', 0)}, "
+            f"skipped={runtime.get('skipped', 0)} "
+            f"(from {runtime.get('from') or '?'})"
+        )
+    lines.extend([
         "",
         "## Pass 1",
         f"- Mechanical: {(synthesis.get('pass1') or {}).get('status') or '?'}",
         "",
         "## Pass 2",
-    ]
+    ])
     counts = (synthesis.get("pass2") or {}).get("counts") or {}
     lines.append(
         "- Functional: "
@@ -167,6 +190,7 @@ def materialize_qa_synthesis(project_root: Path | str, synthesis: dict[str, Any]
         "events_appended": event_count,
         "state_path": str(state_path) if state_path else "",
         "verdict": synthesis.get("verdict"),
+        "verification_mode": synthesis.get("verification_mode") or "static",
         "next_action": synthesis.get("next_action"),
         "convergence": convergence,
     }
@@ -183,6 +207,7 @@ def qa_summary(project_root: Path | str) -> dict[str, Any]:
     return {
         "present": bool(results),
         "verdict": synthesis.get("verdict"),
+        "verification_mode": synthesis.get("verification_mode") or "static",
         "reason": synthesis.get("reason"),
         "next_action": synthesis.get("next_action"),
         "convergence": results.get("convergence") or synthesis.get("convergence") or {},
@@ -275,14 +300,38 @@ def _normalize_pass2_item(data: dict[str, Any]) -> dict[str, Any]:
     evidence = data.get("evidence") or []
     if isinstance(evidence, str):
         evidence = [evidence]
+    reason = str(data.get("reason") or data.get("notes") or "")
+    method = str(data.get("method") or "independent")
+    mechanical = data.get("mechanical_verification")
+    if isinstance(data.get("verify"), dict):
+        method = "verify.command"
+        if not isinstance(mechanical, dict) or not mechanical.get("ran"):
+            verdict = "FAIL"
+            reason = (
+                "; ".join(mechanical.get("errors") or [])
+                if isinstance(mechanical, dict) and mechanical.get("errors")
+                else "verify.command execution result is missing"
+            )
+        else:
+            verdict = "PASS" if mechanical.get("passed") is True else "FAIL"
+            if verdict == "FAIL":
+                reason = str(
+                    mechanical.get("error")
+                    or "; ".join(mechanical.get("errors") or [])
+                    or "verify.command mechanical evidence failed"
+                )
+            log_file = str(mechanical.get("log_file") or "")
+            if log_file and log_file not in evidence:
+                evidence = [log_file, *evidence]
     return {
         "id": str(data.get("id") or data.get("ac_id") or "?"),
         "criterion": str(data.get("criterion") or data.get("description") or ""),
         "verdict": verdict,
-        "method": str(data.get("method") or "independent"),
+        "method": method,
         "evidence": list(evidence),
-        "reason": str(data.get("reason") or data.get("notes") or ""),
+        "reason": reason,
         "is_core_experience": bool(data.get("is_core_experience", False)),
+        "mechanical_verification": mechanical if isinstance(mechanical, dict) else {},
     }
 
 
@@ -475,22 +524,23 @@ def _convergence_events(convergence: dict[str, Any]) -> list[dict[str, Any]]:
 def _append_event_drafts(root: Path, events: list[dict[str, Any]]) -> int:
     if not events:
         return 0
-    path = qa_events_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    from .server import _append_project_event_rows
+
     state = _load_project_state(root)
     session_id = state.get("session_id")
     now = _now_iso()
-    with path.open("a", encoding="utf-8") as handle:
-        for event in events:
-            row = {
-                "ts": now,
-                "session_id": session_id,
-                "event_type": event.get("event_type"),
-                "stage": event.get("stage") or "qa",
-                "data": event.get("data") or {},
-                "source": "qa_synthesis",
-            }
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    rows = [
+        {
+            "timestamp": now,
+            "session_id": str(session_id or ""),
+            "event_type": str(event.get("event_type") or "qa_event"),
+            "stage": str(event.get("stage") or "qa"),
+            "data": event.get("data") or {},
+            "source": "qa_synthesis",
+        }
+        for event in events
+    ]
+    _append_project_event_rows(root, rows)
     return len(events)
 
 
@@ -507,6 +557,7 @@ def _update_project_state(root: Path, synthesis: dict[str, Any], convergence: di
     history.append({
         "iteration": synthesis.get("iteration"),
         "verdict": synthesis.get("verdict"),
+        "verification_mode": synthesis.get("verification_mode") or "static",
         "reason": synthesis.get("reason"),
         "next_action": synthesis.get("next_action"),
         "issue_ids": synthesis.get("issue_ids") or convergence.get("issue_ids") or [],
@@ -517,6 +568,9 @@ def _update_project_state(root: Path, synthesis: dict[str, Any], convergence: di
     })
     state["qa_history"] = history
     state["last_qa_verdict"] = synthesis.get("verdict")
+    state["last_qa_verification_mode"] = (
+        synthesis.get("verification_mode") or "static"
+    )
     state["last_qa_next_action"] = synthesis.get("next_action")
     state["last_qa_convergence"] = convergence
     state["last_qa_at"] = _now_iso()

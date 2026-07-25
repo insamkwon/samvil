@@ -613,18 +613,38 @@ def test_build_manifest_excludes_empty_public_api_modules(tmp_path):
     assert "empty" not in m.public_apis
 
 
-def test_build_manifest_idempotent_modulo_timestamp(tmp_path):
+def test_build_manifest_idempotent_modulo_timestamp(tmp_path, monkeypatch):
     """Two calls with the same input produce equal manifests except generated_at."""
     (tmp_path / "src" / "auth").mkdir(parents=True)
     (tmp_path / "src" / "auth" / "index.ts").write_text("export const x = 1;")
 
-    from samvil_mcp.manifest import build_manifest
+    from samvil_mcp import manifest as manifest_module
     from dataclasses import replace
 
-    m1 = build_manifest(tmp_path, project_name="p")
-    m2 = build_manifest(tmp_path, project_name="p")
-    # Strip the timestamp before comparing (deterministic except for `generated_at`)
-    assert replace(m1, generated_at="X") == replace(m2, generated_at="X")
+    timestamps = iter(
+        [
+            "2026-07-24T00:00:00Z",
+            "2026-07-24T00:00:00Z",
+            "2026-07-24T00:00:01Z",
+            "2026-07-24T00:00:01Z",
+        ]
+    )
+    monkeypatch.setattr(manifest_module, "_now_iso", lambda: next(timestamps))
+
+    m1 = manifest_module.build_manifest(tmp_path, project_name="p")
+    m2 = manifest_module.build_manifest(tmp_path, project_name="p")
+
+    def without_generated_times(manifest):
+        return replace(
+            manifest,
+            generated_at="X",
+            modules=[
+                replace(module, summary_generated_at="X", last_updated="X")
+                for module in manifest.modules
+            ],
+        )
+
+    assert without_generated_times(m1) == without_generated_times(m2)
 
 
 def test_build_manifest_preserves_relative_path(tmp_path, monkeypatch):

@@ -1,6 +1,6 @@
 ---
 name: samvil-qa
-description: "3-pass verification against seed acceptance criteria. Ralph loop for auto-fix. Verdict: PASS/REVISE/FAIL."
+description: "3-pass verification against seed acceptance criteria. Ralph loop for auto-fix. Verdict: PASS/REVISE/FAIL. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-qa (ultra-thin)
@@ -28,7 +28,7 @@ Adopt the **QA Judge** role. Boot pre-flight, Pass 1/1b digest, and Phase Z (syn
 
 Shell `boot.pass1.command` (web-app/dashboard `npm run build`; game `npx tsc --noEmit && npm run build`; mobile-app `npx expo export --platform web`; automation `python -m py_compile` / `npx tsc --noEmit`). Capture exit code.
 
-If `boot.pass1.smoke` is `playwright`/`-canvas`/`-mobile`: drive Playwright MCP per legacy `## Pass 1b: Playwright Smoke Run` for the matching solution_type — `browser_navigate` → `browser_console_messages(level="error")` → `browser_evaluate(...body length)` → `browser_take_screenshot` per route. Collect `{method, console_errors[], empty_routes[], screenshots[], fallback_reason}`. **Fallback**: 2 retries fail → `method="static"` + `fallback_reason="Playwright unavailable after 2 retries"` (P8). For automation: dry-run per legacy `### automation`, set `smoke_result=None`.
+If `boot.pass1.smoke` is `playwright`/`-canvas`/`-mobile`: drive Playwright MCP per legacy `## Pass 1b: Playwright Smoke Run` for the matching solution_type — `browser_navigate` → `browser_console_messages(level="error")` → `browser_evaluate(...body length)` → `browser_take_screenshot` per route. Collect `{method, console_errors[], empty_routes[], screenshots[], fallback_reason}`. **Fallback**: `RUNTIME_PROBE_RETRIES` from `references/decision-boundaries.md` exhausted → `method="static"` + an honest fallback reason (P8). For automation: dry-run per legacy `### automation`, set `smoke_result=None`.
 
 ```
 mcp__samvil_mcp__dispatch_qa_pass1_batch(project_path=".",
@@ -42,23 +42,24 @@ Returns `pass1`, `pass1b`, `should_proceed_to_pass2`, `verdict_reason`, `events[
 
 **Tier branch** per `boot.resume_hint.selected_tier`:
 - **`minimal`** — inline per legacy `## Pass 2: Functional Verification`.
-- **`standard` / `thorough` / `full`** — independent agents per legacy `### Spawn Pass 2 Independent Agent` + `### Spawn Pass 3 Independent Agent` (Agent tool, model `<resume_hint.current_model_qa.model_id or "sonnet">`, prompt은 `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["qa-functional"]' or `'["qa-quality"]'`, context_files_json=..., task=<legacy spawn 블록의 Task>)`로 조립 — `missing_agents` 시 `agents/*.md` 직접 paste 폴백(P8), **agents do NOT write files** — main session is sole writer per legacy "Central Synthesis Rules").
+- **`standard` / `thorough` / `full` / `deep`** — independent agents per legacy `### Spawn Pass 2 Independent Agent` + `### Spawn Pass 3 Independent Agent` (Agent tool, model `<resume_hint.current_model_qa.model_id or "sonnet">`, prompt은 `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["qa-functional"]' or `'["qa-quality"]'`, context_files_json=..., task=<legacy spawn 블록의 Task>)`로 조립 — `missing_agents` 시 `agents/*.md` 직접 paste 폴백(P8), **agents do NOT write files** — main session is sole writer per legacy "Central Synthesis Rules").
 
 **병렬 배치 (W5.1, standard+ tier)**: 전체 leaf를 `mcp__samvil_mcp__compute_parallel_safety(leaves_json=<[{id,likely_files,shared_resources}]>)`로 판정 → `safety=true` leaf들은 `MAX_PARALLEL` chunk로 나눠 Pass 2 에이전트를 **ONE message에 병렬 스폰** (Build Phase B 패턴). Playwright runtime이 필요한 leaf와 `safety=false` leaf는 main session 순차 처리 (단일 브라우저 세션 제약).
 
 For each Pass 2 leaf (legacy `### Pass 2 Tree Setup (v3.0.0+)`):
 1. `tree_json = parse_ac_tree(ac_data_json=<feature.acceptance_criteria>)`.
 2. Drive Playwright runtime per legacy `### Runtime Verification with Playwright MCP` (or static fallback per `### Fallback to Static Analysis`). **While driving, record each action as a step** (`{action:goto|click|fill|press|reload|expect_text|expect_visible|expect_no_console_errors, role/name or selector, contains/equals/value/key/url}`) keyed by leaf — this becomes the deliverable spec (B).
-3. **Pass 2.5 Reward Hacking detection** per leaf evidence:
+3. **Emit before contract validation (browser)**: after a feature's runtime steps are recorded, call `mcp__samvil_mcp__emit_ac_spec(...)` and write `tests/e2e/<feature>.spec.ts` before validating any auto-generated `verify.command` that targets that file. `empty_acs` must be revisited; never claim a path that has not been emitted.
+4. **AC contract validation + Pass 2.5 Reward Hacking detection**: when a leaf has `verify`, call `mcp__samvil_mcp__collect_ac_verification(project_root=".", ac_id=<id>, verify_json=<verify>)` and include `{verify, mechanical_verification:<result>}` in its Pass 2 item. Current MCP hosts have no portable trusted process sandbox, so this call validates the command contract but returns `ran=false`; it never executes seed-authored commands or produces PASS. `finalize_qa_verdict` therefore forces every such leaf (including omitted Pass 2 leaves) to FAIL until a trusted runner exists. Host-driven Playwright observations and emitted test files remain useful diagnostic evidence, with file:line as secondary evidence, but cannot override that contract. Then per leaf evidence:
    - `validate_evidence(evidences_json=<["src/file:line",...]>, project_root=".")` — `all_valid=false` or `valid_count<1` → downgrade to FAIL (P1, E1).
-   - `semantic_check(code=<snippet ±3 lines>, context_hint=<AC>)` — `risk_level=HIGH` → downgrade PASS/PARTIAL → FAIL; MEDIUM → PASS → PARTIAL with Socratic Questions surfaced.
-4. **Module Boundary validation (M1)**: if `.samvil/modules/` exists, run `validate_contract(project_root=".", module_name="<module>")` per relevant module. `valid=false` → surface contract errors as FAIL evidence.
-5. `update_leaf_status(ac_tree_json=<tree>, leaf_id=<id>, status=<s>, evidence_json=<files+screenshots>)` → use returned `tree`.
-6. `save_event(event_type="ac_verdict", data='{"feature":"...", "leaf_id":"...","status":"..."}')`.
+   - `semantic_check(code=<snippet ±3 lines>, context_hint=<AC>, shell_command=<verify.command or "">, execution_log=<mechanical log or "">, runner_exit_code=<trusted runner exit code>)` — filtered output behind `| tail`/`| grep` without a trusted successful runner status is `EVIDENCE_FORM_MISMATCH`; log text cannot self-authenticate with `SAMVIL_EXIT`. `risk_level=HIGH` → downgrade PASS/PARTIAL → FAIL; MEDIUM → PASS → PARTIAL with Socratic Questions surfaced.
+5. **Module Boundary validation (M1)**: if `.samvil/modules/` exists, run `validate_contract(project_root=".", module_name="<module>")` per relevant module. `valid=false` → surface contract errors as FAIL evidence.
+6. `update_leaf_status(ac_tree_json=<tree>, leaf_id=<id>, status=<s>, evidence_json=<files+screenshots>)` → use returned `tree`.
+7. `save_event(event_type="ac_verdict", data='{"feature":"...", "leaf_id":"...","status":"..."}')`.
 
-After all leaves: `print(json.loads(render_ac_tree_hud(ac_tree_json=tree_json))["ascii"])`; append to `qa-report.md`. **Emit deliverable spec (B, browser solution_types)**: per feature, `mcp__samvil_mcp__emit_ac_spec(project_root="~/dev/<seed.name>", feature_name="<feature>", acs_json=<[{ac_id, description, steps:[recorded steps]}]>, base_path="/")` → writes `tests/e2e/<feature>.spec.ts`. `empty_acs` 비어있지 않으면 해당 AC는 step 미기록 → 재방문하거나 TODO로 남김. 결과: 사용자가 `npm test`로 QA가 검증한 걸 재실행 가능.
+After all leaves: `print(json.loads(render_ac_tree_hud(ac_tree_json=tree_json))["ascii"])`; append to `qa-report.md`. Browser deliverable specs were already emitted before their mechanical commands in step 3, so the user can rerun them with `npm test`.
 
-**Adversarial pass (A3, standard+ browser)**: 해피패스 검증 중 발견한 버튼 role-name / input selector를 모아 `mcp__samvil_mcp__emit_adversarial_spec(project_root="~/dev/<seed.name>", buttons_json=<["증가","리셋",...]>, inputs_json=<["#title",...]>, base_path="/")` → `tests/e2e/adversarial.spec.ts` (연타/초장문/빈값/새로고침 → 콘솔에러·크래시 0 단언). `npm test`에 포함되어 실행됨. 적대 테스트가 빨간불이면 AC엔 없던 결함 → REVISE 입력으로 처리.
+**Adversarial pass (A3, standard+ browser)**: 해피패스 검증 중 발견한 버튼 role-name / input selector를 모아 `mcp__samvil_mcp__emit_adversarial_spec(project_root="~/dev/<seed.name>", buttons_json=<["증가","리셋",...]>, inputs_json=<["#title",...]>, base_path="/")` → `tests/e2e/adversarial.spec.ts` (연타/초장문/빈값/새로고침 → 콘솔에러·크래시 0 단언). 적대 테스트가 빨간불이면 AC엔 없던 결함 → REVISE 입력으로 처리. **Mechanical runtime evidence**: browser solution types must execute generated specs with `npm test > .samvil/qa.log 2>&1; qa_exit=$?; echo "SAMVIL_EXIT:${qa_exit}" >> .samvil/qa.log; test "$qa_exit" -eq 0`, then call `mcp__samvil_mcp__collect_stage_evidence(project_root=".", stage="qa")`. A missing/invalid `.samvil/test-results.json`, or a report with zero tests, means `runtime_verified=false`; do not infer runtime success from narrative Pass 2 verdicts.
 
 **Evaluation principles (v4.23/v4.25, when `seed.evaluation_principles` present)**: After Pass 2 verdicts collected, call `mcp__samvil_mcp__score_acs_against_principles(ac_verdicts_json=<JSON list>, evaluation_principles_json=<seed.evaluation_principles JSON>)` — returns per-leaf `principle_hits`, `weighted_score`, `downgrade_recommended`. Apply downgrades verbatim (PASS→PARTIAL where flagged). Phase Z calls `mcp__samvil_mcp__evaluate_exit_conditions(seed_json, qa_state_json)`; `verdict_blocked=true` → verdict cannot be PASS this iteration.
 
@@ -68,7 +69,7 @@ After all leaves: `print(json.loads(render_ac_tree_hud(ac_tree_json=tree_json))[
 
 ### 4. Phase Z — synthesis + contract finalize
 
-Build `evidence = {iteration, max_iterations, pass1{status,issues}, pass2{items[{id,criterion,verdict,evidence,method,reason}],counts}, pass3, agent_writes:[]}`. Query pending build claims via `claim_query_by_subject(project_root=".", subject_glob="<seed leaf id glob>")` (best-effort).
+Build `evidence = {iteration, max_iterations, pass1{status,issues}, pass2{items[{id,criterion,verdict,evidence,method,reason}],counts}, pass3, agent_writes:[]}`. Load `.samvil/claims.jsonl` (best-effort) and select rows with `type="ac_verdict"`, `status="pending"`, and `subject` matching a current seed leaf id; pass that list as the pending build claims.
 
 ```
 mcp__samvil_mcp__finalize_qa_verdict(project_path=".",
@@ -77,12 +78,12 @@ mcp__samvil_mcp__finalize_qa_verdict(project_path=".",
 
 Returns `synthesis`, `convergence`, `claim_actions[]`, `consensus_triggers[]`, `gate_input` (qa_to_deploy), `blocked {detected, persistent_issue_ids}`, `next_skill_decision {verdict, suggested, reason, user_options}`, `handoff_block`, `samvil_tier`, `notes[]`, `errors[]`.
 
-Apply in order (each best-effort, INV-5):
+Apply in order (best-effort except the evidence-backed `gate_check`, INV-5):
 1. `materialize_qa_synthesis(project_root=".", synthesis_json=<finalize.synthesis>)` → writes qa-results.json, qa-report.md, events.jsonl, project.state.json.
 2. For each `claim_actions[i]`: `action=="verify"` → `claim_verify(claim_id=<i.claim_id>, verified_by=<i.verified_by>, evidence_json=<i.evidence_json>)`; `action=="reject"` → `claim_reject(claim_id=<i.claim_id>, verified_by=<i.verified_by>, reason=<i.reason>)`. PARTIAL leaves claim pending (retro decides).
 3. If `boot.resume_hint.stage_claims.qa`: `claim_verify(claim_id=<id>, verified_by="agent:product-owner")`.
 4. For each `consensus_triggers[i]`: `consensus_trigger(input_json=<i.input_json>)`. `should_invoke=true` → 2-round resolver (legacy "consensus" rules) → `consensus_verdict` claim → use as final answer for that AC.
-5. `gate_check(gate_name="qa_to_deploy", samvil_tier=<finalize.samvil_tier>, metrics_json=<finalize.gate_input.metrics>, project_root=".")`. `verdict=block` → REVISE (or FAIL if Ralph exhausted), emit `required_action.type`. `verdict=pass` → record `gate_verdict` claim → proceed.
+5. Select the gate **after** `finalize.next_skill_decision.suggested` is known: `samvil-evolve` → `qa_to_evolve`; `samvil-deploy` → `qa_to_deploy` with `evidence_mode="mechanical"`; `samvil-retro` → `any_to_retro` with `metrics_json='{"always_run":true}'`; `samvil-qa` means `REVISE + convergence=continue`, so run no cross-stage gate, write no marker, and continue Ralph. Artifact-only `.samvil/qa.log` and `test-results.json` are model-writable and therefore never set trusted `runtime_verified`; deploy remains blocked until a trusted host receipt adapter exists. Mandatory tool error or any verdict other than exact `pass` (including `block`, `escalate`, `skip`, or unknown) → record the `gate_verdict`, surface the reason, and halt. `gate_override` is unavailable on current hosts and `force_proceed` is forbidden. Exact `verdict=pass` → record `gate_verdict` → proceed.
 6. If convergence is `blocked`/`failed`: `materialize_qa_recovery_routing(project_root=".")` → writes `<paths.qa_routing>` + `<paths.next_skill_marker>` for host continuation.
 
 ### 5. Iterate or terminate
@@ -103,10 +104,10 @@ Both modes skip deploy/retro chain — pure evaluation output. Use cases: seed m
 
 ## Chain on PASS / FAIL / BLOCKED (INV-4)
 
-1. Append `finalize.handoff_block` to `<boot.paths.handoff>` via Bash `cat >>` or Edit (**never Write tool**).
+1. Append `finalize.handoff_block` to `<boot.paths.handoff>` via Edit (**never Write tool or Bash redirection**).
 2. Render console output per legacy `## On PASS — Offer Evolve or Chain to Retro` (PASS) or `## On FAIL (after 3 iterations)` (FAIL/BLOCKED) — Try-it line, 배포 방법, 배포 전 체크리스트, 3 user options.
 3. `save_event(event_type="qa_verdict", data='{"verdict":"<PASS|REVISE|FAIL>","iteration":<N>,"pass1":"...","pass2":"...","pass3":"..."}')`.
-4. **TaskUpdate** "QA" → `completed`. Print `[SAMVIL] Stage 5/5: QA complete`.
+4. Record the authoritative terminal result with `complete_stage(session_id="<sid>", stage="qa", verdict="<pass|fail|blocked>")`: map synthesis PASS→`pass`, FAIL→`fail`, and convergence BLOCKED→`blocked`. Exact `status="ok"` is required before any cross-stage marker or Skill invocation; error halts. `REVISE + continue` remains inside QA and does not call `complete_stage`. On success, **TaskUpdate** "QA" → `completed` and print `[SAMVIL] Stage 5/5: QA complete`.
 5. Chain per `finalize.next_skill_decision.suggested` — PASS→`samvil-deploy` (default) or `samvil-evolve` (auto-trigger: build_retries≥5, qa_history≥2, partial_count≥5); FAIL/BLOCKED→`samvil-retro` (default), surface `user_options` for evolve / manual.
 6. **HostCapability**: claude-code → invoke the Skill tool with `<suggested>`. Codex → write `<boot.paths.next_skill_marker>` `{"skill":"<suggested>"}` and read `skills/<suggested>/SKILL.md`.
 

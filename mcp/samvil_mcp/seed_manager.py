@@ -89,9 +89,27 @@ def validate_seed(seed: dict) -> dict:
     if is_v3:
         # v3: at least one AC leaf (recursive walk, any depth up to MAX_DEPTH)
         from .ac_tree import ACNode, leaves as _tree_leaves
+        from .ac_verification import validate_verify_contract
         total_leaves = 0
-        for feat in features:
-            for ac in feat.get("acceptance_criteria", []):
+        for feature_index, feat in enumerate(features):
+            def _validate_verify(items: list, prefix: str) -> None:
+                for ac_index, item in enumerate(items):
+                    if not isinstance(item, dict):
+                        continue
+                    item_path = f"{prefix}[{ac_index}]"
+                    if "verify" in item:
+                        for error in validate_verify_contract(item["verify"]):
+                            errors.append(f"{item_path}.{error}")
+                    children = item.get("children")
+                    if isinstance(children, list):
+                        _validate_verify(children, f"{item_path}.children")
+
+            criteria = feat.get("acceptance_criteria", [])
+            _validate_verify(
+                criteria,
+                f"features[{feature_index}].acceptance_criteria",
+            )
+            for ac in criteria:
                 if isinstance(ac, dict):
                     try:
                         node = ACNode.from_dict(ac)

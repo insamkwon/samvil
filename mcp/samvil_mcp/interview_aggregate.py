@@ -3,15 +3,14 @@
 Single best-effort call that collects everything the (now ~180-LOC) skill
 body needs but that is not already covered by `score_ambiguity`,
 `scan_manifest`, `route_question`, `update_answer_streak`, `manage_tracks`,
-`get_tier_phases`, `compute_seed_readiness`, `gate_check`, etc.
+`get_tier_phases`, `score_ambiguity`, `gate_check`, etc.
 
 Specifically:
 
   1. **tier** — resolves `samvil_tier` from project.config.json /
      project.state.json with the same precedence the orchestrator uses
-     (state > config > default), preserving the v3.1 `deep` alias only
-     for interview's own threshold logic (interview supports 5 tiers
-     including `deep`; pipeline routes through `full` post-interview).
+     (state > config > default), including the canonical strictest `deep`
+     tier used throughout the pipeline.
   2. **phases** — resolved required interview phases for the chosen
      tier (`tier_phases` mirror) + ambiguity target threshold.
   3. **mode** — Zero-Question vs Normal mode detection from the
@@ -28,7 +27,7 @@ The skill body still owns:
     question loops + summary verification).
   - Per-question routing call to `route_question` (per-question, not
     pre-flightable here).
-  - Final `compute_seed_readiness` + `gate_check` + `claim_post`
+  - Final `score_ambiguity` + `gate_check` + `claim_post`
     (post_stage Contract Layer step — owned by skill).
 
 All reads are best-effort. Missing files yield empty defaults and a
@@ -42,6 +41,8 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+
+from .interview_engine import MAX_QUESTIONS, QUESTION_EXTENSION
 
 INTERVIEW_AGGREGATE_SCHEMA_VERSION = "1.0"
 
@@ -141,10 +142,8 @@ def _read_json(path: Path) -> dict[str, Any]:
 def _resolve_tier(state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     """Resolve interview tier with precedence state > config > default.
 
-    Recognises both `samvil_tier` (v3.2) and legacy `selected_tier`. Maps
-    no v3.1 alias here — interview is the one place `deep` survives as a
-    real tier (stricter ambiguity target). Pipeline-side normalisation is
-    the orchestrator's job.
+    Recognises both `samvil_tier` (v3.2) and legacy `selected_tier`.
+    `deep` remains a real tier with the strictest ambiguity target.
     """
     valid = set(INTERVIEW_TIERS)
     chosen = ""
@@ -303,7 +302,7 @@ def aggregate_interview_state(
       - AskUserQuestion checkpoints (Phase 1–4 + summary).
       - Per-question `route_question` calls (those need the live
         question text and current streak, not pre-flight).
-      - Final `compute_seed_readiness` + `gate_check` + `claim_post`
+      - Final `score_ambiguity` + `gate_check` + `claim_post`
         (post_stage Contract Layer step).
 
     Returns a dict with:
@@ -393,6 +392,10 @@ def aggregate_interview_state(
         "current_stage": current_stage,
         "tier": tier_block,
         "ambiguity_target": ambiguity_target,
+        "question_budget": {
+            "max_questions": MAX_QUESTIONS.get(chosen_tier, 12),
+            "extension_questions": QUESTION_EXTENSION,
+        },
         "required_phases": required_phases,
         "mode": mode_block,
         "preset": preset_block,

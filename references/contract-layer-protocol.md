@@ -12,8 +12,16 @@ points per stage:
 pre_stage  →  [stage body unchanged]  →  post_stage
 ```
 
+**Lifecycle correction (trustworthy-core Wave 4.2):** Claude Code's
+`PostToolUse(Skill)` fires after the Skill prompt is loaded, not after the stage
+body finishes. Therefore only the start claim may be automatic. The plugin no
+longer registers `contract-stage-end.sh` as a PostToolUse hook; artifact-backed
+post-stage gates remain in the stage skill/MCP finalizer until the host exposes
+an explicit stage-complete lifecycle signal. Running the end hook manually is
+diagnostic only. This prevents a pre-execution gate from producing a false PASS.
+
 Each skill references this protocol by name; the minimal per-stage
-addition is the **domain-specific** call (e.g. `compute_seed_readiness`
+addition is the **domain-specific** call (e.g. `score_ambiguity`
 at the end of interview because only interview has those dimensions).
 
 ## Protocol at a glance
@@ -94,6 +102,11 @@ before invoking the next skill via the chain pattern:
    → On verdict=pass: record gate_verdict claim (verified by Judge) and
      proceed to chain invoke the next skill.
    → On verdict=skip: record skip in state.json.completed_stages, proceed.
+   → Current hosts do not expose a non-model-callable approval attestation
+     channel. Therefore `gate_override` is unavailable and every blocked gate
+     halts. Model-authored approval strings, ledger rows, event ids, and
+     unapproved `force_proceed` are never authority. A future adapter may
+     re-enable overrides only with a host-signed, replay-protected receipt.
 
 3. Stagnation sniff (optional; do on any non-pass)
    mcp__samvil_mcp__stagnation_evaluate(
@@ -119,7 +132,7 @@ Used when calling `route_task`.
 | scaffold | scaffolder |
 | build | build-worker |
 | qa | qa-functional (Judge) |
-| deploy | deployer |
+| deploy | infra-dev |
 | retro | retro-analyst |
 | evolve | reflect-proposer |
 
@@ -129,14 +142,19 @@ Used when calling `gate_check` at post_stage.
 
 | After stage | gate_name | Metrics the skill passes |
 |-------------|-----------|--------------------------|
-| interview | `interview_to_seed` | `{"seed_readiness": <float>, ...per-dim scores}` |
+| interview | `interview_to_seed` | `{"seed_readiness": <float>, "ambiguity_converged": bool}` |
 | seed | `seed_to_council` | `{"schema_valid": bool, "schema_version_min": "3.2"}` |
 | council | `council_to_design` | `{"consensus_required": bool}` |
 | design | `design_to_scaffold` | `{"blueprint_valid": bool, "stack_matrix_match": bool}` |
 | scaffold | `scaffold_to_build` | `{"sanity_build_ok": bool, "env_vars_present": bool}` |
 | build | `build_to_qa` | `{"implementation_rate": <float 0..1>}` |
-| qa | `qa_to_deploy` | `{"three_pass_pass": bool, "zero_stubs": bool}` |
+| qa → evolve | `qa_to_evolve` | `{"three_pass_pass": bool, "zero_stubs": bool}` |
+| qa → deploy | `qa_to_deploy` | `{"three_pass_pass": bool, "zero_stubs": bool, "runtime_verified": bool, "verification_mode": "runtime" \| "static"}` |
 | * (end of chain) | `any_to_retro` | `{"always_run": true}` |
+
+For the interview gate, re-run `score_ambiguity` against the persisted answers.
+Pass its deterministic `seed_readiness` field unchanged and map `converged` to
+`ambiguity_converged`; model-authored readiness dimensions are not accepted.
 
 ## What stays OUT of skills
 
@@ -148,9 +166,9 @@ Used when calling `gate_check` at post_stage.
   just pass `task_role`.
 - **Threshold arithmetic.** `gate_check` reads `gate_config.yaml` and
   applies per-tier floors.
-- **Performance budget bookkeeping.** Sprint 6 `budget_status` tool
-  consumes consumption numbers; skills pass their observed values and
-  honor hard_stop.
+- **Concurrency budget bookkeeping.** Sprint 6 `rate_budget_acquire`,
+  `rate_budget_release`, and `rate_budget_stats` tools manage worker slots;
+  skills pass the budget path/worker id and honor `acquired=false`.
 
 ## Failure / degradation
 
@@ -165,6 +183,11 @@ a contract-layer call returns `{"error": ...}`:
   can audit drift.
 
 Never fake a `gate_verdict=pass` when the check couldn't run.
+
+If Python is unavailable, the boot health table must show
+`Contract: DEGRADED(no python)`. Fresh interview entry passes `project_root` in
+the Skill input; the start hook writes `.samvil/contract-project-root` before
+`project.state.json` or `project.seed.json` exists.
 
 ## Quick-reference checklist for skill authors
 

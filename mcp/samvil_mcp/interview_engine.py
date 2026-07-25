@@ -68,6 +68,32 @@ MIN_QUESTIONS = {
     "deep":     40,
 }
 
+# Forced question budgets. Reaching the cap offers draft-or-extend; it never
+# silently loops. Each explicit user extension adds five questions.
+MAX_QUESTIONS = {
+    "minimal": 6,
+    "standard": 12,
+    "thorough": 20,
+    "full": 30,
+    "deep": 40,
+}
+QUESTION_EXTENSION = 5
+
+_GENERIC_TARGET_USERS = {
+    "users", "people", "everyone", "anyone", "customers",
+    "누구나", "모두", "사람들",
+}
+
+
+def _is_short_text(value: str, latin_minimum: int) -> bool:
+    """Use a 60% floor for Hangul-dense text to avoid English-length bias."""
+    minimum = (latin_minimum * 3 + 4) // 5 if re.search(r"[가-힣]", value) else latin_minimum
+    return len(value.strip()) < minimum
+
+
+def _is_generic_target_user(value: str) -> bool:
+    return value.strip().lower() in _GENERIC_TARGET_USERS
+
 # Required interview phases per tier (v3.1.0, Sprint 1)
 TIER_REQUIRED_PHASES = {
     "minimal":  {"core", "scope"},
@@ -88,6 +114,7 @@ def score_ambiguity(
     tier: str = "standard",
     questions_asked: int = 0,
     pre_filled_dimensions: list[str] | None = None,
+    question_extensions: int = 0,
 ) -> dict:
     """Score ambiguity of an interview state across 10 dimensions.
 
@@ -109,6 +136,9 @@ def score_ambiguity(
     """
     target = TIER_TARGETS.get(tier, 0.05)
     base_min_q = MIN_QUESTIONS.get(tier, 10)
+    max_q = MAX_QUESTIONS.get(tier, 12)
+    extensions = max(0, int(question_extensions or 0))
+    effective_max_q = max_q + extensions * QUESTION_EXTENSION
     pre_filled = set(pre_filled_dimensions or [])
 
     # Reduce MIN_QUESTIONS by one per pre-filled dimension (floor 2)
@@ -159,13 +189,24 @@ def score_ambiguity(
 
     min_questions_met = questions_asked >= min_q
     converged = overall <= target and floors_passed and min_questions_met
+    questions_remaining = max(0, effective_max_q - questions_asked)
+    budget_exhausted = questions_asked >= effective_max_q and not converged
+    if converged:
+        budget_action = "converged"
+    elif budget_exhausted:
+        budget_action = "offer_draft_or_extend"
+    else:
+        budget_action = "continue"
+    next_question_number = min(questions_asked + 1, effective_max_q)
 
+    ambiguity = round(overall, 3)
     return {
         # Core dimension clarities (backward-compatible) ──────────
         "goal_clarity":         goal_clarity,
         "constraint_clarity":   constraint_clarity,
         "criteria_testability": criteria_testability,
-        "ambiguity":            round(overall, 3),
+        "ambiguity":            ambiguity,
+        "seed_readiness":       round(1.0 - ambiguity, 3),
         "converged":            converged,
         "target":               target,
         "tier":                 tier,
@@ -178,6 +219,14 @@ def score_ambiguity(
         "questions_asked":      questions_asked,
         "min_questions_required": min_q,
         "min_questions_met":    min_questions_met,
+        "max_questions":        max_q,
+        "effective_max_questions": effective_max_q,
+        "question_extensions":  extensions,
+        "extension_questions":  QUESTION_EXTENSION,
+        "questions_remaining":  questions_remaining,
+        "budget_exhausted":     budget_exhausted,
+        "budget_action":        budget_action,
+        "next_question_prefix": f"[질문 {next_question_number}/{effective_max_q}]",
         "pre_filled_dimensions": sorted(pre_filled),
         "dimension_scores": {
             "goal":           round(goal_score, 3),
@@ -242,21 +291,21 @@ def _score_goal(state: dict) -> float:
     target_user = state.get("target_user", "")
     if not target_user:
         penalties += 0.4
-    elif len(target_user) < 10:
+    elif _is_generic_target_user(target_user):
         penalties += 0.2
-    elif any(v in target_user.lower() for v in ["everyone", "anyone", "people", "users"]):
-        penalties += 0.15
+    elif _is_short_text(target_user, 10):
+        penalties += 0.2
 
     core_problem = state.get("core_problem", "")
     if not core_problem:
         penalties += 0.3
-    elif len(core_problem) < 15:
+    elif _is_short_text(core_problem, 15):
         penalties += 0.15
 
     core_exp = state.get("core_experience", "")
     if not core_exp:
         penalties += 0.3
-    elif len(core_exp) < 10:
+    elif _is_short_text(core_exp, 10):
         penalties += 0.15
 
     return min(penalties, 1.0)
@@ -302,6 +351,7 @@ def _score_criteria(state: dict) -> float:
         r"\bgood\b", r"\bnice\b", r"\bfast\b", r"\bclean\b",
         r"\buser.?friendly\b", r"\bintuitive\b", r"\bsmooth\b",
         r"\bprofessional\b", r"\bmodern\b", r"\bresponsive\b",
+        r"좋(?:은|게|고)", r"빠른|빠르게", r"간단한", r"예쁘게", r"직관적",
     ]
     vague_count = sum(
         1 for c in criteria
@@ -382,11 +432,12 @@ def _score_nonfunctional(state: dict) -> float:
 def _score_stakeholder(state: dict) -> float:
     """Score stakeholder specificity: role + context? (0=specific, 1=vague)"""
     target_user = state.get("target_user", "")
-    if not target_user or len(target_user) < 10:
+    if not target_user:
         return 1.0
-    vague_only = target_user.strip().lower() in {"users", "people", "everyone", "anyone", "customers"}
-    if vague_only:
+    if _is_generic_target_user(target_user):
         return 0.9
+    if _is_short_text(target_user, 10):
+        return 1.0
     has_number = bool(re.search(r'\d+', target_user))
     has_context = any(kw in target_user.lower() for kw in [
         "who", "that", "with", "at", "managing", "working", "using",

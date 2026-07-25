@@ -197,8 +197,12 @@ fi
 _section "10. Host parity (CC ↔ Codex)"
 
 if python3 scripts/check-host-parity.py --strict >/tmp/samvil-hostparity.log 2>&1; then
-  summary=$(tail -1 /tmp/samvil-hostparity.log | sed -E 's/^[[:space:]]*✓[[:space:]]*//')
+  summary=$(grep '^✓ structural host parity:' /tmp/samvil-hostparity.log | sed -E 's/^[[:space:]]*✓[[:space:]]*//')
+  untested_pairs=$(sed -nE 's/^UNTESTED: ([0-9]+) pair.*/\1/p' /tmp/samvil-hostparity.log | head -1)
+  untested_native=$(grep -c '^UNTESTED: .*native' /tmp/samvil-hostparity.log)
+  untested=$(( ${untested_pairs:-0} + untested_native ))
   _ok "$summary"
+  echo "  ! UNTESTED: $untested host execution surface(s); see scripts/check-host-parity.py"
 else
   _fail "host parity drift:"
   cat /tmp/samvil-hostparity.log | sed 's/^/      /'
@@ -215,6 +219,18 @@ if python3 scripts/check-skill-forward-integrity.py >/tmp/samvil-forward.log 2>&
 else
   _fail "forward integrity: unresolved tool references"
   cat /tmp/samvil-forward.log | sed 's/^/      /'
+fi
+
+
+# ── Summary ─────────────────────────────────────────────────────────
+_section "12. Agent inventory consistency"
+
+if python3 scripts/check-agent-inventory.py >/tmp/samvil-agent-inventory.log 2>&1; then
+  summary=$(tail -1 /tmp/samvil-agent-inventory.log)
+  _ok "$summary"
+else
+  _fail "agent inventory drift:"
+  cat /tmp/samvil-agent-inventory.log | sed 's/^/      /'
 fi
 
 

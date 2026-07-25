@@ -19,10 +19,30 @@ Not checked here (runtime):
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+
+REFERENCE_TOOL_CALL_RE = re.compile(
+    r"`([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\([^`]*\)`"
+)
+REFERENCE_TOOL_LABEL_RE = re.compile(
+    r"`([a-z][a-z0-9]+(?:_[a-z0-9]+)+)`\s+tool\b"
+)
+REFERENCE_TOOL_PREFIXED_RE = re.compile(r"mcp__samvil_mcp__([a-z][a-z0-9_]*)")
+NAMED_NUMERIC_CONSTANT_RE = re.compile(
+    r"\b([A-Z][A-Z0-9_]{2,})[ \t]*(?:=|:)[ \t]*(\d+(?:\.\d+)?)\b"
+)
+DECISION_BOUNDARIES_REF = "references/decision-boundaries.md"
+RETIRED_REFERENCE_TOOLS: frozenset[str] = frozenset(
+    {
+        # Trustworthy Core §3.4: deterministic interview_engine output replaced
+        # the model-scored v3.2 readiness helper.
+        "compute_seed_readiness",
+    }
+)
 
 CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
     # (skill_name, skill_path, required substrings)
@@ -36,10 +56,20 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
         "skills/samvil-interview/SKILL.md",
         (
             "contract-layer-protocol",
-            "compute_seed_readiness",
             "gate_check",
             "interview_to_seed",
             "render_domain_context",
+        ),
+    ),
+    (
+        "samvil-pm-interview",
+        "skills/samvil-pm-interview/SKILL.md",
+        (
+            "validate_pm_seed",
+            "gate_check",
+            "claim_post",
+            "complete_stage",
+            "pm_seed_to_eng_seed",
         ),
     ),
     (
@@ -68,6 +98,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "route_task",
             "validate_role_separation",
             "claim_verify",
+            ".samvil/claims.jsonl",
             "consensus_trigger",
             "qa_to_deploy",
             "render_pattern_context",
@@ -75,6 +106,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "aggregate_qa_boot_context",
             "dispatch_qa_pass1_batch",
             "finalize_qa_verdict",
+            "complete_stage",
             "SKILL.legacy.md",
         ),
     ),
@@ -86,6 +118,7 @@ CHECKS: list[tuple[str, str, tuple[str, ...]]] = [
             "council-retirement-migration",
             "--council",
             "synthesize_council_verdicts",
+            "complete_stage",
             "SKILL.legacy.md",
         ),
     ),
@@ -181,6 +214,8 @@ def check_boot_contract() -> bool:
             missing.append("save_event (stage entry)")
         if "SKILL.legacy.md" not in text and "P8" not in text:
             missing.append("P8/legacy fallback")
+        if "gate_override" not in text or "force_proceed" not in text:
+            missing.append("explicit gate override policy")
         if missing:
             _fail(f"boot-contract {skill}: missing {missing}")
             all_green = False
@@ -332,6 +367,87 @@ def _collect_mcp_tools() -> list[str]:
     return names
 
 
+def find_unresolved_reference_tools(repo: Path = REPO) -> dict[str, list[str]]:
+    """Find MCP-like tool references in ``references/`` with no registration."""
+    server = repo / "mcp" / "samvil_mcp" / "server.py"
+    sources = [server] + sorted(server.parent.glob("tools_*.py"))
+    registered: set[str] = set()
+    for source in sources:
+        if not source.exists():
+            continue
+        registered.update(
+            re.findall(
+                r"@mcp\.tool\(\)\s*\n\s*(?:async )?def (\w+)",
+                source.read_text(errors="ignore"),
+            )
+        )
+
+    unresolved: dict[str, list[str]] = {}
+    tool_prefixes = {name.split("_", 1)[0] for name in registered}
+    tool_prefixes.update({"budget", "claim", "gate", "rate", "route"})
+    references = repo / "references"
+    if not references.exists():
+        return unresolved
+    for path in sorted(references.rglob("*.md")):
+        for lineno, line in enumerate(path.read_text(errors="ignore").splitlines(), start=1):
+            raw_candidates = set(REFERENCE_TOOL_CALL_RE.findall(line))
+            raw_candidates.update(REFERENCE_TOOL_LABEL_RE.findall(line))
+            candidates = {
+                name for name in raw_candidates
+                if name.split("_", 1)[0] in tool_prefixes
+                or name in RETIRED_REFERENCE_TOOLS
+            }
+            candidates.update(REFERENCE_TOOL_PREFIXED_RE.findall(line))
+            for name in sorted(candidates - registered):
+                unresolved.setdefault(name, []).append(
+                    f"{path.relative_to(repo)}:{lineno}"
+                )
+    return unresolved
+
+
+def find_skill_numeric_drift(repo: Path = REPO) -> list[str]:
+    """Detect named numeric constants that drift across thin/legacy pairs."""
+    issues: list[str] = []
+    skills_dir = repo / "skills"
+    if not skills_dir.exists():
+        return issues
+    for skill_dir in sorted(path for path in skills_dir.iterdir() if path.is_dir()):
+        thin_path = skill_dir / "SKILL.md"
+        legacy_path = skill_dir / "SKILL.legacy.md"
+        if not thin_path.exists() or not legacy_path.exists():
+            continue
+        thin = thin_path.read_text(errors="ignore")
+        legacy = legacy_path.read_text(errors="ignore")
+        thin_values: dict[str, set[str]] = {}
+        legacy_values: dict[str, set[str]] = {}
+        for name, value in NAMED_NUMERIC_CONSTANT_RE.findall(thin):
+            thin_values.setdefault(name, set()).add(value)
+        for name, value in NAMED_NUMERIC_CONSTANT_RE.findall(legacy):
+            legacy_values.setdefault(name, set()).add(value)
+        names = thin_values.keys() | legacy_values.keys()
+        for name in sorted(names):
+            if name not in thin_values:
+                issues.append(f"{skill_dir.name}: {name} missing from thin")
+                continue
+            if name not in legacy_values:
+                issues.append(f"{skill_dir.name}: {name} missing from legacy")
+                continue
+            left = sorted(thin_values[name])
+            right = sorted(legacy_values[name])
+            if left != right:
+                issues.append(
+                    f"{skill_dir.name}: {name} thin={left} legacy={right}"
+                )
+        if names and (
+            DECISION_BOUNDARIES_REF not in thin
+            or DECISION_BOUNDARIES_REF not in legacy
+        ):
+            issues.append(
+                f"{skill_dir.name}: named constants missing decision-boundaries SSOT citation"
+            )
+    return issues
+
+
 def _collect_legacy_text() -> str:
     """Concatenate all SKILL.legacy.md files (P8 fallback bodies)."""
     parts: list[str] = []
@@ -477,6 +593,24 @@ def main() -> int:
     else:
         allowlisted = [t for t in mcp_tools if t not in skill_text and t in REVERSE_CHECK_ALLOWLIST]
         _ok(f"all non-allowlisted @mcp.tool() functions referenced ({len(allowlisted)} allowlisted pending-wiring tools skipped)")
+
+    print()
+    print("Reference check: MCP-like tool names in references/ resolve ...")
+    unresolved_references = find_unresolved_reference_tools()
+    if unresolved_references:
+        _fail(f"unregistered reference tool(s): {unresolved_references}")
+        all_green = False
+    else:
+        _ok("all MCP-like references resolve to registered tools")
+
+    print()
+    print("Numeric drift: thin/legacy named constants stay aligned with SSOT ...")
+    numeric_drift = find_skill_numeric_drift()
+    if numeric_drift:
+        _fail(f"numeric constant drift: {numeric_drift}")
+        all_green = False
+    else:
+        _ok("named numeric constants aligned and decision-boundaries cited")
 
     print()
     print("Summary:", "PASS" if all_green else "FAIL")

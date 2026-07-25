@@ -17,6 +17,7 @@ from samvil_mcp.server import (
     next_buildable_leaves,
     pm_seed_to_eng_seed,
     rate_budget_acquire,
+    rate_budget_heartbeat,
     rate_budget_release,
     rate_budget_reset,
     rate_budget_stats,
@@ -162,6 +163,8 @@ def test_rate_budget_lifecycle(tmp_path: Path):
     assert a["acquired"] is True
     s = json.loads(_run(rate_budget_stats(p)))
     assert s["active"] == 1
+    heartbeat = json.loads(_run(rate_budget_heartbeat(p, "w1")))
+    assert heartbeat["renewed"] is True
     r = json.loads(_run(rate_budget_release(p, "w1")))
     assert r["released"] is True
     reset_out = json.loads(_run(rate_budget_reset(p)))
@@ -197,6 +200,8 @@ def test_validate_pm_seed_tool_ok():
     d = json.loads(out)
     assert d["valid"] is True
     assert d["errors"] == []
+    assert d["seed_readiness"] == 1.0
+    assert d["ambiguity_converged"] is True
 
 
 def test_validate_pm_seed_tool_reports_errors():
@@ -204,6 +209,8 @@ def test_validate_pm_seed_tool_reports_errors():
     d = json.loads(out)
     assert d["valid"] is False
     assert d["errors"]
+    assert d["seed_readiness"] == 0.0
+    assert d["ambiguity_converged"] is False
 
 
 def test_pm_seed_to_eng_seed_tool_roundtrips_to_validate_seed():

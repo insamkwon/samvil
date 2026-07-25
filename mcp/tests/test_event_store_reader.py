@@ -75,6 +75,40 @@ def test_read_events_happy(project_root: Path) -> None:
     assert result["last_ts"] == "2026-05-16T11:00:00Z"
 
 
+def test_read_events_accepts_legacy_ts(project_root: Path) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "qa_start", "stage": "qa",
+         "ts": "2026-05-16T10:00:00Z"},
+    ])
+
+    result = read_events(project_root=str(project_root))
+
+    assert result["first_ts"] == "2026-05-16T10:00:00Z"
+    assert result["last_ts"] == "2026-05-16T10:00:00Z"
+
+
+def test_read_events_normalizes_non_string_and_null_timestamps(
+    project_root: Path,
+) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "start", "stage": "build",
+         "timestamp": 123},
+        {"session_id": "s1", "event_type": "middle", "stage": "build",
+         "ts": None},
+        {"session_id": "s1", "event_type": "end", "stage": "build",
+         "timestamp": "2026-05-16T10:00:00Z"},
+    ])
+
+    result = read_events(project_root=str(project_root))
+
+    assert result["first_ts"] == "123"
+    assert result["last_ts"] == "2026-05-16T10:00:00Z"
+    sessions = list_in_flight_sessions(project_root=str(project_root))
+    assert sessions["in_flight_sessions"][0]["last_event_ts"] == (
+        "2026-05-16T10:00:00Z"
+    )
+
+
 def test_read_events_skips_malformed(project_root: Path) -> None:
     samvil = project_root / ".samvil"
     samvil.mkdir()
@@ -155,6 +189,139 @@ def test_list_in_flight_detected(project_root: Path) -> None:
     assert s["event_count"] == 2
     assert "interview" in s["stages_touched"]
     assert "build" in s["stages_touched"]
+
+
+def test_list_in_flight_accepts_legacy_ts(project_root: Path) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "qa_start", "stage": "qa",
+         "ts": "2026-05-16T11:00:00Z"},
+    ])
+    _seed_state(project_root, {"current_stage": "qa", "session_id": "s1"})
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["in_flight_sessions"][0]["last_event_ts"] == "2026-05-16T11:00:00Z"
+
+
+def test_completed_stage_event_resumes_from_state_stage(project_root: Path) -> None:
+    """A *_complete event records the completed stage, not the resume target."""
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "interview_complete", "stage": "interview",
+         "timestamp": "2026-05-16T10:30:00Z"},
+    ])
+    _seed_state(project_root, {"current_stage": "seed", "session_id": "s1"})
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    assert len(result["in_flight_sessions"]) == 1
+    assert result["in_flight_sessions"][0]["current_stage"] == "seed"
+    assert result["in_flight_sessions"][0]["last_event_type"] == "interview_complete"
+
+
+def test_completed_stage_event_without_state_is_not_in_flight(project_root: Path) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "interview_complete", "stage": "interview",
+         "timestamp": "2026-05-16T10:30:00Z"},
+    ])
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    assert result["in_flight_sessions"] == []
+
+
+@pytest.mark.parametrize(
+    ("event_type", "stage"),
+    [
+        ("seed_generated", "seed"),
+        ("pm_seed_converted", "seed"),
+        ("qa_pass", "qa"),
+        ("build_pass", "build"),
+        ("council_verdict", "council"),
+        ("evolve_converge", "evolve"),
+    ],
+)
+def test_success_events_without_complete_suffix_are_not_in_flight_when_stage_done(
+    project_root: Path,
+    event_type: str,
+    stage: str,
+) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": event_type, "stage": stage,
+         "timestamp": "2026-05-16T10:30:00Z"},
+    ])
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    assert result["in_flight_sessions"] == []
+
+
+def test_success_event_with_next_stage_resumes_without_state(project_root: Path) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "seed_generated", "stage": "design",
+         "timestamp": "2026-05-16T10:30:00Z"},
+    ])
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    assert result["in_flight_sessions"][0]["current_stage"] == "design"
+
+
+def test_completed_stage_event_with_next_stage_resumes_without_state(
+    project_root: Path,
+) -> None:
+    """File SSOT rows may store the next stage for MCP-free recovery."""
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "interview_complete", "stage": "seed",
+         "timestamp": "2026-05-16T10:30:00Z"},
+        {"session_id": "s2", "event_type": "scaffold_complete", "stage": "build",
+         "timestamp": "2026-05-16T11:30:00Z"},
+    ])
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    sessions = {s["session_id"]: s for s in result["in_flight_sessions"]}
+    assert sessions["s1"]["current_stage"] == "seed"
+    assert sessions["s2"]["current_stage"] == "build"
+
+
+def test_substage_complete_events_remain_in_flight_without_state(
+    project_root: Path,
+) -> None:
+    _seed_events(project_root, [
+        {"session_id": "s1", "event_type": "qa_pass1_complete", "stage": "qa",
+         "timestamp": "2026-05-16T10:30:00Z"},
+        {"session_id": "s2", "event_type": "ac_leaf_complete", "stage": "build",
+         "timestamp": "2026-05-16T11:30:00Z"},
+    ])
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    sessions = {s["session_id"]: s for s in result["in_flight_sessions"]}
+    assert sessions["s1"]["current_stage"] == "qa"
+    assert sessions["s2"]["current_stage"] == "build"
+
+
+def test_state_without_session_id_does_not_resurrect_terminal_sessions(
+    project_root: Path,
+) -> None:
+    _seed_events(project_root, [
+        {"session_id": "old", "event_type": "interview_complete", "stage": "interview",
+         "timestamp": "2026-05-16T10:30:00Z"},
+        {"session_id": "new", "event_type": "build_start", "stage": "build",
+         "timestamp": "2026-05-16T11:30:00Z"},
+    ])
+    _seed_state(project_root, {"current_stage": "qa"})
+
+    result = list_in_flight_sessions(project_root=str(project_root))
+
+    assert result["ok"] is True
+    assert [s["session_id"] for s in result["in_flight_sessions"]] == ["new"]
 
 
 def test_list_terminal_session_excluded(project_root: Path) -> None:

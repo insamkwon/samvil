@@ -39,6 +39,8 @@ CLAIM_TYPES: tuple[str, ...] = (
     "seed_field_set",
     "ac_verdict",
     "gate_verdict",
+    "user_approval",
+    "gate_override",
     "evolve_decision",
     "policy_adoption",
     "evidence_posted",
@@ -49,6 +51,9 @@ CLAIM_TYPES: tuple[str, ...] = (
 )
 
 CLAIM_STATUSES: tuple[str, ...] = ("pending", "verified", "rejected")
+HOST_ONLY_CLAIM_TYPES: frozenset[str] = frozenset(
+    {"user_approval", "gate_override"}
+)
 
 # Evidence format: "path/to/file.ext:line_no" or bare "path/to/file.ext".
 # We accept both but require at least one element on verify.
@@ -216,6 +221,11 @@ class ClaimLedger:
                 f"claim type {type!r} not in whitelist {CLAIM_TYPES}. "
                 "Use events.jsonl for non-contract records."
             )
+        if type in HOST_ONLY_CLAIM_TYPES:
+            raise ClaimLedgerError(
+                f"claim type {type!r} is host-only and cannot be posted "
+                "through the generic claim API."
+            )
         if not claimed_by:
             raise ClaimLedgerError("claimed_by is required (Generator identity).")
         if not subject or not statement:
@@ -264,6 +274,11 @@ class ClaimLedger:
             current = self._latest_by_id().get(claim_id)
             if current is None:
                 raise ClaimLedgerError(f"claim {claim_id!r} does not exist.")
+            if current.type in HOST_ONLY_CLAIM_TYPES:
+                raise ClaimLedgerError(
+                    f"claim type {current.type!r} is host-only and cannot be "
+                    "verified through the generic claim API."
+                )
             if current.status == "verified":
                 return current  # idempotent
             if current.status == "rejected":
@@ -369,6 +384,42 @@ class ClaimLedger:
             )
             self._append(rejected)
         return rejected
+
+    def record_host_user_approval(
+        self,
+        *,
+        gate: str,
+        reason: str,
+        host_event_id: str,
+    ) -> Claim:
+        """Fail closed until a non-model-callable host adapter exists.
+
+        A plain event id is forgeable by any process that can import this
+        module or write the ledger. Treating it as authority would make the
+        approval boundary cosmetic, so the current multi-host implementation
+        deliberately exposes no approval minting path.
+        """
+        raise ClaimLedgerError(
+            "gate overrides are unavailable: no trusted host approval adapter "
+            "is installed. Halt at the blocked gate."
+        )
+
+    def record_gate_override(
+        self,
+        *,
+        gate: str,
+        reason: str,
+        approval_claim_id: str,
+    ) -> Claim:
+        """Fail closed; see :meth:`record_host_user_approval`."""
+        raise ClaimLedgerError(
+            "gate overrides are unavailable: no trusted host approval adapter "
+            "is installed. Halt at the blocked gate."
+        )
+
+    def consume_gate_override(self, gate: str) -> Claim | None:
+        """Return no override until trusted host attestations are implemented."""
+        return None
 
     # ── Queries ────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 ---
 name: samvil-resume
-description: "Resume an interrupted SAMVIL session. Reads project.state.json and jumps back to the last in-progress stage — no re-interview needed."
+description: "Resume an interrupted SAMVIL session. Reads project.state.json and jumps back to the last in-progress stage — no re-interview needed. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # SAMVIL Resume — Session Recovery Entry Point

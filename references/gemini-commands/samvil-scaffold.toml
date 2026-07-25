@@ -9,7 +9,7 @@ If `next_skill` is not `samvil-scaffold`, skip and report the expected stage.
 ## Execution
 
 1. Use MCP tool `read_chain_marker` with project_root to confirm stage.
-2. Read `.samvil/project.seed.json` for seed context.
+2. Read `project.seed.json` for seed context.
 3. Execute the samvil-scaffold stage logic (see Codex command reference for details).
 4. On completion, use MCP tool `write_chain_marker` to advance pipeline.
 

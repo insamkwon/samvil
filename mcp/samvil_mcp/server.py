@@ -13,8 +13,12 @@ Graceful Degradation (INV-7):
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
+import os
 from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -24,7 +28,7 @@ from .ac_leaf_schema import (
     compute_parallel_safety as _compute_parallel_safety,
     validate_leaf as _validate_leaf_core,
 )
-from .claim_ledger import ClaimLedger, ClaimLedgerError
+from .claim_ledger import ClaimLedger, ClaimLedgerError, _locked as _file_locked
 from .decision_log import (
     DecisionADR,
     DecisionLogError,
@@ -69,6 +73,12 @@ from .deploy_targets import (
 )
 from .scaffold_targets import (
     evaluate_scaffold_target as _evaluate_scaffold_target,
+)
+from .ssot_io import atomic_write_text
+from .event_sanitizer import (
+    sanitize_event_data,
+    sanitize_event_label,
+    sanitize_stage_label,
 )
 from .build_phase_a import (
     aggregate_build_phase_a as _aggregate_build_phase_a,
@@ -139,7 +149,6 @@ from .retro_v3_2 import (
 from .interview_v3_2 import (
     InterviewLevel,
     build_meta_probe_prompt as _build_meta_prompt,
-    compute_seed_readiness as _compute_seed_readiness_core,
     confidence_follow_up as _confidence_follow_up,
     pal_select_level as _pal_select_level,
     parse_meta_probe_result as _parse_meta_result,
@@ -153,7 +162,9 @@ from .narrate import (
     parse_narrative as _parse_narrative,
 )
 from .orchestrator import (
+    FAIL_EVENT_TO_STAGE as _ORCHESTRATOR_FAIL_EVENTS,
     OrchestratorError,
+    SUCCESS_EVENT_TO_STAGE as _ORCHESTRATOR_SUCCESS_EVENTS,
     StageEvent as _OrchestratorStageEvent,
     aggregate_orchestrator_state as _aggregate_orchestrator_state,
     complete_stage_plan as _complete_stage_plan,
@@ -256,6 +267,34 @@ mcp = FastMCP("samvil-mcp")
 # Default DB path — can be overridden via environment
 DB_PATH = Path.home() / ".samvil" / "samvil.db"
 _store: EventStore | None = None
+_stage_transition_locks: dict[str, asyncio.Lock] = {}
+
+
+class _AsyncFileLock:
+    """Acquire the existing cross-process flock without blocking the event loop."""
+
+    def __init__(self, path: Path):
+        self._path = path
+        self._context: Any = None
+
+    async def __aenter__(self) -> "_AsyncFileLock":
+        context = _file_locked(self._path)
+        await asyncio.to_thread(context.__enter__)
+        self._context = context
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        context = self._context
+        self._context = None
+        if context is not None:
+            await asyncio.to_thread(context.__exit__, exc_type, exc, traceback)
+
+
+def _stage_transition_lock_path(store: EventStore, session_id: str) -> Path:
+    """Return one stable lock target for a DB/session pair across MCP processes."""
+    db_path = Path(store.db_path).expanduser().resolve()
+    session_key = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return db_path.parent / f".{db_path.name}.stage-transitions" / session_key
 
 
 async def get_store() -> EventStore:
@@ -282,6 +321,28 @@ _HEALTH_OK_COUNTS: dict[str, int] = {}
 _HEALTH_OK_COUNTS_LOCK = threading.Lock()
 # Sample 1-in-N successful calls per tool. `fail` is always logged.
 _HEALTH_OK_SAMPLE_RATE = 10
+_HEALTH_LOG_MAX_BYTES = 10 * 1024 * 1024
+_HEALTH_LOG_LOCK = threading.Lock()
+
+
+def _health_log_path() -> Path:
+    """Resolve the health log path, allowing test/process isolation."""
+    override = os.environ.get("SAMVIL_MCP_HEALTH_PATH")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".samvil" / "mcp-health.jsonl"
+
+
+def _rotate_health_log(path: Path) -> None:
+    """Keep one rotated generation when the active health log reaches its cap."""
+    try:
+        if not path.exists() or path.stat().st_size < _HEALTH_LOG_MAX_BYTES:
+            return
+        generation = Path(f"{path}.1")
+        generation.unlink(missing_ok=True)
+        path.replace(generation)
+    except OSError:
+        return
 
 
 def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
@@ -304,8 +365,6 @@ def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
         if total_calls % _HEALTH_OK_SAMPLE_RATE != 0:
             return  # sampled out
 
-    health_path = Path.home() / ".samvil" / "mcp-health.jsonl"
-    health_path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "status": status,
         "tool": tool,
@@ -315,8 +374,12 @@ def _log_mcp_health(status: str, tool: str, error: str = "") -> None:
     if total_calls is not None:
         entry["ok_total_so_far"] = total_calls
         entry["sample_rate"] = _HEALTH_OK_SAMPLE_RATE
-    with open(health_path, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    health_path = _health_log_path()
+    with _HEALTH_LOG_LOCK:
+        health_path.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_health_log(health_path)
+        with open(health_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
 
 
 # ── Session tools ─────────────────────────────────────────────
@@ -328,6 +391,7 @@ async def create_session(
     project_name: str,
     samvil_tier: str = "standard",
     agent_tier: str | None = None,  # glossary-allow: deprecated alias, removed in v3.3
+    project_root: str = "",
 ) -> str:
     """Create a new SAMVIL session for a project. Returns session ID.
 
@@ -350,9 +414,23 @@ async def create_session(
         if detected:
             return json.dumps({"session_id": None, "error": f"Blocked patterns: {detected}"})
         project_name = sanitize_filename(project_name, max_len=100)
+        normalized_root = ""
+        if project_root:
+            normalized_root = str(Path(project_root).expanduser().resolve())
+        else:
+            inferred_root = _resolve_project_path(project_name)
+            if inferred_root is not None:
+                normalized_root = str(inferred_root.resolve())
         store = await get_store()
-        session = await store.create_session(project_name, samvil_tier)
-        return json.dumps({"session_id": session.id, "project_name": project_name, "tier": samvil_tier})
+        session = await store.create_session(
+            project_name, samvil_tier, project_root=normalized_root
+        )
+        return json.dumps({
+            "session_id": session.id,
+            "project_name": project_name,
+            "project_root": session.project_root,
+            "tier": samvil_tier,
+        })
     except Exception as e:
         _log_mcp_health("fail", "create_session", str(e))
         return json.dumps({"session_id": None, "error": str(e)})
@@ -368,6 +446,7 @@ async def get_session(session_id: str) -> str:
     return json.dumps({
         "id": session.id,
         "project_name": session.project_name,
+        "project_root": session.project_root,
         "current_stage": session.current_stage,
         "seed_version": session.seed_version,
         "samvil_tier": session.samvil_tier,
@@ -384,6 +463,7 @@ async def list_sessions(limit: int = 10) -> str:
     return json.dumps([{
         "id": s.id,
         "project_name": s.project_name,
+        "project_root": s.project_root,
         "current_stage": s.current_stage,
         "updated_at": s.updated_at,
     } for s in sessions])
@@ -420,6 +500,8 @@ _STAGE_ENTRY_EVENTS = {
     "seed_started",
     "council_started",
     "design_started",
+    "analyze_start",
+    "build_started",
     "scaffold_started",
     "build_feature_start",
     "feature_tree_start",
@@ -488,6 +570,14 @@ def _resolve_project_path(project_name: str | None) -> "Path | None":
         return None
     guess = Path.home() / "dev" / project_name
     return guess if guess.exists() else None
+
+
+def _session_project_path(session: Session | None) -> Path | None:
+    """Prefer the persisted absolute root, then fall back to legacy inference."""
+    if session and session.project_root:
+        root = Path(session.project_root)
+        return root if root.exists() else None
+    return _resolve_project_path(session.project_name if session else None)
 
 
 # Map event_type → canonical stage name. The v3.1 skill convention is
@@ -571,11 +661,216 @@ def _canonical_stage_for_event(event_type_raw: str, fallback_stage: str) -> str:
     return (fallback_stage or "unknown").lower()
 
 
+def _append_project_event(
+    project_root: Path,
+    *,
+    timestamp: str,
+    event_type: str,
+    stage: str,
+    session_id: str,
+    data: dict,
+    source: str | None = None,
+    event_id: str | None = None,
+) -> str:
+    """Append one canonical project event and return its file-backed evidence."""
+    row = {
+        "timestamp": timestamp,
+        "event_type": event_type,
+        "stage": stage,
+        "session_id": session_id,
+        "data": data,
+    }
+    if source:
+        row["source"] = source
+    if event_id:
+        row["event_id"] = event_id
+    return _append_project_event_rows(project_root, [row])[0]
+
+
+def _canonical_project_event_exists(project_root: Path, event_id: str) -> bool:
+    path = project_root / ".samvil" / "events.jsonl"
+    if not path.exists():
+        return False
+    with _file_locked(path):
+        _validate_existing_event_log(path)
+        try:
+            with path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        row = json.loads(line)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if isinstance(row, dict) and row.get("event_id") == event_id:
+                        return True
+        except OSError:
+            return False
+    return False
+
+
+async def _reconcile_pending_project_events(
+    store: EventStore,
+    session_id: str,
+    project_path: Path,
+) -> list[dict[str, Any]]:
+    reconciled: list[dict[str, Any]] = []
+    async with _AsyncFileLock(_stage_transition_lock_path(store, session_id)):
+        pending = await store.get_pending_project_events(session_id)
+        if not pending:
+            return reconciled
+        for item in pending:
+            event_id = str(item["event_id"])
+            if not await asyncio.to_thread(
+                _canonical_project_event_exists,
+                project_path,
+                event_id,
+            ):
+                canonical_event_type = str(
+                    item["data"].get("event_type_raw") or item["event_type"]
+                )
+                canonical_stage = _canonical_stage_for_event(
+                    canonical_event_type,
+                    str(item["stage"]),
+                )
+                await asyncio.to_thread(
+                    _append_project_event,
+                    project_path,
+                    timestamp=str(item["timestamp"]),
+                    event_type=canonical_event_type,
+                    stage=canonical_stage,
+                    session_id=session_id,
+                    data=dict(item["data"]),
+                    event_id=event_id,
+                )
+            await store.acknowledge_pending_project_event(event_id)
+            reconciled.append(item)
+    return reconciled
+
+
+def _validate_existing_event_log(path: Path) -> None:
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    raw = path.read_bytes()
+    offset = 0
+    lines = raw.splitlines(keepends=True)
+    for index, raw_line in enumerate(lines):
+        line = raw_line.strip()
+        if not line:
+            offset += len(raw_line)
+            continue
+        try:
+            parsed = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError) as exc:
+            is_unterminated_tail = index == len(lines) - 1 and not raw_line.endswith(
+                (b"\n", b"\r")
+            )
+            if is_unterminated_tail:
+                with path.open("r+b") as handle:
+                    handle.truncate(offset)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                return
+            raise OSError("malformed canonical event log") from exc
+        if not isinstance(parsed, dict):
+            raise OSError("malformed canonical event log")
+        offset += len(raw_line)
+
+
+def _append_project_event_rows(
+    project_root: Path,
+    rows: list[dict[str, Any]],
+) -> list[str]:
+    """Atomically append a canonical event batch and update its line index."""
+    if not rows:
+        return []
+    path = project_root / ".samvil" / "events.jsonl"
+    index_path = path.with_suffix(path.suffix + ".index")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _file_locked(path):
+        _validate_existing_event_log(path)
+        current_size: int | None = None
+        try:
+            with path.open("a+", encoding="utf-8") as handle:
+                handle.seek(0, os.SEEK_END)
+                current_size = handle.tell()
+                needs_separator = _event_file_needs_separator(path)
+                line_count = _indexed_event_line_count(
+                    handle,
+                    index_path,
+                    current_size=current_size,
+                )
+                if needs_separator:
+                    handle.write("\n")
+                for row in rows:
+                    handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+                new_size = handle.tell()
+        except Exception as exc:
+            if current_size is not None:
+                try:
+                    with path.open("r+b") as rollback_handle:
+                        rollback_handle.truncate(current_size)
+                        rollback_handle.flush()
+                        os.fsync(rollback_handle.fileno())
+                except Exception as rollback_exc:
+                    raise OSError(
+                        "canonical event append failed and file rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            raise
+        final_line_count = line_count + len(rows)
+        try:
+            atomic_write_text(
+                index_path,
+                json.dumps({"size": new_size, "line_count": final_line_count}),
+            )
+        except OSError as exc:
+            _log_mcp_health("warn", "save_event.events_index", str(exc))
+    relative_path = path.relative_to(project_root).as_posix()
+    return [
+        f"{relative_path}:{line_number}"
+        for line_number in range(line_count + 1, final_line_count + 1)
+    ]
+
+
+def _event_file_needs_separator(path: Path) -> bool:
+    if path.stat().st_size == 0:
+        return False
+    with path.open("rb") as handle:
+        handle.seek(-1, os.SEEK_END)
+        return handle.read(1) != b"\n"
+
+
+def _scan_event_line_count(handle: Any) -> int:
+    handle.seek(0)
+    return sum(1 for _ in handle)
+
+
+def _indexed_event_line_count(
+    handle: Any,
+    index_path: Path,
+    *,
+    current_size: int,
+) -> int:
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        if (
+            isinstance(index, dict)
+            and int(index.get("size", -1)) == current_size
+            and int(index.get("line_count", -1)) >= 0
+        ):
+            return int(index["line_count"])
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return _scan_event_line_count(handle)
+
+
 async def _auto_post_claim_for_event(
     session_id: str,
     event_type_raw: str,
     stage: str,
     data: dict,
+    canonical_evidence: str | None = None,
 ) -> None:
     """Best-effort append to the project's .samvil/claims.jsonl based on
     the event type. Never raises — on failure we log to health and move
@@ -585,7 +880,7 @@ async def _auto_post_claim_for_event(
         session = await store.get_session(session_id)
         if session is None:
             return
-        project_path = _resolve_project_path(session.project_name)
+        project_path = _session_project_path(session)
         if project_path is None:
             return
         ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
@@ -603,42 +898,21 @@ async def _auto_post_claim_for_event(
                 statement=f"{event_type_raw} @ {stage}",
                 authority_file="project.state.json",
                 claimed_by=f"agent:orchestrator-agent",
-                evidence=["project.state.json"],
+                evidence=[canonical_evidence] if canonical_evidence else [],
                 meta={"via": "save_event", "event_type": event_type_raw},
             )
         elif et in _STAGE_EXIT_EVENTS:
-            # Verify the most recent stage_start claim (if any) and post
-            # a gate_verdict claim if we have enough signal.
-            pending = [
-                c
-                for c in ledger.query_by_subject(subject)
-                if c.status == "pending" and c.type == "evidence_posted"
-            ]
-            if pending:
-                target = sorted(pending, key=lambda c: c.ts)[-1]
-                try:
-                    ledger.verify(
-                        target.claim_id,
-                        verified_by="agent:user",
-                        evidence=[f"event:{event_type_raw}"],
-                        skip_file_resolution=True,
-                    )
-                except ClaimLedgerError:
-                    pass
-            # Gate verdict synthesis (light: PASS if event is *_pass /
-            # *_complete, else leave untagged).
-            verdict = "pass" if et.endswith("_pass") or et.endswith("_complete") else "unknown"
             ledger.post(
-                type="gate_verdict",
-                subject=f"gate:{canonical_stage}_exit",
-                statement=f"verdict={verdict} via {event_type_raw}",
-                authority_file="state.json",
+                type="evidence_posted",
+                subject=subject,
+                statement=f"{event_type_raw} reported @ {stage}",
+                authority_file=".samvil/events.jsonl",
                 claimed_by="agent:orchestrator-agent",
-                evidence=["project.state.json"],
+                evidence=[canonical_evidence] if canonical_evidence else [],
                 meta={
-                    "verdict": verdict,
+                    "via": "save_event",
                     "event_type": event_type_raw,
-                    "data": data,
+                    "trusted_transition": False,
                 },
             )
         elif et in _STAGE_FAIL_EVENTS:
@@ -648,7 +922,7 @@ async def _auto_post_claim_for_event(
                 statement=f"{event_type_raw} failure @ {stage}",
                 authority_file="project.state.json",
                 claimed_by="agent:orchestrator-agent",
-                evidence=["project.state.json"],
+                evidence=[canonical_evidence] if canonical_evidence else [],
                 meta={"via": "save_event", "failure": True, "event_type": event_type_raw},
             )
         # Other event types: not stage transitions; skip.
@@ -676,22 +950,36 @@ async def save_event(
     """
     try:
         parsed_data = json.loads(data) if data else {}
+        if not isinstance(parsed_data, dict):
+            raise ValueError("event data must be a JSON object")
+        parsed_data = sanitize_event_data(parsed_data)
+        persisted_event_type = sanitize_event_label(event_type)
 
         # Lenient EventType: try the enum, fall back to STAGE_CHANGE.
         try:
             event_type_enum = EventType(event_type)
         except ValueError:
             event_type_enum = EventType.STAGE_CHANGE
-            parsed_data.setdefault("event_type_raw", event_type)
+            parsed_data.setdefault("event_type_raw", persisted_event_type)
 
         # Lenient Stage: fall back to STAGE_CHANGE's stage if unknown.
         try:
             stage_enum = Stage(stage)
         except ValueError:
             stage_enum = Stage.INTERVIEW  # default rather than crash
-            parsed_data.setdefault("stage_raw", stage)
+            parsed_data.setdefault("stage_raw", sanitize_stage_label(stage))
 
         store = await get_store()
+        session = await store.get_session(session_id)
+        if session is None:
+            return json.dumps(
+                {
+                    "event_id": None,
+                    "saved": False,
+                    "error": f"session {session_id} not found",
+                }
+            )
+        parsed_data["trusted_transition"] = False
         event = await store.save_event(
             session_id=session_id,
             event_type=event_type_enum,
@@ -699,16 +987,71 @@ async def save_event(
             data=parsed_data,
             token_count=token_count,
         )
-        # Update session's current stage
-        await store.update_session_stage(session_id, stage_enum)
-
+        project_path = _session_project_path(session)
+        canonical_saved = False
+        canonical_evidence = None
+        if project_path is None:
+            _log_mcp_health(
+                "warn",
+                "save_event.events_ssot",
+                f"project root unresolved for session {session_id}",
+            )
+        else:
+            try:
+                canonical_evidence = await asyncio.to_thread(
+                    _append_project_event,
+                    project_path,
+                    timestamp=event.timestamp,
+                    event_type=persisted_event_type,
+                    stage=_canonical_stage_for_event(persisted_event_type, stage_enum.value),
+                    session_id=session_id,
+                    data=parsed_data,
+                )
+                canonical_saved = True
+            except Exception as exc:
+                _log_mcp_health("fail", "save_event.events_ssot", str(exc))
+                db_rolled_back = False
+                rollback_error = ""
+                try:
+                    db_rolled_back = await store.delete_event(event.id)
+                except Exception as rollback_exc:
+                    rollback_error = str(rollback_exc)
+                    _log_mcp_health(
+                        "fail", "save_event.events_ssot_rollback", rollback_error
+                    )
+                return json.dumps(
+                    {
+                        "event_id": event.id,
+                        "saved": False,
+                        "canonical_saved": False,
+                        "db_rolled_back": db_rolled_back,
+                        "partial_persistence": not db_rolled_back,
+                        "error": str(exc),
+                        **(
+                            {"rollback_error": rollback_error}
+                            if rollback_error
+                            else {}
+                        ),
+                    }
+                )
         # v3.2 contract-layer auto-claim (best-effort, never blocks).
         await _auto_post_claim_for_event(
-            session_id, event_type, stage, parsed_data
+            session_id,
+            persisted_event_type,
+            stage,
+            parsed_data,
+            canonical_evidence=canonical_evidence,
         )
 
         _log_mcp_health("ok", "save_event")
-        return json.dumps({"event_id": event.id, "saved": True})
+        return json.dumps(
+            {
+                "event_id": event.id,
+                "saved": True,
+                "canonical_saved": canonical_saved,
+                "stage_transitioned": False,
+            }
+        )
     except Exception as e:
         _log_mcp_health("fail", "save_event", str(e))
         return json.dumps({"event_id": None, "saved": False, "error": str(e)})
@@ -764,8 +1107,9 @@ async def session_status(session_id: str) -> str:
 
 
 def _events_to_orchestrator(events: list[Event]) -> list[_OrchestratorStageEvent]:
-    # EventStore returns newest first; orchestrator status is chronological.
-    ordered = sorted(events, key=lambda event: event.timestamp)
+    # EventStore returns a total newest-first order (timestamp, then rowid).
+    # Reverse that exact order so equal timestamps still resolve by insertion.
+    ordered = reversed(events)
     return [
         _OrchestratorStageEvent(
             event_type=event.data.get("event_type_raw", event.event_type.value),
@@ -782,15 +1126,24 @@ async def _session_and_events(session_id: str) -> tuple[Session | None, list[_Or
     session = await store.get_session(session_id)
     if session is None:
         return None, []
-    events = await store.get_events(session_id, limit=1000)
+    events = await store.get_orchestration_events(
+        session_id,
+        frozenset(_ORCHESTRATOR_SUCCESS_EVENTS | _ORCHESTRATOR_FAIL_EVENTS),
+    )
     return session, _events_to_orchestrator(events)
 
 
 @mcp.tool()
-async def get_next_stage(current: str, samvil_tier: str) -> str:
+async def get_next_stage(
+    current: str,
+    samvil_tier: str,
+    council_opt_in: bool = False,
+) -> str:
     """Return the next non-skipped stage for a tier."""
     try:
-        next_stage = _orchestrator_get_next_stage(current, samvil_tier)
+        next_stage = _orchestrator_get_next_stage(
+            current, samvil_tier, council_opt_in=council_opt_in
+        )
         _log_mcp_health("ok", "get_next_stage")
         return json.dumps({"next_stage": next_stage})
     except OrchestratorError as e:
@@ -799,10 +1152,16 @@ async def get_next_stage(current: str, samvil_tier: str) -> str:
 
 
 @mcp.tool()
-async def should_skip_stage(stage: str, samvil_tier: str) -> str:
+async def should_skip_stage(
+    stage: str,
+    samvil_tier: str,
+    council_opt_in: bool = False,
+) -> str:
     """Return whether a stage should be skipped for a tier."""
     try:
-        skip = _orchestrator_should_skip_stage(stage, samvil_tier)
+        skip = _orchestrator_should_skip_stage(
+            stage, samvil_tier, council_opt_in=council_opt_in
+        )
         _log_mcp_health("ok", "should_skip_stage")
         return json.dumps({"skip": skip})
     except OrchestratorError as e:
@@ -811,7 +1170,11 @@ async def should_skip_stage(stage: str, samvil_tier: str) -> str:
 
 
 @mcp.tool()
-async def stage_can_proceed(session_id: str, target_stage: str) -> str:
+async def stage_can_proceed(
+    session_id: str,
+    target_stage: str,
+    council_opt_in: bool = False,
+) -> str:
     """Return whether target_stage can proceed for a session."""
     try:
         session, events = await _session_and_events(session_id)
@@ -820,7 +1183,9 @@ async def stage_can_proceed(session_id: str, target_stage: str) -> str:
                 "can_proceed": False,
                 "blockers": [f"session {session_id} not found"],
             })
-        result = _orchestrator_stage_can_proceed(session, events, target_stage)
+        result = _orchestrator_stage_can_proceed(
+            session, events, target_stage, council_opt_in=council_opt_in
+        )
         _log_mcp_health("ok", "stage_can_proceed")
         return json.dumps(result)
     except OrchestratorError as e:
@@ -829,13 +1194,18 @@ async def stage_can_proceed(session_id: str, target_stage: str) -> str:
 
 
 @mcp.tool()
-async def get_orchestration_state(session_id: str) -> str:
+async def get_orchestration_state(
+    session_id: str,
+    council_opt_in: bool = False,
+) -> str:
     """Return event-derived orchestration progress for a session."""
     try:
         session, events = await _session_and_events(session_id)
         if session is None:
             return json.dumps({"error": f"session {session_id} not found"})
-        state = _orchestrator_get_state(session, events)
+        state = _orchestrator_get_state(
+            session, events, council_opt_in=council_opt_in
+        )
         _log_mcp_health("ok", "get_orchestration_state")
         return json.dumps(state)
     except OrchestratorError as e:
@@ -844,16 +1214,76 @@ async def get_orchestration_state(session_id: str) -> str:
 
 
 @mcp.tool()
-async def complete_stage(session_id: str, stage: str, verdict: str) -> str:
+async def complete_stage(
+    session_id: str,
+    stage: str,
+    verdict: str,
+    council_opt_in: bool = False,
+) -> str:
     """Complete a stage by emitting an event and posting a gate claim."""
     try:
         store = await get_store()
         session = await store.get_session(session_id)
         if session is None:
             return json.dumps({"status": "error", "error": f"session {session_id} not found"})
+        project_path = _session_project_path(session)
+        if project_path is None:
+            raise OrchestratorError(
+                f"project root unresolved for session {session_id}"
+            )
+        reconciled = await _reconcile_pending_project_events(
+            store, session_id, project_path
+        )
 
-        plan = _complete_stage_plan(session, stage, verdict)
+        session = await store.get_session(session_id)
+        if session is None:
+            return json.dumps({"status": "error", "error": f"session {session_id} not found"})
+        current_stage = session.current_stage.value
+        if current_stage != stage:
+            for item in reversed(reconciled):
+                event_type = str(
+                    item["data"].get("event_type_raw") or item["event_type"]
+                )
+                if _canonical_stage_for_event(event_type, str(item["stage"])) == stage:
+                    return json.dumps(
+                        {
+                            "status": "ok",
+                            "event_id": str(item["event_id"]),
+                            "claim_saved": False,
+                            "recovered": True,
+                            "next_stage": current_stage,
+                        }
+                    )
+            raise OrchestratorError(
+                f"cannot complete stage {stage!r}; current stage is {current_stage}"
+            )
+        if verdict in ("pass", "complete"):
+            await asyncio.to_thread(
+                _require_stage_exit_evidence,
+                project_path,
+                stage,
+            )
+        stored_events = await store.get_orchestration_events(
+            session_id,
+            frozenset(_ORCHESTRATOR_SUCCESS_EVENTS | _ORCHESTRATOR_FAIL_EVENTS),
+        )
+        prerequisite = _orchestrator_stage_can_proceed(
+            session,
+            _events_to_orchestrator(stored_events),
+            stage,
+            council_opt_in=council_opt_in,
+        )
+        if not prerequisite["can_proceed"]:
+            raise OrchestratorError(
+                f"cannot complete stage {stage!r}: "
+                + "; ".join(prerequisite["blockers"])
+            )
+
+        plan = _complete_stage_plan(
+            session, stage, verdict, council_opt_in=council_opt_in
+        )
         event_data = dict(plan["event_data"])
+        event_data["trusted_transition"] = True
         try:
             event_type_enum = EventType(plan["event_type"])
         except ValueError:
@@ -861,35 +1291,103 @@ async def complete_stage(session_id: str, stage: str, verdict: str) -> str:
             event_data.setdefault("event_type_raw", plan["event_type"])
         stage_enum = Stage(plan["event_stage"])
 
-        event = await store.save_event(
-            session_id=session_id,
-            event_type=event_type_enum,
-            stage=stage_enum,
-            data=event_data,
+        transition_lock = _stage_transition_locks.setdefault(
+            session_id,
+            asyncio.Lock(),
         )
-        await store.update_session_stage(session_id, stage_enum)
+        async with transition_lock:
+            async with _AsyncFileLock(
+                _stage_transition_lock_path(store, session_id)
+            ):
+                transition = await store.save_event_and_update_stage(
+                    session_id=session_id,
+                    data=event_data,
+                    event_type=event_type_enum,
+                    stage=stage_enum,
+                    expected_stage=Stage(stage),
+                )
+                event = transition.event
+                try:
+                    await asyncio.to_thread(
+                        _append_project_event,
+                        project_path,
+                        timestamp=event.timestamp,
+                        event_type=plan["event_type"],
+                        stage=_canonical_stage_for_event(
+                            plan["event_type"], stage_enum.value
+                        ),
+                        session_id=session_id,
+                        data=event_data,
+                        event_id=event.id,
+                    )
+                except Exception as exc:
+                    _log_mcp_health("fail", "complete_stage.events_ssot", str(exc))
+                    db_rolled_back = False
+                    rollback_error = ""
+                    try:
+                        db_rolled_back = await store.delete_event_and_restore_stage(
+                            transition
+                        )
+                    except Exception as rollback_exc:
+                        rollback_error = str(rollback_exc)
+                        _log_mcp_health(
+                            "fail",
+                            "complete_stage.events_ssot_rollback",
+                            rollback_error,
+                        )
+                    return json.dumps(
+                        {
+                            "status": "error",
+                            "event_id": event.id,
+                            "canonical_saved": False,
+                            "db_rolled_back": db_rolled_back,
+                            "partial_persistence": not db_rolled_back,
+                            "error": str(exc),
+                            **(
+                                {"rollback_error": rollback_error}
+                                if rollback_error
+                                else {}
+                            ),
+                        }
+                    )
+
+        try:
+            await store.acknowledge_pending_project_event(event.id)
+        except Exception as exc:
+            _log_mcp_health(
+                "warn",
+                "complete_stage.pending_event_ack",
+                str(exc),
+            )
 
         claim_id = None
-        project_path = _resolve_project_path(session.project_name)
+        claim_saved = False
+        claim_error = ""
         if project_path is not None:
             claim_data = plan["claim"]
-            ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
-            claim = ledger.post(
-                type=claim_data["type"],
-                subject=claim_data["subject"],
-                statement=claim_data["statement"],
-                authority_file=claim_data["authority_file"],
-                claimed_by="agent:orchestrator-agent",
-                evidence=claim_data["evidence"],
-                meta=claim_data["meta"],
-            )
-            claim_id = claim.claim_id
-
+            try:
+                ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
+                claim = ledger.post(
+                    type=claim_data["type"],
+                    subject=claim_data["subject"],
+                    statement=claim_data["statement"],
+                    authority_file=claim_data["authority_file"],
+                    claimed_by="agent:orchestrator-agent",
+                    evidence=claim_data["evidence"],
+                    meta=claim_data["meta"],
+                )
+                claim_id = claim.claim_id
+                claim_saved = True
+            except Exception as exc:
+                claim_error = str(exc)
+                _log_mcp_health("fail", "complete_stage.claim", claim_error)
         _log_mcp_health("ok", "complete_stage")
         return json.dumps({
             "status": "ok",
             "event_id": event.id,
             "claim_id": claim_id,
+            "claim_saved": claim_saved,
+            **({"claim_error": claim_error} if claim_error else {}),
             "next_stage": plan["next_stage"],
         })
     except (OrchestratorError, ClaimLedgerError) as e:
@@ -898,6 +1396,605 @@ async def complete_stage(session_id: str, stage: str, verdict: str) -> str:
     except Exception as e:
         _log_mcp_health("fail", "complete_stage", str(e))
         return json.dumps({"status": "error", "error": str(e)})
+
+
+def _require_stage_exit_evidence(project_path: Path, stage: str) -> None:
+    if stage == "interview":
+        _require_interview_exit_evidence(project_path)
+        return
+    if stage == "seed":
+        seed = _read_stage_exit_json(project_path, "project.seed.json", stage)
+        from .seed_manager import validate_seed as _validate_seed
+
+        try:
+            validation = _validate_seed(seed)
+        except Exception as exc:
+            raise OrchestratorError(
+                f"seed exit evidence is invalid: {exc}"
+            ) from exc
+        if not validation.get("valid"):
+            errors = "; ".join(str(item) for item in validation.get("errors", []))
+            raise OrchestratorError(
+                f"seed exit evidence is invalid: {errors or 'validation failed'}"
+            )
+        return
+    if stage == "design":
+        seed = _read_stage_exit_json(project_path, "project.seed.json", stage)
+        blueprint = _read_stage_exit_json(
+            project_path,
+            "project.blueprint.json",
+            stage,
+        )
+        _validate_blueprint_exit_evidence(
+            blueprint,
+            str(seed.get("solution_type") or ""),
+        )
+        return
+    if stage == "scaffold":
+        result = _read_stage_exit_json(
+            project_path,
+            ".samvil/scaffold-results.json",
+            stage,
+        )
+        if result.get("all_passed") is not True:
+            raise OrchestratorError(
+                "scaffold exit evidence requires all_passed=true"
+            )
+        return
+    if stage == "build":
+        from .stage_evidence import collect_stage_evidence
+
+        evidence = collect_stage_evidence(project_path, "build")
+        build = evidence.get("build") or {}
+        if build.get("exit_code") != 0:
+            raise OrchestratorError(
+                "build exit evidence requires a successful SAMVIL_EXIT code"
+            )
+        if build.get("runtime_verified") is not True:
+            raise OrchestratorError(
+                "build exit evidence requires trusted runtime verification"
+            )
+        return
+    if stage == "qa":
+        results = _read_stage_exit_json(
+            project_path,
+            ".samvil/qa-results.json",
+            stage,
+        )
+        synthesis = results.get("synthesis") or {}
+        if not isinstance(synthesis, dict) or str(
+            synthesis.get("verdict") or ""
+        ).upper() != "PASS":
+            raise OrchestratorError(
+                "qa exit evidence requires synthesis.verdict=PASS"
+            )
+        from .stage_evidence import collect_stage_evidence
+
+        evidence = collect_stage_evidence(project_path, "qa")
+        qa = evidence.get("qa") or {}
+        if qa.get("artifact_runtime_passed") is not True:
+            raise OrchestratorError(
+                "qa exit evidence requires a passing runtime test artifact"
+            )
+        if qa.get("runtime_verified") is not True:
+            raise OrchestratorError(
+                "qa exit evidence requires trusted runtime verification"
+            )
+
+
+def _validate_blueprint_exit_evidence(
+    blueprint: dict[str, Any],
+    solution_type: str,
+) -> None:
+    """Validate the canonical project.blueprint.json contract."""
+    errors: list[str] = []
+
+    if solution_type in {"web-app", "dashboard"}:
+        _require_blueprint_name_list(blueprint, "screens", errors)
+        _require_blueprint_nonempty_dict(blueprint, "data_model", errors)
+        _validate_blueprint_data_model(blueprint, errors)
+        _require_blueprint_type(blueprint, "api_routes", list, errors)
+        _validate_blueprint_api_routes(blueprint, errors)
+        state_options = {"zustand", "useState"}
+        if solution_type == "web-app":
+            state_options.add("none")
+        _require_blueprint_enum(
+            blueprint,
+            "state_management",
+            state_options,
+            errors,
+        )
+        _require_blueprint_enum(
+            blueprint,
+            "auth_strategy",
+            {"none", "localStorage", "supabase", "custom"},
+            errors,
+        )
+        _require_blueprint_name_list(blueprint, "key_libraries", errors)
+        _require_component_structure(blueprint, errors)
+        _require_blueprint_nonempty_dict(blueprint, "routing", errors)
+        _require_blueprint_type(blueprint, "mobile_considerations", dict, errors)
+        routing = blueprint.get("routing")
+        if isinstance(routing, dict) and any(
+            not isinstance(route, str)
+            or not route.strip()
+            or not isinstance(target, str)
+            or not target.strip()
+            for route, target in routing.items()
+        ):
+            errors.append("routing must map non-empty routes to non-empty targets")
+        screens = blueprint.get("screens")
+        if isinstance(routing, dict) and isinstance(screens, list):
+            screen_names = {
+                screen.strip()
+                for screen in screens
+                if isinstance(screen, str) and screen.strip()
+            }
+            unknown_targets = sorted(
+                {
+                    target.strip()
+                    for target in routing.values()
+                    if isinstance(target, str)
+                    and target.strip()
+                    and target.strip() not in screen_names
+                }
+            )
+            if unknown_targets:
+                errors.append(
+                    "routing targets must reference screens: "
+                    + ", ".join(unknown_targets)
+                )
+        if solution_type == "dashboard":
+            _require_blueprint_name_list(blueprint, "chart_components", errors)
+            data_sources = blueprint.get("data_sources")
+            if (
+                not isinstance(data_sources, list)
+                or not data_sources
+                or any(
+                    not isinstance(source, dict)
+                    or not isinstance(source.get("name"), str)
+                    or not source["name"].strip()
+                    or not isinstance(source.get("type"), str)
+                    or not source["type"].strip()
+                    or source["type"] not in {"localStorage", "api", "supabase"}
+                    or "refresh_interval" not in source
+                    for source in data_sources
+                )
+            ):
+                errors.append("data_sources must describe at least one named source")
+            if "refresh_interval" not in blueprint:
+                errors.append("refresh_interval is required")
+            _require_blueprint_type(blueprint, "alert_thresholds", list, errors)
+    elif solution_type == "mobile-app":
+        _require_blueprint_name_list(blueprint, "screens", errors)
+        _require_blueprint_nonempty_dict(blueprint, "navigation", errors)
+        navigation = blueprint.get("navigation")
+        if isinstance(navigation, dict):
+            _require_nested_enum(
+                navigation,
+                "navigation",
+                "type",
+                {"tabs", "drawer", "stack"},
+                errors,
+            )
+            _require_nested_type(navigation, "navigation", "tabs", list, errors)
+            tabs = navigation.get("tabs")
+            if navigation.get("type") == "tabs" and isinstance(tabs, list) and not tabs:
+                errors.append("navigation.tabs must be non-empty for tabs navigation")
+            if isinstance(tabs, list) and any(
+                not isinstance(tab, dict)
+                or any(
+                    not isinstance(tab.get(field), str)
+                    or not tab[field].strip()
+                    for field in ("name", "screen", "icon")
+                )
+                for tab in tabs
+            ):
+                errors.append(
+                    "navigation.tabs must contain named screen and icon mappings"
+                )
+            screens = blueprint.get("screens")
+            if isinstance(tabs, list) and isinstance(screens, list):
+                screen_names = {
+                    screen.strip()
+                    for screen in screens
+                    if isinstance(screen, str) and screen.strip()
+                }
+                unknown_tab_screens = sorted(
+                    {
+                        str(tab.get("screen")).strip()
+                        for tab in tabs
+                        if isinstance(tab, dict)
+                        and isinstance(tab.get("screen"), str)
+                        and str(tab["screen"]).strip()
+                        and str(tab["screen"]).strip() not in screen_names
+                    }
+                )
+                if unknown_tab_screens:
+                    errors.append(
+                        "navigation tab screens must reference screens: "
+                        + ", ".join(unknown_tab_screens)
+                    )
+        _require_blueprint_nonempty_dict(blueprint, "data_model", errors)
+        _validate_blueprint_data_model(blueprint, errors)
+        _require_blueprint_enum(
+            blueprint,
+            "state_management",
+            {"zustand"},
+            errors,
+        )
+        _require_blueprint_type(blueprint, "native_modules", list, errors)
+        _validate_blueprint_string_list(blueprint, "native_modules", errors)
+        _require_blueprint_name_list(blueprint, "key_libraries", errors)
+        _require_component_structure(blueprint, errors)
+    elif solution_type == "automation":
+        _require_blueprint_text(blueprint, "entry_point", errors)
+        _require_blueprint_nonempty_dict(blueprint, "modules", errors)
+        modules = blueprint.get("modules")
+        if isinstance(modules, dict):
+            _require_nested_name_list(modules, "modules", "core", errors)
+            _require_nested_type(modules, "modules", "utils", list, errors)
+            _validate_nested_string_list(modules, "modules", "utils", errors)
+        _require_blueprint_nonempty_dict(blueprint, "fixtures", errors)
+        fixtures = blueprint.get("fixtures")
+        if isinstance(fixtures, dict):
+            _require_nested_text(fixtures, "fixtures", "input", errors)
+            _require_nested_text(fixtures, "fixtures", "expected", errors)
+        _require_blueprint_type(blueprint, "dependencies", list, errors)
+        _validate_blueprint_string_list(blueprint, "dependencies", errors)
+        _require_blueprint_enum(
+            blueprint,
+            "error_handling",
+            {"retry_with_logging", "skip_and_continue", "fail_fast"},
+            errors,
+        )
+        _require_blueprint_nonempty_dict(blueprint, "execution", errors)
+        execution = blueprint.get("execution")
+        if isinstance(execution, dict):
+            _require_nested_enum(
+                execution,
+                "execution",
+                "type",
+                {"cli", "cron", "webhook", "cc-skill"},
+                errors,
+            )
+            if "schedule" not in execution:
+                errors.append("execution.schedule is required")
+            elif execution["schedule"] is not None and (
+                not isinstance(execution["schedule"], str)
+                or not execution["schedule"].strip()
+            ):
+                errors.append("execution.schedule must be null or a non-empty string")
+    elif solution_type == "game":
+        _require_blueprint_name_list(blueprint, "scenes", errors)
+        _require_blueprint_name_list(blueprint, "entities", errors)
+        _require_blueprint_nonempty_dict(blueprint, "game_config", errors)
+        game_config = blueprint.get("game_config")
+        if isinstance(game_config, dict):
+            for dimension in ("width", "height"):
+                value = game_config.get(dimension)
+                if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+                    errors.append(f"game_config.{dimension} must be a positive number")
+            _require_nested_text(game_config, "game_config", "physics", errors)
+            _require_nested_text(game_config, "game_config", "input", errors)
+        _require_blueprint_nonempty_dict(blueprint, "assets", errors)
+        assets = blueprint.get("assets")
+        if isinstance(assets, dict):
+            _require_nested_type(assets, "assets", "sprites", list, errors)
+            _require_nested_type(assets, "assets", "audio", list, errors)
+            _validate_nested_string_list(assets, "assets", "sprites", errors)
+            _validate_nested_string_list(assets, "assets", "audio", errors)
+        _require_blueprint_nonempty_dict(blueprint, "scene_flow", errors)
+        scene_flow = blueprint.get("scene_flow")
+        if isinstance(scene_flow, dict) and any(
+            not isinstance(scene, str)
+            or not scene.strip()
+            or not isinstance(target, str)
+            or not target.strip()
+            for scene, target in scene_flow.items()
+        ):
+            errors.append("scene_flow must map non-empty scenes to non-empty targets")
+        scenes = blueprint.get("scenes")
+        if isinstance(scene_flow, dict) and isinstance(scenes, list):
+            scene_names = {
+                scene.strip()
+                for scene in scenes
+                if isinstance(scene, str) and scene.strip()
+            }
+            unknown_scenes = sorted(
+                {
+                    scene_name.strip()
+                    for source, target in scene_flow.items()
+                    for scene_name in (source, target)
+                    if isinstance(scene_name, str)
+                    and scene_name.strip()
+                    and scene_name.strip() not in scene_names
+                }
+            )
+            if unknown_scenes:
+                errors.append(
+                    "scene_flow entries must reference scenes: "
+                    + ", ".join(unknown_scenes)
+                )
+        _require_blueprint_name_list(blueprint, "key_libraries", errors)
+        _require_blueprint_enum(
+            blueprint,
+            "state_management",
+            {"phaser-scene"},
+            errors,
+        )
+        component_structure = blueprint.get("component_structure")
+        _require_blueprint_nonempty_dict(blueprint, "component_structure", errors)
+        if isinstance(component_structure, dict):
+            for field in ("scenes", "entities", "config"):
+                _require_nested_type(
+                    component_structure,
+                    "component_structure",
+                    field,
+                    list,
+                    errors,
+                )
+                _validate_nested_string_list(
+                    component_structure,
+                    "component_structure",
+                    field,
+                    errors,
+                )
+    else:
+        errors.append(f"unsupported solution_type: {solution_type or '<missing>'}")
+
+    if errors:
+        raise OrchestratorError(
+            "design exit evidence is invalid: " + "; ".join(errors)
+        )
+
+
+def _require_blueprint_type(
+    blueprint: dict[str, Any],
+    field: str,
+    expected_type: type,
+    errors: list[str],
+) -> None:
+    if not isinstance(blueprint.get(field), expected_type):
+        errors.append(f"{field} must be a {expected_type.__name__}")
+
+
+def _require_blueprint_nonempty_dict(
+    blueprint: dict[str, Any],
+    field: str,
+    errors: list[str],
+) -> None:
+    value = blueprint.get(field)
+    if not isinstance(value, dict) or not value:
+        errors.append(f"{field} must be a non-empty dict")
+
+
+def _require_nested_type(
+    container: dict[str, Any],
+    parent: str,
+    field: str,
+    expected_type: type,
+    errors: list[str],
+) -> None:
+    if not isinstance(container.get(field), expected_type):
+        errors.append(f"{parent}.{field} must be a {expected_type.__name__}")
+
+
+def _require_nested_text(
+    container: dict[str, Any],
+    parent: str,
+    field: str,
+    errors: list[str],
+) -> None:
+    value = container.get(field)
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{parent}.{field} must be a non-empty string")
+
+
+def _require_nested_enum(
+    container: dict[str, Any],
+    parent: str,
+    field: str,
+    allowed: set[str],
+    errors: list[str],
+) -> None:
+    value = container.get(field)
+    if not isinstance(value, str) or value not in allowed:
+        errors.append(
+            f"{parent}.{field} must be one of {', '.join(sorted(allowed))}"
+        )
+
+
+def _validate_nested_string_list(
+    container: dict[str, Any],
+    parent: str,
+    field: str,
+    errors: list[str],
+) -> None:
+    value = container.get(field)
+    if isinstance(value, list) and any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        errors.append(f"{parent}.{field} must contain only non-empty strings")
+
+
+def _require_nested_name_list(
+    container: dict[str, Any],
+    parent: str,
+    field: str,
+    errors: list[str],
+) -> None:
+    value = container.get(field)
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+    ):
+        errors.append(f"{parent}.{field} must be a non-empty list of names")
+
+
+def _require_component_structure(
+    blueprint: dict[str, Any],
+    errors: list[str],
+) -> None:
+    _require_blueprint_nonempty_dict(blueprint, "component_structure", errors)
+    value = blueprint.get("component_structure")
+    if isinstance(value, dict):
+        _require_nested_type(value, "component_structure", "shared_ui", list, errors)
+        _validate_nested_string_list(
+            value,
+            "component_structure",
+            "shared_ui",
+            errors,
+        )
+        _require_nested_type(
+            value,
+            "component_structure",
+            "feature_components",
+            dict,
+            errors,
+        )
+        feature_components = value.get("feature_components")
+        if isinstance(feature_components, dict) and any(
+            not isinstance(feature, str)
+            or not feature.strip()
+            or not isinstance(components, list)
+            or any(
+                not isinstance(component, str) or not component.strip()
+                for component in components
+            )
+            for feature, components in feature_components.items()
+        ):
+            errors.append(
+                "component_structure.feature_components must map names to string lists"
+            )
+
+
+def _require_blueprint_text(
+    blueprint: dict[str, Any],
+    field: str,
+    errors: list[str],
+) -> None:
+    value = blueprint.get(field)
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{field} must be a non-empty string")
+
+
+def _require_blueprint_enum(
+    blueprint: dict[str, Any],
+    field: str,
+    allowed: set[str],
+    errors: list[str],
+) -> None:
+    value = blueprint.get(field)
+    if not isinstance(value, str) or value not in allowed:
+        errors.append(f"{field} must be one of {', '.join(sorted(allowed))}")
+
+
+def _validate_blueprint_string_list(
+    blueprint: dict[str, Any],
+    field: str,
+    errors: list[str],
+) -> None:
+    value = blueprint.get(field)
+    if isinstance(value, list) and any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        errors.append(f"{field} must contain only non-empty strings")
+
+
+def _validate_blueprint_data_model(
+    blueprint: dict[str, Any],
+    errors: list[str],
+) -> None:
+    value = blueprint.get("data_model")
+    if isinstance(value, dict) and any(
+        not isinstance(entity, str)
+        or not entity.strip()
+        or not isinstance(fields, dict)
+        or not fields
+        or any(
+            not isinstance(field, str)
+            or not field.strip()
+            or not isinstance(field_type, str)
+            or not field_type.strip()
+            for field, field_type in fields.items()
+        )
+        for entity, fields in value.items()
+    ):
+        errors.append("data_model must map named entities to string field types")
+
+
+def _validate_blueprint_api_routes(
+    blueprint: dict[str, Any],
+    errors: list[str],
+) -> None:
+    value = blueprint.get("api_routes")
+    if isinstance(value, list) and any(
+        (isinstance(route, str) and not route.strip())
+        or (isinstance(route, dict) and not route)
+        or not isinstance(route, (str, dict))
+        for route in value
+    ):
+        errors.append("api_routes must contain only non-empty strings or objects")
+
+
+def _require_blueprint_name_list(
+    blueprint: dict[str, Any],
+    field: str,
+    errors: list[str],
+) -> None:
+    value = blueprint.get(field)
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+    ):
+        errors.append(f"{field} must be a non-empty list of names")
+
+
+def _read_stage_exit_json(project_path: Path, relative: str, stage: str) -> dict:
+    path = project_path / relative
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise OrchestratorError(
+            f"{stage} exit evidence is unavailable: {relative}: {exc}"
+        ) from exc
+    if not isinstance(payload, dict) or not payload:
+        raise OrchestratorError(
+            f"{stage} exit evidence is invalid: {relative} must be a non-empty object"
+        )
+    return payload
+
+
+def _require_interview_exit_evidence(project_path: Path) -> None:
+    summary_path = project_path / "interview-summary.md"
+    try:
+        summary = summary_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise OrchestratorError(
+            f"interview exit evidence is unavailable: {exc}"
+        ) from exc
+    if not summary:
+        raise OrchestratorError(
+            "interview exit evidence is empty: interview-summary.md"
+        )
+
+    ledger = ClaimLedger(project_path / ".samvil" / "claims.jsonl")
+    claims = ledger.query_by_subject("interview_to_seed")
+    latest = max(claims, key=lambda claim: (claim.ts, claim.claim_id), default=None)
+    if (
+        latest is None
+        or latest.type != "gate_verdict"
+        or latest.status == "rejected"
+        or latest.meta.get("verdict") != "pass"
+        or "interview-summary.md" not in latest.evidence
+    ):
+        raise OrchestratorError(
+            "interview exit evidence requires the latest interview_to_seed "
+            "gate_verdict to pass with interview-summary.md evidence"
+        )
 
 
 # ── Host Capability (v3.3) ───────────────────────────────────
@@ -1009,6 +2106,7 @@ async def score_ambiguity(
     tier: str = "standard",
     questions_asked: int = 0,
     pre_filled_dimensions: str = "",
+    question_extensions: int = 0,
 ) -> str:
     """Score interview ambiguity across 10 dimensions (v2.6.0).
     interview_state: JSON with keys target_user, core_problem, core_experience,
@@ -1025,7 +2123,13 @@ async def score_ambiguity(
     from .interview_engine import score_ambiguity as _score
     state = json.loads(interview_state)
     pre_filled = [d.strip() for d in pre_filled_dimensions.split(",") if d.strip()] if pre_filled_dimensions else []
-    result = _score(state, tier=tier, questions_asked=questions_asked, pre_filled_dimensions=pre_filled)
+    result = _score(
+        state,
+        tier=tier,
+        questions_asked=questions_asked,
+        pre_filled_dimensions=pre_filled,
+        question_extensions=question_extensions,
+    )
     return json.dumps(result)
 
 
@@ -1208,6 +2312,20 @@ async def validate_seed(seed_json: str) -> str:
     seed = json.loads(seed_json)
     result = _validate(seed)
     return json.dumps(result)
+
+
+@mcp.tool()
+async def prepare_seed_verify_contracts(seed_json: str) -> str:
+    """Fill browser AC verify commands and propose automation candidates."""
+    try:
+        from .ac_verification import prepare_seed_verify_contracts as _prepare
+
+        result = _prepare(json.loads(seed_json))
+        _log_mcp_health("ok", "prepare_seed_verify_contracts")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "prepare_seed_verify_contracts", str(e))
+        return json.dumps({"error": str(e)})
 
 
 # ── Phase 3: QA Enhancement tools (v2.5.0) ────────────────────
@@ -1488,7 +2606,13 @@ async def validate_evidence(evidences_json: str, project_root: str) -> str:
 
 
 @mcp.tool()
-async def semantic_check(code: str, context_hint: str = "") -> str:
+async def semantic_check(
+    code: str,
+    context_hint: str = "",
+    shell_command: str = "",
+    execution_log: str = "",
+    runner_exit_code: int | None = None,
+) -> str:
     """Detect reward hacking signals in a code snippet.
 
     Args:
@@ -1499,7 +2623,16 @@ async def semantic_check(code: str, context_hint: str = "") -> str:
     """
     try:
         from .semantic_checker import analyze_code_snippet
-        return json.dumps(analyze_code_snippet(code, context_hint))
+        return json.dumps(
+            await asyncio.to_thread(
+                analyze_code_snippet,
+                code,
+                context_hint,
+                shell_command=shell_command,
+                execution_log=execution_log,
+                runner_exit_code=runner_exit_code,
+            )
+        )
     except Exception as e:
         _log_mcp_health("fail", "semantic_check", str(e))
         return json.dumps({"risk_level": "LOW", "error": str(e)})
@@ -1559,7 +2692,7 @@ async def save_checkpoint(
         store = CheckpointStore(base)
         state = json.loads(state_json)
         cp = CheckpointData.create(seed_id, phase, state)
-        store.save(cp)
+        await asyncio.to_thread(store.save, cp)
         return json.dumps({"saved": True, "timestamp": cp.timestamp})
     except Exception as e:
         _log_mcp_health("fail", "save_checkpoint", str(e))
@@ -2176,6 +3309,19 @@ async def rate_budget_release(budget_path: str, worker_id: str) -> str:
 
 
 @mcp.tool()
+async def rate_budget_heartbeat(budget_path: str, worker_id: str) -> str:
+    """Renew a live worker lease. Expired or unknown workers stay expired."""
+    try:
+        from .rate_budget import heartbeat as _heartbeat
+        result = _heartbeat(budget_path, worker_id)
+        _log_mcp_health("ok", "rate_budget_heartbeat")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "rate_budget_heartbeat", str(e))
+        return json.dumps({"error": str(e), "renewed": False})
+
+
+@mcp.tool()
 async def rate_budget_stats(budget_path: str) -> str:
     """Return budget stats {active, peak, total_acquired, total_released}."""
     try:
@@ -2211,8 +3357,16 @@ async def validate_pm_seed(pm_seed_json: str) -> str:
         from .pm_seed import validate_pm_seed as _validate
         pm_seed = json.loads(pm_seed_json)
         errors = _validate(pm_seed)
+        valid = not errors
         _log_mcp_health("ok", "validate_pm_seed")
-        return json.dumps({"valid": not errors, "errors": errors})
+        return json.dumps(
+            {
+                "valid": valid,
+                "errors": errors,
+                "seed_readiness": 1.0 if valid else 0.0,
+                "ambiguity_converged": valid,
+            }
+        )
     except Exception as e:
         _log_mcp_health("fail", "validate_pm_seed", str(e))
         return json.dumps({"valid": False, "errors": [str(e)]})
@@ -2380,6 +3534,50 @@ def _config_path_for(project_root: str) -> str | None:
     return str(repo_default) if repo_default.exists() else None
 
 
+def _mechanical_gate_evidence(
+    project_root: str, gate_name: str
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Return mechanical metrics, required thresholds, and source evidence."""
+    from .stage_evidence import collect_stage_evidence as _collect
+
+    if gate_name == "build_to_qa":
+        evidence = _collect(project_root, "build")
+        return (
+            {
+                "build_ok": bool(
+                    evidence["build"]["runtime_verified"]
+                    and evidence["build"]["exit_code"] == 0
+                )
+            },
+            {"build_ok": True},
+            evidence,
+        )
+    if gate_name == "qa_to_deploy":
+        evidence = _collect(project_root, "qa")
+        npm_test = evidence["qa"]["npm_test"]
+        decided = npm_test["passed"] + npm_test["failed"]
+        pass_rate = npm_test["passed"] / decided if decided else 0.0
+        runtime_verified = bool(
+            evidence["qa"]["runtime_verified"] and npm_test["exit_code"] is not None
+        )
+        return (
+            {
+                "test_pass_rate": round(pass_rate, 6),
+                "runtime_verified": runtime_verified,
+                "verification_mode": "runtime" if runtime_verified else "static",
+            },
+            {
+                "test_pass_rate": 1.0,
+                "runtime_verified": True,
+                "verification_mode": "runtime",
+            },
+            evidence,
+        )
+    raise ValueError(
+        f"evidence_mode='mechanical' is unsupported for gate {gate_name!r}"
+    )
+
+
 @mcp.tool()
 async def gate_check(
     gate_name: str,
@@ -2388,6 +3586,7 @@ async def gate_check(
     project_root: str = ".",
     subject: str = "",
     allow_warn: bool = False,
+    evidence_mode: str = "",
 ) -> str:
     """Evaluate a stage gate. Returns the verdict as JSON.
 
@@ -2405,21 +3604,95 @@ async def gate_check(
     try:
         from dataclasses import asdict
 
-        metrics = json.loads(metrics_json or "{}")
+        reported_metrics = json.loads(metrics_json or "{}")
+        if not isinstance(reported_metrics, dict):
+            raise ValueError("metrics_json must decode to an object")
+        metrics = dict(reported_metrics)
         cfg_path = _config_path_for(project_root)
         cfg = _load_gate_config(cfg_path) if cfg_path else _load_gate_config(None)
+        mechanical_metrics: dict[str, Any] = {}
+        metric_mismatches: list[dict[str, Any]] = []
+        stage_evidence: dict[str, Any] = {}
+        if evidence_mode:
+            if evidence_mode != "mechanical":
+                raise ValueError("evidence_mode must be empty or 'mechanical'")
+            mechanical_metrics, mechanical_thresholds, stage_evidence = (
+                await asyncio.to_thread(
+                    _mechanical_gate_evidence, project_root, gate_name
+                )
+            )
+            for key, mechanical in mechanical_metrics.items():
+                if key in reported_metrics and reported_metrics[key] != mechanical:
+                    metric_mismatches.append(
+                        {
+                            "metric": key,
+                            "reported": reported_metrics[key],
+                            "mechanical": mechanical,
+                        }
+                    )
+                metrics[key] = mechanical
+            tier_thresholds = (
+                cfg.setdefault("gates", {})
+                .setdefault(gate_name, {})
+                .setdefault("thresholds", {})
+                .setdefault(samvil_tier, {})
+            )
+            tier_thresholds.update(mechanical_thresholds)
         verdict = _gate_check_core(
             gate_name,
             samvil_tier=samvil_tier,
             metrics=metrics,
             subject=subject,
             config=cfg,
-            allow_warn=allow_warn,
+            allow_warn=allow_warn and evidence_mode != "mechanical",
         )
+        result = asdict(verdict)
+        if evidence_mode == "mechanical":
+            result.update(
+                {
+                    "evidence_mode": evidence_mode,
+                    "metrics": metrics,
+                    "reported_metrics": reported_metrics,
+                    "mechanical_metrics": mechanical_metrics,
+                    "metric_mismatches": metric_mismatches,
+                    "stage_evidence": stage_evidence,
+                    "allow_warn_ignored": bool(allow_warn),
+                }
+            )
+            if metric_mismatches:
+                _log_mcp_health(
+                    "warn",
+                    "gate_check.metric_mismatch",
+                    json.dumps(metric_mismatches, ensure_ascii=False),
+                )
         _log_mcp_health("ok", "gate_check")
-        return json.dumps(asdict(verdict))
+        return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "gate_check", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def gate_override(
+    project_root: str,
+    gate: str,
+    reason: str,
+    approval_claim_id: str,
+) -> str:
+    """Fail closed until a trusted host approval adapter is installed."""
+    try:
+        from .gates import gate_override as _gate_override
+
+        result = _gate_override(
+            project_root,
+            gate=gate,
+            reason=reason,
+            approval_claim_id=approval_claim_id,
+        )
+        _log_mcp_health("ok", "gate_override")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "gate_override", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -2603,27 +3876,6 @@ async def compute_parallel_safety(leaves_json: str) -> str:
 
 
 # ── v3.2.0 Sprint 4 — Interview (②) + narrate ─────────────────
-
-
-@mcp.tool()
-async def compute_seed_readiness(
-    dimensions_json: str,
-    samvil_tier: str = "standard",
-) -> str:
-    """Compute the multi-dimensional seed_readiness score (T1).
-
-    `dimensions_json` is a JSON object with keys `intent_clarity`,
-    `constraint_clarity`, `ac_testability`, `lifecycle_coverage`,
-    `decision_boundary` (values in [0, 1]).
-    """
-    try:
-        dims = json.loads(dimensions_json)
-        score = _compute_seed_readiness_core(dims, samvil_tier=samvil_tier)
-        _log_mcp_health("ok", "compute_seed_readiness")
-        return json.dumps(score.to_dict())
-    except Exception as e:
-        _log_mcp_health("fail", "compute_seed_readiness", str(e))
-        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -2850,6 +4102,20 @@ async def migrate_apply(project_root: str = ".", dry_run: bool = False) -> str:
         return json.dumps(plan.to_dict())
     except Exception as e:
         _log_mcp_health("fail", "migrate_apply", str(e))
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+async def migrate_seed_v3_3(project_root: str = ".") -> str:
+    """Migrate a v3.2 seed to v3.3 AC verify contracts."""
+    try:
+        from . import migrate_v3_3 as _migrate_v3_3
+
+        result = await asyncio.to_thread(_migrate_v3_3.apply_migration, project_root)
+        _log_mcp_health("ok", "migrate_seed_v3_3")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "migrate_seed_v3_3", str(e))
         return json.dumps({"error": str(e)})
 
 
@@ -3792,6 +5058,7 @@ async def aggregate_orchestrator_state(
     cli_tier: str = "",
     mode_hint: str = "",
     host_name: str = "",
+    council_opt_in: bool = False,
 ) -> str:
     """Boot-time aggregator for the samvil orchestrator skill (T4.5 ultra-thin).
 
@@ -3800,12 +5067,13 @@ async def aggregate_orchestrator_state(
       - filesystem artifacts (`project.seed.json`, `package.json`, `src/`)
 
     Returns a JSON string with:
-      - tier: resolved samvil_tier with precedence cli > state > config > default
-        (deprecated v3.1 'deep' alias is mapped to 'full' with `aliased_from`).
+      - tier: resolved samvil_tier with precedence cli > state > config > default,
+        preserving the canonical strictest `deep` tier.
       - solution_type: 3-layer keyword/context detection
         (web-app | automation | game | mobile-app | dashboard).
         Layer-3 user confirmation still happens in the skill body.
       - is_pm_mode: true when the prompt contains PM-mode signals.
+      - council_opt_in: true only for an explicit argument or persisted flag.
       - brownfield: artifact + state-based detection of resume / brownfield mode.
       - chain: which skill the orchestrator should invoke first
         (samvil-analyze | samvil-interview | samvil-pm-interview | resume target).
@@ -3823,6 +5091,7 @@ async def aggregate_orchestrator_state(
             cli_tier=cli_tier or "",
             mode_hint=mode_hint or "",
             host_name=host_name or "",
+            council_opt_in=council_opt_in,
         )
         _log_mcp_health("ok", "aggregate_orchestrator_state")
         return json.dumps(result)
@@ -3862,7 +5131,7 @@ async def aggregate_interview_state(
 
     Companion to existing `score_ambiguity`, `route_question`,
     `update_answer_streak`, `manage_tracks`, `get_tier_phases`,
-    `compute_seed_readiness`, `gate_check` — this tool covers the boot
+    `gate_check` — this tool covers the boot
     pre-flight (tier, mode, preset match, manifest scan) that was
     inline in the legacy 1259-LOC interview skill body.
     """
@@ -3990,6 +5259,7 @@ async def dispatch_build_batch(
     config_json: str = "",
     consecutive_fail_batches: int = 0,
     project_root: str = ".",
+    rate_budget_path: str = "",
 ) -> str:
     """Per-batch dispatch aggregator for samvil-build Phase B (T4.8).
 
@@ -4032,6 +5302,7 @@ async def dispatch_build_batch(
             completed_ids=completed_ids,
             consecutive_fail_batches=int(consecutive_fail_batches),
             project_root=project_root,
+            rate_budget_path=rate_budget_path,
         )
         _log_mcp_health("ok", "dispatch_build_batch")
         return json.dumps(result)
@@ -4190,7 +5461,7 @@ async def finalize_qa_verdict(
         project_path: Repo root.
         evidence_json: Same shape `synthesize_qa_evidence` consumes.
         pending_ac_claims_json: JSON array of pending build-stage
-            ac_verdict claims (e.g., from `claim_query_by_subject`).
+            ac_verdict claims loaded from `.samvil/claims.jsonl`.
 
     Returns: JSON with `synthesis`, `convergence`, `claim_actions[]`,
     `consensus_triggers[]`, `gate_input`, `blocked
@@ -4201,7 +5472,8 @@ async def finalize_qa_verdict(
     try:
         evidence = json.loads(evidence_json) if evidence_json else {}
         pending = json.loads(pending_ac_claims_json) if pending_ac_claims_json else []
-        result = _finalize_qa_verdict(
+        result = await asyncio.to_thread(
+            _finalize_qa_verdict,
             project_path or ".",
             evidence=evidence,
             pending_ac_claims=pending,
@@ -4305,18 +5577,63 @@ async def write_chain_marker(
     project_root: str,
     host_name: str | None,
     current_skill: str,
+    next_skill: str | None = None,
 ) -> str:
     """Write next-skill marker after current_skill completes.
 
     Creates .samvil/next-skill.json with chain continuation data.
     """
     try:
-        result = _write_chain_marker(project_root, host_name, current_skill)
+        result = await asyncio.to_thread(
+            _write_chain_marker,
+            project_root,
+            host_name,
+            current_skill,
+            next_skill=next_skill,
+        )
         _log_mcp_health("ok", "write_chain_marker")
         return json.dumps(result)
     except Exception as e:
         _log_mcp_health("fail", "write_chain_marker", str(e))
         return json.dumps({"error": str(e)})
+
+
+def _project_state_session_id(project_root: str) -> str:
+    root = Path(project_root)
+    for path in (root / "project.state.json", root / ".samvil" / "state.json"):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeError):
+            continue
+        if isinstance(state, dict):
+            session_id = state.get("session_id")
+            if isinstance(session_id, str) and session_id.strip():
+                return session_id
+    return ""
+
+
+async def _recover_rootless_legacy_session(project_root: str) -> bool | None:
+    session_id = await asyncio.to_thread(
+        _project_state_session_id,
+        project_root,
+    )
+    if not session_id:
+        return None
+    store = await get_store()
+    recovered = await store.recover_legacy_session_project_root(
+        session_id,
+        project_root,
+    )
+    if recovered:
+        return True
+    get_session = getattr(store, "get_session", None)
+    if get_session is not None:
+        session = await get_session(session_id)
+        if session is not None and session.project_root:
+            return str(Path(session.project_root).resolve()) == str(
+                Path(project_root).expanduser().resolve()
+            )
+    return False
 
 
 @mcp.tool()
@@ -4326,7 +5643,14 @@ async def read_chain_marker(project_root: str) -> str:
     Returns marker dict or null if no marker exists.
     """
     try:
-        result = _read_chain_marker(project_root)
+        recovery = await _recover_rootless_legacy_session(project_root)
+        if recovery is False:
+            return json.dumps(
+                {
+                    "error": "legacy session recovery rejected; refusing to read chain marker"
+                }
+            )
+        result = await asyncio.to_thread(_read_chain_marker, project_root)
         _log_mcp_health("ok", "read_chain_marker")
         return json.dumps(result)
     except Exception as e:
@@ -4338,7 +5662,7 @@ async def read_chain_marker(project_root: str) -> str:
 async def clear_chain_marker(project_root: str) -> str:
     """Remove the chain marker (after pipeline completes)."""
     try:
-        result = _clear_chain_marker(project_root)
+        result = await asyncio.to_thread(_clear_chain_marker, project_root)
         _log_mcp_health("ok", "clear_chain_marker")
         return json.dumps({"cleared": result})
     except Exception as e:
@@ -4356,7 +5680,7 @@ async def advance_chain(
     Returns new marker or pipeline_complete status.
     """
     try:
-        result = _advance_chain(project_root, host_name)
+        result = await asyncio.to_thread(_advance_chain, project_root, host_name)
         _log_mcp_health("ok", "advance_chain")
         return json.dumps(result)
     except Exception as e:
@@ -4371,7 +5695,7 @@ async def get_pipeline_status(project_root: str) -> str:
     Returns has_marker, current_position, next_skill, progress.
     """
     try:
-        result = _get_pipeline_status(project_root)
+        result = await asyncio.to_thread(_get_pipeline_status, project_root)
         _log_mcp_health("ok", "get_pipeline_status")
         return json.dumps(result)
     except Exception as e:
@@ -4495,16 +5819,33 @@ async def scaffold_test_harness(
 
         written: list[str] = []
         (root / "tests" / "e2e").mkdir(parents=True, exist_ok=True)
+        pkg_path = root / "package.json"
+        is_expo = False
+        if pkg_path.exists():
+            try:
+                existing_pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+                dependencies = {
+                    **dict(existing_pkg.get("dependencies") or {}),
+                    **dict(existing_pkg.get("devDependencies") or {}),
+                }
+                is_expo = "expo" in dependencies
+            except (json.JSONDecodeError, OSError):
+                is_expo = False
 
         config_path = root / "playwright.config.ts"
-        config_path.write_text(playwright_config(base_url), encoding="utf-8")
+        config_path.write_text(
+            playwright_config(
+                "http://localhost:8081" if is_expo else base_url,
+                mobile=is_expo,
+            ),
+            encoding="utf-8",
+        )
         written.append("playwright.config.ts")
 
         smoke_path = root / "tests" / "e2e" / "smoke.spec.ts"
         smoke_path.write_text(smoke_spec(base_path), encoding="utf-8")
         written.append("tests/e2e/smoke.spec.ts")
 
-        pkg_path = root / "package.json"
         pkg_patched = False
         if pkg_path.exists():
             try:
@@ -4516,8 +5857,16 @@ async def scaffold_test_harness(
                 )
                 pkg_patched = True
                 written.append("package.json (test script + devDep)")
+                dependencies = {
+                    **dict(pkg.get("dependencies") or {}),
+                    **dict(pkg.get("devDependencies") or {}),
+                }
+                is_expo = "expo" in dependencies
             except (json.JSONDecodeError, OSError) as e:
                 _log_mcp_health("warn", "scaffold_test_harness", f"pkg patch: {e}")
+                is_expo = False
+        else:
+            is_expo = False
 
         _log_mcp_health("ok", "scaffold_test_harness")
         return json.dumps(
@@ -4531,6 +5880,46 @@ async def scaffold_test_harness(
     except Exception as e:
         _log_mcp_health("fail", "scaffold_test_harness", str(e))
         return json.dumps({"status": "error", "error": str(e)})
+
+
+@mcp.tool()
+async def collect_stage_evidence(project_root: str, stage: str) -> str:
+    """Collect build/QA evidence only from persisted runtime artifacts."""
+    try:
+        from .stage_evidence import collect_stage_evidence as _collect
+
+        result = await asyncio.to_thread(_collect, project_root, stage)
+        _log_mcp_health("ok", "collect_stage_evidence")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "collect_stage_evidence", str(e))
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+@mcp.tool()
+async def collect_ac_verification(
+    project_root: str,
+    ac_id: str,
+    verify_json: str,
+    timeout_seconds: float = 120,
+) -> str:
+    """Execute an AC verify contract and return mechanical evidence."""
+    try:
+        from .ac_verification import run_ac_verification
+
+        result = await asyncio.to_thread(
+            run_ac_verification,
+            project_root,
+            ac_id,
+            json.loads(verify_json),
+            timeout_seconds=timeout_seconds,
+        )
+        status = "ok" if result.get("passed") else "warn"
+        _log_mcp_health(status, "collect_ac_verification")
+        return json.dumps(result)
+    except Exception as e:
+        _log_mcp_health("fail", "collect_ac_verification", str(e))
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -4968,6 +6357,13 @@ async def resume_session(project_root: str) -> str:
     completed_features, failed_acs, samvil_tier, project_name.
     """
     try:
+        recovery = await _recover_rootless_legacy_session(project_root)
+        if recovery is False:
+            return json.dumps(
+                {
+                    "error": "legacy session recovery rejected; refusing to resume"
+                }
+            )
         result = _resume_session(project_root)
         _log_mcp_health("ok", "resume_session")
         return json.dumps(result)
@@ -4993,7 +6389,13 @@ async def write_leaf_checkpoint(
     Returns the written checkpoint as JSON.
     """
     try:
-        result = _write_leaf_checkpoint(project_root, feature_id, leaf_id, leaf_description)
+        result = await asyncio.to_thread(
+            _write_leaf_checkpoint,
+            project_root,
+            feature_id,
+            leaf_id,
+            leaf_description,
+        )
         _log_mcp_health("ok", "write_leaf_checkpoint")
         return json.dumps(result)
     except Exception as e:
@@ -5476,97 +6878,6 @@ async def resolve_mechanical_command(
         return json.dumps({"ok": False, "error": str(e)})
 
 
-# ── External benchmark (v4.29.0 — backs samvil-benchmark SKILL) ──
-
-
-@mcp.tool()
-async def benchmark_fetch_target(url: str, timeout: float = 5.0) -> str:
-    """Fetch a remote CHANGELOG and extract the latest 3 release sections.
-
-    Returns ``{ok, items[], error?, url}``. Best-effort — network
-    errors return ok=False without raising.
-    """
-    try:
-        from .benchmark import fetch_external_changelog as _fetch
-        result = _fetch(url=url, timeout=timeout)
-        _log_mcp_health("ok" if result.get("ok") else "fail", "benchmark_fetch_target")
-        return json.dumps(result, ensure_ascii=False)
-    except Exception as e:
-        _log_mcp_health("fail", "benchmark_fetch_target", str(e))
-        return json.dumps({"ok": False, "error": str(e)})
-
-
-@mcp.tool()
-async def benchmark_classify_items(
-    items_json: str,
-    already_have_json: str = "",
-    rejected_json: str = "",
-) -> str:
-    """Classify changelog items into already_have / rejected / gap.
-
-    Args via JSON strings: ``items`` (output of benchmark_fetch_target),
-    ``already_have`` + ``rejected`` (token/phrase lists). Whitespace-
-    token overlap matching, case-insensitive.
-
-    Returns ``{ok, categorized: {already_have, rejected, gaps}, counts}``.
-    """
-    try:
-        from .benchmark import classify_changelog_items as _classify
-        items = json.loads(items_json) if items_json else []
-        already_have = json.loads(already_have_json) if already_have_json else []
-        rejected = json.loads(rejected_json) if rejected_json else []
-        result = _classify(items=items, samvil_already_have=already_have, samvil_rejected=rejected)
-        _log_mcp_health("ok" if result.get("ok") else "fail", "benchmark_classify_items")
-        return json.dumps(result, ensure_ascii=False)
-    except Exception as e:
-        _log_mcp_health("fail", "benchmark_classify_items", str(e))
-        return json.dumps({"ok": False, "error": str(e)})
-
-
-@mcp.tool()
-async def benchmark_append_gap(
-    gap_json: str,
-    target_name: str,
-    target_url: str,
-    feedback_log_path: str,
-) -> str:
-    """Render a gap as a feedback-log entry and append it.
-
-    ``gap_json`` is a JSON-encoded ``{section, bullet}`` dict (one
-    item from benchmark_classify_items.categorized.gaps). The entry
-    is dedup'd by id (sha1 of bullet text).
-
-    Returns ``{ok, appended, appended_id, path, reason?}``.
-    """
-    try:
-        from .benchmark import append_gap_to_feedback_log as _append, render_gap_entry as _render
-        gap = json.loads(gap_json) if gap_json else {}
-        entry = _render(gap=gap, target_name=target_name, target_url=target_url)
-        result = _append(gap_entry=entry, feedback_log_path=feedback_log_path)
-        _log_mcp_health("ok" if result.get("ok") else "fail", "benchmark_append_gap")
-        return json.dumps(result, ensure_ascii=False)
-    except Exception as e:
-        _log_mcp_health("fail", "benchmark_append_gap", str(e))
-        return json.dumps({"ok": False, "error": str(e)})
-
-
-@mcp.tool()
-async def benchmark_load_targets(config_path: str = "") -> str:
-    """Load benchmark target registry (defaults + user overrides).
-
-    Returns ``{ok, targets[], overrides_applied, overrides_path}``.
-    Defaults to ``~/.samvil/benchmark-targets.json``.
-    """
-    try:
-        from .benchmark import load_benchmark_targets as _load
-        result = _load(config_path=(config_path or None))
-        _log_mcp_health("ok" if result.get("ok") else "fail", "benchmark_load_targets")
-        return json.dumps(result, ensure_ascii=False)
-    except Exception as e:
-        _log_mcp_health("fail", "benchmark_load_targets", str(e))
-        return json.dumps({"ok": False, "error": str(e)})
-
-
 # ── Standalone artifact QA (v4.29.0 — backs samvil-qa --target=artifact) ──
 
 
@@ -5688,8 +6999,10 @@ def main():
 # Each tools_<domain>.py registers its own @mcp.tool() set. Keeps
 # server.py shrinking without changing tool behavior or names.
 from .tools_jobs import register_job_tools  # noqa: E402
+from .tools_benchmark import register_benchmark_tools  # noqa: E402
 
 register_job_tools(mcp, _log_mcp_health)
+register_benchmark_tools(mcp, _log_mcp_health)
 
 
 if __name__ == "__main__":

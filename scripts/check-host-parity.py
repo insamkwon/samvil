@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SAMVIL host parity check (Phase A.2).
+"""SAMVIL structural host parity check (Phase A.2).
 
 Verifies that every CC skill (`skills/<name>/SKILL.md`) has a matching
 Codex command (`references/codex-commands/<name>.md`) and that the two
@@ -13,8 +13,15 @@ agree on the things a user would notice when switching hosts:
 4. **Auto-Proceed Policy** — Codex commands for mechanical-only stages
    (evolve, retro) must declare the auto-proceed policy explicitly. CC
    SKILL.md is implicit via the Skill tool.
+5. **Gemini QA lifecycle** — the Gemini QA command must finalize and
+   materialize synthesis, pass the route-specific gate, and preserve the
+   dynamic next skill instead of defaulting every outcome to deploy.
 
 Intentional divergences are listed in `references/host-parity-allowlist.yaml`.
+
+This is a document/wiring check. It does not execute stages natively on Codex
+or Gemini, and it reports those surfaces as UNTESTED instead of implying green
+runtime parity.
 
 Usage:
     python3 scripts/check-host-parity.py            # report mode
@@ -34,8 +41,34 @@ from typing import Iterable
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_DIR = REPO_ROOT / "skills"
 CODEX_DIR = REPO_ROOT / "references" / "codex-commands"
+GEMINI_DIR = REPO_ROOT / "references" / "gemini-commands"
 SERVER_PY = REPO_ROOT / "mcp" / "samvil_mcp" / "server.py"
 ALLOWLIST_FILE = REPO_ROOT / "references" / "host-parity-allowlist.yaml"
+FORBIDDEN_SSOT_PATHS: dict[str, tuple[str, str]] = {
+    ".samvil/project.seed.json": (
+        "legacy .samvil/project.seed.json",
+        "root project.seed.json",
+    ),
+    ".samvil/project.config.json": (
+        "legacy .samvil/project.config.json",
+        "root project.config.json",
+    ),
+    ".samvil/project.state.json": (
+        "legacy .samvil/project.state.json",
+        "root project.state.json",
+    ),
+    ".samvil/interview-summary.md": (
+        "legacy .samvil/interview-summary.md",
+        "root interview-summary.md",
+    ),
+}
+GEMINI_QA_REQUIRED_MARKERS: tuple[str, ...] = (
+    "finalize_qa_verdict",
+    "materialize_qa_synthesis",
+    "gate_check",
+    'next_skill="<finalize.next_skill_decision.suggested>"',
+    "do not write a marker",
+)
 
 # Host-specific core tools. CC uses aggregator-style helpers
 # (e.g., aggregate_build_phase_a) while Codex uses lower-level
@@ -63,11 +96,16 @@ CORE_TOOLS_CODEX: dict[str, set[str]] = {
     "samvil": {"health_check", "aggregate_orchestrator_state"},
     "samvil-interview": {"score_ambiguity"},
     "samvil-pm-interview": {"validate_pm_seed"},
-    "samvil-seed": {"validate_seed"},
+    "samvil-seed": {"prepare_seed_verify_contracts", "validate_seed"},
     "samvil-council": set(),
     "samvil-design": set(),
     "samvil-scaffold": set(),
-    "samvil-build": {"next_buildable_leaves", "update_leaf_status"},
+    "samvil-build": {
+        "collect_stage_evidence",
+        "gate_check",
+        "next_buildable_leaves",
+        "update_leaf_status",
+    },
     "samvil-qa": set(),  # validation tools vary by track
     "samvil-deploy": {"evaluate_deploy_target"},
     "samvil-evolve": {"compare_seeds"},
@@ -81,6 +119,25 @@ CORE_TOOLS_CODEX: dict[str, set[str]] = {
 # are mechanical (no user-decision pause expected). CC is implicit
 # (Skill tool invocation = auto-proceed by definition).
 CODEX_AUTO_PROCEED_REQUIRED: set[str] = {"samvil-evolve", "samvil-retro"}
+
+# Stage route contracts that must be visible in both host instruction files.
+# Dynamic stages list every allowed explicit target so a wrong hard-coded
+# replacement (for example samvil-seed -> samvil-retro) cannot hide behind a
+# generic "chain" or "next" section.
+CHAIN_TARGETS_REQUIRED: dict[str, set[str]] = {
+    "samvil": {"samvil-interview", "samvil-pm-interview", "samvil-analyze"},
+    "samvil-interview": {"samvil-seed", "samvil-build"},
+    "samvil-pm-interview": {"samvil-design", "samvil-council"},
+    "samvil-seed": {"samvil-design", "samvil-council"},
+    "samvil-council": {"samvil-design"},
+    "samvil-design": {"samvil-scaffold"},
+    "samvil-scaffold": {"samvil-build"},
+    "samvil-build": {"samvil-qa"},
+    "samvil-qa": {"samvil-deploy", "samvil-evolve", "samvil-retro"},
+    "samvil-deploy": {"samvil-retro"},
+    "samvil-evolve": {"samvil-retro"},
+    "samvil-analyze": {"samvil-interview", "samvil-qa", "samvil-design"},
+}
 
 
 def load_server_tools() -> set[str]:
@@ -214,6 +271,21 @@ def check_pair(
             issues.append(
                 f"{name}: Codex command has no chain/next-skill mention"
             )
+    required_targets = CHAIN_TARGETS_REQUIRED.get(name, set())
+    missing_cc_targets = sorted(
+        target for target in required_targets if target not in cc_text
+    )
+    missing_codex_targets = sorted(
+        target for target in required_targets if target not in codex_text
+    )
+    if missing_cc_targets:
+        issues.append(
+            f"{name}: CC SKILL.md missing chain target(s): {missing_cc_targets}"
+        )
+    if missing_codex_targets:
+        issues.append(
+            f"{name}: Codex command missing chain target(s): {missing_codex_targets}"
+        )
 
     return issues
 
@@ -231,6 +303,51 @@ def discover_pairs() -> tuple[list[str], list[str], list[str]]:
     cc_only = sorted(cc_names - codex_names)
     codex_only = sorted(codex_names - cc_names)
     return matched, cc_only, codex_only
+
+
+def untested_core_contracts(matched: Iterable[str]) -> list[str]:
+    """Pairs with no curated MCP core-tool assertion on either host."""
+    return sorted(
+        name
+        for name in matched
+        if not CORE_TOOLS_CC.get(name, set())
+        and not CORE_TOOLS_CODEX.get(name, set())
+    )
+
+
+def ssot_path_contract_issues() -> list[str]:
+    """All host-facing command docs must point at canonical root SSOT files."""
+    paths = [
+        REPO_ROOT / "AGENTS.md",
+        *sorted(CODEX_DIR.glob("*.md")),
+        *sorted(GEMINI_DIR.glob("*.toml")),
+    ]
+    issues: list[str] = []
+    for path in paths:
+        if not path.exists():
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for forbidden, (legacy_label, canonical_label) in FORBIDDEN_SSOT_PATHS.items():
+                if forbidden in line:
+                    issues.append(
+                        f"{path.relative_to(REPO_ROOT)}:{lineno}: "
+                        f"uses {legacy_label}; use {canonical_label}"
+                    )
+    return issues
+
+
+def gemini_qa_lifecycle_contract_issues() -> list[str]:
+    """Gemini QA must preserve the same finalized dynamic route as other hosts."""
+    path = GEMINI_DIR / "samvil-qa.toml"
+    if not path.exists():
+        return ["Gemini QA lifecycle contract: missing samvil-qa.toml"]
+    text = path.read_text(encoding="utf-8")
+    return [
+        "Gemini QA lifecycle contract: "
+        f"references/gemini-commands/samvil-qa.toml missing {marker}"
+        for marker in GEMINI_QA_REQUIRED_MARKERS
+        if marker not in text
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -257,6 +374,8 @@ def main(argv: list[str] | None = None) -> int:
         codex_text = (CODEX_DIR / f"{name}.md").read_text(encoding="utf-8")
         allowed = allowlist.get(name, {})
         issues.extend(check_pair(name, cc_text, codex_text, all_tools, allowed))
+    issues.extend(ssot_path_contract_issues())
+    issues.extend(gemini_qa_lifecycle_contract_issues())
 
     if issues:
         print("✗ host parity check found issues:")
@@ -269,8 +388,21 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1 if args.strict else 0
     print(
-        f"✓ host parity: {len(matched)} skill pair(s) consistent "
-        f"(CC ↔ Codex)"
+        f"✓ structural host parity: {len(matched)} paired command documents "
+        "passed existence/core/chain checks"
+    )
+    untested = untested_core_contracts(matched)
+    print(
+        f"UNTESTED: {len(untested)} pair(s) have no curated MCP core-tool "
+        f"contract: {', '.join(untested)}"
+    )
+    print(
+        "UNTESTED: Codex native stage execution; this check covers command "
+        "documents and model-routing wiring only"
+    )
+    print(
+        "UNTESTED: Gemini native stage execution; SSOT command corpus "
+        "contract is checked, but runtime parity is not"
     )
     return 0
 

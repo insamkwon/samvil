@@ -1,6 +1,6 @@
 ---
 name: samvil-interview
-description: "Socratic interview with app presets, unknown-unknown probing, and zero-question mode. Korean language."
+description: "Socratic interview with app presets, unknown-unknown probing, and zero-question mode. Korean language. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-interview (ultra-thin)
@@ -54,7 +54,7 @@ Per question: `route_question(question, manifest_facts, force_user=(streak>=3))`
 
 ## Step 2 — Phase Loop (Korean, host-bound)
 
-Run **only the phases in `aggregate.required_phases`**. **한 번에 하나씩** AskUserQuestion (객관식 + Other), preset-aware options. Adaptive follow-up (short→expand, long→structure, vague→choose). Framework names (AARRR/JTBD/HEART) never exposed to user.
+Run **only the phases in `aggregate.required_phases`**. 같은 Phase에서 답변 순서가 서로 영향을 주지 않는 **독립 질문 2~3개**는 한 AskUserQuestion의 `questions=[...]`로 묶고, 앞 답변에 따라 뒤 질문이 달라지는 **의존 질문**은 순차 실행한다. Prefix each question with the latest budget range (`[질문 N/max]`) and increment `questions_asked` per question, not per batch. Preset-aware options; adaptive follow-up (short→expand, long→structure, vague→choose). Framework names never exposed.
 
 Per-`solution_type` question bodies + Phase id/trigger/body 매핑 표: `SKILL.legacy.md` §"Phase id / Trigger / Body 매핑 표".
 
@@ -62,12 +62,11 @@ Per-`solution_type` question bodies + Phase id/trigger/body 매핑 표: `SKILL.l
 
 ## Step 3 — Convergence Check
 
-Track `questions_asked` (increment per user question). Re-score after each Phase:
-`mcp__samvil_mcp__score_ambiguity(interview_state='<json>', tier="<tier>", questions_asked=<N>)`.
+Track `questions_asked` (increment per user question) and `question_extensions` (starts 0). Re-score after each Phase:
+`mcp__samvil_mcp__score_ambiguity(interview_state='<json>', tier="<tier>", questions_asked=<N>, question_extensions=<E>)`.
 Render milestone + `floor_violations` + `missing_items` + `min_questions_met` + `dimension_scores`.
 
-**Convergence** = `ambiguity ≤ target` + `floors_passed` + `min_questions_met` (minimal 5 / standard 10 / thorough 20 / full 30 / deep 40).
-No phase reprompt cap — loop until all 3 hold. Check `dimension_scores`: highest-scoring dimension's Phase is the next loop target.
+**Convergence** = `ambiguity ≤ target` + `floors_passed` + `min_questions_met`. Read all tier numbers only from `references/decision-boundaries.md`. If `budget_action="offer_draft_or_extend"`, AskUserQuestion: `지금까지로 seed 초안을 만들까요, 질문을 5개 더 이어갈까요?` → draft routes to Step 4; extend increments `question_extensions` once and resumes. Otherwise use the highest `dimension_scores` Phase next; never loop past the effective max without this user choice.
 
 **AC Testability Gate (PHI-06)**: vague AC ("좋은", "빠른", "직관적인", "smooth"…) → AskUserQuestion to rewrite. Never accept vague AC silently.
 
@@ -87,14 +86,14 @@ Step 5 직전 한 줄 재진술. Epic Claim과 *같은 한 줄에 수렴*이 이
 ## Step 5 — Persist + Contract Layer (post_stage)
 
 1. `mcp__samvil_mcp__load_interview_progress(project_root=".")` → use returned `qa_entries` + `ac_by_phase` as source of truth for summary generation. Do NOT rely on conversation context. Write summary to `aggregate.paths.interview_summary` (Korean, sections per `SKILL.legacy.md` §"Output Format" by `solution_type`). Each section non-empty; constraints ≥1; success criteria ≥3. **삭제하지 않음** — samvil-seed가 progress 파일을 consume 후 `clear_interview_progress` 호출.
-2. `mcp__samvil_mcp__compute_seed_readiness(dimensions_json='{"intent_clarity":<f>,"constraint_clarity":<f>,"ac_testability":<f>,"lifecycle_coverage":<f>,"decision_boundary":<f>}', samvil_tier="<tier>")` — score each dim from recorded answers; flag estimates in summary.
-3. `mcp__samvil_mcp__gate_check(gate_name="interview_to_seed", samvil_tier="<tier>", metrics_json='{"seed_readiness":<total>}', project_root=".")`.
+2. Re-run `mcp__samvil_mcp__score_ambiguity(interview_state='<persisted answers JSON>', tier="<tier>", questions_asked=<actual>, question_extensions=<actual>)`; persist its deterministic `seed_readiness`, `ambiguity`, `dimension_scores`, and `converged`. Never ask the LLM to assign readiness dimensions.
+3. `mcp__samvil_mcp__gate_check(gate_name="interview_to_seed", samvil_tier="<tier>", metrics_json='{"seed_readiness":<score.seed_readiness>,"ambiguity_converged":<score.converged>}', project_root=".")`.
    - `block` → loop back to failing dim's owning Phase (`required_action.type` ∈ `split_ac/run_research/stronger_model/ask_user`). Cap 2 escalations via `gate_should_force_user`.
    - `escalate` → bump `interview_level` one step (`normal→deep→max`) and re-run that Phase.
    - `pass` → continue.
 4. `mcp__samvil_mcp__claim_post(project_root=".", claim_type="gate_verdict", subject="interview_to_seed", statement="verdict=<v>, seed_readiness=<total>", authority_file="state.json", claimed_by="agent:socratic-interviewer", evidence_json='["interview-summary.md"]', meta_json='<verdict dict>')`. Per `references/contract-layer-protocol.md`, the Judge here is `agent:user` or `agent:product-owner` invoked out-of-band during approval — do NOT self-verify.
-5. `mcp__samvil_mcp__save_event(event_type="interview_complete", stage="seed", data='{"questions_asked":<N>,"preset_matched":"<preset.name>"}')`.
-6. Append the Interview block to `.samvil/handoff.md` via Bash `cat >>` or Edit (never the Write tool).
+5. `mcp__samvil_mcp__complete_stage(session_id="<sid>", stage="interview", verdict="pass")`. Any error halts before seed; the trusted transition writes the canonical completion event and advances the session together.
+6. Append the Interview block to `.samvil/handoff.md` via Edit (never the Write tool or Bash redirection).
 
 ## Brownfield Mode (auto-detected from `state._analysis_source == "brownfield"`)
 
@@ -113,7 +112,7 @@ After Step 5 approval: `mcp__samvil_mcp__merge_brownfield_seed(existing_seed_jso
 
 ## Anti-Patterns
 
-1. Asking 2+ questions in a single AskUserQuestion. 2. Skipping summary verification (Zero-Question Mode included). 3. Accepting a vague AC without offering a rewrite (PHI-06). 4. Exposing framework names (AARRR/JTBD/HEART) to the user. 5. Self-verifying the `interview_to_seed` gate verdict (Generator ≠ Judge). 6. Hard-coding `chain.next_skill` instead of always invoking `samvil-seed`. 7. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
+1. Batching 4+ questions or batching **의존 질문** in one AskUserQuestion. 2. Skipping summary verification (Zero-Question Mode included). 3. Accepting a vague AC without offering a rewrite (PHI-06). 4. Exposing framework names (AARRR/JTBD/HEART) to the user. 5. Self-verifying the `interview_to_seed` gate verdict (Generator ≠ Judge). 6. Hard-coding `chain.next_skill` instead of always invoking `samvil-seed`. 7. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — 독립 질문 2~3개는 `questions=[q1,q2,q3]`, 단일/의존 질문은 `questions=[q1]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

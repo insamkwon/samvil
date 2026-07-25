@@ -41,13 +41,14 @@ Outputs (all best-effort, no file writes here):
   - `consensus_triggers[]` — list of payloads for `consensus_trigger`.
   - `gate_input` — payload for `gate_check(gate_name='qa_to_deploy')`.
   - `blocked` — `{detected: bool, persistent_issue_ids: [str]}`.
-  - `next_skill_decision` — `{verdict, suggested: 'samvil-deploy' |
-    'samvil-evolve' | 'samvil-retro', reason}`.
+  - `next_skill_decision` — `{verdict, suggested: 'samvil-qa' |
+    'samvil-deploy' | 'samvil-evolve' | 'samvil-retro', reason}`.
   - `handoff_block` — pre-rendered Korean handoff section.
 """
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -75,6 +76,102 @@ def _resolve_tier(state: dict[str, Any], config: dict[str, Any]) -> str:
         or config.get("selected_tier")
         or "standard"
     )
+
+
+def _seed_verify_contracts(seed: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return every leaf verify contract keyed by AC id."""
+    contracts: dict[str, dict[str, Any]] = {}
+    missing_id_count = 0
+
+    def visit(items: Any) -> None:
+        nonlocal missing_id_count
+        if not isinstance(items, list):
+            return
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            children = item.get("children")
+            if isinstance(children, list) and children:
+                visit(children)
+                continue
+            if "verify" not in item:
+                continue
+            verify = item.get("verify")
+            if isinstance(verify, dict):
+                ac_id = str(item.get("id") or "")
+                if not ac_id:
+                    missing_id_count += 1
+                    ac_id = f"__verify_missing_id_{missing_id_count}"
+                contracts[ac_id] = {
+                    "verify": copy.deepcopy(verify),
+                    "criterion": str(
+                        item.get("description") or item.get("criterion") or ac_id
+                    ),
+                }
+                continue
+            ac_id = str(item.get("id") or "")
+            if not ac_id:
+                missing_id_count += 1
+                ac_id = f"__verify_missing_id_{missing_id_count}"
+            contracts[ac_id] = {
+                "verify": {},
+                "criterion": str(
+                    item.get("description") or item.get("criterion") or ac_id
+                ),
+                "contract_errors": ["verify must be an object"],
+            }
+
+    for feature in seed.get("features") or []:
+        if isinstance(feature, dict):
+            visit(feature.get("acceptance_criteria"))
+    return contracts
+
+
+def _fail_closed_verify_items(
+    evidence: dict[str, Any],
+    contracts: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], int]:
+    """Prevent PASS for seed verify contracts without a trusted runner."""
+    prepared = copy.deepcopy(evidence)
+    pass2 = prepared.setdefault("pass2", {})
+    items = pass2.setdefault("items", [])
+    if not isinstance(items, list):
+        items = []
+        pass2["items"] = items
+    by_id = {
+        str(item.get("id") or ""): item
+        for item in items
+        if isinstance(item, dict) and item.get("id")
+    }
+    blocked = 0
+    for ac_id, contract in contracts.items():
+        contract_errors = list(contract.get("contract_errors") or [])
+        errors = contract_errors or ["trusted AC command runner unavailable"]
+        reason = (
+            "; ".join(errors)
+            if contract_errors
+            else "trusted AC command runner unavailable; verify contract cannot PASS"
+        )
+        item = by_id.get(ac_id)
+        if item is None:
+            item = {
+                "id": ac_id,
+                "criterion": contract["criterion"],
+                "evidence": [],
+            }
+            items.append(item)
+        item["verify"] = copy.deepcopy(contract["verify"])
+        item["verdict"] = "FAIL"
+        item["method"] = "static"
+        item["reason"] = reason
+        item["mechanical_verification"] = {
+            "ran": False,
+            "passed": False,
+            "primary_evidence": False,
+            "errors": errors,
+        }
+        blocked += 1
+    return prepared, blocked
 
 
 def _build_claim_actions(
@@ -184,6 +281,7 @@ def _build_gate_input(
         and unimplemented == 0
     )
     zero_stubs = unimplemented == 0
+    verification_mode = synthesis.get("verification_mode") or "static"
     return {
         "gate_name": "qa_to_deploy",
         "samvil_tier": samvil_tier,
@@ -192,6 +290,8 @@ def _build_gate_input(
             "zero_stubs": zero_stubs,
             "fail_count": fail,
             "unimplemented_count": unimplemented,
+            "runtime_verified": verification_mode == "runtime",
+            "verification_mode": verification_mode,
         },
     }
 
@@ -223,13 +323,33 @@ def _detect_blocked(
 def _decide_next_skill(
     synthesis: dict[str, Any],
     state: dict[str, Any],
+    convergence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Decide the next skill to chain into based on verdict + auto-triggers."""
+    """Decide the next skill from synthesis and convergence as one table."""
     verdict = str(synthesis.get("verdict") or "").upper()
+    convergence_verdict = str(
+        (convergence or {}).get("verdict") or ""
+    ).casefold()
     counts = (synthesis.get("pass2") or {}).get("counts") or {}
     partial_count = int(counts.get("PARTIAL", 0) or 0)
     qa_history = state.get("qa_history") or []
     build_retries = int(state.get("build_retries") or 0)
+
+    if verdict not in {"PASS", "REVISE", "FAIL"}:
+        return {
+            "verdict": verdict,
+            "suggested": "samvil-qa",
+            "reason": "unknown or missing QA verdict — fail closed in QA",
+            "user_options": ["samvil-qa"],
+        }
+
+    if verdict == "REVISE" and convergence_verdict == "continue":
+        return {
+            "verdict": verdict,
+            "suggested": "samvil-qa",
+            "reason": "qa_revise + convergence=continue — stay in Ralph loop",
+            "user_options": ["samvil-qa"],
+        }
 
     if verdict in ("FAIL", "REVISE"):
         # FAIL → user choice (evolve / retro / manual). We default to retro.
@@ -274,6 +394,10 @@ def _render_handoff_block(
 ) -> str:
     """Render the QA section of `.samvil/handoff.md` (Korean, INV-1)."""
     verdict = synthesis.get("verdict") or "?"
+    verification_mode = synthesis.get("verification_mode") or "static"
+    verdict_label = (
+        f"{verdict}({verification_mode})" if verdict == "PASS" else str(verdict)
+    )
     iteration = synthesis.get("iteration") or 1
     counts = (synthesis.get("pass2") or {}).get("counts") or {}
     pass_n = counts.get("PASS", 0)
@@ -285,7 +409,7 @@ def _render_handoff_block(
     lines = [
         "",
         "## QA",
-        f"- Verdict: {verdict}",
+        f"- Verdict: {verdict_label}",
         f"- Iterations: {iteration}",
         f"- Pass 1 (Mechanical): {(synthesis.get('pass1') or {}).get('status') or '?'}",
         f"- Pass 2 (Functional): PASS={pass_n} / PARTIAL={partial_n} / "
@@ -316,6 +440,7 @@ class QAFinalizeReport:
     claim_actions: list[dict[str, Any]] = field(default_factory=list)
     consensus_triggers: list[dict[str, Any]] = field(default_factory=list)
     gate_input: dict[str, Any] = field(default_factory=dict)
+    stage_evidence: dict[str, Any] = field(default_factory=dict)
     blocked: dict[str, Any] = field(default_factory=dict)
     next_skill_decision: dict[str, Any] = field(default_factory=dict)
     handoff_block: str = ""
@@ -332,6 +457,7 @@ class QAFinalizeReport:
             "claim_actions": self.claim_actions,
             "consensus_triggers": self.consensus_triggers,
             "gate_input": self.gate_input,
+            "stage_evidence": self.stage_evidence,
             "blocked": self.blocked,
             "next_skill_decision": self.next_skill_decision,
             "handoff_block": self.handoff_block,
@@ -352,7 +478,7 @@ def finalize_qa_verdict(
         project_path: Repo root.
         evidence: JSON shape consumed by `synthesize_qa_evidence`.
         pending_ac_claims: List of pending build-stage `ac_verdict`
-            claims (e.g., output of `claim_query_by_subject`). When
+            claims loaded from `.samvil/claims.jsonl`. When
             None or empty, `claim_actions` and `consensus_triggers`
             return empty.
 
@@ -371,9 +497,36 @@ def finalize_qa_verdict(
     qa_history = state.get("qa_history") or []
     report.samvil_tier = _resolve_tier(state, config)
 
+    # Mechanical verification mode. Missing/invalid runtime artifacts fail closed.
+    try:
+        from .stage_evidence import collect_stage_evidence
+
+        report.stage_evidence = collect_stage_evidence(root, "qa")
+    except Exception as e:  # pragma: no cover - collector is deliberately defensive
+        report.errors.append(f"collect_stage_evidence failed: {e}")
+        report.stage_evidence = {}
+    npm_test = ((report.stage_evidence.get("qa") or {}).get("npm_test") or {})
+    runtime_verified = bool(
+        (report.stage_evidence.get("qa") or {}).get("runtime_verified")
+        and npm_test.get("exit_code") is not None
+    )
+    seed = _read_json_safe(root / "project.seed.json") or {}
+    verify_contracts = _seed_verify_contracts(seed)
+    evidence_for_synthesis, blocked_verify_count = _fail_closed_verify_items(
+        evidence, verify_contracts
+    )
+    if blocked_verify_count:
+        report.notes.append(
+            f"{blocked_verify_count} verify contract(s) forced to FAIL: "
+            "trusted AC command runner unavailable"
+        )
+    evidence_for_synthesis["verification_mode"] = (
+        "runtime" if runtime_verified else "static"
+    )
+
     # Synthesis.
     try:
-        synthesis = synthesize_qa_evidence(evidence)
+        synthesis = synthesize_qa_evidence(evidence_for_synthesis)
     except Exception as e:  # pragma: no cover — synthesize is robust
         report.errors.append(f"synthesize_qa_evidence failed: {e}")
         synthesis = {
@@ -385,7 +538,9 @@ def finalize_qa_verdict(
             "pass2": {"items": [], "counts": {}},
             "pass3": evidence.get("pass3") or {},
             "events": [],
+            "verification_mode": "static",
         }
+    synthesis["runtime_evidence"] = dict(npm_test)
     report.synthesis = synthesis
 
     # Convergence (preview — actual write happens in materialize_qa_synthesis).
@@ -406,11 +561,27 @@ def finalize_qa_verdict(
     # Gate input.
     report.gate_input = _build_gate_input(synthesis, report.samvil_tier)
 
-    # Ralph-loop BLOCKED detection.
-    report.blocked = _detect_blocked(qa_history)
+    # Ralph-loop BLOCKED detection. `convergence` includes the current
+    # synthesis; the legacy helper only sees already-persisted history.
+    history_blocked = _detect_blocked(qa_history)
+    if str(report.convergence.get("verdict") or "").casefold() == "blocked":
+        report.blocked = {
+            "detected": True,
+            "persistent_issue_ids": list(
+                report.convergence.get("issue_ids")
+                or history_blocked.get("persistent_issue_ids")
+                or []
+            ),
+        }
+    else:
+        report.blocked = history_blocked
 
     # Next-skill decision.
-    report.next_skill_decision = _decide_next_skill(synthesis, state)
+    report.next_skill_decision = _decide_next_skill(
+        synthesis,
+        state,
+        report.convergence,
+    )
 
     # Handoff block.
     report.handoff_block = _render_handoff_block(
@@ -429,5 +600,7 @@ def finalize_qa_verdict(
         )
     if not report.gate_input["metrics"]["three_pass_pass"]:
         report.notes.append("qa_to_deploy gate input: three_pass_pass=False (gate may block)")
+    if synthesis.get("verification_mode") != "runtime":
+        report.notes.append("qa_to_deploy gate input: verification_mode=static (gate must block)")
 
     return report.to_dict()

@@ -7,6 +7,10 @@ budgets. Most v3.1 projects migrate cleanly via
 `samvil-update --migrate v3.2`. This doc explains what changes, how to
 revert, and how to verify.
 
+> Current contract note: the planned v3.3 Council deletion was superseded.
+> Council remains default-off and available only through exact `--council`
+> compatibility opt-in; see `references/council-retirement-migration.md`.
+
 ## TL;DR
 
 ```bash

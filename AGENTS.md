@@ -62,7 +62,7 @@ Key tools used throughout the pipeline:
 | `read_chain_marker(project_root)` | Read current pipeline state |
 | `write_chain_marker(project_root, host_name, current_skill)` | Advance to next stage |
 | `score_ambiguity(interview_state, tier)` | Check if interview is complete |
-| `validate_seed(seed_path)` | Validate seed.json |
+| `validate_seed(seed_json)` | Validate seed.json |
 | `snapshot_generation(project_root)` | Capture evolve cycle results (regression guard) |
 | `get_health_tier_summary(project_root)` | MCP health: healthy / degraded / critical |
 
@@ -85,7 +85,7 @@ automatically — just follow `next_skill` from the marker.
 
 ## 5. Critical Rules
 
-1. **Seed is SSOT** — always read `.samvil/project.seed.json` at each stage.
+1. **Seed is SSOT** — always read root `project.seed.json` at each stage.
 2. **Evidence-based assertions** — every PASS verdict needs a `file:line` reference (P1).
 3. **Stub = FAIL** — hardcoded or mocked values trigger automatic FAIL (P8).
 4. **Circuit Breaker** — same failure twice in a row → stop and report to user.
@@ -98,8 +98,8 @@ automatically — just follow `next_skill` from the marker.
 
 | File | Contents |
 |---|---|
-| `.samvil/project.seed.json` | Requirements, features, ACs |
-| `.samvil/project.state.json` | Current pipeline stage |
+| `project.seed.json` | Requirements, features, ACs |
+| `project.state.json` | Current pipeline stage |
 | `.samvil/handoff.md` | Cross-session continuation notes |
 | `.samvil/qa-results.json` | QA pass/fail verdicts |
 | `.samvil/events.jsonl` | Event audit log |

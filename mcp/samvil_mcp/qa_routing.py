@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .qa_finalize import _decide_next_skill
 from .qa_synthesis import read_qa_results
 
 QA_ROUTING_SCHEMA_VERSION = "1.0"
@@ -35,9 +36,10 @@ def build_qa_recovery_routing(
     results = qa_results if qa_results is not None else read_qa_results(root) or {}
     synthesis = results.get("synthesis") or {}
     convergence = results.get("convergence") or synthesis.get("convergence") or {}
+    state = _load_json(root / "project.state.json")
     issue_ids = [str(item) for item in (convergence.get("issue_ids") or synthesis.get("issue_ids") or [])]
     issue_families = _issue_families(issue_ids)
-    primary = _primary_route(synthesis, convergence, issue_families)
+    primary = _primary_route(synthesis, convergence, issue_families, state)
     alternatives = _alternatives(primary, synthesis, convergence, issue_families)
     routing = {
         "schema_version": QA_ROUTING_SCHEMA_VERSION,
@@ -131,10 +133,12 @@ def _primary_route(
     synthesis: dict[str, Any],
     convergence: dict[str, Any],
     issue_families: dict[str, int],
+    state: dict[str, Any],
 ) -> dict[str, Any]:
     conv = str(convergence.get("verdict") or "")
-    verdict = str(synthesis.get("verdict") or "")
     reason = str(convergence.get("reason") or synthesis.get("reason") or "")
+    decision = _decide_next_skill(synthesis, state, convergence)
+    suggested = str(decision.get("suggested") or "")
     if conv not in {"blocked", "failed"}:
         return _route(
             "samvil-qa",
@@ -143,52 +147,17 @@ def _primary_route(
             "continue QA revise loop",
             confidence="medium",
         )
-    if issue_families.get("ownership"):
-        return _route(
-            "samvil-retro",
-            "retro",
-            "independent QA ownership violation needs process correction",
-            "record ownership violation and tighten QA contract",
-            confidence="high",
-        )
-    if issue_families.get("pass1"):
-        return _route(
-            "samvil-build",
-            "manual_repair",
-            "mechanical QA is still failing",
-            "fix mechanical build or smoke failures before rerunning QA",
-            confidence="high",
-        )
-    if issue_families.get("pass2"):
-        return _route(
-            "samvil-evolve",
-            "seed_evolve",
-            "functional acceptance criteria did not converge",
-            "evolve the seed or acceptance criteria before another build loop",
-            confidence="high",
-        )
-    if issue_families.get("pass3"):
-        return _route(
-            "samvil-build",
-            "manual_repair",
-            "quality findings persisted without functional failures",
-            "apply targeted UX/accessibility/code-quality repair before rerunning QA",
-            confidence="medium",
-        )
-    if conv == "failed" or verdict == "FAIL":
-        return _route(
-            "samvil-retro",
-            "retro",
-            reason or "QA failed after max iterations",
-            "stop the run and capture retro findings",
-            confidence="medium",
-        )
+    recovery_skill = (
+        suggested
+        if suggested in {"samvil-evolve", "samvil-build", "samvil-retro"}
+        else "samvil-retro"
+    )
     return _route(
-        "samvil-evolve",
-        "seed_evolve",
-        reason or "QA convergence blocked",
-        "evolve seed or request manual decision",
-        confidence="medium",
+        recovery_skill,
+        "retro" if recovery_skill == "samvil-retro" else "qa_recovery",
+        str(decision.get("reason") or reason or "QA recovery requires user choice"),
+        "review evolve, retro, or manual-fix options before continuing",
+        confidence="high",
     )
 
 

@@ -21,10 +21,12 @@ def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _next_after_seed(tier: str) -> tuple[str, str]:
-    if tier == "minimal":
-        return "samvil-design", "minimal tier skips council"
-    return "samvil-council", f"{tier} tier routes through council"
+def _next_after_seed(tier: str, council_opt_in: bool = False) -> tuple[str, str]:
+    if council_opt_in and tier != "minimal":
+        return "samvil-council", f"{tier} tier explicitly enables council"
+    if council_opt_in:
+        return "samvil-design", "minimal tier skips council despite explicit opt-in"
+    return "samvil-design", "council is default-off"
 
 
 def _marker(host: str, next_skill: str, reason: str, from_stage: str, created_by: str) -> dict:
@@ -72,7 +74,9 @@ def replay_host(host: str) -> dict:
         if seed["name"] != "small-web-app":
             raise AssertionError("fixture seed did not load")
 
-        seed_next, seed_reason = _next_after_seed(config["samvil_tier"])
+        seed_next, seed_reason = _next_after_seed(
+            config["samvil_tier"], "--council" in config.get("flags", [])
+        )
         seed_result = _continue(project_root, host, seed_next, seed_reason, "seed")
         design_result = _continue(
             project_root,

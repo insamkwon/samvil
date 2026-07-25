@@ -7,7 +7,7 @@ skill's purpose — but every machine-checkable contract the skill relies
 on lives below:
 
 - `aggregate_interview_state` MCP wrapper resolves tier (state > config
-  > default) including the v3.1 `deep` alias which interview keeps.
+  > default), including the canonical strictest `deep` tier.
 - Built-in preset matching for each major solution_type keyword set.
 - Custom-preset scan honors `~/.samvil/presets/*.json` (or
   `$SAMVIL_PRESET_DIR`) and beats built-ins on overlapping keywords.
@@ -18,9 +18,9 @@ on lives below:
   same payload.
 - Graceful degradation — missing files / unreadable preset dir never
   raises, only populates `errors[]`.
-- Wiring — both the new aggregator and the legacy MCP tools the skill
-  still calls (`route_question`, `score_ambiguity`, `compute_seed_readiness`,
-  `gate_check`, `claim_post`, `render_domain_context`, `save_event`)
+- Wiring — both the new aggregator and the MCP tools the skill still calls
+  (`route_question`, `score_ambiguity`, `gate_check`, `claim_post`,
+  `render_domain_context`, `save_event`)
   are registered on `samvil_mcp.server.mcp`.
 
 The Korean phase prompts and tier-routing prose stay in SKILL.md and are
@@ -29,6 +29,7 @@ validated by interactive `/samvil:samvil-interview` runs.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -137,6 +138,34 @@ def test_ambiguity_target_matches_engine_for_all_tiers():
         assert TIER_AMBIGUITY_TARGETS[tier] == TIER_TARGETS[tier], (
             f"{tier}: aggregate target diverges from engine"
         )
+
+
+def test_aggregate_exposes_question_budget(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAMVIL_PRESET_DIR", str(tmp_path / "presets-empty"))
+    result = aggregate_interview_state(tmp_path, prompt="todo app")
+
+    assert result["question_budget"] == {
+        "max_questions": 12,
+        "extension_questions": 5,
+    }
+
+
+def test_score_ambiguity_mcp_applies_extension() -> None:
+    from samvil_mcp.server import score_ambiguity
+
+    result = json.loads(
+        asyncio.run(
+            score_ambiguity(
+                interview_state="{}",
+                tier="minimal",
+                questions_asked=6,
+                question_extensions=1,
+            )
+        )
+    )
+
+    assert result["effective_max_questions"] == 11
+    assert result["budget_exhausted"] is False
 
 
 def test_required_phases_mirror_engine_for_all_tiers():
@@ -398,10 +427,10 @@ def test_interview_tools_registered_on_server() -> None:
         "update_answer_streak",
         "manage_tracks",
         "get_tier_phases",
-        "compute_seed_readiness",
         "gate_check",
         "claim_post",
         "render_domain_context",
         "save_event",
     ):
         assert required in names, f"missing MCP tool: {required}"
+    assert "compute_seed_readiness" not in names

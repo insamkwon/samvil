@@ -1481,13 +1481,13 @@ process.exit(ok ? 0 : 1);
   Build: passing
 ```
 
-**If build fails — Circuit Breaker (MAX_RETRIES=2):**
+**If build fails — Circuit Breaker (`MAX_RETRIES`, `references/decision-boundaries.md`):**
 
 1. Read error: `tail -30 .samvil/build.log`
 2. Diagnose and fix
 3. Log fix to `.samvil/fix-log.md`
 4. Retry build
-5. Still fails after 2 retries? → **STOP** and report to user
+5. Still fails at the `MAX_RETRIES` boundary? → **STOP** and report to user
 
 #### game
 
@@ -1509,8 +1509,8 @@ echo "Vite build exit code: $?"
   Build: passing
 ```
 
-**If game build fails — Circuit Breaker (MAX_RETRIES=2):**
-Same as web-app: read error, diagnose, fix, retry, MAX_RETRIES=2.
+**If game build fails — Circuit Breaker (`MAX_RETRIES`):**
+Same as web-app: read error, diagnose, fix, retry; value from `references/decision-boundaries.md`.
 
 #### mobile (Expo)
 
@@ -1530,8 +1530,8 @@ echo "Expo web export exit code: $?"
   Build: passing (web export)
 ```
 
-**If mobile build fails — Circuit Breaker (MAX_RETRIES=2):**
-Same as web-app: read error, diagnose, fix, retry, MAX_RETRIES=2.
+**If mobile build fails — Circuit Breaker (`MAX_RETRIES`):**
+Same as web-app: read error, diagnose, fix, retry; value from `references/decision-boundaries.md`.
 
 #### automation
 
@@ -1571,8 +1571,8 @@ ls ~/dev/<seed.name>/SKILL.md
   Build: passing
 ```
 
-**If automation build fails — Circuit Breaker (MAX_RETRIES=2):**
-Same as web-app: read error, diagnose, fix, retry, MAX_RETRIES=2.
+**If automation build fails — Circuit Breaker (`MAX_RETRIES`):**
+Same as web-app: read error, diagnose, fix, retry; value from `references/decision-boundaries.md`.
 
 ### Step 5: Update State and Chain (INV-4)
 

@@ -434,6 +434,88 @@ class TestQAFinalize:
         result = qa_finalize.finalize_qa_verdict(tmp_path, evidence=evidence)
         assert result["synthesis"]["verdict"] == "PASS"
 
+    def test_verify_contract_cannot_pass_without_trusted_runner(
+        self, tmp_path: Path
+    ) -> None:
+        seed = _seed()
+        leaf = seed["features"][0]["acceptance_criteria"][0]
+        leaf["verify"] = {
+            "command": "npx playwright test tests/e2e/feature-0.spec.ts"
+        }
+        _write(tmp_path / "project.seed.json", seed)
+        _write(tmp_path / "project.state.json", _state())
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path,
+            evidence=_make_evidence(),
+        )
+
+        assert result["synthesis"]["verdict"] != "PASS"
+        item = result["synthesis"]["pass2"]["items"][0]
+        assert item["verdict"] == "FAIL"
+        assert item["mechanical_verification"]["ran"] is False
+        assert any("trusted AC command runner unavailable" in note for note in result["notes"])
+
+    def test_non_object_verify_contract_cannot_be_ignored(
+        self, tmp_path: Path
+    ) -> None:
+        seed = _seed()
+        leaf = seed["features"][0]["acceptance_criteria"][0]
+        leaf["verify"] = "pytest"
+        _write(tmp_path / "project.seed.json", seed)
+        _write(tmp_path / "project.state.json", _state())
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path,
+            evidence=_make_evidence(),
+        )
+
+        assert result["synthesis"]["verdict"] != "PASS"
+        item = result["synthesis"]["pass2"]["items"][0]
+        assert item["id"] == "feature_0.ac.1"
+        assert item["verdict"] == "FAIL"
+        assert item["reason"] == "verify must be an object"
+        assert item["mechanical_verification"]["errors"] == [
+            "verify must be an object"
+        ]
+
+    def test_missing_verify_leaf_is_synthesized_as_fail(self, tmp_path: Path) -> None:
+        seed = _seed(features_count=2)
+        missing = seed["features"][1]["acceptance_criteria"][0]
+        missing["verify"] = {
+            "command": "npx playwright test tests/e2e/feature-1.spec.ts"
+        }
+        _write(tmp_path / "project.seed.json", seed)
+        _write(tmp_path / "project.state.json", _state())
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path,
+            evidence=_make_evidence(),
+        )
+
+        by_id = {
+            item["id"]: item for item in result["synthesis"]["pass2"]["items"]
+        }
+        assert by_id["feature_1.ac.1"]["verdict"] == "FAIL"
+
+    def test_verify_leaf_without_id_is_synthesized_as_fail(self, tmp_path: Path) -> None:
+        seed = _seed()
+        leaf = seed["features"][0]["acceptance_criteria"][0]
+        leaf.pop("id")
+        leaf["verify"] = {"command": "python -m unittest"}
+        _write(tmp_path / "project.seed.json", seed)
+        _write(tmp_path / "project.state.json", _state())
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path,
+            evidence=_make_evidence(),
+        )
+
+        by_id = {
+            item["id"]: item for item in result["synthesis"]["pass2"]["items"]
+        }
+        assert by_id["__verify_missing_id_1"]["verdict"] == "FAIL"
+
     def test_at_2_one_fail_synthesis_revise(self, tmp_path: Path) -> None:
         _write(tmp_path / "project.state.json", _state())
         evidence = _make_evidence(
@@ -598,6 +680,8 @@ class TestQAFinalize:
         assert gi["metrics"]["three_pass_pass"] is True
         assert gi["metrics"]["zero_stubs"] is True
         assert gi["metrics"]["fail_count"] == 0
+        assert gi["metrics"]["runtime_verified"] is False
+        assert gi["metrics"]["verification_mode"] == "static"
 
     def test_cl_5b_gate_input_blocked_on_fail(self, tmp_path: Path) -> None:
         _write(tmp_path / "project.state.json", _state())
@@ -609,6 +693,40 @@ class TestQAFinalize:
         result = qa_finalize.finalize_qa_verdict(tmp_path, evidence=evidence)
         assert result["gate_input"]["metrics"]["three_pass_pass"] is False
         assert result["gate_input"]["metrics"]["fail_count"] >= 1
+
+    def test_cl_5c_finalize_does_not_trust_model_writable_runtime_artifacts(
+        self, tmp_path: Path
+    ) -> None:
+        _write(tmp_path / "project.state.json", _state())
+        _write(tmp_path / ".samvil" / "qa.log", "SAMVIL_EXIT:0\n")
+        _write(
+            tmp_path / ".samvil" / "test-results.json",
+            {"stats": {"expected": 1, "unexpected": 0, "skipped": 0}},
+        )
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path, evidence=_make_evidence()
+        )
+
+        assert result["synthesis"]["verification_mode"] == "static"
+        assert result["synthesis"]["runtime_evidence"]["passed"] == 1
+        assert result["gate_input"]["metrics"]["runtime_verified"] is False
+        assert result["gate_input"]["metrics"]["verification_mode"] == "static"
+        assert result["stage_evidence"]["qa"]["artifact_runtime_passed"] is True
+        assert result["stage_evidence"]["qa"]["runtime_verified"] is False
+
+    def test_cl_5d_finalize_fails_closed_to_static_mode(self, tmp_path: Path) -> None:
+        _write(tmp_path / "project.state.json", _state())
+        evidence = _make_evidence()
+        evidence["verification_mode"] = "runtime"
+
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path, evidence=evidence
+        )
+
+        assert result["synthesis"]["verification_mode"] == "static"
+        assert result["gate_input"]["metrics"]["verification_mode"] == "static"
+        assert "PASS(static)" in result["handoff_block"]
 
     def test_cl_6_blocked_detection_carried_in_handoff(self, tmp_path: Path) -> None:
         history = [
@@ -622,6 +740,35 @@ class TestQAFinalize:
         assert "BLOCKED" in result["handoff_block"]
         assert "x" in result["handoff_block"]
         assert "y" in result["handoff_block"]
+
+    def test_cl_6b_current_repeated_issue_is_carried_in_handoff(
+        self, tmp_path: Path
+    ) -> None:
+        history = [
+            {"iteration": 1, "issue_ids": ["pass2:AC-1:UNIMPLEMENTED"]},
+        ]
+        _write(tmp_path / "project.state.json", _state(qa_history=history))
+        result = qa_finalize.finalize_qa_verdict(
+            tmp_path,
+            evidence=_make_evidence(
+                pass2_items=[
+                    {
+                        "id": "AC-1",
+                        "criterion": "Create task",
+                        "verdict": "UNIMPLEMENTED",
+                        "reason": "stub",
+                    },
+                ],
+                iteration=2,
+            ),
+        )
+
+        assert result["convergence"]["verdict"] == "blocked"
+        assert result["blocked"]["detected"] is True
+        assert result["blocked"]["persistent_issue_ids"] == [
+            "pass2:AC-1:UNIMPLEMENTED"
+        ]
+        assert "BLOCKED" in result["handoff_block"]
 
     def test_cl_7_next_skill_pass_to_deploy(self, tmp_path: Path) -> None:
         _write(tmp_path / "project.state.json", _state())
@@ -643,7 +790,7 @@ class TestQAFinalize:
         assert result["next_skill_decision"]["suggested"] == "samvil-evolve"
         assert "partial_count" in result["next_skill_decision"]["reason"]
 
-    def test_cl_7c_next_skill_fail_to_retro(self, tmp_path: Path) -> None:
+    def test_cl_7c_revise_with_continue_stays_in_qa(self, tmp_path: Path) -> None:
         _write(tmp_path / "project.state.json", _state())
         evidence = _make_evidence(
             pass2_items=[
@@ -651,9 +798,36 @@ class TestQAFinalize:
             ]
         )
         result = qa_finalize.finalize_qa_verdict(tmp_path, evidence=evidence)
+
+        assert result["synthesis"]["verdict"] == "REVISE"
+        assert result["convergence"]["verdict"] == "continue"
+        assert result["next_skill_decision"]["suggested"] == "samvil-qa"
+
+    def test_cl_7d_failed_convergence_routes_to_retro(self, tmp_path: Path) -> None:
+        _write(tmp_path / "project.state.json", _state())
+        evidence = _make_evidence(
+            pass2_items=[
+                {"id": "f.1", "criterion": "x", "verdict": "FAIL", "evidence": []},
+            ],
+            iteration=3,
+            max_iterations=3,
+        )
+        result = qa_finalize.finalize_qa_verdict(tmp_path, evidence=evidence)
+
+        assert result["convergence"]["verdict"] == "failed"
         assert result["next_skill_decision"]["suggested"] == "samvil-retro"
         assert "samvil-evolve" in result["next_skill_decision"]["user_options"]
         assert "samvil-retro" in result["next_skill_decision"]["user_options"]
+
+    @pytest.mark.parametrize("verdict", ["", "BOGUS"])
+    def test_cl_7e_unknown_verdict_fails_closed_in_qa(self, verdict: str) -> None:
+        decision = qa_finalize._decide_next_skill(
+            {"verdict": verdict, "pass2": {"counts": {}}},
+            {},
+        )
+
+        assert decision["suggested"] == "samvil-qa"
+        assert decision["user_options"] == ["samvil-qa"]
 
     def test_cl_8_no_state_file_does_not_raise(self, tmp_path: Path) -> None:
         # No project.state.json — graceful (INV-5).

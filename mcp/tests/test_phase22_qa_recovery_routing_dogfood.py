@@ -19,4 +19,4 @@ def test_phase22_qa_recovery_routing_dogfood_passes():
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "OK: phase22 QA recovery routing dogfood passed" in result.stdout
-    assert "next_skill=samvil-evolve" in result.stdout
+    assert "next_skill=samvil-retro" in result.stdout

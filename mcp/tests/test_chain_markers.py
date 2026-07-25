@@ -7,6 +7,7 @@ from pathlib import Path
 from samvil_mcp.chain_markers import (
     write_chain_marker,
     read_chain_marker,
+    resolve_stage_next_skill,
     clear_chain_marker,
     advance_chain,
     get_pipeline_status,
@@ -37,9 +38,32 @@ class TestWriteChainMarker:
     def test_marker_content(self, project_root):
         result = write_chain_marker(project_root, "codex_cli", "samvil-build")
         assert result["next_skill"] == "samvil-qa"
+        assert result["command"] == "samvil samvil-qa"
         assert result["chain_via"] == "file_marker"
         assert result["host_name"] == "codex_cli"
         assert "written_at" in result
+
+    def test_dynamic_override_updates_command_with_next_skill(self, project_root):
+        result = write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-qa",
+            next_skill="samvil-evolve",
+        )
+
+        assert result["next_skill"] == "samvil-evolve"
+        assert result["command"] == "samvil samvil-evolve"
+
+    def test_orchestrator_dynamic_override_preserves_pm_route(self, project_root):
+        result = write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil",
+            next_skill="samvil-pm-interview",
+        )
+
+        assert result["next_skill"] == "samvil-pm-interview"
+        assert result["command"] == "samvil samvil-pm-interview"
 
     def test_creates_samvil_dir(self, project_root):
         samvil_dir = Path(project_root) / SAMVIL_DIR
@@ -78,6 +102,35 @@ class TestReadChainMarker:
         marker_path.write_text("not json{")
         assert read_chain_marker(project_root) is None
 
+    @pytest.mark.parametrize("payload", [[], "samvil-qa", 1, True])
+    def test_handles_parseable_non_object_json(self, project_root, payload):
+        marker_path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        assert read_chain_marker(project_root) is None
+        assert advance_chain(project_root, "codex_cli") == {
+            "next_skill": "",
+            "status": "pipeline_complete",
+        }
+
+
+def test_pm_council_override_is_disabled_for_minimal_tier(project_root):
+    root = Path(project_root)
+    (root / "project.state.json").write_text(
+        json.dumps({"samvil_tier": "minimal"}),
+        encoding="utf-8",
+    )
+    (root / "project.config.json").write_text(
+        json.dumps({"flags": ["--council"]}),
+        encoding="utf-8",
+    )
+
+    assert (
+        resolve_stage_next_skill(project_root, "samvil-pm-interview")
+        == "samvil-design"
+    )
+
 
 class TestClearChainMarker:
     def test_removes_marker(self, project_with_marker):
@@ -98,6 +151,238 @@ class TestAdvanceChain:
         # new marker's next_skill = build (next after scaffold)
         result = advance_chain(project_with_marker, "codex_cli")
         assert result["next_skill"] == "samvil-build"
+
+    def test_advance_chain_honors_pm_council_project_policy(self, project_root):
+        root = Path(project_root)
+        (root / "project.state.json").write_text(
+            json.dumps({"samvil_tier": "standard"}),
+            encoding="utf-8",
+        )
+        (root / "project.config.json").write_text(
+            json.dumps({"flags": ["--council"]}),
+            encoding="utf-8",
+        )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil",
+            next_skill="samvil-pm-interview",
+        )
+
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["from_stage"] == "samvil-pm-interview"
+        assert result["next_skill"] == "samvil-council"
+
+    def test_advance_chain_honors_failed_qa_project_policy(self, project_root):
+        root = Path(project_root)
+        (root / "project.state.json").write_text("{}", encoding="utf-8")
+        (root / ".samvil").mkdir(exist_ok=True)
+        (root / ".samvil" / "qa-results.json").write_text(
+            json.dumps(
+                {
+                    "synthesis": {"verdict": "FAIL", "pass2": {"counts": {}}},
+                    "convergence": {"verdict": "failed"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["from_stage"] == "samvil-qa"
+        assert result["next_skill"] == "samvil-retro"
+
+    @pytest.mark.parametrize("qa_results", [None, "not json{"])
+    def test_advance_chain_keeps_qa_when_current_results_are_unavailable(
+        self,
+        project_root,
+        qa_results,
+    ):
+        root = Path(project_root)
+        (root / ".samvil").mkdir(exist_ok=True)
+        if qa_results is not None:
+            (root / ".samvil" / "qa-results.json").write_text(
+                qa_results,
+                encoding="utf-8",
+            )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["next_skill"] == "samvil-qa"
+        assert result["command"] == "samvil samvil-qa"
+        assert result["status"] == "blocked_missing_qa_results"
+
+    @pytest.mark.parametrize(
+        "synthesis",
+        [
+            {"pass2": {"counts": {}}},
+            {"verdict": "BOGUS", "pass2": {"counts": {}}},
+        ],
+    )
+    def test_advance_chain_keeps_qa_for_untrusted_verdict(
+        self,
+        project_root,
+        synthesis,
+    ):
+        root = Path(project_root)
+        (root / ".samvil").mkdir(exist_ok=True)
+        (root / ".samvil" / "qa-results.json").write_text(
+            json.dumps({"synthesis": synthesis}),
+            encoding="utf-8",
+        )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["next_skill"] == "samvil-qa"
+        assert result["status"] == "blocked_missing_qa_results"
+
+    @pytest.mark.parametrize(
+        "qa_results",
+        [
+            {"synthesis": "corrupt"},
+            {
+                "synthesis": {"verdict": "PASS", "pass2": {"counts": {}}},
+                "convergence": ["corrupt"],
+            },
+            {
+                "synthesis": {"verdict": "PASS", "pass2": {"counts": {}}},
+                "convergence": [],
+            },
+            {"synthesis": {"verdict": "PASS", "pass2": "corrupt"}},
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass2": {"counts": ["corrupt"]},
+                }
+            },
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass2": {"counts": {"PARTIAL": "corrupt"}},
+                }
+            },
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass2": {"counts": {"PARTIAL": []}},
+                }
+            },
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass2": {"counts": {"PARTIAL": True}},
+                }
+            },
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass2": {"counts": {"PARTIAL": -1}},
+                }
+            },
+        ],
+    )
+    def test_advance_chain_keeps_qa_for_parseable_structural_corruption(
+        self,
+        project_root,
+        qa_results,
+    ):
+        root = Path(project_root)
+        (root / ".samvil").mkdir(exist_ok=True)
+        (root / ".samvil" / "qa-results.json").write_text(
+            json.dumps(qa_results),
+            encoding="utf-8",
+        )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        assert resolve_stage_next_skill(project_root, "samvil-qa") is None
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["next_skill"] == "samvil-qa"
+        assert result["status"] == "blocked_missing_qa_results"
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            {"build_retries": "corrupt"},
+            {"build_retries": []},
+            {"build_retries": True},
+            {"build_retries": -1},
+            {"qa_history": "corrupt"},
+        ],
+    )
+    def test_advance_chain_keeps_qa_for_corrupt_routing_state(
+        self, project_root, state
+    ):
+        root = Path(project_root)
+        (root / ".samvil").mkdir(exist_ok=True)
+        (root / ".samvil" / "qa-results.json").write_text(
+            json.dumps(
+                {
+                    "synthesis": {
+                        "verdict": "PASS",
+                        "pass2": {"counts": {"PARTIAL": 0}},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "project.state.json").write_text(
+            json.dumps(state),
+            encoding="utf-8",
+        )
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        assert resolve_stage_next_skill(project_root, "samvil-qa") is None
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["next_skill"] == "samvil-qa"
+        assert result["status"] == "blocked_missing_qa_results"
+
+    def test_advance_chain_keeps_qa_for_non_utf8_results(self, project_root):
+        root = Path(project_root)
+        (root / ".samvil").mkdir(exist_ok=True)
+        (root / ".samvil" / "qa-results.json").write_bytes(b"\xff\xfe\x00")
+        write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        assert resolve_stage_next_skill(project_root, "samvil-qa") is None
+        result = advance_chain(project_root, "codex_cli")
+
+        assert result["next_skill"] == "samvil-qa"
+        assert result["status"] == "blocked_missing_qa_results"
 
     def test_pipeline_complete(self, project_root):
         write_chain_marker(project_root, "generic", "samvil-retro")

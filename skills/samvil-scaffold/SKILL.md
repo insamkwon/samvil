@@ -1,6 +1,6 @@
 ---
 name: samvil-scaffold
-description: "CLI-based project scaffold. Supports Next.js, Vite+React, Astro, Phaser, Expo, python-script, node-script, cc-skill. No template folder dependency."
+description: "CLI-based project scaffold. Supports Next.js, Vite+React, Astro, Phaser, Expo, python-script, node-script, cc-skill. No template folder dependency. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-scaffold (ultra-thin)
@@ -80,7 +80,7 @@ pin matches `package.json`; on mismatch `npm install <pkg>@<exact>`
 **PASS**: print `[SAMVIL] Stage 3/5: Scaffold ✓` with project path,
 framework label, build status.
 
-**FAIL — MAX_RETRIES=2**: `tail -30 <build_log_path>`, apply per-stack
+**FAIL — `MAX_RETRIES` from `references/decision-boundaries.md`**: `tail -30 <build_log_path>`, apply per-stack
 recovery (`SKILL.legacy.md` §"Step 4"), append fix to `.samvil/fix-log.md`,
 retry. Two failures → STOP, report user (P10).
 
@@ -94,12 +94,12 @@ mcp__samvil_mcp__evaluate_scaffold_target(project_path="~/dev/<seed.name>", run_
 
 ## Step 5.5 — Test Harness (tests-as-deliverable, B)
 
-Browser solution_types (`web-app`/`dashboard`/`game`): `mcp__samvil_mcp__scaffold_test_harness(project_root="~/dev/<seed.name>", base_url="http://localhost:4173", base_path="/")` → writes `playwright.config.ts` + `tests/e2e/smoke.spec.ts` + patches `package.json` `test` script. The delivered repo gets a runnable `npm test` from here; samvil-qa later appends one spec per AC. `automation` keeps its `tests/test_dry_run.*` (scaffold catalog). On `error`: best-effort, continue (P8) — QA still verifies, just no committed spec.
+Browser solution_types (`web-app`/`dashboard`/`game`/`mobile-app`): `mcp__samvil_mcp__scaffold_test_harness(project_root="~/dev/<seed.name>", base_url="http://localhost:4173", base_path="/")` → writes `playwright.config.ts` + `tests/e2e/smoke.spec.ts` + patches `package.json` `test` script. For Expo/mobile projects the harness detects `expo`, switches to `http://localhost:8081`, and starts `npx expo start --web --non-interactive`; the delivered repo still gets a runnable `npm test` from here, and samvil-qa later appends one spec per AC. `automation` keeps its `tests/test_dry_run.*` (scaffold catalog). On `error`: best-effort, continue (P8) — QA still verifies, just no committed spec.
 
 ## Step 6 — Persist + Chain
 
-1. Append Scaffold block to `.samvil/handoff.md` via Bash `cat >>` or Edit (never Write tool): include `framework`, `label`, `existing_project.signal`, build status.
-2. Best-effort `mcp__samvil_mcp__save_event(event_type="scaffold_complete", stage="build", data='{"framework":"<framework>","build_passed":true}')`.
+1. Append Scaffold block to `.samvil/handoff.md` via Edit (never Write tool or Bash redirection), then atomically persist the successful `sanity_result` as `.samvil/scaffold-results.json` with `all_passed=true`.
+2. `mcp__samvil_mcp__complete_stage(session_id="<sid>", stage="scaffold", verdict="pass")` emits canonical `scaffold_complete`; any error halts before chaining.
 3. Print `[SAMVIL] Stage 4/5: Building core experience...`, then invoke the Skill tool with `samvil-build`. Codex CLI fallback: read `skills/samvil-build/SKILL.md`.
 
 ## Anti-Patterns
@@ -108,7 +108,7 @@ Browser solution_types (`web-app`/`dashboard`/`game`): `mcp__samvil_mcp__scaffol
 2. Skipping Tailwind overwrite re-write after `shadcn init` (QA "no colors").
 3. Hardcoding external-API model ID (`game-asset-gen` Gemini-404).
 4. Business logic in scaffold — components/`src/` skeleton only.
-5. Auto-retry past `MAX_RETRIES=2` (Circuit Breaker; P10).
+5. Auto-retry past the `MAX_RETRIES` boundary in `references/decision-boundaries.md` (P10).
 6. Hard-coding next chain target — always invoke `samvil-build`. 7. **`AskUserQuestion` 호출 포맷**: `questions=["<질문>"]` 배열만 허용; 문자열 직접 전달 시 `InputValidationError`.
 
 ## Legacy reference

@@ -6,31 +6,31 @@ update the mapping, then re-run the script.
 
 ## Summary
 
+Agent persona files: **41**
+
+Inline runtime identities: **2** (`build-worker`, `compressor`)
+
 | Role | Count | Write authority |
 |------|------:|-----------------|
-| `generator` | 18 | files in scope |
+| `generator` | 14 | files in scope |
 | `reviewer` | 17 | read + propose |
-| `judge` | 7 | read + mark PASS/FAIL |
+| `judge` | 4 | read + mark PASS/FAIL |
 | `repairer` | 1 | edit only files listed by diagnosis |
 | `researcher` | 2 | external + read only |
 | `compressor` | 1 | handoff / seed summary (inline) |
-| `out_of_band` | 6 | n/a — not part of six-role taxonomy |
+| `out_of_band` | 4 | n/a — not part of six-role taxonomy |
 
 ## Agents by role
 
 ### generator
 
-- `automation-architect`
 - `automation-engineer`
 - `backend-dev` (secondary: repairer)
 - `build-worker` (secondary: repairer)
-- `deployer`
 - `frontend-dev` (secondary: repairer)
-- `game-architect`
 - `game-art-architect`
 - `game-developer` (secondary: repairer)
 - `infra-dev`
-- `mobile-architect`
 - `mobile-developer` (secondary: repairer)
 - `scaffolder`
 - `seed-architect`
@@ -61,9 +61,6 @@ update the mapping, then re-run the script.
 
 ### judge
 
-- `automation-qa`
-- `game-qa`
-- `mobile-qa`
 - `product-owner`
 - `qa-functional`
 - `qa-mechanical`
@@ -84,9 +81,7 @@ update the mapping, then re-run the script.
 
 ### out_of_band
 
-- `automation-interviewer`
 - `game-interviewer`
-- `mobile-interviewer`
 - `orchestrator-agent`
 - `socratic-interviewer`
 - `user-interviewer`

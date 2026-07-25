@@ -4,17 +4,17 @@ The samvil orchestrator skill is the `/samvil` entry point. It keeps the
 bits that need a real shell / user interaction:
 
 - Health Check shell calls (Node/Python/uv/gh/MCP discovery).
-- AskUserQuestion checkpoints (project mode, tier, L3 solution_type
-  confirmation, resume vs fresh start).
+- AskUserQuestion checkpoints (unresolved project mode, tier, medium/low
+  confidence L3 solution_type confirmation, resume vs fresh start).
 - Chain dispatch (Skill tool when claude_code, file marker otherwise).
 
 What CAN be machine-pinned, and is pinned here, is the new
 `aggregate_orchestrator_state` MCP tool the thin skill delegates to. It owns:
 
-- Tier resolution with precedence cli > state > config > default
-  (deprecated v3.1 'deep' alias mapped to 'full' with `aliased_from`).
+- Tier resolution with precedence cli > state > config > default, including
+  the canonical strictest `deep` tier.
 - 3-layer solution_type detection (L1 keyword + L2 context, web-app fallback).
-  Layer-3 user confirmation still happens in the skill body.
+  Layer-3 confirmation remains host-bound; high confidence is notification-only.
 - PM-mode detection from the one-line prompt.
 - Brownfield + resume detection from filesystem artifacts + state.
 - First-skill selection (analyze / interview / pm-interview / resume target).
@@ -170,13 +170,14 @@ def test_aggregate_tier_state_overrides_config(tmp_path: Path) -> None:
     assert result["tier"]["source"] == "state"
 
 
-def test_aggregate_tier_deep_alias_mapped_to_full(tmp_path: Path) -> None:
-    """v3.1 'deep' alias is mapped to v3.2 'full' with `aliased_from`."""
+def test_aggregate_tier_preserves_deep(tmp_path: Path) -> None:
+    """The strictest deep tier must remain distinct through orchestration."""
     result = aggregate_orchestrator_state(
         tmp_path, prompt="todo app", cli_tier="deep"
     )
-    assert result["tier"]["samvil_tier"] == "full"
-    assert result["tier"]["aliased_from"] == "deep"
+    assert result["tier"]["samvil_tier"] == "deep"
+    assert result["tier"]["aliased_from"] == ""
+    assert "deep" in result["tier"]["valid_tiers"]
 
 
 def test_aggregate_tier_invalid_falls_back_to_default(tmp_path: Path) -> None:
@@ -237,6 +238,34 @@ def test_aggregate_resume_state_present(tmp_path: Path) -> None:
     assert result["chain"]["next_skill"] == "samvil-build"
 
 
+def test_resume_after_seed_skips_default_off_council(tmp_path: Path) -> None:
+    _write_state(
+        tmp_path,
+        completed_stages=["interview", "seed"],
+        current_stage="seed",
+        samvil_tier="standard",
+    )
+    result = aggregate_orchestrator_state(tmp_path, prompt="todo app")
+    assert result["council_opt_in"] is False
+    assert result["chain"]["next_skill"] == "samvil-design"
+
+
+def test_resume_after_seed_honors_persisted_council_flag(tmp_path: Path) -> None:
+    _write_state(
+        tmp_path,
+        completed_stages=["interview", "seed"],
+        current_stage="seed",
+        samvil_tier="standard",
+    )
+    (tmp_path / "project.config.json").write_text(
+        json.dumps({"samvil_tier": "standard", "flags": ["--council"]}),
+        encoding="utf-8",
+    )
+    result = aggregate_orchestrator_state(tmp_path, prompt="todo app")
+    assert result["council_opt_in"] is True
+    assert result["chain"]["next_skill"] == "samvil-council"
+
+
 # ── Chain / first-skill selection ─────────────────────────────
 
 
@@ -244,6 +273,7 @@ def test_aggregate_chain_default_engineering_interview(tmp_path: Path) -> None:
     """Fresh + no PM signals → samvil-interview."""
     result = aggregate_orchestrator_state(tmp_path, prompt="todo app")
     assert result["chain"]["next_skill"] == "samvil-interview"
+    assert result["chain"]["state_stage"] == "interview"
     assert result["is_pm_mode"] is False
 
 
@@ -254,6 +284,7 @@ def test_aggregate_chain_pm_mode_routes_to_pm_interview(tmp_path: Path) -> None:
     )
     assert result["is_pm_mode"] is True
     assert result["chain"]["next_skill"] == "samvil-pm-interview"
+    assert result["chain"]["state_stage"] == "pm-interview"
 
 
 def test_aggregate_chain_brownfield_beats_pm_signals(tmp_path: Path) -> None:
@@ -263,6 +294,7 @@ def test_aggregate_chain_brownfield_beats_pm_signals(tmp_path: Path) -> None:
         tmp_path, prompt="add MVP analytics dashboard"
     )
     assert result["chain"]["next_skill"] == "samvil-analyze"
+    assert result["chain"]["state_stage"] == "analyze"
 
 
 def test_aggregate_chain_resume_overrides_pm_default(tmp_path: Path) -> None:

@@ -4,6 +4,36 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## Unreleased
+
+- Added enforced per-tier interview question budgets, `[질문 N/max]` progress,
+  and an explicit draft-or-extend-by-5 choice at the cap.
+- Unified interview readiness under the deterministic 10-dimension ambiguity
+  engine, removed LLM-assigned readiness scores, and added Korean vague-text
+  detection with Hangul-aware length floors.
+- Made Council default-off across task creation, seed chaining, resume, and
+  complete-stage routing; only an explicit persisted `--council` opts in.
+- Prevented premature contract gates by disabling the invalid automatic
+  PostToolUse stage-end hook, while surfacing no-Python degradation and seeding
+  fresh-interview project roots for the start hook.
+- Made QA/deploy trust mechanical: project-local events feed retro durations,
+  reporter artifacts override self-reported metrics, static-only evidence blocks
+  deploy, and gate overrides fail closed until a trusted host attestation exists.
+- Reduced happy-path user checkpoints to 12, made Council explicit opt-in, and
+  verified both standard dashboard and standard automation scenarios.
+- Consolidated agent personas and references, hardened destructive-command
+  blocking, labeled untested host execution honestly, and extracted benchmark
+  MCP tools from the monolithic server without changing the 202-tool registry.
+- Closed follow-up review gaps in destructive-command parsing, host-only gate
+  approvals, persisted project-root routing, runtime deploy gating, async AC
+  verification, and canonical `deep` tier propagation.
+- Removed host command execution from AC verification until a portable trusted
+  sandbox exists, and stopped treating model-writable QA artifacts or event ids
+  as deployment/approval authority. Council remains exact opt-in on every host,
+  and QA chooses Deploy, Evolve, or Retro gates only after routing is known.
+
+---
+
 ## v4.32.1 — 2026-06-14
 
 **README body reflects tests-as-deliverable (PATCH)**

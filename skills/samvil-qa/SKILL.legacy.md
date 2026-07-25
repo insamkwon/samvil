@@ -469,15 +469,15 @@ mkdir -p ~/dev/<seed.name>/.samvil/qa-evidence
 모든 Playwright 호출에 다음 규칙 적용:
 
 - **Timeout**: 기본 30초. `project.config.json`의 `playwright_timeout`으로 설정 가능 (단위: ms).
-- **Retry**: 최대 2회, exponential backoff (1초 → 2초).
+- **Retry**: `RUNTIME_PROBE_RETRIES` from `references/decision-boundaries.md`, exponential backoff.
 - **연결 실패 로깅**: Playwright MCP 호출 시 에러가 발생하면, fallback 전에 반드시 에러 내용을 콘솔에 명시적 출력:
   ```
   [SAMVIL] ⚠ Playwright MCP error: <error message>
-  [SAMVIL] Retrying (attempt N/2)...
+  [SAMVIL] Retrying (attempt N/RUNTIME_PROBE_RETRIES)...
   ```
-- **Fallback 전환**: 2회 재시도 후에도 실패 시:
+- **Fallback 전환**: `RUNTIME_PROBE_RETRIES` 소진 후에도 실패 시:
   ```
-  [SAMVIL] ⚠ Playwright MCP unavailable after 2 retries.
+  [SAMVIL] ⚠ Playwright MCP unavailable after RUNTIME_PROBE_RETRIES.
   [SAMVIL] Falling back to static analysis (제한적 검증).
   ```
   이후 정적 분석(Grep/Read)으로 전환. QC 리포트에 `Method: static (Playwright unavailable)`로 기록.
@@ -1575,13 +1575,13 @@ If verdict is REVISE:
    cd ~/dev/<seed.name>
    npm run build > .samvil/build.log 2>&1
    ```
-   Circuit breaker: MAX_RETRIES=2 per fix attempt
+   Circuit breaker: `MAX_RETRIES` per fix attempt; value from `references/decision-boundaries.md`
 3. Re-run all 3 QA passes
 4. Update `qa_history` in `project.state.json`:
    ```json
    { "iteration": 1, "verdict": "REVISE", "issues": ["..."] }
    ```
-5. **MAX_ITERATIONS = config.qa_max_iterations || 3**: After MAX_ITERATIONS REVISE cycles → verdict = FAIL
+5. **MAX_ITERATIONS = config.qa_max_iterations || QA_MAX_ITERATIONS**: After MAX_ITERATIONS REVISE cycles → verdict = FAIL. Default lives in `references/decision-boundaries.md`.
 
 **Convergence check:** Each iteration MUST reduce total issue count compared to previous iteration.
 SAMVIL v3.23 also materializes this as a `qa_convergence` gate in

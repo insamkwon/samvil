@@ -11,7 +11,7 @@ If `next_skill` is not `samvil-resume`, skip and report the expected stage.
 ## Execution
 
 1. Use MCP tool `read_chain_marker` with project_root to confirm stage.
-2. Read `.samvil/project.seed.json` for seed context.
+2. Read `project.seed.json` for seed context.
 3. Execute the samvil-resume stage logic (see `skills/samvil-resume/SKILL.md`).
 4. On completion, use MCP tool `write_chain_marker` with project_root="${PWD}",
    host_name="gemini_cli", current_skill="samvil-resume".

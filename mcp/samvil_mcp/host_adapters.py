@@ -117,14 +117,14 @@ _GENERIC_ALIASES: dict[str, str] = {
 _SKILL_CHAIN: list[dict[str, str]] = [
     {"name": "samvil", "next": "samvil-interview"},
     {"name": "samvil-interview", "next": "samvil-seed"},
-    {"name": "samvil-pm-interview", "next": "samvil-seed"},
-    {"name": "samvil-seed", "next": "samvil-council"},
+    {"name": "samvil-pm-interview", "next": "samvil-design"},
+    {"name": "samvil-seed", "next": "samvil-design"},
     {"name": "samvil-council", "next": "samvil-design"},
     {"name": "samvil-design", "next": "samvil-scaffold"},
     {"name": "samvil-scaffold", "next": "samvil-build"},
     {"name": "samvil-build", "next": "samvil-qa"},
     {"name": "samvil-qa", "next": "samvil-deploy"},
-    {"name": "samvil-deploy", "next": "samvil-evolve"},
+    {"name": "samvil-deploy", "next": "samvil-retro"},
     {"name": "samvil-evolve", "next": "samvil-retro"},
     {"name": "samvil-retro", "next": ""},
     {"name": "samvil-analyze", "next": ""},
@@ -167,6 +167,14 @@ def _build_skill_mappings(
             next_skill=entry["next"],
         ))
     return mappings
+
+
+def _host_command_for_skill(adapter: HostAdapter, skill_name: str) -> str:
+    """Return the host-native command that invokes skill_name."""
+    for mapping in adapter.skill_mappings:
+        if mapping.skill_name == skill_name:
+            return mapping.host_command
+    return ""
 
 
 # ── Adapter instances ─────────────────────────────────────────────
@@ -284,18 +292,16 @@ def get_chain_continuation(
     )
 
     next_skill = ""
-    host_command = ""
     for m in adapter.skill_mappings:
         if m.skill_name == current_skill:
             next_skill = m.next_skill
-            host_command = m.host_command
             break
 
     return {
         "next_skill": next_skill,
         "chain_via": adapter.chain_format,
         "marker_path": ".samvil/next-skill.json",
-        "command": host_command,
+        "command": _host_command_for_skill(adapter, next_skill) if next_skill else "",
         "host_name": adapter.host_name,
     }
 

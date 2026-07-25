@@ -81,7 +81,9 @@ class TestChainMarkerEquivalence:
                 break
             skill = nxt
         # All hosts must walk the same number of steps
-        assert len(steps) == 11, f"{host}: expected 11 steps, got {len(steps)}"
+        assert len(steps) == 9, f"{host}: expected 9 steps, got {len(steps)}"
+        assert "samvil-council" not in steps
+        assert "samvil-evolve" not in steps
         assert steps[0] == "samvil"
         assert steps[-1] == "samvil-retro"
 

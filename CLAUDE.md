@@ -244,8 +244,11 @@ Single source of truth: `references/glossary.md`. Enforced in CI via
 
 ## 🏛️ 4-Layer Architecture (v3.3)
 
-v3.3 separates SAMVIL into four layers so the same project can run across
-Claude Code, Codex CLI, OpenCode, or a generic host.
+v3.3 separates SAMVIL into four layers so project state can continue across
+hosts. Current support is intentionally asymmetric: Claude Code is the native
+execution host; Codex integrates model routing, MCP, and file-marker
+continuation but has no verified native stage parity; Gemini remains an
+experimental stub.
 
 | Layer | Owns | v3.3 files |
 |---|---|---|
@@ -256,8 +259,8 @@ Claude Code, Codex CLI, OpenCode, or a generic host.
 
 Rules:
 - Skills ask MCP for state instead of inferring stage flow from prompt text.
-- Host-specific chaining goes through `HostCapability`; do not assume the
-  Claude Code Skill tool exists.
+- Host-specific continuation goes through `HostCapability`. This preserves
+  state portability; it does not claim native execution parity.
 - `.samvil/*` files remain the recovery boundary when MCP or host features
   degrade.
 
@@ -298,7 +301,7 @@ samvil-update    ← [v3.0.0] GitHub 업데이트 + --migrate 지원
 
 ## Architectural Invariants (절대 규칙)
 
-1. **INV-1: File is SSOT** — seed.json + state.json + handoff.md + qa-results.json + events.jsonl 5개 파일이 truth. 대화 컨텍스트 의존 금지. (Claim ledger `.samvil/claims.jsonl`은 v3.2에서 첫 번째 SSOT 파일로 추가됨.)
+1. **INV-1: File is SSOT** — seed.json + state.json + handoff.md + qa-results.json + events.jsonl 5개 파일이 truth. 대화 컨텍스트 의존 금지. 프로젝트 `.samvil/events.jsonl`이 이벤트 canonical이고, 전역 SQLite는 크로스 프로젝트 조회용 보조 인덱스다. (Claim ledger `.samvil/claims.jsonl`은 v3.2에서 첫 번째 SSOT 파일로 추가됨.)
 2. **INV-2: Build logs to files** — `npm run build > .samvil/build.log 2>&1`. 에러 시에만 읽기.
 3. **INV-3: Interview to file** — interview-summary.md로 저장. seed가 파일에서 읽음.
 4. **INV-4: Chain pattern** — 각 스킬이 다음 스킬을 Skill tool로 invoke. state.json으로 복구 가능. (v3.3부터는 `HostCapability` 통해 host-agnostic chain.)
@@ -309,7 +312,9 @@ samvil-update    ← [v3.0.0] GitHub 업데이트 + --migrate 지원
 - **현재 (adopted role)**: 스킬의 인라인 행동 규칙이 실행됨. `agents/*.md`는 참조용.
 - **Council/Worker spawn 시**: `agents/*.md` 내용을 Agent tool prompt에 포함해서 전달.
 - **양쪽 다 개선해야 함**: 규칙 변경 시 스킬 인라인 + agent 파일 모두 업데이트.
-- 37개 에이전트, 4 Tier (minimal 10 / standard 20 / thorough 30 / full 36).
+- Agent persona files: **41**. 런타임 전용 identity 2개(`build-worker`,
+  `compressor`)는 파일 없이 등록된다. 4 Tier (minimal 10 / standard 20 /
+  thorough 30 / full 36).
 
 ## Key Rules
 
@@ -329,7 +334,7 @@ samvil-update    ← [v3.0.0] GitHub 업데이트 + --migrate 지원
 
 | 단계 | 종료 조건 |
 |------|----------|
-| Interview | `ambiguity_score ≤ samvil_tier 임계값` (minimal 0.10 / standard 0.05 / thorough 0.02 / full 0.01 / deep 0.01) |
+| Interview | `ambiguity_score ≤ samvil_tier 임계값` (minimal 0.10 / standard 0.05 / thorough 0.02 / full 0.01 / deep 0.005) |
 | Build | `npm run build` 성공 + typecheck 통과 |
 | QA | 3-pass 모두 PASS + 모든 leaf에 file:line evidence |
 | Evolve 수렴 | `similarity ≥ 0.95` + `regression == 0` + 5 evolve_checks 통과 |

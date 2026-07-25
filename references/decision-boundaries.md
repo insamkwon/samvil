@@ -25,20 +25,23 @@ the implementations cited under each section.
 
 ## Interview termination
 
-**Rule:** Interview ends when `ambiguity_score` ≤ tier threshold OR
-`max_questions` reached.
+Interview converges when `ambiguity_score` ≤ tier threshold, component floors
+pass, and `min_questions_reference` is met. `max_questions` is a forced cap:
+reaching it before convergence must offer draft-or-extend instead of silently
+looping. Explicit extension adds 5 questions.
 
-| `samvil_tier` | `ambiguity_score` 임계값 | `max_questions` |
-|---|---|---|
-| `minimal` | 0.10 | 8 |
-| `standard` | 0.05 | 16 |
-| `thorough` | 0.02 | 24 |
-| `full` | 0.01 | 32 |
-| `deep` | 0.01 | 40 |
+| `samvil_tier` | `ambiguity_score` 임계값 | `min_questions_reference` | `max_questions` |
+|---|---|---|---|
+| `minimal` | 0.10 | 5 | 6 |
+| `standard` | 0.05 | 10 | 12 |
+| `thorough` | 0.02 | 20 | 20 |
+| `full` | 0.01 | 30 | 30 |
+| `deep` | 0.005 | 40 | 40 |
 
-**Implementation:** `mcp/samvil_mcp/interview_engine.py` (`score_ambiguity`,
-`resolve_max_questions`). `mcp/samvil_mcp/interview_v3_2.py` for
-`interview_level`-aware (quick/normal/deep/max/auto) selection.
+**Current implementation:** `mcp/samvil_mcp/interview_engine.py`
+(`TIER_TARGETS`, `MIN_QUESTIONS`, `MAX_QUESTIONS`, `score_ambiguity`).
+`mcp/samvil_mcp/interview_v3_2.py` owns `interview_level`-aware
+(quick/normal/deep/max/auto) selection.
 
 **Why:** higher tier ⇒ more rigor ⇒ tighter ambiguity tolerance. Below
 the threshold the residual ambiguity is acceptable for the chosen level
@@ -164,6 +167,47 @@ declared budget for the stage. Consensus rounds are exempt.
 
 **Implementation:** `mcp/samvil_mcp/performance_budget.py`,
 defaults in `references/performance_budget.defaults.yaml`.
+
+---
+
+## Shared runtime controls
+
+These values are referenced by thin and legacy skills; this table is their
+only numeric definition.
+
+| Constant | Value | Applies to |
+|---|---:|---|
+| `MAX_RETRIES` | 2 | build/scaffold/QA-fix identical-cause circuit breaker |
+| `MAX_REAWAKES` | 3 | council/design/build stalled-agent recovery |
+| `STALL_TIMEOUT_SECONDS` | 300 | no-progress stall detection |
+| `QA_MAX_ITERATIONS` | 3 | QA revise loop |
+| `RUNTIME_PROBE_RETRIES` | 2 | QA Playwright/runtime probe fallback |
+| `CPU_LOW_WATERMARK` | 4 | dynamic parallelism chooses 1 worker at or below |
+| `CPU_HIGH_WATERMARK` | 8 | dynamic parallelism chooses 3 workers at or above |
+| `DEFAULT_MAX_PARALLEL` | 2 | dynamic parallelism between CPU watermarks |
+| `MEMORY_PRESSURE_PERCENT` | 80 | reduce max parallelism by 1 above this value |
+
+Skill prose may describe the behavior but MUST cite this file instead of
+redeclaring a named constant with a numeric value.
+
+## Canonical stage gates
+
+The ordered gate names are:
+
+1. `interview_to_seed`
+2. `seed_to_council` (historical name; also protects direct Seed → Design)
+3. `council_to_design` (only for explicit Council opt-in)
+4. `design_to_scaffold`
+5. `scaffold_to_build`
+6. `build_to_qa`
+7. `qa_to_evolve`
+8. `qa_to_deploy`
+9. `any_to_retro`
+
+## Council compatibility matrix
+
+Council is default-off for every tier. Exact `--council` opt-in enables it for
+`standard`, `thorough`, and `full`; `minimal` always skips it.
 
 ---
 

@@ -36,11 +36,28 @@ SAMVIL_PLUGIN_ROOT="$(_samvil_resolve_plugin_root)"
 # SessionStart hook has run. If the venv hasn't been created yet, the
 # Python calls fall through to the system `python3` (best-effort mode —
 # the hook is allowed to no-op silently until the venv is in place).
-if [ -x "$SAMVIL_PLUGIN_ROOT/mcp/.venv/bin/python" ]; then
+if [ "${SAMVIL_FORCE_NO_PYTHON:-0}" = "1" ]; then
+  SAMVIL_PY=""
+  SAMVIL_PY_AVAILABLE=0
+elif [ -x "$SAMVIL_PLUGIN_ROOT/mcp/.venv/bin/python" ]; then
   SAMVIL_PY="$SAMVIL_PLUGIN_ROOT/mcp/.venv/bin/python"
+  SAMVIL_PY_AVAILABLE=1
+elif command -v python3 >/dev/null 2>&1; then
+  SAMVIL_PY="$(command -v python3)"
+  SAMVIL_PY_AVAILABLE=1
 else
-  SAMVIL_PY="$(command -v python3 || echo python3)"
+  SAMVIL_PY=""
+  SAMVIL_PY_AVAILABLE=0
 fi
+export SAMVIL_PY_AVAILABLE
+
+samvil_contract_python_status() {
+  if [ "$SAMVIL_PY_AVAILABLE" = "1" ]; then
+    echo "HEALTHY"
+  else
+    echo "DEGRADED(no python)"
+  fi
+}
 
 # Export the MCP package dir so the inline Python heredocs below can
 # resolve imports without hard-coding paths.
@@ -61,6 +78,14 @@ samvil_contract_log_health() {
   local hook_name="$1"
   local status="$2"
   local detail="${3:-}"
+  if [ "$SAMVIL_PY_AVAILABLE" != "1" ]; then
+    local ts
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
+    mkdir -p "$HOME/.samvil" 2>/dev/null
+    printf '{"status":"fail","tool":"hook:%s","error":"python-unavailable","timestamp":"%s","source":"hook"}\n' \
+      "$hook_name" "$ts" >> "$HOME/.samvil/mcp-health.jsonl" 2>/dev/null
+    return 0
+  fi
   "$SAMVIL_PY" - "$hook_name" "$status" "$detail" <<'PY' 2>/dev/null
 import json, sys
 from datetime import datetime, timezone
@@ -97,6 +122,7 @@ PY
 #   on failure. Accepts either a raw JSON string or quoted form.
 samvil_contract_extract_skill_name() {
   local raw="$1"
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || { echo ""; return 0; }
   "$SAMVIL_PY" - "$raw" <<'PY' 2>/dev/null
 import json, sys
 raw = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -112,6 +138,29 @@ skill = (
 )
 print(skill.strip())
 PY
+}
+
+samvil_contract_extract_project_root() {
+  local raw="$1"
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || { echo ""; return 1; }
+  "$SAMVIL_PY" - "$raw" <<'PY' 2>/dev/null
+import json, sys
+try:
+    data = json.loads(sys.argv[1] if len(sys.argv) > 1 else "")
+except Exception:
+    data = {}
+print(str(data.get("project_root") or data.get("cwd") or "").strip())
+PY
+}
+
+samvil_contract_write_project_root_marker() {
+  local root="$1"
+  [ -n "$root" ] || return 1
+  local absolute
+  absolute="$(cd "$root" 2>/dev/null && pwd -P)" || return 1
+  mkdir -p "$absolute/.samvil" || return 1
+  printf '%s\n' "$absolute" > "$absolute/.samvil/contract-project-root"
+  echo "$absolute"
 }
 
 # samvil_contract_is_stage_skill <skill_name>
@@ -130,7 +179,8 @@ samvil_contract_is_stage_skill() {
 samvil_contract_stage_name() {
   local skill="$1"
   case "$skill" in
-    samvil-interview|samvil-pm-interview) echo "interview" ;;
+    samvil-interview) echo "interview" ;;
+    samvil-pm-interview) echo "pm-interview" ;;
     samvil-seed)       echo "seed" ;;
     samvil-council)    echo "council" ;;
     samvil-design)     echo "design" ;;
@@ -151,13 +201,14 @@ samvil_contract_primary_agent() {
   local stage="$1"
   case "$stage" in
     interview)  echo "agent:socratic-interviewer" ;;
+    pm-interview) echo "agent:product-owner" ;;
     seed)       echo "agent:seed-architect" ;;
     council)    echo "agent:product-owner" ;;
     design)     echo "agent:tech-architect" ;;
     scaffold)   echo "agent:scaffolder" ;;
     build)      echo "agent:build-worker" ;;
     qa)         echo "agent:qa-functional" ;;
-    deploy)     echo "agent:deployer" ;;
+    deploy)     echo "agent:infra-dev" ;;
     retro)      echo "agent:retro-analyst" ;;
     evolve)     echo "agent:reflect-proposer" ;;
     *)          echo "agent:orchestrator-agent" ;;
@@ -168,8 +219,20 @@ samvil_contract_primary_agent() {
 #   Return the nearest ancestor of CWD that contains project.state.json
 #   (or equivalent). Empty string means "not a SAMVIL project context".
 samvil_contract_find_project_root() {
+  if [ -n "${SAMVIL_PROJECT_ROOT:-}" ] && [ -d "$SAMVIL_PROJECT_ROOT" ]; then
+    (cd "$SAMVIL_PROJECT_ROOT" && pwd -P)
+    return 0
+  fi
   local dir="$PWD"
   while [ "$dir" != "/" ] && [ -n "$dir" ]; do
+    if [ -f "$dir/.samvil/contract-project-root" ]; then
+      local marked
+      marked="$(head -n 1 "$dir/.samvil/contract-project-root" 2>/dev/null)"
+      if [ -n "$marked" ] && [ -d "$marked" ]; then
+        echo "$marked"
+        return 0
+      fi
+    fi
     if [ -f "$dir/project.state.json" ] || [ -f "$dir/project.seed.json" ]; then
       echo "$dir"
       return 0
@@ -211,6 +274,7 @@ samvil_contract_append_claim() {
   local evidence="${7:-[]}"
 
   [ -z "$root" ] && return 0
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || return 0
 
   "$SAMVIL_PY" - "$root" "$ctype" "$subject" "$statement" "$authority" "$claimed_by" "$evidence" <<'PY' 2>/dev/null
 import json, sys, os
@@ -246,6 +310,7 @@ samvil_contract_verify_claim() {
   local verified_by="$3"
 
   [ -z "$root" ] && return 0
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || return 0
 
   "$SAMVIL_PY" - "$root" "$subject" "$verified_by" <<'PY' 2>/dev/null
 import sys, os
@@ -283,20 +348,43 @@ samvil_contract_update_state() {
   local key="$2"
   local value="$3"
   [ -z "$root" ] && return 0
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || return 0
 
   "$SAMVIL_PY" - "$root" "$key" "$value" <<'PY' 2>/dev/null
-import json, sys, os
+import json, os, sys
+from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 root, key, value = sys.argv[1:4]
-path = os.path.join(root, "project.state.json")
+path = Path(root) / "project.state.json"
+lock_path = path.with_suffix(path.suffix + ".lock")
+tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}")
 try:
-    with open(path) as f:
-        state = json.load(f)
-except Exception:
-    state = {}
-state[key] = value
-try:
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as lock_handle:
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                state = {}
+            if not isinstance(state, dict):
+                raise ValueError("project.state.json must contain an object")
+            state[key] = value
+            with tmp.open("w", encoding="utf-8") as handle:
+                json.dump(state, handle, indent=2, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+            if fcntl is not None:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 except Exception as e:
     sys.stderr.write(f"[samvil-contract-hook] update_state failed: {e}\n")
 PY
@@ -311,21 +399,44 @@ samvil_contract_append_stage_claim_to_state() {
   local claim_id="$3"
   [ -z "$root" ] && return 0
   [ -z "$claim_id" ] && return 0
+  [ "$SAMVIL_PY_AVAILABLE" = "1" ] || return 0
 
   "$SAMVIL_PY" - "$root" "$stage" "$claim_id" <<'PY' 2>/dev/null
-import json, sys, os
+import json, os, sys
+from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 root, stage, claim_id = sys.argv[1:4]
-path = os.path.join(root, "project.state.json")
+path = Path(root) / "project.state.json"
+lock_path = path.with_suffix(path.suffix + ".lock")
+tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}")
 try:
-    with open(path) as f:
-        state = json.load(f)
-except Exception:
-    state = {}
-sc = state.setdefault("stage_claims", {})
-sc[stage] = claim_id
-try:
-    with open(path, "w") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as lock_handle:
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                state = json.loads(path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                state = {}
+            if not isinstance(state, dict):
+                raise ValueError("project.state.json must contain an object")
+            stage_claims = state.setdefault("stage_claims", {})
+            stage_claims[stage] = claim_id
+            with tmp.open("w", encoding="utf-8") as handle:
+                json.dump(state, handle, indent=2, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+            if fcntl is not None:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 except Exception as e:
     sys.stderr.write(f"[samvil-contract-hook] stage_claims failed: {e}\n")
 PY

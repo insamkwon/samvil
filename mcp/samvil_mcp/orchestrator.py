@@ -28,7 +28,13 @@ PIPELINE_STAGES: tuple[str, ...] = (
     "complete",
 )
 
-SAMVIL_TIERS: tuple[str, ...] = ("minimal", "standard", "thorough", "full")
+SAMVIL_TIERS: tuple[str, ...] = (
+    "minimal",
+    "standard",
+    "thorough",
+    "full",
+    "deep",
+)
 
 SUCCESS_EVENT_TO_STAGE: dict[str, str] = {
     "interview_complete": "interview",
@@ -72,7 +78,6 @@ SUCCESS_COMPLETE_EVENTS: dict[str, str] = {
     "scaffold": "scaffold_complete",
     "build": "build_stage_complete",
     "qa": "qa_pass",
-    "deploy": "deploy_complete",
     "retro": "retro_complete",
     "evolve": "evolve_converge",
     "complete": "stage_end",
@@ -114,26 +119,37 @@ def _validate_tier(samvil_tier: str) -> None:
         raise OrchestratorError(f"unknown samvil_tier: {samvil_tier!r}")
 
 
-def should_skip_stage(stage: str, samvil_tier: str) -> bool:
-    """Return whether `stage` is skipped for the current tier in v3.3 Phase 1."""
+def should_skip_stage(
+    stage: str,
+    samvil_tier: str,
+    *,
+    council_opt_in: bool = False,
+) -> bool:
+    """Return whether a stage is skipped; Council is explicit opt-in only."""
     _validate_stage(stage)
     _validate_tier(samvil_tier)
 
-    if stage == "council" and samvil_tier == "minimal":
-        return True
+    if stage == "council":
+        return samvil_tier == "minimal" or not council_opt_in
     if stage == "deploy":
+        # Deploy is opt-in and runs outside the automatic complete_stage flow.
         return True
     return False
 
 
-def get_next_stage(current: str, samvil_tier: str) -> str | None:
+def get_next_stage(
+    current: str,
+    samvil_tier: str,
+    *,
+    council_opt_in: bool = False,
+) -> str | None:
     """Return the next non-skipped stage after `current`."""
     _validate_stage(current)
     _validate_tier(samvil_tier)
 
     current_index = PIPELINE_STAGES.index(current)
     for stage in PIPELINE_STAGES[current_index + 1:]:
-        if not should_skip_stage(stage, samvil_tier):
+        if not should_skip_stage(stage, samvil_tier, council_opt_in=council_opt_in):
             return stage
     return None
 
@@ -142,13 +158,15 @@ def stage_can_proceed(
     session: Any,
     events: list[StageEvent],
     target_stage: str,
+    *,
+    council_opt_in: bool = False,
 ) -> dict[str, Any]:
     """Return whether `target_stage` can run based on prior stage outcomes."""
     samvil_tier = _session_tier(session)
     _validate_stage(target_stage)
     _validate_tier(samvil_tier)
 
-    if should_skip_stage(target_stage, samvil_tier):
+    if should_skip_stage(target_stage, samvil_tier, council_opt_in=council_opt_in):
         return {
             "can_proceed": False,
             "blockers": [f"stage {target_stage} is skipped for tier {samvil_tier}"],
@@ -159,7 +177,7 @@ def stage_can_proceed(
 
     target_index = PIPELINE_STAGES.index(target_stage)
     for stage in PIPELINE_STAGES[:target_index]:
-        if should_skip_stage(stage, samvil_tier):
+        if should_skip_stage(stage, samvil_tier, council_opt_in=council_opt_in):
             continue
         status = statuses.get(stage)
         if status == "failed":
@@ -170,7 +188,12 @@ def stage_can_proceed(
     return {"can_proceed": not blockers, "blockers": blockers}
 
 
-def get_orchestration_state(session: Any, events: list[StageEvent]) -> dict[str, Any]:
+def get_orchestration_state(
+    session: Any,
+    events: list[StageEvent],
+    *,
+    council_opt_in: bool = False,
+) -> dict[str, Any]:
     """Summarize progress from session + event stream without mutating state."""
     current_stage = _session_stage(session)
     samvil_tier = _session_tier(session)
@@ -179,7 +202,9 @@ def get_orchestration_state(session: Any, events: list[StageEvent]) -> dict[str,
 
     statuses = _stage_statuses(events)
     skipped = [
-        stage for stage in PIPELINE_STAGES if should_skip_stage(stage, samvil_tier)
+        stage
+        for stage in PIPELINE_STAGES
+        if should_skip_stage(stage, samvil_tier, council_opt_in=council_opt_in)
     ]
     completed = [
         stage
@@ -191,8 +216,12 @@ def get_orchestration_state(session: Any, events: list[StageEvent]) -> dict[str,
         for stage in PIPELINE_STAGES
         if statuses.get(stage) == "failed" and stage not in skipped
     ]
-    next_stage = get_next_stage(current_stage, samvil_tier)
-    can_proceed = stage_can_proceed(session, events, current_stage)
+    next_stage = get_next_stage(
+        current_stage, samvil_tier, council_opt_in=council_opt_in
+    )
+    can_proceed = stage_can_proceed(
+        session, events, current_stage, council_opt_in=council_opt_in
+    )
 
     executable_stages = [s for s in PIPELINE_STAGES if s not in skipped]
     return {
@@ -211,7 +240,13 @@ def get_orchestration_state(session: Any, events: list[StageEvent]) -> dict[str,
     }
 
 
-def complete_stage_plan(session: Any, stage: str, verdict: str) -> dict[str, Any]:
+def complete_stage_plan(
+    session: Any,
+    stage: str,
+    verdict: str,
+    *,
+    council_opt_in: bool = False,
+) -> dict[str, Any]:
     """Return the event + claim payloads needed to mark a stage complete.
 
     This function is intentionally pure. The server wrapper owns EventStore and
@@ -220,7 +255,7 @@ def complete_stage_plan(session: Any, stage: str, verdict: str) -> dict[str, Any
     samvil_tier = _session_tier(session)
     _validate_stage(stage)
     _validate_tier(samvil_tier)
-    if should_skip_stage(stage, samvil_tier):
+    if should_skip_stage(stage, samvil_tier, council_opt_in=council_opt_in):
         raise OrchestratorError(f"stage {stage} is skipped for tier {samvil_tier}")
     if verdict not in COMPLETE_VERDICTS:
         raise OrchestratorError(f"unknown verdict: {verdict!r}")
@@ -228,7 +263,9 @@ def complete_stage_plan(session: Any, stage: str, verdict: str) -> dict[str, Any
     success = verdict in ("pass", "complete")
     if success:
         event_type = SUCCESS_COMPLETE_EVENTS[stage]
-        next_stage = get_next_stage(stage, samvil_tier)
+        next_stage = get_next_stage(
+            stage, samvil_tier, council_opt_in=council_opt_in
+        )
         event_stage = next_stage or stage
     elif verdict == "blocked":
         event_type = BLOCKED_COMPLETE_EVENTS.get(stage, f"{stage}_blocked")
@@ -263,6 +300,13 @@ def complete_stage_plan(session: Any, stage: str, verdict: str) -> dict[str, Any
 def _stage_statuses(events: list[StageEvent]) -> dict[str, str]:
     statuses: dict[str, str] = {}
     for event in events:
+        event_data = (
+            event.get("data", {})
+            if isinstance(event, dict)
+            else getattr(event, "data", {})
+        )
+        if isinstance(event_data, dict) and event_data.get("trusted_transition") is False:
+            continue
         event_type = _as_value(event.event_type)
         stage = _stage_for_event(event_type, _as_value(event.stage))
         if stage not in PIPELINE_STAGES:
@@ -448,7 +492,7 @@ def _resolve_tier(
         if isinstance(config, dict)
         else ""
     )
-    valid = set(SAMVIL_TIERS) | {"deep"}  # accept v3.1 deep alias
+    valid = set(SAMVIL_TIERS)
     chosen = ""
     source = "default"
     for candidate, src in (
@@ -463,11 +507,7 @@ def _resolve_tier(
     if not chosen:
         chosen = "standard"
         source = "default"
-    # Map deprecated v3.1 alias if seen.
     aliased_from = ""
-    if chosen == "deep":
-        aliased_from = "deep"
-        chosen = "full"
     return {
         "samvil_tier": chosen,
         "source": source,
@@ -521,6 +561,7 @@ def _decide_first_skill(
     current_stage: str,
     samvil_tier: str,
     is_pm_mode: bool,
+    council_opt_in: bool,
 ) -> dict[str, Any]:
     """Pick the first skill to chain into.
 
@@ -537,7 +578,9 @@ def _decide_first_skill(
         # Find the next non-skipped stage after the last completed.
         last = completed_stages[-1]
         try:
-            next_stage = get_next_stage(last, samvil_tier)
+            next_stage = get_next_stage(
+                last, samvil_tier, council_opt_in=council_opt_in
+            )
         except OrchestratorError:
             next_stage = None
         if next_stage and next_stage != "complete":
@@ -569,6 +612,15 @@ def _decide_first_skill(
     }
 
 
+def _state_stage_for_skill(next_skill: str) -> str:
+    """Return the project-state stage represented by a selected skill."""
+    if next_skill.startswith("samvil-"):
+        return next_skill.removeprefix("samvil-")
+    if next_skill == "samvil":
+        return "interview"
+    return "interview"
+
+
 def aggregate_orchestrator_state(
     project_root: str | Path,
     *,
@@ -576,6 +628,7 @@ def aggregate_orchestrator_state(
     cli_tier: str = "",
     mode_hint: str = "",
     host_name: str = "",
+    council_opt_in: bool = False,
 ) -> dict[str, Any]:
     """Boot-time aggregator for the samvil orchestrator skill body (T4.5).
 
@@ -586,7 +639,8 @@ def aggregate_orchestrator_state(
 
     The skill body still does:
       - Health Check shell calls (Node/Python/uv/gh/MCP).
-      - AskUserQuestion checkpoints (mode + tier + L3 confirm + resume).
+      - Conditional AskUserQuestion checkpoints (unresolved mode + tier +
+        medium/low-confidence L3 confirm + resume).
       - Chain dispatch via HostCapability (skill_tool / file_marker).
 
     Returns a dict with:
@@ -594,6 +648,7 @@ def aggregate_orchestrator_state(
       - tier: {samvil_tier, source, aliased_from, valid_tiers}
       - solution_type: {solution_type, layer, matched, confidence}
       - is_pm_mode: bool
+      - council_opt_in: bool (explicit flag or persisted config only)
       - brownfield: {is_brownfield, can_resume, artifacts, state_present,
                      current_stage, completed_stages, mode_hint}
       - chain: {next_skill, reason, resume_point}
@@ -610,6 +665,13 @@ def aggregate_orchestrator_state(
         # Tolerate state at .samvil/state.json (older layout).
         state = _read_json_safe(root / ".samvil" / "state.json")
     config = _read_json_safe(root / "project.config.json")
+    configured_flags = config.get("flags", []) if isinstance(config, dict) else []
+    if isinstance(configured_flags, str):
+        configured_flags = configured_flags.split()
+    configured_council = (
+        isinstance(configured_flags, list) and "--council" in configured_flags
+    )
+    council_requested = bool(council_opt_in or configured_council)
 
     try:
         tier_block = _resolve_tier(cli_tier, config, state)
@@ -661,6 +723,7 @@ def aggregate_orchestrator_state(
             current_stage=brownfield["current_stage"],
             samvil_tier=tier_block["samvil_tier"],
             is_pm_mode=is_pm_mode,
+            council_opt_in=council_requested,
         )
     except Exception as exc:  # pragma: no cover — defensive
         chain = {
@@ -669,6 +732,9 @@ def aggregate_orchestrator_state(
             "resume_point": "interview",
         }
         errors.append(f"chain: {exc}")
+    chain["state_stage"] = _state_stage_for_skill(
+        str(chain.get("next_skill") or "samvil-interview")
+    )
 
     return {
         "schema_version": ORCHESTRATOR_AGGREGATE_SCHEMA_VERSION,
@@ -678,6 +744,7 @@ def aggregate_orchestrator_state(
         "tier": tier_block,
         "solution_type": stype_block,
         "is_pm_mode": is_pm_mode,
+        "council_opt_in": council_requested,
         "brownfield": brownfield,
         "chain": chain,
         "errors": errors,

@@ -1,6 +1,6 @@
 ---
 name: samvil-council
-description: "Multi-agent council debate. Spawns agents via CC Agent tool, synthesizes verdicts, writes binding decisions."
+description: "Multi-agent council debate. Spawns agents via CC Agent tool, synthesizes verdicts, writes binding decisions. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-council (ultra-thin)
@@ -10,8 +10,8 @@ research + Round 2 review) stays here — Agent tool calls are CC-only.
 What moves to MCP is the BEFORE (Round-1 → Round-2 debate-point
 extraction) and AFTER (per-section consensus aggregation, dissent
 preservation, overall verdict) logic, via
-`mcp__samvil_mcp__synthesize_council_verdicts`. v3.2 status: opt-in
-behind `--council` flag, removed in v3.3 (see
+`mcp__samvil_mcp__synthesize_council_verdicts`. Current status: default-off
+compatibility stage behind the exact `--council` flag (see
 `references/council-retirement-migration.md`). Full Korean prose,
 verbose synthesis examples, decisions.log shapes in `SKILL.legacy.md`.
 
@@ -30,11 +30,12 @@ Apply `selected_tier` (full matrix in `SKILL.legacy.md`):
 - `standard` → R1 skipped. R2: `product-owner`, `simplifier`, `scope-guard`.
 - `thorough` → R1: `business-analyst`. R2: above + `ceo-advisor`.
 - `full` → R1: `competitor-analyst`, `business-analyst`, `user-interviewer`. R2: all 4.
+- `deep` → same council roster as `full`; deeper rigor is enforced by the downstream gates and interview contract.
 
 ## Step 2 — Round 1 (Research, parallel spawn) — skip if tier < thorough
 
 1. Print `[SAMVIL] Spawning N agents for Council Round 1 (Research) | MAX_PARALLEL=<N>` then `mcp__samvil_mcp__heartbeat_state(state_path="project.state.json")`.
-2. Determine `MAX_PARALLEL`: `config.max_parallel` if set else CPU/memory heuristic (`SKILL.legacy.md` Step 2b — CPU≤4→1, ≥8→3, mem>80% → -1).
+2. Determine `MAX_PARALLEL`: `config.max_parallel` if set else the CPU/memory watermarks in `references/decision-boundaries.md` (`SKILL.legacy.md` Step 2b).
 3. **Compose prompts (MCP-owned, W3.2)**: `mcp__samvil_mcp__compose_agent_prompt(agent_names_json='["<r1 names>"]', project_root=".", header="You are {name} for SAMVIL Council Gate A, Round 1.", context_files_json='["project.seed.json","interview-summary.md"]', task='Return JSON: {"agent":"<name>","topics":[{"topic":"<short>","stance":"<one-liner>","is_blind_spot":bool}]}\nUnder 500 words.')` → `prompts.<name>`. `missing_agents` 비어있지 않으면 해당 agent만 legacy 방식(`<paste agents/<name>.md>` 직접 조립)으로 폴백 (P8).
    Split agents into chunks of `MAX_PARALLEL`. **Spawn each chunk in ONE message** (Agent tool, parallel):
    ```
@@ -43,7 +44,7 @@ Apply `selected_tier` (full matrix in `SKILL.legacy.md`):
          prompt: <prompts.<name> from compose_agent_prompt>,
          subagent_type: "general-purpose")
    ```
-4. Between chunks: `is_state_stalled` → if stalled, `increment_stall_recovery_count` + `build_reawake_message`, print, continue. Cap at 3 reawakes (then surface skip/abort/retry AskUserQuestion).
+4. Between chunks: `is_state_stalled` → if stalled, `increment_stall_recovery_count` + `build_reawake_message`, print, continue. Cap at `MAX_REAWAKES` from `references/decision-boundaries.md` (then surface skip/abort/retry AskUserQuestion).
 5. Collect verdicts as `round1_verdicts` (list of `{agent, topics:[]}`).
 
 ## Step 3 — Synthesize Round 1 → Round 2 Injection
@@ -99,11 +100,11 @@ MCP fail → decisions.log is fallback truth (P8/INV-5); log warning, continue. 
 ```
 mcp__samvil_mcp__save_event(session_id="<sid>", event_type="council_verdict", stage="design", data='{"verdict":"<PROCEED|PROCEED_WITH_CHANGES|HOLD>","agents_count":<N>}')
 ```
-Append Council section to `.samvil/handoff.md` via Bash `cat >>` or Edit (never Write tool): tier · consensus N/M (%) · verdict · changes applied · dissenting summary. Print `[SAMVIL] Gate A complete. Proceeding to design...` and invoke Skill tool with skill `samvil-design`.
+For PROCEED or approved PROCEED_WITH_CHANGES, require `complete_stage(session_id="<sid>", stage="council", verdict="pass", council_opt_in=true)` to return exact `status="ok"`; error halts. Append Council section to `.samvil/handoff.md` via Edit (never Write tool or Bash redirection): tier · consensus N/M (%) · verdict · changes applied · dissenting summary. Print `[SAMVIL] Gate A complete. Proceeding to design...` and invoke Skill tool with skill `samvil-design`.
 
 ## Anti-Patterns
 
-1. Auto-modifying seed without user approval on PROCEED_WITH_CHANGES. 2. Spawning agents the tier doesn't include. 3. Skipping Step 3 (Round 1 synthesis) before Round 2 — R2 must see debate points. 4. Dropping dissenting opinions — `sections[*].dissenting` MUST appear in Devil's Advocate block and decisions.log. 5. Proceeding past `HOLD` without user input (P5 Blind convergence). 6. Using Write tool for handoff.md (Bash `cat >>` or Edit only). 7. Spawning agents serially when MAX_PARALLEL allows — chunk-parallel non-negotiable. 8. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
+1. Auto-modifying seed without user approval on PROCEED_WITH_CHANGES. 2. Spawning agents the tier doesn't include. 3. Skipping Step 3 (Round 1 synthesis) before Round 2 — R2 must see debate points. 4. Dropping dissenting opinions — `sections[*].dissenting` MUST appear in Devil's Advocate block and decisions.log. 5. Proceeding past `HOLD` without user input (P5 Blind convergence). 6. Using Write tool or Bash redirection for handoff.md (Edit only). 7. Spawning agents serially when MAX_PARALLEL allows — chunk-parallel non-negotiable. 8. **`AskUserQuestion` 호출 포맷**: `questions` 파라미터는 반드시 배열 — `questions=["<질문>"]`. 문자열 직접 전달 시 `InputValidationError` 발생.
 
 ## Legacy reference
 

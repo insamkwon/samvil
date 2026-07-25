@@ -17,12 +17,13 @@ them so no two axes share a value name.
 | Whole-pipeline rigor / robustness budget | **`samvil_tier`** | `minimal`, `standard`, `thorough`, `full`, `deep` |
 | Model cost band (from Ouroboros) | **`cost_tier`** | `frugal`, `balanced`, `frontier` |
 | Interview intensity | **`interview_level`** | `quick`, `normal`, `deep`, `max`, `auto` |
-| Stage gate (§3.⑥) | **`gate`** | 8 named gates: `interview_to_seed`, `seed_to_council`, `council_to_design`, `design_to_scaffold`, `scaffold_to_build`, `build_to_qa`, `qa_to_deploy`, `any_to_retro` |
+| Stage gate (§3.⑥) | **`gate`** | 9 named gates: `interview_to_seed`, `seed_to_council`, `council_to_design`, `design_to_scaffold`, `scaffold_to_build`, `build_to_qa`, `qa_to_evolve`, `qa_to_deploy`, `any_to_retro` |
 | Evolve convergence checks | **`evolve_checks`** | the 5 checks (similarity / regression / stagnation / stall / metrics-alignment) previously misnamed "evolve gates" |
-| Agent persona identity | **`agent_persona`** | 37 personas across 4 tiers (minimal/standard/thorough/full) |
+| Agent persona identity | **`agent_persona`** | Agent persona files: **41** across 4 tiers; 2 inline runtime identities |
 | Agent model-responsibility layer (§3.⑤) | **`model_role`** | `generator`, `reviewer`, `judge`, `repairer`, `researcher`, `compressor` |
+| Host support level | **`host_support`** | `native` (Claude Code), `integration` (Codex routing/MCP/marker), `experimental_stub` (Gemini) |
 | Contract ledger entry (§3.①) | **`claim`** | typed record with status `pending` / `verified` / `rejected` |
-| Typed subset of claim | **`claim.type`** | `seed_field_set`, `ac_verdict`, `gate_verdict`, `evolve_decision`, `policy_adoption`, `evidence_posted`, `claim_disputed`, `consensus_verdict`, `migration_applied`, `stagnation_declared` |
+| Typed subset of claim | **`claim.type`** | `seed_field_set`, `ac_verdict`, `gate_verdict`, `user_approval`, `gate_override`, `evolve_decision`, `policy_adoption`, `evidence_posted`, `claim_disputed`, `consensus_verdict`, `migration_applied`, `stagnation_declared` |
 
 ## Banned or legacy names
 

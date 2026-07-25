@@ -1,6 +1,6 @@
 ---
 name: samvil-pm-interview
-description: "PM-mode interview. Collect vision → users → metrics → epics → tasks → ACs, then convert to engineering seed."
+description: "PM-mode interview. Collect vision → users → metrics → epics → tasks → ACs, then convert to engineering seed. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # samvil-pm-interview (ultra-thin)
@@ -18,7 +18,8 @@ remains the default.
 
 ## Boot Sequence
 
-1. Read `project.config.json` if present; pick up `selected_tier`.
+1. Read `project.config.json` if present; pick up `selected_tier` and exact
+   `"--council"` membership in `flags` as `council_opt_in`.
 2. Read existing `project.pm-seed.json` to resume at the first
    unfilled section.
 3. 한국어로 진행 (모든 사용자 대화 한국어).
@@ -47,7 +48,7 @@ AC is a leaf `{id, description, children: []}` — vague words ("빠르게",
    ```
    mcp__samvil_mcp__validate_pm_seed(pm_seed_json=<json>)
    ```
-   On `valid: false`, surface every error and resume Phases 4–6 to fix.
+   On `valid: false`, surface every error and resume Phases 4–6 to fix. On valid output, write `interview-summary.md` from `project.pm-seed.json`, then run `gate_check(gate_name="interview_to_seed", samvil_tier="<tier>", metrics_json='{"seed_readiness":<validate.seed_readiness>,"ambiguity_converged":<validate.ambiguity_converged>}', project_root=".")`; exact pass only. Post the result with `claim_post(... subject="interview_to_seed", evidence_json='["interview-summary.md"]')`, then require `complete_stage(session_id="<sid>", stage="interview", verdict="pass")` exact `status="ok"` before conversion.
 
 2. Convert. If engineering-only choices are already known
    (tech stack, solution_type, visual direction), pass them as
@@ -62,10 +63,12 @@ AC is a leaf `{id, description, children: []}` — vague words ("빠르게",
 
 3. Write the result to `project.seed.json`.
 
+   Require `complete_stage(session_id="<sid>", stage="seed", verdict="pass", council_opt_in=<true|false>)` exact `status="ok"`, using true only for the validated explicit `--council` route. Error halts before chaining.
+
 4. Best-effort events (P8 — file write is the source of truth):
    ```
-   mcp__samvil_mcp__save_event("pm_seed_complete", '{"epics":N,"tasks":M}')
-   mcp__samvil_mcp__save_event("pm_seed_converted", '{"features":N}')
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="pm_seed_complete", stage="seed", data='{"epics":N,"tasks":M}')
+   mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="pm_seed_converted", stage="seed", data='{"features":N}')
    ```
 
 ## Chain to next skill (INV-4)
@@ -74,8 +77,8 @@ After `project.seed.json` is written, invoke the next stage via the
 Skill tool. Both Council and Design read `project.seed.json`; nothing
 else needs to be passed.
 
-- `selected_tier` ∈ {`thorough`, `full`} → invoke `samvil-council`
-- `selected_tier` ∈ {`minimal`, `standard`} → invoke `samvil-design`
+- Exact `--council` opt-in with `selected_tier` ∈ {`standard`, `thorough`, `full`, `deep`} → invoke `samvil-council`.
+- Default for every tier (`minimal`, `standard`, `thorough`, `full`, `deep`) → invoke `samvil-design`.
 - Missing/unset tier → invoke `samvil-design`, emit `tier_missing`
   event (best-effort).
 

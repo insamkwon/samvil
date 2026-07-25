@@ -86,12 +86,12 @@ score_ambiguity(
 3. `min_questions_met` is true (minimal 5 / standard 10 / thorough 20 / full 30 / deep 40;
    reduced by 1 per pre-filled dim in Brownfield Mode)
 
-Inspect `dimension_scores` for the highest-scoring dimension — ask more questions targeting it.
-**No cap on reprompts** — keep asking until all three conditions hold.
+Inspect `dimension_scores` for the highest-scoring dimension — ask more questions targeting it while respecting the returned question budget.
+If `budget_action="offer_draft_or_extend"`, ask the user whether to draft the seed from current answers or extend by 5 more questions. Do not continue past `effective_max_questions` without this explicit user choice.
 
 ## Save Interview Results
 
-Write to `.samvil/interview-summary.md`:
+Write to root `interview-summary.md`:
 
 ```markdown
 # Interview Summary
@@ -123,6 +123,22 @@ Write to `.samvil/interview-summary.md`:
 
 ## Chain
 
+Scope correction: the canonical skill already treats the interview gate claim
+as required exit evidence, so the Codex command must preserve the same trusted
+transition contract. Run `gate_check(gate_name="interview_to_seed",
+samvil_tier=<tier>, metrics_json='{"seed_readiness":<score.seed_readiness>,
+"ambiguity_converged":<score.converged>}', project_root=".")`. Any result other
+than exact `verdict="pass"` halts. Post that result with
+`claim_post(project_root=".", claim_type="gate_verdict",
+subject="interview_to_seed", statement="verdict=pass,
+seed_readiness=<score.seed_readiness>", authority_file="project.state.json",
+claimed_by="agent:socratic-interviewer",
+evidence_json='["interview-summary.md"]', meta_json=<gate result>)`.
+
+Then read `<sid>` from root `project.state.json` and run
+`complete_stage(session_id=<sid>, stage="interview", verdict="pass")`. Any
+error halts before writing the next marker.
+
 **Greenfield:**
 Run: `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-interview", next_skill="samvil-seed")`
 
@@ -131,5 +147,8 @@ Run: `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_s
 2. Build `interview_state_json` from all collected answers.
 3. Run MCP tool: `merge_brownfield_seed(existing_seed_json=<project.seed.json contents>, interview_state_json=<answers>, new_features_json="[]")`.
 4. Write merged result to `project.seed.json`.
-5. Run: `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-interview", next_skill="samvil-build")`.
-6. Tell user: "인터뷰 완료! Seed 병합 완료. 다음: `codex samvil-build 실행`"
+5. Scope correction: follow the canonical skill flow through `samvil-seed` so
+   seed persistence and its trusted completion are not skipped; `samvil-build`
+   remains the later implementation target after the seed stage.
+6. Run: `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-interview", next_skill="samvil-seed")`.
+7. Tell user: "인터뷰 완료! Seed 병합 완료. 다음: `codex samvil-seed 실행`"

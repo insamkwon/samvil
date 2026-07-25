@@ -21,8 +21,8 @@ def test_release_checks_workflow_contract() -> None:
         "mcp/.venv/bin/python -m pip install pytest pytest-asyncio",
         "npx --yes playwright@1.52.0 install --with-deps chromium",
         "set -o pipefail",
-        "python3 scripts/run-release-checks.py --format json",
-        "python3 scripts/build-release-bundle.py --format json",
+        "mcp/.venv/bin/python scripts/run-release-checks.py --format json",
+        "mcp/.venv/bin/python scripts/build-release-bundle.py --format json",
         "actions/upload-artifact@v4",
         "samvil-release-evidence",
         "release-report.json",
@@ -31,6 +31,9 @@ def test_release_checks_workflow_contract() -> None:
         "release-bundle.json",
     ):
         assert expected in text
+
+    assert "python3 scripts/run-release-checks.py --format json" not in text
+    assert "python3 scripts/build-release-bundle.py --format json" not in text
 
 
 def test_ci_workflow_validator_script_passes() -> None:

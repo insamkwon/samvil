@@ -1,9 +1,10 @@
 # Council retirement — 2-phase migration
 
 Per HANDOFF-v3.2-DECISIONS.md §3.⑨, Council Gate A as an always-on
-pipeline stage is retiring. v3.2 keeps it available behind an opt-in
-flag; v3.3 removes it entirely. Consensus in v3.2+ runs only as a
-**dispute resolver** triggered by specific signals.
+pipeline stage is retiring. The planned v3.3 deletion did not occur; the
+current contract keeps it behind an exact `--council` opt-in as a default-off
+compatibility path. Consensus otherwise runs only as a **dispute resolver**
+triggered by specific signals.
 
 ## Timeline
 
@@ -11,7 +12,7 @@ flag; v3.3 removes it entirely. Consensus in v3.2+ runs only as a
 |---------|------------------------|-------------|
 | **v3.1.x** | Always-on pipeline stage | none |
 | **v3.2.0** (this release) | Opt-in via `--council`. Default OFF. Running with `--council` emits a deprecation warning. | no action required; scripts using Council stop triggering it automatically |
-| **v3.3.0** | Removed. Consensus only as dispute resolver. | migrate any remaining dependency on Council Gate A |
+| **Current** | Default OFF; exact `--council` keeps the compatibility stage. | prefer dispute-triggered consensus; remove the flag when no longer needed |
 
 ## What changes for users
 
@@ -96,10 +97,10 @@ If a downstream script depends on Council Gate A running every time:
 # New (v3.2):
 /samvil "my project" --council    # keeps v3.1 behavior, emits warning
 
-# Future (v3.3):
-#   --council is removed. Remove the flag. Rely on automatic consensus
-#   triggers (⑨). If you need forced consensus, use the experimental
-#   override to set a `repeated_failure_signature` or similar trigger.
+# Current:
+#   --council runs the compatibility stage and emits a default-off warning.
+#   Remove the flag for the normal Seed → Design chain and rely on automatic
+#   consensus triggers (⑨) for contradictory verdicts.
 ```
 
 If you have a bespoke CI workflow that parses `.samvil/council/*.md`:

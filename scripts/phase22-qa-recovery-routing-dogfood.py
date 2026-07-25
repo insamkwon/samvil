@@ -63,27 +63,27 @@ def _scenario(root: Path) -> dict:
     status_json = json.loads(status.render_json(root))
     status_human = status.render_human(root)
 
-    if routed["primary_route"]["next_skill"] != "samvil-evolve":
-        raise AssertionError(f"expected samvil-evolve route, got {routed}")
+    if routed["primary_route"]["next_skill"] != "samvil-retro":
+        raise AssertionError(f"expected samvil-retro route, got {routed}")
     if routed["next_skill_path"] == "":
         raise AssertionError("expected next-skill marker to be written")
     marker = json.loads((root / ".samvil" / "next-skill.json").read_text(encoding="utf-8"))
-    if marker["next_skill"] != "samvil-evolve" or marker["from_stage"] != "qa":
+    if marker["next_skill"] != "samvil-retro" or marker["from_stage"] != "qa":
         raise AssertionError(f"invalid marker: {marker}")
-    if report["qa_routing"]["next_skill"] != "samvil-evolve":
+    if report["qa_routing"]["next_skill"] != "samvil-retro":
         raise AssertionError(f"run report did not expose route: {report['qa_routing']}")
-    expected_action = "evolve the seed or acceptance criteria before another build loop"
+    expected_action = "review evolve, retro, or manual-fix options before continuing"
     if report["next_action"] != expected_action:
         raise AssertionError(f"run report next action mismatch: {report['next_action']!r}")
     if status_json["next_recommended_action"] != expected_action:
         raise AssertionError(f"status next action mismatch: {status_json['next_recommended_action']!r}")
-    if status_json["qa_routing"]["next_skill"] != "samvil-evolve":
+    if status_json["qa_routing"]["next_skill"] != "samvil-retro":
         raise AssertionError(f"status JSON did not expose route: {status_json['qa_routing']}")
-    if "QA route: samvil-evolve" not in status_human:
+    if "QA route: samvil-retro" not in status_human:
         raise AssertionError("human status did not expose QA route")
 
     smoke = subprocess.run(
-        [sys.executable, str(REPO / "scripts" / "host-continuation-smoke.py"), str(root), "--expect-next", "samvil-evolve"],
+        [sys.executable, str(REPO / "scripts" / "host-continuation-smoke.py"), str(root), "--expect-next", "samvil-retro"],
         cwd=REPO,
         text=True,
         capture_output=True,

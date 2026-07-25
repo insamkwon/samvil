@@ -3,12 +3,12 @@
 ## Prerequisites
 
 Read `.samvil/next-skill.json`. If `next_skill` is not `samvil-council`, skip this stage.
-Ensure `.samvil/project.seed.json` exists.
+Ensure root `project.seed.json` exists.
 
 ## Execution
 
 1. Run MCP tool `read_chain_marker(project_root="${PWD}")` to confirm this is the expected stage.
-2. Read `.samvil/project.seed.json` for the full seed.
+2. Read root `project.seed.json` for the full seed.
 3. **Round 1 — Research**: Analyze the seed for:
    - Technical feasibility (stack, dependencies, complexity)
    - Scope realism (feature count, AC coverage)
@@ -19,7 +19,8 @@ Ensure `.samvil/project.seed.json` exists.
    - Flag any deal-breaker issues
 5. Save council results to `.samvil/council-results.md`.
 6. If council rejects, report issues to user for revision.
-7. Run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-council")`.
+7. For an approved council, run `complete_stage(session_id=<sid>, stage="council", verdict="pass", council_opt_in=true)` and require exact `status="ok"`; error halts.
+8. Run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-council")`.
 
 ## Chain
 

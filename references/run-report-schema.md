@@ -65,7 +65,7 @@ project run. It is deterministic and file-only; no LLM call is required.
     "present": true,
     "next_skill": "samvil-design",
     "from_stage": "seed",
-    "reason": "minimal tier skips council",
+    "reason": "council is default-off",
     "chain_via": "file_marker"
   },
   "next_action": "continue with samvil-design"

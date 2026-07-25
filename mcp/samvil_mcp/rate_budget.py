@@ -28,7 +28,8 @@ except ImportError:  # pragma: no cover — Windows fallback
     fcntl = None  # type: ignore[assignment]
     _HAS_FLOCK = False
 
-Kind = Literal["acquire", "release"]
+Kind = Literal["acquire", "heartbeat", "release"]
+ACQUIRE_TTL_SECONDS = 30 * 60
 
 
 @contextmanager
@@ -64,12 +65,18 @@ def _append_locked(path: Path, kind: Kind, worker_id: str) -> None:
         }) + "\n")
 
 
-def _replay(path: Path) -> tuple[set[str], list[dict]]:
-    """Return (active_workers, all_events). Caller holds the file lock."""
+def _replay(
+    path: Path,
+    *,
+    now: float | None = None,
+    ttl_seconds: float = ACQUIRE_TTL_SECONDS,
+) -> tuple[set[str], list[dict]]:
+    """Return active workers and events, expiring stale acquire records."""
     events: list[dict] = []
     if not path.exists():
         return set(), events
-    active: set[str] = set()
+    current_time = time.time() if now is None else now
+    active: dict[str, float] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -84,10 +91,24 @@ def _replay(path: Path) -> tuple[set[str], list[dict]]:
         if not wid:
             continue
         if kind == "acquire":
-            active.add(wid)
+            try:
+                acquired_at = float(ev.get("ts"))
+            except (TypeError, ValueError):
+                continue
+            active[wid] = acquired_at
+        elif kind == "heartbeat" and wid in active:
+            try:
+                active[wid] = float(ev.get("ts"))
+            except (TypeError, ValueError):
+                continue
         elif kind == "release":
-            active.discard(wid)
-    return active, events
+            active.pop(wid, None)
+    fresh = {
+        worker_id
+        for worker_id, last_seen_at in active.items()
+        if current_time - last_seen_at <= ttl_seconds
+    }
+    return fresh, events
 
 
 def acquire(budget_path: str, worker_id: str, max_concurrent: int) -> dict:
@@ -128,37 +149,56 @@ def release(budget_path: str, worker_id: str) -> dict:
         return {"released": True, "current": len(active) - 1}
 
 
+def heartbeat(budget_path: str, worker_id: str) -> dict:
+    """Renew a live worker lease without resurrecting expired workers."""
+    p = Path(budget_path)
+    with _locked(p):
+        active, _ = _replay(p)
+        if worker_id not in active:
+            return {"renewed": False, "current": len(active), "note": "not held"}
+        _append_locked(p, "heartbeat", worker_id)
+        return {"renewed": True, "current": len(active)}
+
+
+def _stats_unlocked(path: Path) -> dict:
+    active, events = _replay(path)
+    peak = 0
+    running = 0
+    total_acq = 0
+    total_rel = 0
+    total_heartbeats = 0
+    for ev in events:
+        if ev.get("kind") == "acquire":
+            running += 1
+            total_acq += 1
+            peak = max(peak, running)
+        elif ev.get("kind") == "release":
+            running = max(0, running - 1)
+            total_rel += 1
+        elif ev.get("kind") == "heartbeat":
+            total_heartbeats += 1
+    return {
+        "active": len(active),
+        "peak": peak,
+        "total_acquired": total_acq,
+        "total_released": total_rel,
+        "total_heartbeats": total_heartbeats,
+        "active_workers": sorted(active),
+    }
+
+
 def stats(budget_path: str) -> dict:
     """Return {active, peak, total_acquired, total_released, active_workers}."""
     p = Path(budget_path)
     with _locked(p):
-        active, events = _replay(p)
-        peak = 0
-        running = 0
-        total_acq = 0
-        total_rel = 0
-        for ev in events:
-            if ev.get("kind") == "acquire":
-                running += 1
-                total_acq += 1
-                peak = max(peak, running)
-            elif ev.get("kind") == "release":
-                running = max(0, running - 1)
-                total_rel += 1
-        return {
-            "active": len(active),
-            "peak": peak,
-            "total_acquired": total_acq,
-            "total_released": total_rel,
-            "active_workers": sorted(active),
-        }
+        return _stats_unlocked(p)
 
 
 def reset(budget_path: str) -> dict:
     """Truncate the budget log. Returns stats before reset."""
     p = Path(budget_path)
-    before = stats(budget_path)
     with _locked(p):
+        before = _stats_unlocked(p)
         if p.exists():
             p.unlink()
     return {"reset": True, "previous": before}

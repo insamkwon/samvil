@@ -1,6 +1,6 @@
 ---
 name: samvil-seed
-description: "MCP-driven seed stage: crystallize interview-summary.md into project.seed.json and chain portably."
+description: "MCP-driven seed stage: crystallize interview-summary.md into project.seed.json and chain portably. gate_override is unavailable without a trusted host adapter; blocked gates halt and force_proceed is forbidden."
 ---
 
 # SAMVIL Seed - Thin Orchestrated Entry
@@ -18,14 +18,14 @@ skip "Build Seed" step entirely. Instead:
 2. Present merged seed to user: list `status:existing` features (existing) + `status:new` features (new additions).
 3. AskUserQuestion `이 병합된 seed가 맞나요?` → `맞아, 진행` / `수정 필요`.
    - 수정 필요 → AskUserQuestion으로 어떤 피처를 수정할지 받아 편집 후 재표시.
-4. After approval: skip write (seed already on disk), call `save_seed_version` + `complete_stage`, append handoff.md, chain to samvil-council.
+4. After approval: skip write (seed already on disk), call `save_seed_version` + `complete_stage`, append handoff.md, then chain by the same explicit Council opt-in rule below.
 
 ## Inputs
 
 0. **Stage entry (boot contract — `references/skill-boot-template.md`)**: `mcp__samvil_mcp__save_event(session_id="<sid>", event_type="seed_started", stage="seed", data="{}")` — best-effort; auto-claims `evidence_posted subject="stage:seed"`.
 1. Read `project.state.json` for `session_id`, `current_stage`, `_brownfield_seed_merged`, and host name
    (`host`, `runtime`, or `agent_host`; default `generic`).
-2. Read `project.config.json` for `selected_tier` / `samvil_tier`.
+2. Read `project.config.json` for `selected_tier` / `samvil_tier` and `flags`; Council is enabled only when `flags` contains the exact `--council` token.
 3. If NOT brownfield: load interview state in this order (v4.19 Progressive AC support):
    a. `mcp__samvil_mcp__load_interview_progress(project_root=".")` — if `exists==true`, use the returned `ac_by_phase` and `answers_by_phase` as the **primary** source. AC candidates are the consolidation base (do not regenerate from scratch).
    b. Read `interview-summary.md` from disk regardless — used as supplementary narrative for non-AC fields (description, tech stack, constraints).
@@ -77,20 +77,21 @@ If `stage_can_proceed.can_proceed` is false, show blockers and stop.
 
 In both paths: validate against `references/seed-schema.json`, present, and ask approval. If edits are requested, revise and re-present.
 
-**Concrete behavior confirmation (A2)**: 추상 AC 텍스트만 보여주지 말 것 — 핵심 feature마다 AC(네거티브 포함)를 **실제 동작 시퀀스**로 풀어서 제시한다. 예: `"AC 통과" 대신 "증가 버튼 클릭 → 숫자 0→1 → 자동 저장 → 새로고침해도 1 유지 / 빈 값 추가 시도 → 거부 + 안내"`. 그 다음 `AskUserQuestion(["이렇게 동작하면 맞나요?"], [네 맞아요 / 다르게 동작해야 해요])`. "다르게" → 어느 동작이 어떻게 달라야 하는지 받아 AC 수정 후 재표시. 목적: "QA는 PASS인데 내 의도와 다름"을 빌드 전에 잡는다 (spec↔intent 격차).
+**Concrete behavior confirmation (A2)**: 추상 AC 텍스트만 보여주지 말 것 — 핵심 feature마다 AC(네거티브 포함)를 **실제 동작 시퀀스**로 풀어서 제시한다. 예: `"AC 통과" 대신 "증가 버튼 클릭 → 숫자 0→1 → 자동 저장 → 새로고침해도 1 유지 / 빈 값 추가 시도 → 거부 + 안내"`. Then call `mcp__samvil_mcp__prepare_seed_verify_contracts(seed_json=<draft>)`: browser `verify.command` values reuse per-feature Playwright specs; automation candidates are applied only after the user confirms the concrete command/output sequence. `AskUserQuestion(["이렇게 동작하면 맞나요?"], [네 맞아요 / 다르게 동작해야 해요])`; on change, revise AC/verify and re-present. Write schema_version `3.3` after approval.
 
 ## After Approval
 
 1. Write approved JSON to `project.seed.json`.
-2. `mcp__samvil_mcp__save_seed_version(session_id, version=1, seed_json=<escaped>, change_summary="Initial seed from interview")` + `mcp__samvil_mcp__complete_stage(session_id, stage="seed", verdict="pass")`.
-3. Append `.samvil/handoff.md` (cat >> or Edit, never Write).
+2. `mcp__samvil_mcp__save_seed_version(session_id, version=1, seed_json=<escaped>, change_summary="Initial seed from interview")` + `mcp__samvil_mcp__complete_stage(session_id, stage="seed", verdict="pass", council_opt_in=<flags contains --council>)`.
+3. Append `.samvil/handoff.md` via Edit (never Write or Bash redirection).
 4. Best-effort `mcp__samvil_mcp__clear_interview_progress(project_root=".")` — interview-summary.md remains narrative record.
 
 ## Chain
 
 Use `host_chain_strategy.chain_via`:
-- `skill_tool`: invoke `samvil-council` (standard/thorough/full) or `samvil-design` (minimal).
-- `file_marker`: write `.samvil/next-skill.json` with `{schema_version:"1.0", chain_via:"file_marker", host, next_skill, reason, from_stage:"seed", created_by:"samvil-seed"}` — `next_skill` per tier (minimal → `samvil-design`, else `samvil-council`).
+- Default: `next_skill="samvil-design"` for every tier. Exact `--council` opt-in on standard/thorough/full/deep sets `next_skill="samvil-council"`; minimal remains design.
+- `skill_tool`: invoke the resolved `next_skill` directly.
+- `file_marker`: write `.samvil/next-skill.json` with `{schema_version:"1.0", chain_via:"file_marker", host, next_skill, reason, from_stage:"seed", created_by:"samvil-seed"}`.
 
 If MCP unavailable: fall back to `SKILL.legacy.md` legacy chaining rules + announce degraded orchestration.
 

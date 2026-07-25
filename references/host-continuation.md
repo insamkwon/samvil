@@ -3,6 +3,11 @@
 SAMVIL hosts without native skill invocation continue through
 `.samvil/next-skill.json`.
 
+This marker preserves deterministic continuation state; it is not evidence of
+native host parity. Claude Code is the validated native host. Codex consumes
+the marker as an integration path, while Gemini support is an experimental
+stub until host-native stage execution is tested.
+
 ## Marker Shape
 
 ```json
@@ -11,7 +16,7 @@ SAMVIL hosts without native skill invocation continue through
   "chain_via": "file_marker",
   "host": "codex_cli",
   "next_skill": "samvil-design",
-  "reason": "minimal tier skips council",
+  "reason": "council is default-off",
   "from_stage": "seed",
   "created_by": "samvil-seed"
 }

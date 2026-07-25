@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from samvil_mcp.qa_synthesis import (
     evaluate_qa_convergence,
     materialize_qa_synthesis,
@@ -33,6 +35,57 @@ def test_synthesis_passes_with_partial_functional_evidence():
     assert result["verdict"] == "PASS"
     assert result["pass2"]["counts"]["PARTIAL"] == 1
     assert any(event["event_type"] == "qa_partial" for event in result["events"])
+
+
+def test_synthesis_labels_pass_by_verification_mode() -> None:
+    static = synthesize_qa_evidence(_base([
+        {"id": "AC-1", "criterion": "Create task", "verdict": "PASS"},
+    ]))
+    runtime_input = _base([
+        {"id": "AC-1", "criterion": "Create task", "verdict": "PASS"},
+    ])
+    runtime_input["verification_mode"] = "runtime"
+    runtime = synthesize_qa_evidence(runtime_input)
+
+    assert static["verdict"] == "PASS"
+    assert static["verification_mode"] == "static"
+    assert runtime["verification_mode"] == "runtime"
+    assert "PASS(static)" in render_qa_synthesis(static)
+    assert "PASS(runtime)" in render_qa_synthesis(runtime)
+
+
+def test_verify_contract_result_overrides_narrative_pass() -> None:
+    result = synthesize_qa_evidence(_base([
+        {
+            "id": "AC-1",
+            "criterion": "Create task",
+            "verdict": "PASS",
+            "verify": {"command": "npm test"},
+            "mechanical_verification": {
+                "ran": True,
+                "passed": False,
+                "log_file": ".samvil/ac-evidence/AC-1.log",
+            },
+        },
+    ]))
+
+    assert result["verdict"] == "REVISE"
+    assert result["pass2"]["items"][0]["verdict"] == "FAIL"
+    assert result["pass2"]["items"][0]["method"] == "verify.command"
+
+
+def test_verify_contract_missing_execution_fails_closed() -> None:
+    result = synthesize_qa_evidence(_base([
+        {
+            "id": "AC-1",
+            "criterion": "Create task",
+            "verdict": "PASS",
+            "verify": {"command": "npm test"},
+        },
+    ]))
+
+    assert result["pass2"]["items"][0]["verdict"] == "FAIL"
+    assert "missing" in result["pass2"]["items"][0]["reason"]
 
 
 def test_synthesis_revises_on_unimplemented_non_core_ac():
@@ -141,6 +194,39 @@ def test_render_qa_synthesis_includes_verdict_and_counts():
     assert "PASS=1" in rendered
 
 
+def test_render_qa_synthesis_includes_runtime_test_counts() -> None:
+    result = synthesize_qa_evidence(_base([
+        {"id": "AC-1", "criterion": "Create task", "verdict": "PASS"},
+    ]))
+    result["runtime_evidence"] = {
+        "ran": True,
+        "passed": 3,
+        "failed": 1,
+        "skipped": 2,
+        "from": ".samvil/test-results.json",
+    }
+
+    rendered = render_qa_synthesis(result)
+
+    assert "Runtime tests: passed=3, failed=1, skipped=2" in rendered
+    assert ".samvil/test-results.json" in rendered
+
+
+def test_render_qa_synthesis_hides_unverified_runtime_counts() -> None:
+    result = synthesize_qa_evidence(_base([
+        {"id": "AC-1", "criterion": "Create task", "verdict": "PASS"},
+    ]))
+    result["runtime_evidence"] = {
+        "ran": False,
+        "passed": 99,
+        "failed": 0,
+        "skipped": 0,
+        "from": "untrusted.log",
+    }
+
+    assert "Runtime tests:" not in render_qa_synthesis(result)
+
+
 def test_materialize_qa_synthesis_writes_report_results_events_and_state(tmp_path):
     (tmp_path / "project.state.json").write_text(
         json.dumps({"session_id": "s1", "current_stage": "qa", "qa_history": []}),
@@ -165,8 +251,11 @@ def test_materialize_qa_synthesis_writes_report_results_events_and_state(tmp_pat
     ]
     assert [event["event_type"] for event in events] == ["qa_unimplemented", "qa_verdict"]
     assert events[0]["session_id"] == "s1"
+    assert events[0]["timestamp"]
+    assert "ts" not in events[0]
     state = json.loads((tmp_path / "project.state.json").read_text(encoding="utf-8"))
     assert state["last_qa_verdict"] == "REVISE"
+    assert state["last_qa_verification_mode"] == "static"
     assert state["last_qa_convergence"]["verdict"] == "continue"
     assert state["qa_history"][0]["issue_ids"] == ["pass2:AC-1:UNIMPLEMENTED"]
     assert state["qa_history"][0]["pass2_counts"]["UNIMPLEMENTED"] == 1
@@ -175,6 +264,90 @@ def test_materialize_qa_synthesis_writes_report_results_events_and_state(tmp_pat
     assert summary["verdict"] == "REVISE"
     assert summary["convergence"]["verdict"] == "continue"
     assert summary["pass2_counts"]["UNIMPLEMENTED"] == 1
+
+
+def test_materialize_qa_synthesis_updates_shared_canonical_event_index(tmp_path):
+    from samvil_mcp import server as srv
+
+    (tmp_path / "project.state.json").write_text(
+        json.dumps({"session_id": "s1", "current_stage": "qa", "qa_history": []}),
+        encoding="utf-8",
+    )
+    assert srv._append_project_event(
+        tmp_path,
+        timestamp="2026-07-25T00:00:00Z",
+        event_type="build_pass",
+        stage="build",
+        session_id="s1",
+        data={},
+    ) == ".samvil/events.jsonl:1"
+    synthesis = synthesize_qa_evidence(
+        _base(
+            [
+                {
+                    "id": "AC-1",
+                    "criterion": "Create task",
+                    "verdict": "UNIMPLEMENTED",
+                    "reason": "stub",
+                }
+            ]
+        )
+    )
+
+    result = materialize_qa_synthesis(tmp_path, synthesis)
+
+    events_path = tmp_path / ".samvil" / "events.jsonl"
+    index = json.loads(
+        (tmp_path / ".samvil" / "events.jsonl.index").read_text(encoding="utf-8")
+    )
+    assert result["events_appended"] == 2
+    assert index == {"size": events_path.stat().st_size, "line_count": 3}
+
+
+def test_materialize_qa_synthesis_rolls_back_partial_event_batch_for_safe_retry(
+    tmp_path,
+    monkeypatch,
+):
+    from samvil_mcp import server as srv
+
+    (tmp_path / "project.state.json").write_text(
+        json.dumps({"session_id": "s1", "current_stage": "qa", "qa_history": []}),
+        encoding="utf-8",
+    )
+    synthesis = synthesize_qa_evidence(
+        _base(
+            [
+                {
+                    "id": "AC-1",
+                    "criterion": "Create task",
+                    "verdict": "UNIMPLEMENTED",
+                    "reason": "stub",
+                }
+            ]
+        )
+    )
+    real_dumps = srv.json.dumps
+
+    def fail_second_event(value, *args, **kwargs):
+        if isinstance(value, dict) and value.get("event_type") == "qa_verdict":
+            raise OSError("second QA event serialization failed")
+        return real_dumps(value, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(srv.json, "dumps", fail_second_event)
+        with pytest.raises(OSError, match="second QA event serialization failed"):
+            materialize_qa_synthesis(tmp_path, synthesis)
+
+    events_path = tmp_path / ".samvil" / "events.jsonl"
+    assert not events_path.exists() or events_path.read_text(encoding="utf-8") == ""
+
+    result = materialize_qa_synthesis(tmp_path, synthesis)
+    event_types = [
+        json.loads(line)["event_type"]
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert result["events_appended"] == 2
+    assert event_types == ["qa_unimplemented", "qa_verdict"]
 
 
 def test_materialize_qa_synthesis_marks_blocked_on_repeated_issues(tmp_path):

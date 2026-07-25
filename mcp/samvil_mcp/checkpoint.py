@@ -19,6 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+from .claim_ledger import _locked
+from .ssot_io import atomic_write_text_unlocked
+
 
 @dataclass(frozen=True, slots=True)
 class CheckpointData:
@@ -54,35 +57,32 @@ class CheckpointStore:
     def save(self, cp: CheckpointData) -> None:
         base_name = f"checkpoint_{cp.seed_id}.json"
         current = self.base / base_name
+        with _locked(current):
+            # Rotation: .2 → .3, .1 → .2, current → .1
+            for level in (3, 2, 1):
+                src = self.base / f"{base_name}.{level}"
+                dst = self.base / f"{base_name}.{level + 1}"
+                if level == 3 and src.exists():
+                    src.unlink()
+                    continue
+                if src.exists():
+                    if dst.exists():
+                        dst.unlink()
+                    src.rename(dst)
 
-        # Rotation: .2 → .3, .1 → .2, current → .1
-        for level in (3, 2, 1):
-            src = self.base / f"{base_name}.{level}"
-            dst = self.base / f"{base_name}.{level + 1}"
-            if level == 3 and src.exists():
-                src.unlink()
-                continue
-            if src.exists():
+            if current.exists():
+                dst = self.base / f"{base_name}.1"
                 if dst.exists():
                     dst.unlink()
-                src.rename(dst)
+                current.rename(dst)
 
-        if current.exists():
-            dst = self.base / f"{base_name}.1"
-            if dst.exists():
-                dst.unlink()
-            current.rename(dst)
-
-        # Atomic write
-        tmp = current.with_suffix(".tmp")
-        tmp.write_text(json.dumps({
-            "seed_id": cp.seed_id,
-            "phase": cp.phase,
-            "state": cp.state,
-            "timestamp": cp.timestamp,
-            "hash": cp.hash,
-        }))
-        tmp.rename(current)
+            atomic_write_text_unlocked(current, json.dumps({
+                "seed_id": cp.seed_id,
+                "phase": cp.phase,
+                "state": cp.state,
+                "timestamp": cp.timestamp,
+                "hash": cp.hash,
+            }))
 
     def load(self, seed_id: str) -> Optional[CheckpointData]:
         from .security import sanitize_filename

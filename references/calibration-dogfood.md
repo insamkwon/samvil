@@ -90,7 +90,7 @@ Record the same three metrics. For the real run, also capture:
 - Whether the same check escalated twice (should trigger user-decision
   per §3.⑥).
 - Whether Graceful Degradation (P8) was invoked (MCP down, etc.). Log the
-  category per `references/gate-vs-degradation.md`.
+  category per `references/graceful-degradation.md`.
 
 ## Exit-gate check
 

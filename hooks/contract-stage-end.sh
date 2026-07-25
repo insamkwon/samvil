@@ -61,8 +61,15 @@ project = Path(project_root)
 sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
 
 try:
+    from samvil_mcp.chain_markers import resolve_stage_next_skill
     from samvil_mcp.claim_ledger import ClaimLedger
-    from samvil_mcp.gates import GateName, Verdict, gate_check, load_config
+    from samvil_mcp.gates import (
+        GateName,
+        Verdict,
+        active_gate_override,
+        gate_check,
+        load_config,
+    )
 except Exception as e:
     sys.stderr.write(f"[samvil-contract-hook] gate import failed: {e}\n")
     sys.exit(0)
@@ -77,6 +84,20 @@ def _load_json(p: Path) -> dict:
         return {}
 
 
+def _as_bool(value, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes"}:
+            return True
+        if lowered in {"false", "0", "no", ""}:
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
 STAGE_TO_GATE = {
     "interview": GateName.INTERVIEW_TO_SEED.value,
     "seed": GateName.SEED_TO_COUNCIL.value,
@@ -84,9 +105,38 @@ STAGE_TO_GATE = {
     "design": GateName.DESIGN_TO_SCAFFOLD.value,
     "scaffold": GateName.SCAFFOLD_TO_BUILD.value,
     "build": GateName.BUILD_TO_QA.value,
-    "qa": GateName.QA_TO_DEPLOY.value,
     "retro": GateName.ANY_TO_RETRO.value,
 }
+QA_CONTINUE = "__qa_continue__"
+
+
+def _qa_results_payload() -> dict:
+    results = _load_json(project / ".samvil" / "qa-results.json")
+    return results
+
+
+def _qa_results() -> dict:
+    return _qa_results_payload().get("synthesis") or {}
+
+
+def _qa_suggested_next_skill(state: dict) -> str:
+    try:
+        return str(resolve_stage_next_skill(project, "samvil-qa") or "")
+    except Exception:
+        return ""
+
+
+def _gate_for_stage(stage: str, state: dict) -> str | None:
+    if stage != "qa":
+        return STAGE_TO_GATE.get(stage)
+    suggested = _qa_suggested_next_skill(state)
+    if suggested == "samvil-qa":
+        return QA_CONTINUE
+    if suggested == "samvil-evolve":
+        return GateName.QA_TO_EVOLVE.value
+    if suggested == "samvil-retro":
+        return GateName.ANY_TO_RETRO.value
+    return GateName.QA_TO_DEPLOY.value
 
 
 def _metrics_for_stage(stage: str, state: dict, seed: dict, metrics: dict) -> dict:
@@ -94,8 +144,12 @@ def _metrics_for_stage(stage: str, state: dict, seed: dict, metrics: dict) -> di
         # seed_readiness is computed by the interview skill when β wiring
         # is live. Fall back to state.seed_readiness or a conservative
         # default so the gate can at least render a verdict.
+        converged = state.get("ambiguity_converged", metrics.get("ambiguity_converged"))
+        if converged is None:
+            converged = state.get("converged", metrics.get("converged", False))
         return {
-            "seed_readiness": state.get("seed_readiness", metrics.get("seed_readiness", 0.80))
+            "seed_readiness": state.get("seed_readiness", metrics.get("seed_readiness", 0.80)),
+            "ambiguity_converged": _as_bool(converged),
         }
     if stage == "seed":
         schema = seed.get("schema_version") or ""
@@ -123,10 +177,24 @@ def _metrics_for_stage(stage: str, state: dict, seed: dict, metrics: dict) -> di
             impl = (completed / total) if total else 0.0
         return {"implementation_rate": float(impl)}
     if stage == "qa":
-        qa_verdict = state.get("qa_verdict") or metrics.get("qa_verdict") or "unknown"
+        synthesis = _qa_results()
+        pass1_status = str((synthesis.get("pass1") or {}).get("status") or "").upper()
+        pass3_verdict = str((synthesis.get("pass3") or {}).get("verdict") or "").upper()
+        counts = (synthesis.get("pass2") or {}).get("counts") or {}
+        fail = int(counts.get("FAIL", 0) or 0)
+        unimplemented = int(counts.get("UNIMPLEMENTED", 0) or 0)
+        qa_verdict = state.get("qa_verdict") or synthesis.get("verdict") or metrics.get("qa_verdict") or "unknown"
         return {
-            "three_pass_pass": qa_verdict.upper() in ("PASS", "PASSED"),
-            "zero_stubs": not bool(metrics.get("stub_detected")),
+            "three_pass_pass": (
+                str(qa_verdict).upper() in ("PASS", "PASSED")
+                and pass1_status in ("", "PASS")
+                and pass3_verdict in ("", "PASS")
+                and fail == 0
+                and unimplemented == 0
+            ),
+            "zero_stubs": unimplemented == 0 and not bool(metrics.get("stub_detected")),
+            "runtime_verified": str(synthesis.get("verification_mode") or "").casefold() == "runtime",
+            "verification_mode": synthesis.get("verification_mode") or "static",
         }
     if stage == "retro":
         return {"always_run": True}
@@ -137,7 +205,10 @@ state = _load_json(project / "project.state.json")
 seed = _load_json(project / "project.seed.json")
 metrics_file = _load_json(project / ".samvil" / "metrics.json")
 
-gate_name = STAGE_TO_GATE.get(stage)
+gate_name = _gate_for_stage(stage, state)
+if gate_name == QA_CONTINUE:
+    print("hold;stage=qa;continue")
+    sys.exit(0)
 if gate_name is None:
     print(f"skip;stage={stage};no-gate")
     sys.exit(0)
@@ -152,7 +223,11 @@ tier = (
 if tier not in {"minimal", "standard", "thorough", "full", "deep"}:
     tier = "standard"
 
-metrics = _metrics_for_stage(stage, state, seed, metrics_file)
+metrics = (
+    {"always_run": True}
+    if gate_name == GateName.ANY_TO_RETRO.value
+    else _metrics_for_stage(stage, state, seed, metrics_file)
+)
 
 try:
     verdict = gate_check(
@@ -168,16 +243,22 @@ except Exception as e:
 from dataclasses import asdict
 
 ledger = ClaimLedger(project / ".samvil" / "claims.jsonl")
+override = active_gate_override(ledger, gate_name) if verdict.verdict == "block" else None
+effective_verdict = Verdict.PASS.value if override else verdict.verdict
 posted = True
 try:
+    verdict_meta = asdict(verdict)
+    verdict_meta["original_verdict"] = verdict.verdict
+    verdict_meta["verdict"] = effective_verdict
+    verdict_meta["override_claim_id"] = override.claim_id if override else ""
     ledger.post(
         type="gate_verdict",
         subject=gate_name,
-        statement=f"verdict={verdict.verdict}; metrics={metrics}",
+        statement=f"verdict={effective_verdict}; metrics={metrics}",
         authority_file="state.json",
         claimed_by="agent:orchestrator-agent",
         evidence=["project.state.json"],
-        meta=asdict(verdict),
+        meta=verdict_meta,
     )
 except Exception as e:
     posted = False
@@ -185,25 +266,40 @@ except Exception as e:
 
 # Print a short line so the user sees what happened.
 sys.stderr.write(
-    f"[samvil-contract] post-stage {stage} → {gate_name}={verdict.verdict} "
+    f"[samvil-contract] post-stage {stage} → {gate_name}={effective_verdict} "
     f"(tier={tier}, failed={verdict.failed_checks})\n"
 )
 # Sentinel for the bash wrapper's health logging (stdout, not stderr).
-print(f"gate={gate_name};verdict={verdict.verdict};posted={posted}")
+override_id = override.claim_id if override else "none"
+print(
+    f"gate={gate_name};verdict={effective_verdict};override={override_id};posted={posted}"
+)
 PY
 )"
 
 # 3. Write the expected next-skill marker (W2.2 chain-break recovery).
 #    The stage-start hook clears it when the chain actually continues.
 #    A surviving marker = the chain invoke never happened — samvil-resume
-#    reads it as the recovery point.
-MARKER_RESULT="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
+#    reads it as the recovery point. Hard gate blocks intentionally skip this
+#    marker: a blocked stage has no safe continuation to recover.
+case "$GATE_RESULT" in
+  *";verdict=pass;"*|skip\;*)
+    SHOULD_WRITE_MARKER=1
+    ;;
+  *)
+    SHOULD_WRITE_MARKER=0
+    ;;
+esac
+
+if [ "$SHOULD_WRITE_MARKER" = "1" ]; then
+  MARKER_RESULT="$("$SAMVIL_PY" - "$PROJECT_ROOT" "$SKILL_NAME" <<'PY' 2>/dev/null
 import os, sys
 project_root, skill_name = sys.argv[1:3]
 try:
     sys.path.insert(0, os.environ.get("SAMVIL_MCP_DIR", "mcp"))
-    from samvil_mcp.chain_markers import write_chain_marker
-    marker = write_chain_marker(project_root, "claude_code", skill_name)
+    from samvil_mcp.chain_markers import resolve_stage_next_skill, write_chain_marker
+    next_skill = resolve_stage_next_skill(project_root, skill_name)
+    marker = write_chain_marker(project_root, "claude_code", skill_name, next_skill=next_skill)
     nxt = marker.get("next_skill", "")
     if nxt:
         print(f"marker={skill_name}->{nxt}")
@@ -212,8 +308,14 @@ try:
 except Exception as e:
     sys.stderr.write(f"[samvil-contract-hook] chain marker write failed: {e}\n")
 PY
-)"
-if [ -n "$MARKER_RESULT" ]; then
+  )"
+else
+  MARKER_RESULT="marker=skipped-gate-${STAGE}"
+fi
+
+if [ "$SHOULD_WRITE_MARKER" != "1" ]; then
+  samvil_contract_log_health "chain" "ok" "$MARKER_RESULT"
+elif [ -n "$MARKER_RESULT" ]; then
   samvil_contract_log_health "chain" "ok" "$MARKER_RESULT"
 else
   samvil_contract_log_health "chain" "fail" "next-skill marker not written after $STAGE"

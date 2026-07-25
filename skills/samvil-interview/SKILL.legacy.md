@@ -261,15 +261,11 @@ MCP 호출 실패하면:
 
 ## Step 2: Tier 기반 인터뷰 깊이 (v3.1.0 확장, v3-022)
 
-`selected_tier`에 따라 질문 수, 모호도 목표, 필수 Phase 세트를 결정.
-
-| Tier | 질문 수 | 모호도 목표 | 필수 Phase |
-|------|--------|-----------|-----------|
-| minimal | 3-4개 | ≤ 0.10 | Core(1) + Scope(2) |
-| standard | 5-6개 | ≤ 0.05 | Core + Scope + **Lifecycle(2.9, 8Q)** |
-| thorough | 6-8개 | ≤ 0.02 | + Unknown(2.5) + **Non-func(2.6, 3Q)** + **Inversion(2.7)** |
-| full | 8개 + | ≤ 0.01 | + **Stakeholder/JTBD(2.8)** + PATH 4 Research |
-| **deep** | **10개 +** | **≤ 0.005** | full + **Domain pack 25~30Q 심화** + premortem 반복 |
+`selected_tier`에 따른 모호도 목표와 질문 경계 수치는
+`references/decision-boundaries.md`의 Interview termination 표만 사용한다.
+`min_questions_reference`는 현재 수렴 참고치, `max_questions`는 Wave 3.1에서
+강제될 질문 예산이다. 이 legacy body에 별도 질문 수 표를 복제하지 않는다.
+필수 Phase 세트는 아래 Tier → Phase 매핑과 MCP 결과를 따른다.
 
 **Deep Mode 활성화 경로** (v3-022 fix f):
 - `/samvil:interview --deeper` 플래그가 있으면 tier를 `deep`로 승격
@@ -303,7 +299,7 @@ MCP 실패 시 fallback: tier 이름 기반 prose lookup (이 SKILL의 기존 �
 
 ## Step 3: 인터뷰 질문
 
-모든 질문은 **AskUserQuestion** 도구로 객관식 제시. preset이 있으면 보기에 preset 기본값 포함.
+모든 질문은 **AskUserQuestion** 도구로 객관식 제시. 같은 Phase의 독립 질문 2~3개는 한 번에 묶고, 의존 질문은 순차 실행한다. preset이 있으면 보기에 preset 기본값 포함.
 
 ### 답변 적응형 질문 (Adaptive Follow-up)
 
@@ -322,7 +318,7 @@ MCP 실패 시 fallback: tier 이름 기반 prose lookup (이 SKILL의 기존 �
 
 ### Phase 1: Core Understanding (2-3 questions)
 
-**한 번에 하나씩.** 답변 후 다음 질문.
+**배치 규칙:** 같은 Phase의 독립 질문 2~3개만 한 번에 묶는다. 의존 질문은 답변 후 다음 질문.
 
 #### solution_type: "web-app" (기본)
 
@@ -965,25 +961,25 @@ mcp__samvil_mcp__save_event(session_id="<session_id>", event_type="interview_com
 
 > Spec: `references/contract-layer-protocol.md`.
 
-Compute `seed_readiness` from the interview dimensions (intent_clarity /
-constraint_clarity / ac_testability / lifecycle_coverage /
-decision_boundary). Score each on [0,1] from the answers you recorded;
-if a dimension wasn't probed, pass its current best estimate and flag
-it in the summary.
+Compute `seed_readiness` only through `score_ambiguity` using the persisted
+interview answers and actual question count. Never ask the LLM to assign
+readiness dimensions or fill an unprobed dimension with an estimate.
 
 ```
-# 1. Multi-dimensional readiness
-mcp__samvil_mcp__compute_seed_readiness(
-  dimensions_json='{"intent_clarity":<float>,"constraint_clarity":<float>,"ac_testability":<float>,"lifecycle_coverage":<float>,"decision_boundary":<float>}',
-  samvil_tier="<from project.config.json>"
+# 1. Deterministic readiness from the canonical ambiguity engine
+mcp__samvil_mcp__score_ambiguity(
+  interview_state='<persisted answers JSON>',
+  tier="<from project.config.json>",
+  questions_asked=<actual>,
+  question_extensions=<actual>
 )
-→ Parse total + below_floor. Attach the total to state.json.seed_readiness.
+→ Persist seed_readiness + ambiguity + dimension_scores + converged.
 
 # 2. Gate check for interview → seed
 mcp__samvil_mcp__gate_check(
   gate_name="interview_to_seed",
   samvil_tier="<tier>",
-  metrics_json='{"seed_readiness": <total>}',
+  metrics_json='{"seed_readiness": <score.seed_readiness>, "ambiguity_converged": <score.converged>}',
   project_root="."
 )
 → On verdict=block: DO NOT chain to samvil-seed yet. Emit the
@@ -1252,7 +1248,7 @@ Each section must be non-empty. Constraints must have >= 1 item. Success criteri
 
 1. **모든 질문은 AskUserQuestion 도구 사용** — 객관식 보기 + Other
 2. **대화는 한국어로.** 기술 용어와 코드만 영어.
-3. **한 번에 하나씩.** 2개 이상 질문 금지. Framework 이름(AARRR/JTBD/HEART) 사용자에게 노출 금지.
+3. **독립 질문 2~3개 배치 허용.** 의존 질문 또는 4개 이상 배치 금지. Framework 이름(AARRR/JTBD/HEART) 사용자에게 노출 금지.
 4. **preset 있으면 활용.** 질문을 줄이고 보기 품질 높임.
 5. **Phase 2.5 (Unknown Unknowns)**: thorough/full/deep 기본 + 자동 감지. preset 매칭 실패 + 짧은 답변 비율 > 50%면 minimal/standard도 활성화.
 6. **Phase 2.6 (Non-functional)**: thorough+ 의무 — thorough는 3Q, full/deep는 7Q 전체. (v3.1.0)
