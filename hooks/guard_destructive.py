@@ -692,7 +692,7 @@ def _ln_is_symbolic(args: list[str]) -> bool:
     )
 
 
-def _literal_ln_sources(args: list[str]) -> list[str]:
+def _literal_link_sources(args: list[str]) -> list[str]:
     target_directory: str | None = None
     operands: list[str] = []
     literal_operands = False
@@ -1188,12 +1188,26 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
                 if reason:
                     return reason
 
+    hard_link_sources: list[str] = []
     if executable == "ln" and not _ln_is_symbolic(args):
-        for source in _literal_ln_sources(args):
-            if _is_samvil_event_store_target(source):
-                return "protected SAMVIL EventStore hard link"
-            if _is_protected_ssot_target(source):
-                return "protected SAMVIL SSOT hard link"
+        hard_link_sources = _literal_link_sources(args)
+    elif executable == "link" and len(args) >= 2:
+        hard_link_sources = args[:-1]
+    elif executable == "cp" and any(
+        token == "--link"
+        or (
+            token.startswith("-")
+            and not token.startswith("--")
+            and "l" in token[1:]
+        )
+        for token in args
+    ):
+        hard_link_sources = _literal_link_sources(args)
+    for source in hard_link_sources:
+        if _is_samvil_event_store_target(source):
+            return "protected SAMVIL EventStore hard link"
+        if _is_protected_ssot_target(source):
+            return "protected SAMVIL SSOT hard link"
 
     if executable in {"cp", "install", "ln", "mv", "rsync"} and len(args) >= 2:
         for target in _copy_like_mutation_targets(args):
