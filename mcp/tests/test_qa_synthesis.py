@@ -264,6 +264,44 @@ def test_materialize_qa_synthesis_writes_report_results_events_and_state(tmp_pat
     assert summary["pass2_counts"]["UNIMPLEMENTED"] == 1
 
 
+def test_materialize_qa_synthesis_updates_shared_canonical_event_index(tmp_path):
+    from samvil_mcp import server as srv
+
+    (tmp_path / "project.state.json").write_text(
+        json.dumps({"session_id": "s1", "current_stage": "qa", "qa_history": []}),
+        encoding="utf-8",
+    )
+    assert srv._append_project_event(
+        tmp_path,
+        timestamp="2026-07-25T00:00:00Z",
+        event_type="build_pass",
+        stage="build",
+        session_id="s1",
+        data={},
+    ) == ".samvil/events.jsonl:1"
+    synthesis = synthesize_qa_evidence(
+        _base(
+            [
+                {
+                    "id": "AC-1",
+                    "criterion": "Create task",
+                    "verdict": "UNIMPLEMENTED",
+                    "reason": "stub",
+                }
+            ]
+        )
+    )
+
+    result = materialize_qa_synthesis(tmp_path, synthesis)
+
+    events_path = tmp_path / ".samvil" / "events.jsonl"
+    index = json.loads(
+        (tmp_path / ".samvil" / "events.jsonl.index").read_text(encoding="utf-8")
+    )
+    assert result["events_appended"] == 2
+    assert index == {"size": events_path.stat().st_size, "line_count": 3}
+
+
 def test_materialize_qa_synthesis_marks_blocked_on_repeated_issues(tmp_path):
     (tmp_path / "project.state.json").write_text(
         json.dumps({

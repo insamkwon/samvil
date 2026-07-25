@@ -669,6 +669,7 @@ def _append_project_event(
     stage: str,
     session_id: str,
     data: dict,
+    source: str | None = None,
 ) -> str:
     """Append one canonical project event and return its file-backed evidence."""
     path = project_root / ".samvil" / "events.jsonl"
@@ -681,6 +682,8 @@ def _append_project_event(
         "session_id": session_id,
         "data": data,
     }
+    if source:
+        row["source"] = source
     with _file_locked(path):
         current_size: int | None = None
         try:

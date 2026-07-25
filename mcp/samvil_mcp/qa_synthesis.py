@@ -524,22 +524,21 @@ def _convergence_events(convergence: dict[str, Any]) -> list[dict[str, Any]]:
 def _append_event_drafts(root: Path, events: list[dict[str, Any]]) -> int:
     if not events:
         return 0
-    path = qa_events_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    from .server import _append_project_event
+
     state = _load_project_state(root)
     session_id = state.get("session_id")
     now = _now_iso()
-    with path.open("a", encoding="utf-8") as handle:
-        for event in events:
-            row = {
-                "timestamp": now,
-                "session_id": session_id,
-                "event_type": event.get("event_type"),
-                "stage": event.get("stage") or "qa",
-                "data": event.get("data") or {},
-                "source": "qa_synthesis",
-            }
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    for event in events:
+        _append_project_event(
+            root,
+            timestamp=now,
+            session_id=str(session_id or ""),
+            event_type=str(event.get("event_type") or "qa_event"),
+            stage=str(event.get("stage") or "qa"),
+            data=event.get("data") or {},
+            source="qa_synthesis",
+        )
     return len(events)
 
 
