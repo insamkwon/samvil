@@ -294,6 +294,7 @@ class EventStore:
         normalized_root = str(Path(project_root).expanduser().resolve())
         root = Path(normalized_root)
         state_path = root / "project.state.json"
+        legacy_state_path = root / ".samvil" / "state.json"
         marker_path = root / ".samvil" / "next-skill.json"
 
         backups: dict[Path, str | None] = {}
@@ -312,10 +313,20 @@ class EventStore:
                     return False
                 locks.enter_context(_locked(state_path))
                 locks.enter_context(_locked(marker_path))
-                try:
-                    parsed_state = json.loads(state_path.read_text(encoding="utf-8"))
-                except (json.JSONDecodeError, OSError, UnicodeError):
-                    parsed_state = None
+                locks.enter_context(_locked(legacy_state_path))
+                parsed_state = None
+                for candidate in (state_path, legacy_state_path):
+                    try:
+                        candidate_state = json.loads(
+                            candidate.read_text(encoding="utf-8")
+                        )
+                    except (json.JSONDecodeError, OSError, UnicodeError):
+                        continue
+                    if isinstance(candidate_state, dict) and str(
+                        candidate_state.get("session_id") or ""
+                    ):
+                        parsed_state = candidate_state
+                        break
                 if not isinstance(parsed_state, dict):
                     await db.rollback()
                     return False

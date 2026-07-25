@@ -137,6 +137,54 @@ def test_rootless_recovery_rejects_a_cross_session_state_swap(
     assert json.loads(marker_path.read_text())["next_skill"] == "samvil-build"
 
 
+def test_rootless_recovery_accepts_the_legacy_state_fallback(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from samvil_mcp import server as srv
+    from samvil_mcp.event_store import EventStore
+
+    project_root = tmp_path / "legacy-project"
+    legacy_state_path = project_root / ".samvil" / "state.json"
+    marker_path = project_root / ".samvil" / "next-skill.json"
+    legacy_state_path.parent.mkdir(parents=True)
+    db_path = tmp_path / "samvil.db"
+    store = EventStore(str(db_path))
+    _run(store.initialize())
+    session = _run(store.create_session("legacy-app"))
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE sessions SET current_stage = 'build', stage_transition_id = 'old' "
+            "WHERE id = ?",
+            (session.id,),
+        )
+    legacy_state_path.write_text(
+        json.dumps({"session_id": session.id, "current_stage": "build"}),
+        encoding="utf-8",
+    )
+    marker_path.write_text(
+        json.dumps({"next_skill": "samvil-build", "from_stage": "samvil-scaffold"}),
+        encoding="utf-8",
+    )
+
+    async def fake_get_store():
+        return store
+
+    monkeypatch.setattr(srv, "get_store", fake_get_store)
+
+    assert _run(srv._recover_rootless_legacy_session(str(project_root))) is True
+    recovered = _run(store.get_session(session.id))
+    assert recovered is not None
+    assert recovered.project_root == str(project_root.resolve())
+    assert recovered.current_stage.value == "interview"
+    canonical_state = json.loads(
+        (project_root / "project.state.json").read_text(encoding="utf-8")
+    )
+    assert canonical_state["session_id"] == session.id
+    assert canonical_state["current_stage"] == "interview"
+    assert json.loads(marker_path.read_text())["next_skill"] == "samvil-interview"
+
+
 def _prepare_interview_exit(project_root: Path) -> None:
     (project_root / "interview-summary.md").write_text(
         "# Interview Summary\n\nValidated interview output.\n",
