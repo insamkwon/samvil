@@ -5552,18 +5552,28 @@ def _project_state_session_id(project_root: str) -> str:
     return ""
 
 
-async def _recover_rootless_legacy_session(project_root: str) -> bool:
+async def _recover_rootless_legacy_session(project_root: str) -> bool | None:
     session_id = await asyncio.to_thread(
         _project_state_session_id,
         project_root,
     )
     if not session_id:
-        return False
+        return None
     store = await get_store()
-    return await store.recover_legacy_session_project_root(
+    recovered = await store.recover_legacy_session_project_root(
         session_id,
         project_root,
     )
+    if recovered:
+        return True
+    get_session = getattr(store, "get_session", None)
+    if get_session is not None:
+        session = await get_session(session_id)
+        if session is not None and session.project_root:
+            return str(Path(session.project_root).resolve()) == str(
+                Path(project_root).expanduser().resolve()
+            )
+    return False
 
 
 @mcp.tool()
@@ -5573,7 +5583,13 @@ async def read_chain_marker(project_root: str) -> str:
     Returns marker dict or null if no marker exists.
     """
     try:
-        await _recover_rootless_legacy_session(project_root)
+        recovery = await _recover_rootless_legacy_session(project_root)
+        if recovery is False:
+            return json.dumps(
+                {
+                    "error": "legacy session recovery rejected; refusing to read chain marker"
+                }
+            )
         result = await asyncio.to_thread(_read_chain_marker, project_root)
         _log_mcp_health("ok", "read_chain_marker")
         return json.dumps(result)
@@ -6256,7 +6272,13 @@ async def resume_session(project_root: str) -> str:
     completed_features, failed_acs, samvil_tier, project_name.
     """
     try:
-        await _recover_rootless_legacy_session(project_root)
+        recovery = await _recover_rootless_legacy_session(project_root)
+        if recovery is False:
+            return json.dumps(
+                {
+                    "error": "legacy session recovery rejected; refusing to resume"
+                }
+            )
         result = _resume_session(project_root)
         _log_mcp_health("ok", "resume_session")
         return json.dumps(result)

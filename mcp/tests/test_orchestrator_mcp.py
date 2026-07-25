@@ -137,6 +137,42 @@ def test_rootless_recovery_rejects_a_cross_session_state_swap(
     assert json.loads(marker_path.read_text())["next_skill"] == "samvil-build"
 
 
+def test_public_rootless_recovery_rejection_is_fail_closed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from samvil_mcp import server as srv
+
+    project_root = tmp_path / "legacy-project"
+    marker_path = project_root / ".samvil" / "next-skill.json"
+    marker_path.parent.mkdir(parents=True)
+    (project_root / "project.state.json").write_text(
+        json.dumps({"session_id": "legacy-session", "current_stage": "build"}),
+        encoding="utf-8",
+    )
+    marker_path.write_text(
+        json.dumps({"next_skill": "samvil-build", "from_stage": "samvil-scaffold"}),
+        encoding="utf-8",
+    )
+
+    class RejectingStore:
+        async def recover_legacy_session_project_root(self, session_id, root):
+            return False
+
+        async def get_session(self, session_id):
+            return None
+
+    async def fake_get_store():
+        return RejectingStore()
+
+    monkeypatch.setattr(srv, "get_store", fake_get_store)
+
+    marker = json.loads(_run(srv.read_chain_marker(str(project_root))))
+    resumed = json.loads(_run(srv.resume_session(str(project_root))))
+    assert "recovery rejected" in marker["error"]
+    assert "recovery rejected" in resumed["error"]
+
+
 def test_rootless_recovery_accepts_the_legacy_state_fallback(
     tmp_path,
     monkeypatch,
