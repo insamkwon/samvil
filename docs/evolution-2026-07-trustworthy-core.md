@@ -1761,6 +1761,18 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/samvil_mcp/migrate_v3_3.py:217`, `mcp/samvil_mcp/migrate_v3_3.py:241`,
     `mcp/tests/test_migrate_v3_3.py:402`, `mcp/tests/test_migrate_v3_3.py:433`,
     `mcp/tests/test_migrate_v3_3.py:491`.
+- [x] **4.137 pushd/popd cwd stack 복귀 보호**
+  (중첩 shell 분석에서 pushd로 이동한 경로를 stack에 저장하고 popd에서 원래 cwd로
+  복귀시켜, 복귀 후 root SSOT hard-link overwrite가 검사에서 빠지지 않는다.)
+  - 완료 증거: `52b9a07`, `c5c1a1e`; `hooks/guard_destructive.py:2567`,
+    `hooks/guard_destructive.py:2599`, `hooks/guard_destructive.py:2607`,
+    `mcp/tests/test_guard_destructive.py:880`.
+- [x] **4.138 pushd/popd 옵션 변형의 cwd stack 의미 보존**
+  (no-arg swap, indexed `popd +N`, bash `pushd -n`, `popd -n`을 각각 stack semantics로
+  처리해 옵션 표기만 바꾼 root SSOT hard-link overwrite 우회를 막는다.)
+  - 완료 증거: `c5c1a1e`; `hooks/guard_destructive.py:2613`,
+    `hooks/guard_destructive.py:2631`, `hooks/guard_destructive.py:2647`,
+    `mcp/tests/test_guard_destructive.py:907`.
 
 ---
 
