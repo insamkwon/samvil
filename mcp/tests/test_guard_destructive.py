@@ -588,6 +588,44 @@ def test_event_store_symlink_alias_cannot_bypass_write_or_overwrite_guard(
     )
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "sqlite3 {alias} 'UPDATE events SET trusted_transition=1'",
+        "cp /tmp/forged {alias}",
+    ],
+)
+def test_new_event_store_symlink_in_same_command_cannot_bypass_guard(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    guard = load_guard_module()
+    alias = tmp_path / "new-event-store-alias.db"
+    command = (
+        f"ln -s ~/.samvil/samvil.db {alias} && "
+        + operation.format(alias=alias)
+    )
+
+    reason = guard.analyze_command(command)
+
+    assert reason in {
+        "direct SAMVIL EventStore mutation",
+        "protected SAMVIL EventStore overwrite",
+    }
+
+
+def test_new_event_store_symlink_read_only_query_still_passes(tmp_path: Path) -> None:
+    guard = load_guard_module()
+    alias = tmp_path / "read-only-event-store-alias.db"
+
+    reason = guard.analyze_command(
+        f"ln -s ~/.samvil/samvil.db {alias} && "
+        f"sqlite3 {alias} 'SELECT id FROM events LIMIT 1'"
+    )
+
+    assert reason is None
+
+
 def test_event_store_file_cannot_be_removed_or_replaced_by_runtime() -> None:
     guard = load_guard_module()
 

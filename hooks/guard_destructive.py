@@ -668,6 +668,69 @@ def _protected_mutation_reason(target: str) -> str | None:
     return None
 
 
+def _literal_path_key(target: str) -> str | None:
+    if any(marker in target for marker in UNINSPECTABLE_PATH_CHARS):
+        return None
+    normalized = target
+    if normalized.startswith("file:"):
+        normalized = normalized.removeprefix("file:").split("?", 1)[0]
+    try:
+        return str(Path(normalized).expanduser().resolve(strict=False))
+    except (OSError, RuntimeError):
+        return None
+
+
+def _chained_protected_alias_reason(command: str) -> str | None:
+    """Track literal symlinks created earlier in the same shell command."""
+    aliases: dict[str, str] = {}
+    for segment in _segments(command):
+        tokens = _unwrap_prefix(segment)
+        start = _command_start(tokens)
+        if start >= len(tokens):
+            continue
+        executable = _executable(tokens[start])
+        args = tokens[start + 1 :]
+        if executable == "ln" and any(
+            token == "--symbolic"
+            or (
+                token.startswith("-")
+                and not token.startswith("--")
+                and "s" in token[1:]
+            )
+            for token in args
+        ):
+            operands = [
+                token
+                for token in args
+                if token == "-" or not token.startswith("-")
+            ]
+            if len(operands) >= 2:
+                source, destination = operands[-2:]
+                source_key = _literal_path_key(source)
+                protected_source = aliases.get(source_key or "", source)
+                destination_key = _literal_path_key(destination)
+                if destination_key and (
+                    _is_samvil_event_store_target(protected_source)
+                    or _is_protected_ssot_target(protected_source)
+                ):
+                    aliases[destination_key] = protected_source
+            continue
+        if not aliases:
+            continue
+        rewritten = list(tokens[start:])
+        changed = False
+        for index, token in enumerate(rewritten):
+            alias_target = aliases.get(_literal_path_key(token) or "")
+            if alias_target is not None:
+                rewritten[index] = alias_target
+                changed = True
+        if changed:
+            reason = analyze_command(shlex.join(rewritten))
+            if reason:
+                return reason
+    return None
+
+
 def _copy_like_mutation_targets(args: list[str]) -> list[str]:
     """Expand copy-style destination directories into their final file targets."""
     target_directory: str | None = None
@@ -1978,6 +2041,9 @@ def _analyze_command_impl(command: str) -> str | None:
     dynamic_substitution_reason = _command_substitution_executable_reason(command)
     if dynamic_substitution_reason:
         return dynamic_substitution_reason
+    chained_alias_reason = _chained_protected_alias_reason(command)
+    if chained_alias_reason:
+        return chained_alias_reason
     piped_sql_reason = _piped_sql_reason(command)
     if piped_sql_reason:
         return piped_sql_reason
