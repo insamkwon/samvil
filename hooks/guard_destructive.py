@@ -2602,6 +2602,10 @@ def _analyze_command_impl(command: str) -> str | None:
         if executable == "popd" and any(
             (token.startswith("-") and token != "-n") or token == "+0"
             for token in args
+        ) or (
+            executable == "popd"
+            and "-n" in args
+            and any(token.startswith("+") for token in args)
         ):
             return "uninspectable directory stack operation"
         if executable == "popd":

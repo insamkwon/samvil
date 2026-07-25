@@ -931,6 +931,8 @@ def test_pushd_stack_variants_cannot_bypass_ssot_hard_link(
         "pushd -1 && cp forged alias.json",
         "pushd sub >/dev/null && popd +0 && cp forged alias.json",
         "pushd sub >/dev/null && popd -1 && cp forged alias.json",
+        "pushd sub1 >/dev/null && pushd sub2 >/dev/null && "
+        "popd -n +2 >/dev/null && cp forged alias.json",
     ],
 )
 def test_unmodeled_directory_stack_index_fails_closed(command: str) -> None:
