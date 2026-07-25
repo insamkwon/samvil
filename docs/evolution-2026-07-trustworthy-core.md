@@ -1714,11 +1714,11 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 - [x] **4.129 기존 hard-link·stale brace·runtime·tee alias 경계 보강**
   (기존 inode hard-link, brace-expanded rmdir stale state, mixed-quote runtime path,
   brace-expanded tee target을 모두 canonical SSOT 보호 대상으로 판정한다.)
-  - 완료 증거: `8b78f2c`; `hooks/guard_destructive.py:653`,
+  - 완료 증거: `8b78f2c`; `hooks/guard_destructive.py:698`,
     `hooks/guard_destructive.py:843`, `hooks/guard_destructive.py:1419`,
-    `hooks/guard_destructive.py:1371`, `mcp/tests/test_guard_destructive.py:769`,
-    `mcp/tests/test_guard_destructive.py:829`, `mcp/tests/test_guard_destructive.py:890`,
-    `mcp/tests/test_guard_destructive.py:919`.
+    `hooks/guard_destructive.py:1414`, `mcp/tests/test_guard_destructive.py:769`,
+    `mcp/tests/test_guard_destructive.py:849`, `mcp/tests/test_guard_destructive.py:893`,
+    `mcp/tests/test_guard_destructive.py:953`.
 - [x] **4.130 trusted rootless attach의 DB·file·marker 불일치 거절**
   (이미 trusted transition이 있는 session은 file stage나 marker가 DB current_stage와
   다르면 root를 attach하지 않고 public recovery가 fail-closed로 중단된다.)
@@ -1744,9 +1744,23 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 - [x] **4.134 기존 SSOT hard-link와 brace-expanded sed/perl overwrite 차단**
   (canonical seed와 동일 inode인 기존 alias 및 쉘 brace 확장으로 숨긴 in-place 편집 대상도
   protected SSOT overwrite로 판정해 destructive guard 우회를 막는다.)
-  - 완료 증거: `2c32f78`; `hooks/guard_destructive.py:635`,
-    `hooks/guard_destructive.py:1343`, `hooks/guard_destructive.py:1355`,
-    `mcp/tests/test_guard_destructive.py:785`, `mcp/tests/test_guard_destructive.py:936`.
+  - 완료 증거: `2c32f78`; `hooks/guard_destructive.py:667`,
+    `hooks/guard_destructive.py:1358`, `hooks/guard_destructive.py:1370`,
+    `mcp/tests/test_guard_destructive.py:785`, `mcp/tests/test_guard_destructive.py:970`.
+- [x] **4.135 command-local cwd와 oversized brace mutation의 fail-closed 보호**
+  (cd/env -C로 바뀐 작업 디렉터리를 보호 경로 해석에 반영하고, expansion limit을 넘는
+  redirection·truncate·sed·perl·tee 대상은 원문 하나로 축소하지 않고 차단한다.)
+  - 완료 증거: `b51ab9c`, `ac96c56`; `hooks/guard_destructive.py:483`,
+    `hooks/guard_destructive.py:1195`, `hooks/guard_destructive.py:1340`,
+    `mcp/tests/test_guard_destructive.py:800`, `mcp/tests/test_guard_destructive.py:817`,
+    `mcp/tests/test_guard_destructive.py:980`.
+- [x] **4.136 migration journal 기반 중단 복구와 최초 backup identity 보존**
+  (seed 교체 전 journal에 원본·결과·backup 원문을 durable하게 남기고, 재시작 시 불일치를
+  복구하며, 기존 valid backup이 다른 valid seed로 바뀌어도 최초 원문을 덮어쓰지 않는다.)
+  - 완료 증거: `375f404`; `mcp/samvil_mcp/migrate_v3_3.py:90`,
+    `mcp/samvil_mcp/migrate_v3_3.py:214`, `mcp/samvil_mcp/migrate_v3_3.py:240`,
+    `mcp/tests/test_migrate_v3_3.py:402`, `mcp/tests/test_migrate_v3_3.py:433`,
+    `mcp/tests/test_migrate_v3_3.py:463`.
 
 ---
 
