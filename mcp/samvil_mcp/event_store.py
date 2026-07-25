@@ -144,6 +144,8 @@ def _restore_legacy_recovery_files(
 def _prepare_legacy_recovery_files(
     sessions: list[tuple[str, str]],
     locks: ExitStack,
+    *,
+    locked_roots: set[Path] | None = None,
 ) -> dict[Path, str | None]:
     """Rewind project SSOTs before the matching legacy DB sessions."""
     backups: dict[Path, str | None] = {}
@@ -160,8 +162,9 @@ def _prepare_legacy_recovery_files(
             marker_path = root / ".samvil" / "next-skill.json"
             if not state_path.exists() and not marker_path.parent.is_dir():
                 continue
-            locks.enter_context(_locked(state_path))
-            locks.enter_context(_locked(marker_path))
+            if locked_roots is None or root not in locked_roots:
+                locks.enter_context(_locked(state_path))
+                locks.enter_context(_locked(marker_path))
 
             original_state = (
                 state_path.read_text(encoding="utf-8")
@@ -289,24 +292,9 @@ class EventStore:
     ) -> bool:
         """Attach a rootless legacy session and replay its trust gates safely."""
         normalized_root = str(Path(project_root).expanduser().resolve())
-        state_path = Path(normalized_root) / "project.state.json"
-        marker_path = Path(normalized_root) / ".samvil" / "next-skill.json"
-        file_stage = ""
-        if state_path.exists():
-            try:
-                parsed_state = json.loads(state_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError, UnicodeError):
-                parsed_state = None
-            if isinstance(parsed_state, dict):
-                file_stage = str(parsed_state.get("current_stage") or "")
-        marker_skill = ""
-        if marker_path.exists():
-            try:
-                parsed_marker = json.loads(marker_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError, UnicodeError):
-                parsed_marker = None
-            if isinstance(parsed_marker, dict):
-                marker_skill = str(parsed_marker.get("next_skill") or "")
+        root = Path(normalized_root)
+        state_path = root / "project.state.json"
+        marker_path = root / ".samvil" / "next-skill.json"
 
         backups: dict[Path, str | None] = {}
         locks = ExitStack()
@@ -322,6 +310,29 @@ class EventStore:
                 if row is None or str(row[0] or ""):
                     await db.rollback()
                     return False
+                locks.enter_context(_locked(state_path))
+                locks.enter_context(_locked(marker_path))
+                try:
+                    parsed_state = json.loads(state_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError, UnicodeError):
+                    parsed_state = None
+                if not isinstance(parsed_state, dict):
+                    await db.rollback()
+                    return False
+                file_session_id = str(parsed_state.get("session_id") or "")
+                if file_session_id != session_id:
+                    await db.rollback()
+                    return False
+                file_stage = str(parsed_state.get("current_stage") or "")
+                try:
+                    parsed_marker = json.loads(marker_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError, UnicodeError):
+                    parsed_marker = None
+                marker_skill = (
+                    str(parsed_marker.get("next_skill") or "")
+                    if isinstance(parsed_marker, dict)
+                    else ""
+                )
                 trusted_cursor = await db.execute(
                     """SELECT COUNT(*) FROM events
                     WHERE session_id = ? AND trusted_transition = 1""",
@@ -338,6 +349,7 @@ class EventStore:
                     backups = _prepare_legacy_recovery_files(
                         [(session_id, normalized_root)],
                         locks,
+                        locked_roots={root},
                     )
                     await db.execute(
                         """UPDATE sessions

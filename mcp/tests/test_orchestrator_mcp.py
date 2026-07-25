@@ -84,6 +84,59 @@ def test_read_chain_marker_recovers_rootless_legacy_session_before_read(
     assert result["next_skill"] == "samvil-interview"
 
 
+def test_rootless_recovery_rejects_a_cross_session_state_swap(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from samvil_mcp import server as srv
+    from samvil_mcp.event_store import EventStore
+
+    project_root = tmp_path / "legacy-project"
+    marker_path = project_root / ".samvil" / "next-skill.json"
+    state_path = project_root / "project.state.json"
+    marker_path.parent.mkdir(parents=True)
+    db_path = tmp_path / "samvil.db"
+    store = EventStore(str(db_path))
+    _run(store.initialize())
+    session_a = _run(store.create_session("legacy-a"))
+    session_b = _run(store.create_session("legacy-b"))
+    with sqlite3.connect(db_path) as db:
+        db.execute("UPDATE sessions SET current_stage = 'build'")
+    state_path.write_text(
+        json.dumps({"session_id": session_a.id, "current_stage": "build"}),
+        encoding="utf-8",
+    )
+    marker_path.write_text(
+        json.dumps({"next_skill": "samvil-build", "from_stage": "samvil-scaffold"}),
+        encoding="utf-8",
+    )
+
+    class SwappingStore:
+        async def recover_legacy_session_project_root(self, session_id, root):
+            assert session_id == session_a.id
+            state_path.write_text(
+                json.dumps({"session_id": session_b.id, "current_stage": "build"}),
+                encoding="utf-8",
+            )
+            return await store.recover_legacy_session_project_root(session_id, root)
+
+    async def fake_get_store():
+        return SwappingStore()
+
+    monkeypatch.setattr(srv, "get_store", fake_get_store)
+
+    assert _run(srv._recover_rootless_legacy_session(str(project_root))) is False
+    recovered_a = _run(store.get_session(session_a.id))
+    recovered_b = _run(store.get_session(session_b.id))
+    assert recovered_a is not None and recovered_a.project_root == ""
+    assert recovered_b is not None and recovered_b.project_root == ""
+    assert json.loads(state_path.read_text()) == {
+        "session_id": session_b.id,
+        "current_stage": "build",
+    }
+    assert json.loads(marker_path.read_text())["next_skill"] == "samvil-build"
+
+
 def _prepare_interview_exit(project_root: Path) -> None:
     (project_root / "interview-summary.md").write_text(
         "# Interview Summary\n\nValidated interview output.\n",
