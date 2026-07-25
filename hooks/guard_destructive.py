@@ -666,6 +666,49 @@ def _protected_mutation_reason(target: str) -> str | None:
     return None
 
 
+def _copy_like_mutation_targets(args: list[str]) -> list[str]:
+    """Expand copy-style destination directories into their final file targets."""
+    target_directory: str | None = None
+    operands: list[str] = []
+    literal_operands = False
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if literal_operands:
+            operands.append(token)
+        elif token == "--":
+            literal_operands = True
+        elif token in {"-t", "--target-directory"} and index + 1 < len(args):
+            target_directory = args[index + 1]
+            index += 1
+        elif token.startswith("--target-directory="):
+            target_directory = token.split("=", 1)[1]
+        elif token.startswith("-t") and len(token) > 2:
+            target_directory = token[2:]
+        elif not token.startswith("-") or token == "-":
+            operands.append(token)
+        index += 1
+
+    if target_directory is None:
+        if len(operands) < 2:
+            return []
+        sources = operands[:-1]
+        destination = operands[-1]
+    else:
+        if not operands:
+            return []
+        sources = operands
+        destination = target_directory
+
+    targets = [destination]
+    targets.extend(
+        str(PurePath(destination) / PurePath(source).name)
+        for source in sources
+        if PurePath(source).name
+    )
+    return targets
+
+
 def _brace_expansion_candidates(target: str, *, limit: int = 32) -> list[str] | None:
     candidates = [target]
     while len(candidates) < limit:
@@ -791,10 +834,10 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
                     return reason
 
     if executable in {"cp", "install", "ln", "mv"} and len(args) >= 2:
-        operands = [token for token in args if token == "-" or not token.startswith("-")]
-        reason = _protected_mutation_reason(operands[-1]) if len(operands) >= 2 else None
-        if reason:
-            return reason
+        for target in _copy_like_mutation_targets(args):
+            reason = _protected_mutation_reason(target)
+            if reason:
+                return reason
 
     if executable == "sed" and any(
         token == "-i"

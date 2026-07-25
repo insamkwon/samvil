@@ -533,6 +533,8 @@ def test_non_rm_overwrites_cannot_destroy_protected_ssot(command: str) -> None:
     [
         "cp /tmp/forged project.seed.json",
         "cp /tmp/forged project.seed.json -f",
+        "cp /tmp/project.seed.json .",
+        "cp -t . /tmp/project.seed.json",
         "install /tmp/forged project.config.json",
         "mv replacement project.state.json",
         "sed -i 's/old/forged/' project.config.json",
@@ -550,6 +552,7 @@ def test_arbitrary_sources_cannot_replace_protected_ssot(command: str) -> None:
     "command",
     [
         "cp /tmp/forged ~/.samvil/samvil.db",
+        "cp /tmp/samvil.db ~/.samvil",
         "mv /tmp/forged ~/.samvil/samvil.db",
         "ln -sf /tmp/forged ~/.samvil/samvil.db",
         "sed -i 's/old/forged/' ~/.samvil/samvil.db",
