@@ -670,6 +670,7 @@ def _append_project_event(
     session_id: str,
     data: dict,
     source: str | None = None,
+    event_id: str | None = None,
 ) -> str:
     """Append one canonical project event and return its file-backed evidence."""
     row = {
@@ -681,7 +682,57 @@ def _append_project_event(
     }
     if source:
         row["source"] = source
+    if event_id:
+        row["event_id"] = event_id
     return _append_project_event_rows(project_root, [row])[0]
+
+
+def _canonical_project_event_exists(project_root: Path, event_id: str) -> bool:
+    path = project_root / ".samvil" / "events.jsonl"
+    if not path.exists():
+        return False
+    with _file_locked(path):
+        try:
+            with path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        row = json.loads(line)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if isinstance(row, dict) and row.get("event_id") == event_id:
+                        return True
+        except OSError:
+            return False
+    return False
+
+
+async def _reconcile_pending_project_events(
+    store: EventStore,
+    session_id: str,
+    project_path: Path,
+) -> None:
+    async with _AsyncFileLock(_stage_transition_lock_path(store, session_id)):
+        pending = await store.get_pending_project_events(session_id)
+        if not pending:
+            return
+        for item in pending:
+            event_id = str(item["event_id"])
+            if not await asyncio.to_thread(
+                _canonical_project_event_exists,
+                project_path,
+                event_id,
+            ):
+                await asyncio.to_thread(
+                    _append_project_event,
+                    project_path,
+                    timestamp=str(item["timestamp"]),
+                    event_type=str(item["event_type"]),
+                    stage=str(item["stage"]),
+                    session_id=session_id,
+                    data=dict(item["data"]),
+                    event_id=event_id,
+                )
+            await store.acknowledge_pending_project_event(event_id)
 
 
 def _append_project_event_rows(
@@ -1139,6 +1190,7 @@ async def complete_stage(
             raise OrchestratorError(
                 f"project root unresolved for session {session_id}"
             )
+        await _reconcile_pending_project_events(store, session_id, project_path)
 
         current_stage = session.current_stage.value
         if current_stage != stage:
@@ -1206,6 +1258,7 @@ async def complete_stage(
                         ),
                         session_id=session_id,
                         data=event_data,
+                        event_id=event.id,
                     )
                 except Exception as exc:
                     _log_mcp_health("fail", "complete_stage.events_ssot", str(exc))
@@ -1237,6 +1290,15 @@ async def complete_stage(
                             ),
                         }
                     )
+
+        try:
+            await store.acknowledge_pending_project_event(event.id)
+        except Exception as exc:
+            _log_mcp_health(
+                "warn",
+                "complete_stage.pending_event_ack",
+                str(exc),
+            )
 
         claim_id = None
         claim_saved = False

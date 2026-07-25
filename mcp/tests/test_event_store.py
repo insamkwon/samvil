@@ -52,6 +52,25 @@ async def test_find_session_by_project(store: EventStore):
 
 
 @pytest.mark.asyncio
+async def test_stage_transition_keeps_pending_canonical_event_for_crash_recovery(
+    store: EventStore,
+) -> None:
+    session = await store.create_session("crash-recovery")
+
+    transition = await store.save_event_and_update_stage(
+        session.id,
+        EventType.STAGE_END,
+        Stage.SEED,
+        data={"event_type_raw": "interview_complete"},
+        expected_stage=Stage.INTERVIEW,
+    )
+
+    pending = await store.get_pending_project_events(session.id)
+    assert [item["event_id"] for item in pending] == [transition.event.id]
+    assert pending[0]["stage"] == "seed"
+
+
+@pytest.mark.asyncio
 async def test_find_session_by_project_root_disambiguates_same_name(store: EventStore):
     first = await store.create_session("same-app", "standard", "/tmp/team-a/same-app")
     second = await store.create_session("same-app", "standard", "/tmp/team-b/same-app")

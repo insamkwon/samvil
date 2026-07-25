@@ -56,6 +56,18 @@ CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(session_id, event_type);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_name);
 CREATE INDEX IF NOT EXISTS idx_seed_versions_session ON seed_versions(session_id, version);
+
+CREATE TABLE IF NOT EXISTS pending_project_events (
+    event_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    data TEXT NOT NULL,
+    timestamp TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_project_events_session
+ON pending_project_events(session_id, timestamp);
 """
 
 # In-place migrations for already-initialized DBs. Initialization first
@@ -578,6 +590,19 @@ class EventStore:
                         event.timestamp,
                     ),
                 )
+                await db.execute(
+                    """INSERT INTO pending_project_events
+                    (event_id, session_id, event_type, stage, data, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        event.id,
+                        event.session_id,
+                        event.event_type.value,
+                        event.stage.value,
+                        json.dumps(event.data),
+                        event.timestamp,
+                    ),
+                )
                 cursor = await db.execute(
                     "UPDATE sessions SET current_stage = ?, stage_transition_id = ?, updated_at = ? WHERE id = ?",
                     (stage.value, event.id, event.timestamp, session_id),
@@ -593,6 +618,38 @@ class EventStore:
             previous_stage=previous_stage,
             previous_transition_id=previous_transition_id,
         )
+
+    async def get_pending_project_events(self, session_id: str) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT event_id, session_id, event_type, stage, data, timestamp
+                FROM pending_project_events
+                WHERE session_id = ? ORDER BY timestamp, event_id""",
+                (session_id,),
+            )
+            rows = await cursor.fetchall()
+        pending: list[dict[str, Any]] = []
+        for event_id, owner, event_type, stage, data, timestamp in rows:
+            pending.append(
+                {
+                    "event_id": str(event_id),
+                    "session_id": str(owner),
+                    "event_type": str(event_type),
+                    "stage": str(stage),
+                    "data": json.loads(str(data)),
+                    "timestamp": str(timestamp),
+                }
+            )
+        return pending
+
+    async def acknowledge_pending_project_event(self, event_id: str) -> bool:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM pending_project_events WHERE event_id = ?",
+                (event_id,),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
 
     async def delete_event(self, event_id: str) -> bool:
         """Compensate an event insert that could not reach the file SSOT."""
@@ -644,6 +701,10 @@ class EventStore:
                 if deleted.rowcount != 1:
                     await db.rollback()
                     return False
+                await db.execute(
+                    "DELETE FROM pending_project_events WHERE event_id = ?",
+                    (event.id,),
+                )
                 restored = await db.execute(
                     """UPDATE sessions
                     SET current_stage = ?, stage_transition_id = ?, updated_at = ?

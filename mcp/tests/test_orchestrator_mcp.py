@@ -1184,6 +1184,46 @@ def test_complete_stage_fails_closed_when_canonical_event_append_fails(
     assert read_events(project_root)["entries"] == []
 
 
+def test_complete_stage_reconciles_db_committed_event_after_process_crash(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from samvil_mcp import server as srv
+    from samvil_mcp.models import EventType, Stage
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    async def runner():
+        sess = json.loads(
+            await create_session(
+                "orch-crash-recovery",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        sid = sess["session_id"]
+        store = await srv.get_store()
+        transition = await store.save_event_and_update_stage(
+            sid,
+            EventType.STAGE_END,
+            Stage.SEED,
+            data={"event_type_raw": "interview_complete"},
+            expected_stage=Stage.INTERVIEW,
+        )
+
+        result = json.loads(await complete_stage(sid, "interview", "pass"))
+        assert result["status"] == "error"
+        assert "current stage is seed" in result["error"]
+        assert await store.get_pending_project_events(sid) == []
+        events = read_events(project_root)["entries"]
+        assert len(events) == 1
+        assert events[0]["event_id"] == transition.event.id
+
+    _run(runner())
+
+
 @pytest.mark.parametrize("operation", ["save_event", "complete_stage"])
 def test_canonical_event_non_oserror_still_compensates_database(
     tmp_path, monkeypatch, operation
