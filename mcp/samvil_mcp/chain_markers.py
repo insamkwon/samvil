@@ -47,10 +47,18 @@ def write_chain_marker(
     Creates `.samvil/next-skill.json` with chain continuation data.
     Returns the marker dict that was written.
     """
-    root = Path(project_root)
-    samvil_dir = root / SAMVIL_DIR
-    samvil_dir.mkdir(parents=True, exist_ok=True)
+    marker = _build_chain_marker(host_name, current_skill, next_skill)
+    marker_path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
+    atomic_write_text(marker_path, json.dumps(marker, indent=2))
+    return marker
 
+
+def _build_chain_marker(
+    host_name: str | None,
+    current_skill: str,
+    next_skill: str | None = None,
+) -> dict[str, Any]:
+    """Build marker content separately for coordinated multi-SSOT writes."""
     continuation = _get_chain_continuation(host_name, current_skill)
     if next_skill is not None:
         valid_skills = {entry["name"] for entry in _SKILL_CHAIN}
@@ -67,18 +75,13 @@ def write_chain_marker(
         if target_skill
         else ""
     )
-    marker = {
+    return {
         **continuation,
         "schema_version": "1.0",
         "reason": f"{current_skill} completed",
         "from_stage": current_skill,
         "written_at": datetime.now(timezone.utc).isoformat(),
     }
-
-    marker_path = samvil_dir / MARKER_FILENAME
-    atomic_write_text(marker_path, json.dumps(marker, indent=2))
-
-    return marker
 
 
 def read_chain_marker(

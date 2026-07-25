@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import json
 import uuid
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 
+from .chain_markers import _build_chain_marker
+from .claim_ledger import _locked
 from .models import Event, EventType, Session, SeedVersion, Stage, StageTransition
+from .ssot_io import atomic_write_text_unlocked
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -116,6 +121,86 @@ def _uuid() -> str:
     return uuid.uuid4().hex[:12]
 
 
+def _restore_legacy_recovery_files(
+    backups: dict[Path, str | None],
+) -> None:
+    """Restore file contents while the caller still holds each file lock."""
+    for path, original in reversed(list(backups.items())):
+        if original is None:
+            path.unlink(missing_ok=True)
+        else:
+            atomic_write_text_unlocked(path, original)
+
+
+def _prepare_legacy_recovery_files(
+    sessions: list[tuple[str, str]],
+    locks: ExitStack,
+) -> dict[Path, str | None]:
+    """Rewind project SSOTs before the matching legacy DB sessions."""
+    backups: dict[Path, str | None] = {}
+    roots: dict[Path, str] = {}
+    for session_id, raw_root in sessions:
+        if not raw_root:
+            continue
+        root = Path(raw_root).expanduser().resolve(strict=False)
+        if root.is_dir():
+            roots.setdefault(root, session_id)
+    try:
+        for root, session_id in sorted(roots.items(), key=lambda item: str(item[0])):
+            state_path = root / "project.state.json"
+            marker_path = root / ".samvil" / "next-skill.json"
+            if not state_path.exists() and not marker_path.parent.is_dir():
+                continue
+            locks.enter_context(_locked(state_path))
+            locks.enter_context(_locked(marker_path))
+
+            original_state = (
+                state_path.read_text(encoding="utf-8")
+                if state_path.exists()
+                else None
+            )
+            original_marker = (
+                marker_path.read_text(encoding="utf-8")
+                if marker_path.exists()
+                else None
+            )
+            backups[state_path] = original_state
+            backups[marker_path] = original_marker
+
+            state: dict[str, Any]
+            if original_state is None:
+                state = {"session_id": session_id}
+            else:
+                parsed_state = json.loads(original_state)
+                if not isinstance(parsed_state, dict):
+                    raise ValueError(
+                        f"legacy recovery state must be an object: {state_path}"
+                    )
+                state = parsed_state
+            state["current_stage"] = "interview"
+            state["completed_stages"] = []
+            state["stage_transition_id"] = ""
+            state["recovery_reason"] = "trusted_transition_revalidation"
+            atomic_write_text_unlocked(state_path, json.dumps(state, indent=2))
+
+            host_name: str | None = None
+            if original_marker is not None:
+                try:
+                    parsed_marker = json.loads(original_marker)
+                except json.JSONDecodeError:
+                    parsed_marker = None
+                if isinstance(parsed_marker, dict):
+                    raw_host = parsed_marker.get("host_name")
+                    if isinstance(raw_host, str) and raw_host.strip():
+                        host_name = raw_host
+            marker = _build_chain_marker(host_name, "samvil")
+            atomic_write_text_unlocked(marker_path, json.dumps(marker, indent=2))
+    except Exception:
+        _restore_legacy_recovery_files(backups)
+        raise
+    return backups
+
+
 class EventStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -124,6 +209,8 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(SCHEMA)
+            legacy_recovery_backups: dict[Path, str | None] = {}
+            legacy_recovery_locks = ExitStack()
             try:
                 await db.execute("BEGIN IMMEDIATE")
                 events_columns = await _table_columns(db, "events")
@@ -141,6 +228,17 @@ class EventStore:
                     # sessions can replay gates instead of remaining stranded
                     # at a stage whose prerequisites are now intentionally
                     # untrusted.
+                    recovery_cursor = await db.execute(
+                        """SELECT id, project_root FROM sessions
+                        WHERE current_stage != 'interview'"""
+                    )
+                    legacy_recovery_backups = _prepare_legacy_recovery_files(
+                        [
+                            (str(row[0]), str(row[1] or ""))
+                            for row in await recovery_cursor.fetchall()
+                        ],
+                        legacy_recovery_locks,
+                    )
                     await db.execute(
                         """UPDATE sessions
                         SET current_stage = 'interview', stage_transition_id = ''
@@ -157,7 +255,14 @@ class EventStore:
                 await db.commit()
             except Exception:
                 await db.rollback()
+                try:
+                    if legacy_recovery_backups:
+                        _restore_legacy_recovery_files(legacy_recovery_backups)
+                finally:
+                    legacy_recovery_locks.close()
                 raise
+            else:
+                legacy_recovery_locks.close()
 
     # ── Sessions ──────────────────────────────────────────
 

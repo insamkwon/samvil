@@ -118,11 +118,7 @@ def test_migration_plan_only_contains_missing_schema_changes() -> None:
     ]
 
 
-@pytest.mark.asyncio
-async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
-    tmp_path,
-) -> None:
-    db_path = tmp_path / "legacy-trust.db"
+def _create_legacy_trust_db(db_path, project_root) -> None:
     with sqlite3.connect(db_path) as db:
         db.executescript(
             """
@@ -152,13 +148,16 @@ async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
         )
         db.execute(
             """INSERT INTO sessions
-            (id, project_name, current_stage, stage_transition_id, created_at, updated_at)
-            VALUES ('session', 'legacy-app', 'seed', 'legacy', '2026-07-25', '2026-07-25')"""
+            (id, project_name, project_root, current_stage, stage_transition_id,
+             created_at, updated_at)
+            VALUES ('session', 'legacy-app', ?, 'build', 'legacy',
+                    '2026-07-25', '2026-07-25')""",
+            (str(project_root),),
         )
         db.execute(
             """INSERT INTO events
             (id, session_id, event_type, stage, data, timestamp)
-            VALUES ('legacy', 'session', 'stage_change', 'seed', ?, '2026-07-25')""",
+            VALUES ('legacy', 'session', 'stage_change', 'build', ?, '2026-07-25')""",
             (
                 json.dumps(
                     {
@@ -169,11 +168,51 @@ async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
             ),
         )
 
+
+@pytest.mark.asyncio
+async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "legacy-trust.db"
+    project_root = tmp_path / "legacy-project"
+    (project_root / ".samvil").mkdir(parents=True)
+    state_path = project_root / "project.state.json"
+    marker_path = project_root / ".samvil" / "next-skill.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "session_id": "session",
+                "current_stage": "build",
+                "completed_stages": ["interview", "seed", "design", "scaffold"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    marker_path.write_text(
+        json.dumps(
+            {
+                "next_skill": "samvil-build",
+                "from_stage": "samvil-scaffold",
+                "host_name": "codex_cli",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _create_legacy_trust_db(db_path, project_root)
+
     legacy_store = EventStore(str(db_path))
     await legacy_store.initialize()
     recovered_session = await legacy_store.get_session("session")
     assert recovered_session is not None
     assert recovered_session.current_stage == Stage.INTERVIEW
+    recovered_state = json.loads(state_path.read_text(encoding="utf-8"))
+    recovered_marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert recovered_state["current_stage"] == "interview"
+    assert recovered_state["completed_stages"] == []
+    assert recovered_marker["next_skill"] == "samvil-interview"
+    from samvil_mcp.resume import resume_session
+
+    assert resume_session(str(project_root))["next_skill"] == "samvil-interview"
     with sqlite3.connect(db_path) as db:
         db.execute(
             """INSERT INTO events
@@ -211,6 +250,80 @@ async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
     migrated_session = await legacy_store.get_session("session")
     assert migrated_session is not None
     assert migrated_session.current_stage == Stage.SEED
+
+
+@pytest.mark.parametrize("failure_mode", ["marker", "database"])
+@pytest.mark.asyncio
+async def test_trusted_transition_migration_restores_file_ssot_when_recovery_fails(
+    tmp_path,
+    monkeypatch,
+    failure_mode,
+) -> None:
+    from samvil_mcp import event_store as event_store_module
+
+    db_path = tmp_path / "legacy-trust-failure.db"
+    project_root = tmp_path / "legacy-project"
+    (project_root / ".samvil").mkdir(parents=True)
+    state_path = project_root / "project.state.json"
+    marker_path = project_root / ".samvil" / "next-skill.json"
+    original_state = json.dumps(
+        {
+            "session_id": "session",
+            "current_stage": "build",
+            "completed_stages": ["interview", "seed", "design", "scaffold"],
+        }
+    )
+    original_marker = json.dumps(
+        {
+            "next_skill": "samvil-build",
+            "from_stage": "samvil-scaffold",
+            "host_name": "codex_cli",
+        }
+    )
+    state_path.write_text(original_state, encoding="utf-8")
+    marker_path.write_text(original_marker, encoding="utf-8")
+    _create_legacy_trust_db(db_path, project_root)
+
+    if failure_mode == "marker":
+        real_atomic_write = event_store_module.atomic_write_text_unlocked
+        failed = False
+
+        def fail_recovery_marker(path, text, **kwargs):
+            nonlocal failed
+            if path.name == "next-skill.json" and not failed:
+                failed = True
+                raise OSError("injected recovery marker failure")
+            return real_atomic_write(path, text, **kwargs)
+
+        monkeypatch.setattr(
+            event_store_module,
+            "atomic_write_text_unlocked",
+            fail_recovery_marker,
+        )
+        expected_error = "injected recovery marker failure"
+    else:
+        real_execute = aiosqlite.Connection.execute
+
+        def fail_database_rewind(connection, sql, *args, **kwargs):
+            if "UPDATE sessions" in sql and "current_stage = 'interview'" in sql:
+                raise sqlite3.OperationalError("injected recovery database failure")
+            return real_execute(connection, sql, *args, **kwargs)
+
+        monkeypatch.setattr(aiosqlite.Connection, "execute", fail_database_rewind)
+        expected_error = "injected recovery database failure"
+
+    with pytest.raises(Exception, match=expected_error):
+        await EventStore(str(db_path)).initialize()
+
+    with sqlite3.connect(db_path) as db:
+        stage = db.execute(
+            "SELECT current_stage FROM sessions WHERE id = 'session'"
+        ).fetchone()[0]
+        columns = {row[1] for row in db.execute("PRAGMA table_info(events)")}
+    assert stage == "build"
+    assert "trusted_transition" not in columns
+    assert state_path.read_text(encoding="utf-8") == original_state
+    assert marker_path.read_text(encoding="utf-8") == original_marker
 
 
 @pytest.mark.asyncio
