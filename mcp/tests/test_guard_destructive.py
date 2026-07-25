@@ -814,6 +814,23 @@ def test_command_local_cd_cannot_bypass_existing_ssot_hard_link(
     assert reason == "protected SAMVIL SSOT overwrite"
 
 
+def test_env_chdir_cannot_bypass_existing_ssot_hard_link(
+    tmp_path: Path, monkeypatch
+) -> None:
+    guard = load_guard_module()
+    monkeypatch.chdir(tmp_path)
+    canonical = Path("project.seed.json")
+    canonical.write_text("ORIGINAL")
+    nested = Path("sub")
+    nested.mkdir()
+    alias = nested / "seed-alias.json"
+    alias.hardlink_to(canonical)
+
+    reason = guard.analyze_command("env -C sub cp ../forged seed-alias.json")
+
+    assert reason == "protected SAMVIL SSOT overwrite"
+
+
 @pytest.mark.parametrize(
     "creator",
     [
@@ -958,6 +975,22 @@ def test_brace_expanded_in_place_edit_cannot_mutate_protected_seed(
     reason = guard.analyze_command(command)
 
     assert reason == "protected SAMVIL SSOT overwrite"
+
+
+def test_oversized_brace_expansion_fails_closed_for_all_file_mutations() -> None:
+    guard = load_guard_module()
+    choices = [*(f"safe{index}.txt" for index in range(32)), "project.seed.json"]
+    target = "{" + ",".join(choices) + "}"
+
+    for command in (
+        f"printf FORGED > {target}",
+        f"truncate -s 0 {target}",
+        f"sed -i.bak 's/ORIGINAL/FORGED/' {target}",
+        f"perl -pi.bak -e 's/ORIGINAL/FORGED/' {target}",
+        f"printf FORGED | tee {target} >/dev/null",
+    ):
+        reason = guard.analyze_command(command)
+        assert reason == "uninspectable brace expansion in protected mutation target"
 
 
 def test_new_event_store_symlink_nested_read_only_query_still_passes(

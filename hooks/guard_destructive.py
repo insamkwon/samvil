@@ -480,6 +480,38 @@ def _unwrap_prefix(tokens: list[str]) -> list[str]:
     return current
 
 
+def _env_command_cwd(tokens: list[str], cwd: Path) -> Path:
+    if not tokens or _executable(tokens[0]) != "env":
+        return cwd
+    index = 1
+    target: str | None = None
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"-C", "--chdir"} and index + 1 < len(tokens):
+            target = tokens[index + 1]
+            index += 2
+            continue
+        if token.startswith("--chdir="):
+            target = token.split("=", 1)[1]
+            index += 1
+            continue
+        if token.startswith("-C") and len(token) > 2:
+            target = token[2:]
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        if "=" in token:
+            index += 1
+            continue
+        break
+    if target is None:
+        return cwd
+    path = Path(target).expanduser()
+    return (path if path.is_absolute() else cwd / path).resolve(strict=False)
+
+
 def _git_subcommand(args: list[str]) -> tuple[str, list[str]]:
     index = 0
     while index < len(args):
@@ -1160,6 +1192,13 @@ def _brace_expansion_candidates(target: str, *, limit: int = 32) -> list[str] | 
     return candidates
 
 
+def _protected_mutation_targets(target: str) -> list[str] | None:
+    """Expand a mutation target, rejecting opaque brace expansions."""
+    if "{" not in target or "," not in target:
+        return [target]
+    return _brace_expansion_candidates(target)
+
+
 def _rm_target_may_expand_to_protected_ssot(target: str) -> bool:
     normalized = _normalized_rm_target(target)
     allowed_cache = normalized == ".next" or normalized.startswith(".next/")
@@ -1301,21 +1340,31 @@ def _perl_option_enables_in_place_edit(token: str) -> bool:
 def _protected_overwrite_reason(
     executable: str, args: list[str], cwd: Path | None = None
 ) -> str | None:
+    def check_target(target: str) -> str | None:
+        candidates = _protected_mutation_targets(target)
+        if candidates is None:
+            return "uninspectable brace expansion in protected mutation target"
+        for candidate in candidates:
+            reason = _protected_mutation_reason(candidate, cwd)
+            if reason:
+                return reason
+        return None
+
     if executable in {">", ">>", ">|", "<>", "&>", "&>>"} and args:
-        reason = _protected_mutation_reason(args[0], cwd)
+        reason = check_target(args[0])
         if reason:
             return reason
 
     for index, token in enumerate(args[:-1]):
         if token in {">", ">>", ">|", "<>", "&>", "&>>"}:
-            reason = _protected_mutation_reason(args[index + 1], cwd)
+            reason = check_target(args[index + 1])
             if reason:
                 return reason
 
     if executable == "truncate":
         for token in args:
             if not token.startswith("-"):
-                reason = _protected_mutation_reason(token, cwd)
+                reason = check_target(token)
                 if reason:
                     return reason
 
@@ -1342,7 +1391,7 @@ def _protected_overwrite_reason(
 
     if executable in {"cp", "install", "ln", "mv", "rsync"} and len(args) >= 2:
         for target in _copy_like_mutation_targets(args):
-            reason = _protected_mutation_reason(target, cwd)
+            reason = check_target(target)
             if reason:
                 return reason
 
@@ -1350,13 +1399,9 @@ def _protected_overwrite_reason(
         _perl_option_enables_in_place_edit(token) for token in args
     ):
         for token in args:
-            targets = _brace_expansion_candidates(token)
-            if targets is None:
-                targets = [token]
-            for target in targets:
-                reason = _protected_mutation_reason(target, cwd)
-                if reason:
-                    return reason
+            reason = check_target(token)
+            if reason:
+                return reason
 
     if executable == "sed" and any(
         token == "-i"
@@ -1366,28 +1411,20 @@ def _protected_overwrite_reason(
         for token in args
     ):
         for token in args:
-            targets = _brace_expansion_candidates(token)
-            if targets is None:
-                targets = [token]
-            for target in targets:
-                reason = _protected_mutation_reason(target, cwd)
-                if reason:
-                    return reason
+            reason = check_target(token)
+            if reason:
+                return reason
 
     if executable == "tee":
         for token in args:
             if not token.startswith("-"):
-                targets = _brace_expansion_candidates(token)
-                if targets is None:
-                    targets = [token]
-                for target in targets:
-                    reason = _protected_mutation_reason(target, cwd)
-                    if reason:
-                        return reason
+                reason = check_target(token)
+                if reason:
+                    return reason
 
     if executable == "dd":
         options = dict(token.split("=", 1) for token in args if "=" in token)
-        reason = _protected_mutation_reason(options.get("of", ""))
+        reason = check_target(options.get("of", ""))
         if reason:
             return reason
     return None
@@ -2518,6 +2555,7 @@ def _analyze_command_impl(command: str) -> str | None:
     analysis_cwd = Path.cwd()
     for tokens in _segments(command):
         command_context = shlex.join(tokens)
+        segment_cwd = _env_command_cwd(tokens, analysis_cwd)
         tokens = _unwrap_prefix(tokens)
         start = _command_start(tokens)
         if start >= len(tokens):
@@ -2554,7 +2592,7 @@ def _analyze_command_impl(command: str) -> str | None:
                 ).resolve(strict=False)
             continue
         overwrite_reason = _protected_overwrite_reason(
-            executable, args, analysis_cwd
+            executable, args, segment_cwd
         )
         if overwrite_reason:
             return overwrite_reason
