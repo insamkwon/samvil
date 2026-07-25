@@ -2597,24 +2597,56 @@ def _analyze_command_impl(command: str) -> str | None:
             return runtime_script_reason
         if executable == "popd":
             if analysis_cwd_stack:
-                analysis_cwd = analysis_cwd_stack.pop()
+                if "-n" in args:
+                    analysis_cwd_stack.pop()
+                    continue
+                index_token = next(
+                    (token for token in args if token.startswith("+")), None
+                )
+                if index_token is None:
+                    analysis_cwd = analysis_cwd_stack.pop()
+                else:
+                    try:
+                        index = int(index_token[1:])
+                    except ValueError:
+                        index = 0
+                    if index > 0 and index <= len(analysis_cwd_stack):
+                        analysis_cwd_stack.pop(-index)
             continue
         if executable in {"cd", "pushd"}:
-            cd_args = [
-                token
-                for token in args
-                if token not in {"--", ">", ">>", ">|", "<", "<>"}
-                and not token.startswith((">", "<"))
-            ]
+            pushd_no_cd = executable == "pushd" and "-n" in args
+            cd_args: list[str] = []
+            skip_redirection_target = False
+            for token in args:
+                if skip_redirection_target:
+                    skip_redirection_target = False
+                    continue
+                if token in {">", ">>", ">|", "<", "<>"}:
+                    skip_redirection_target = True
+                    continue
+                if token.startswith((">", "<")) or token in {"--", "-n"}:
+                    continue
+                cd_args.append(token)
+            if executable == "pushd" and not cd_args:
+                if analysis_cwd_stack:
+                    analysis_cwd, analysis_cwd_stack[-1] = (
+                        analysis_cwd_stack[-1],
+                        analysis_cwd,
+                    )
+                continue
             if cd_args:
                 if executable == "pushd":
                     analysis_cwd_stack.append(analysis_cwd)
                 target = Path(
                     cd_args[0] if executable == "pushd" else cd_args[-1]
                 ).expanduser()
-                analysis_cwd = (
+                resolved_target = (
                     target if target.is_absolute() else analysis_cwd / target
                 ).resolve(strict=False)
+                if pushd_no_cd:
+                    analysis_cwd_stack[-1] = resolved_target
+                else:
+                    analysis_cwd = resolved_target
             continue
         overwrite_reason = _protected_overwrite_reason(
             executable, args, segment_cwd

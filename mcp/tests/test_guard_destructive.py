@@ -869,6 +869,7 @@ def test_nested_working_directory_cannot_bypass_event_store_hard_link(
     canonical.parent.mkdir()
     canonical.write_text("ORIGINAL")
     (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "alias.json").hardlink_to(canonical)
     (tmp_path / "sub" / "alias.db").hardlink_to(canonical)
 
     reason = guard.analyze_command("cd sub && cp ../forged alias.db")
@@ -889,6 +890,35 @@ def test_popd_restores_root_for_existing_ssot_hard_link(
     reason = guard.analyze_command(
         "pushd sub >/dev/null && popd >/dev/null && cp forged alias.json"
     )
+
+    assert reason == "protected SAMVIL SSOT overwrite"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "pushd sub >/dev/null && pushd >/dev/null && cp forged alias.json",
+        "pushd sub1 >/dev/null && pushd ../sub2 >/dev/null && "
+        "popd +1 >/dev/null && cp ../forged alias.json",
+        "pushd -n sub >/dev/null && cp forged alias.json",
+        "pushd sub >/dev/null && popd -n >/dev/null && cp ../forged alias.json",
+    ],
+)
+def test_pushd_stack_variants_cannot_bypass_ssot_hard_link(
+    tmp_path: Path, monkeypatch, command: str
+) -> None:
+    guard = load_guard_module()
+    monkeypatch.chdir(tmp_path)
+    canonical = Path("project.seed.json")
+    canonical.write_text("ORIGINAL")
+    (tmp_path / "alias.json").hardlink_to(canonical)
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "alias.json").hardlink_to(canonical)
+    (tmp_path / "sub1").mkdir()
+    (tmp_path / "sub2").mkdir()
+    (tmp_path / "sub2" / "alias.json").hardlink_to(canonical)
+
+    reason = guard.analyze_command(command)
 
     assert reason == "protected SAMVIL SSOT overwrite"
 
