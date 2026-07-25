@@ -58,7 +58,9 @@ DETECTABLE_EXECUTABLES = SQL_CLIENTS | SHELLS | {
     "install",
     "ln",
     "mv",
+    "perl",
     "rm",
+    "rsync",
     "sed",
     "timeout",
     "nohup",
@@ -833,9 +835,18 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
                 if reason:
                     return reason
 
-    if executable in {"cp", "install", "ln", "mv"} and len(args) >= 2:
+    if executable in {"cp", "install", "ln", "mv", "rsync"} and len(args) >= 2:
         for target in _copy_like_mutation_targets(args):
             reason = _protected_mutation_reason(target)
+            if reason:
+                return reason
+
+    if executable == "perl" and any(
+        token == "-i" or re.match(r"^-[A-Za-z]*i(?:[^A-Za-z].*)?$", token)
+        for token in args
+    ):
+        for token in args:
+            reason = _protected_mutation_reason(token)
             if reason:
                 return reason
 

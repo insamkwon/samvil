@@ -537,6 +537,8 @@ def test_non_rm_overwrites_cannot_destroy_protected_ssot(command: str) -> None:
         "cp -t . /tmp/project.seed.json",
         "install /tmp/forged project.config.json",
         "mv replacement project.state.json",
+        "rsync /tmp/forged project.seed.json",
+        "perl -pi -e 's/old/forged/' project.config.json",
         "sed -i 's/old/forged/' project.config.json",
     ],
 )
@@ -606,6 +608,8 @@ def test_safe_file_copy_and_in_place_edit_still_pass() -> None:
     guard = load_guard_module()
 
     assert guard.analyze_command("cp /tmp/source /tmp/destination") is None
+    assert guard.analyze_command("rsync /tmp/source /tmp/destination") is None
+    assert guard.analyze_command("perl -pe 's/old/new/' /tmp/cache.json") is None
     assert guard.analyze_command("sed -i 's/old/new/' /tmp/cache.json") is None
 
 
