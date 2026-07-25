@@ -133,11 +133,6 @@ class EventStore:
                     sessions_columns=sessions_columns,
                 ):
                     await db.execute(migration)
-                    if migration == TRUSTED_TRANSITION_MIGRATION:
-                        await db.execute(
-                            """UPDATE events SET trusted_transition = 1
-                            WHERE json_extract(data, '$.trusted_transition') = 1"""
-                        )
                 index_cursor = await db.execute(
                     "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
                     ("idx_events_trusted_transition",),

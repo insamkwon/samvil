@@ -119,7 +119,7 @@ def test_migration_plan_only_contains_missing_schema_changes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_trusted_transition_migration_backfills_only_existing_rows(
+async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
     tmp_path,
 ) -> None:
     db_path = tmp_path / "legacy-trust.db"
@@ -154,7 +154,14 @@ async def test_trusted_transition_migration_backfills_only_existing_rows(
             """INSERT INTO events
             (id, session_id, event_type, stage, data, timestamp)
             VALUES ('legacy', 'session', 'stage_change', 'seed', ?, '2026-07-25')""",
-            (json.dumps({"trusted_transition": True}),),
+            (
+                json.dumps(
+                    {
+                        "event_type_raw": "interview_complete",
+                        "trusted_transition": True,
+                    }
+                ),
+            ),
         )
 
     legacy_store = EventStore(str(db_path))
@@ -176,7 +183,12 @@ async def test_trusted_transition_migration_backfills_only_existing_rows(
         index_sql = db.execute(
             "SELECT sql FROM sqlite_master WHERE name = 'idx_events_trusted_transition'"
         ).fetchone()[0]
-    assert provenance == {"legacy": 1, "forged": 0}
+    events = await legacy_store.get_orchestration_events(
+        "session",
+        frozenset({"interview_complete"}),
+    )
+    assert provenance == {"legacy": 0, "forged": 0}
+    assert events == []
     assert "trusted_transition" in index_sql
     assert "json_extract" not in index_sql
 
