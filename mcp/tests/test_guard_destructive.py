@@ -118,6 +118,28 @@ def test_language_runtime_heredoc_cannot_mutate_protected_ssot() -> None:
     assert reason == "language runtime may mutate protected SAMVIL SSOT"
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        (
+            "python3 - <<< \"from pathlib import Path; "
+            "Path('project.seed.json').unlink()\""
+        ),
+        (
+            "printf \"%s\" \"from pathlib import Path; "
+            "Path('project.seed.json').unlink()\" | python3 -"
+        ),
+        "echo \"require('fs').unlinkSync('.samvil/events.jsonl')\" | node",
+    ],
+)
+def test_language_runtime_stdin_cannot_mutate_protected_ssot(command: str) -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(command)
+
+    assert reason == "language runtime may mutate protected SAMVIL SSOT"
+
+
 def test_language_runtime_script_file_cannot_mutate_protected_ssot(
     tmp_path: Path,
 ) -> None:

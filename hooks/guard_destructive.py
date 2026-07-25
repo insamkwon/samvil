@@ -954,6 +954,100 @@ def _language_runtime_heredoc_reason(command: str) -> str | None:
     return None
 
 
+def _language_runtime_stdin_payload_reason(
+    payload: str,
+    command_context: str,
+) -> str | None:
+    if _language_runtime_event_store_mutates(payload, command_context):
+        return "direct SAMVIL EventStore mutation"
+    if _language_runtime_payload_mutates(payload, command_context):
+        return "language runtime may mutate protected SAMVIL SSOT"
+    return None
+
+
+def _language_runtime_argument_stdin_reason(
+    executable: str,
+    args: list[str],
+    command_context: str,
+) -> str | None:
+    runtime = re.sub(r"(?:\d+(?:\.\d+)*)$", "", executable.casefold())
+    if runtime not in INLINE_LANGUAGE_RUNTIME_OPTIONS:
+        return None
+    for index, token in enumerate(args):
+        if token == "<<<" and index + 1 < len(args):
+            return _language_runtime_stdin_payload_reason(
+                args[index + 1],
+                command_context,
+            )
+        if token.startswith("<<<") and len(token) > 3:
+            return _language_runtime_stdin_payload_reason(
+                token[3:],
+                command_context,
+            )
+        if token == "<" and index + 1 < len(args):
+            text, error = _read_inspectable_file(
+                args[index + 1],
+                "language runtime stdin",
+            )
+            if error:
+                return error
+            if text is not None:
+                return _language_runtime_stdin_payload_reason(
+                    text,
+                    command_context,
+                )
+    return None
+
+
+def _piped_language_runtime_reason(command: str) -> str | None:
+    if re.search(r"(?<!\|)\|(?!\|)", command) is None:
+        return None
+    segments = _segments(command)
+    for index in range(1, len(segments)):
+        runtime_tokens = _unwrap_prefix(segments[index])
+        start = _command_start(runtime_tokens)
+        if start >= len(runtime_tokens):
+            continue
+        executable = _executable(runtime_tokens[start])
+        runtime = re.sub(r"(?:\d+(?:\.\d+)*)$", "", executable.casefold())
+        if runtime not in INLINE_LANGUAGE_RUNTIME_OPTIONS:
+            continue
+        runtime_args = runtime_tokens[start + 1 :]
+        if runtime_args and "-" not in runtime_args:
+            continue
+
+        producer_tokens = _unwrap_prefix(segments[index - 1])
+        producer_start = _command_start(producer_tokens)
+        if producer_start >= len(producer_tokens):
+            return "language runtime stdin cannot be inspected"
+        producer = _executable(producer_tokens[producer_start])
+        producer_args = producer_tokens[producer_start + 1 :]
+        if producer in {"echo", "printf"}:
+            payload = " ".join(producer_args)
+        elif producer == "cat" and producer_args:
+            chunks: list[str] = []
+            for source in producer_args:
+                if source.startswith("-"):
+                    continue
+                text, error = _read_inspectable_file(
+                    source,
+                    "language runtime stdin",
+                )
+                if error:
+                    return error
+                if text is not None:
+                    chunks.append(text)
+            if not chunks:
+                return "language runtime stdin cannot be inspected"
+            payload = "\n".join(chunks)
+        else:
+            return "language runtime stdin cannot be inspected"
+        reason = _language_runtime_stdin_payload_reason(payload, command)
+        if reason:
+            return reason
+    return None
+
+
 def _sql_reason(executable: str, args: list[str]) -> str | None:
     if executable not in SQL_CLIENTS:
         return None
@@ -1792,6 +1886,9 @@ def _analyze_command_impl(command: str) -> str | None:
     piped_sql_reason = _piped_sql_reason(command)
     if piped_sql_reason:
         return piped_sql_reason
+    piped_runtime_reason = _piped_language_runtime_reason(command)
+    if piped_runtime_reason:
+        return piped_runtime_reason
     piped_shell_reason = _piped_shell_reason(command)
     if piped_shell_reason:
         return piped_shell_reason
@@ -1813,6 +1910,13 @@ def _analyze_command_impl(command: str) -> str | None:
         )
         if interpreter_reason:
             return interpreter_reason
+        runtime_stdin_argument_reason = _language_runtime_argument_stdin_reason(
+            executable,
+            args,
+            command_context,
+        )
+        if runtime_stdin_argument_reason:
+            return runtime_stdin_argument_reason
         runtime_script_reason = _language_runtime_script_file_reason(
             executable,
             args,
