@@ -1079,6 +1079,64 @@ def _rm_reason(args: list[str]) -> str | None:
     return None
 
 
+def _perl_option_enables_in_place_edit(token: str) -> bool:
+    """Parse Perl short-option clusters without scanning option arguments."""
+    if token == "-i":
+        return True
+    if not token.startswith("-") or token.startswith("--"):
+        return False
+    cluster = token[1:]
+    index = 0
+    while index < len(cluster):
+        option = cluster[index]
+        index += 1
+        if option == "i":
+            return True
+        if option == "0":
+            if index < len(cluster) and cluster[index] in {"x", "X"}:
+                index += 1
+                while (
+                    index < len(cluster)
+                    and cluster[index] in "0123456789abcdefABCDEF"
+                ):
+                    index += 1
+            else:
+                digits = 0
+                while (
+                    index < len(cluster)
+                    and digits < 3
+                    and cluster[index] in "01234567"
+                ):
+                    index += 1
+                    digits += 1
+            continue
+        if option == "l":
+            while index < len(cluster) and cluster[index] in "01234567":
+                index += 1
+            continue
+        if option == "d":
+            remainder = cluster[index:]
+            if remainder.startswith("i"):
+                return False
+            if remainder.startswith(":"):
+                return False
+            if remainder.startswith("t"):
+                index += 1
+                if index < len(cluster) and cluster[index] == ":":
+                    return False
+            continue
+        if option == "V":
+            if index < len(cluster) and cluster[index] == ":":
+                return False
+            continue
+        if option in "acflnpsStTuUvwWX":
+            continue
+        if option in {"C", "D", "e", "E", "F", "I", "m", "M", "x"}:
+            return False
+        return False
+    return False
+
+
 def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
     if executable in {">", ">>", ">|", "<>", "&>", "&>>"} and args:
         reason = _protected_mutation_reason(args[0])
@@ -1105,9 +1163,7 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
                 return reason
 
     if executable == "perl" and any(
-        token == "-i"
-        or re.match(r"^-[0-9acdlnpsStTuvUwxWX]*i.*$", token)
-        for token in args
+        _perl_option_enables_in_place_edit(token) for token in args
     ):
         for token in args:
             reason = _protected_mutation_reason(token)

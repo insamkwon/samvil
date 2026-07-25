@@ -546,6 +546,7 @@ def test_non_rm_overwrites_cannot_destroy_protected_ssot(command: str) -> None:
         "perl -piABC -e 's/old/forged/' project.seed.json",
         "perl -0777pi0 -e 's/old/forged/' project.seed.json",
         "perl -Upi0 -e 's/old/forged/' project.seed.json",
+        "perl -dpi0 -e 's/old/forged/' project.seed.json",
         "sed -i 's/old/forged/' project.config.json",
     ],
 )
@@ -567,11 +568,17 @@ def test_perl_numeric_record_separator_without_in_place_edit_still_passes() -> N
     assert reason is None
 
 
-def test_perl_module_name_containing_i_is_not_mistaken_for_in_place_edit() -> None:
+@pytest.mark.parametrize(
+    "options",
+    ["-Mstrict -ne", "-xinput", "-di0"],
+)
+def test_perl_option_arguments_containing_i_are_not_mistaken_for_in_place_edit(
+    options: str,
+) -> None:
     guard = load_guard_module()
 
     reason = guard.analyze_command(
-        "perl -Mstrict -ne 'print if /project/' project.seed.json"
+        f"perl {options} -e 'print if /project/' project.seed.json"
     )
 
     assert reason is None
