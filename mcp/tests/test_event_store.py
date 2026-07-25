@@ -151,6 +151,11 @@ async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
             """
         )
         db.execute(
+            """INSERT INTO sessions
+            (id, project_name, current_stage, stage_transition_id, created_at, updated_at)
+            VALUES ('session', 'legacy-app', 'seed', 'legacy', '2026-07-25', '2026-07-25')"""
+        )
+        db.execute(
             """INSERT INTO events
             (id, session_id, event_type, stage, data, timestamp)
             VALUES ('legacy', 'session', 'stage_change', 'seed', ?, '2026-07-25')""",
@@ -166,6 +171,9 @@ async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
 
     legacy_store = EventStore(str(db_path))
     await legacy_store.initialize()
+    recovered_session = await legacy_store.get_session("session")
+    assert recovered_session is not None
+    assert recovered_session.current_stage == Stage.INTERVIEW
     with sqlite3.connect(db_path) as db:
         db.execute(
             """INSERT INTO events
@@ -191,6 +199,18 @@ async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
     assert events == []
     assert "trusted_transition" in index_sql
     assert "json_extract" not in index_sql
+
+    await legacy_store.save_event_and_update_stage(
+        "session",
+        EventType.STAGE_CHANGE,
+        Stage.SEED,
+        {"event_type_raw": "interview_complete"},
+        expected_stage=Stage.INTERVIEW,
+    )
+    await legacy_store.initialize()
+    migrated_session = await legacy_store.get_session("session")
+    assert migrated_session is not None
+    assert migrated_session.current_stage == Stage.SEED
 
 
 @pytest.mark.asyncio

@@ -128,11 +128,24 @@ class EventStore:
                 await db.execute("BEGIN IMMEDIATE")
                 events_columns = await _table_columns(db, "events")
                 sessions_columns = await _table_columns(db, "sessions")
-                for migration in _migration_plan(
+                migrations = _migration_plan(
                     events_columns=events_columns,
                     sessions_columns=sessions_columns,
-                ):
+                )
+                trusted_transition_added = TRUSTED_TRANSITION_MIGRATION in migrations
+                for migration in migrations:
                     await db.execute(migration)
+                if trusted_transition_added:
+                    # Legacy JSON flags cannot prove provenance. Rewind only
+                    # once, while adding the provenance column, so existing
+                    # sessions can replay gates instead of remaining stranded
+                    # at a stage whose prerequisites are now intentionally
+                    # untrusted.
+                    await db.execute(
+                        """UPDATE sessions
+                        SET current_stage = 'interview', stage_transition_id = ''
+                        WHERE current_stage != 'interview'"""
+                    )
                 index_cursor = await db.execute(
                     "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
                     ("idx_events_trusted_transition",),
