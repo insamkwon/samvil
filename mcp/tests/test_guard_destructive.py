@@ -531,6 +531,84 @@ def test_non_rm_overwrites_cannot_destroy_protected_ssot(command: str) -> None:
 @pytest.mark.parametrize(
     "command",
     [
+        "cp /tmp/forged project.seed.json",
+        "cp /tmp/forged project.seed.json -f",
+        "install /tmp/forged project.config.json",
+        "mv replacement project.state.json",
+        "sed -i 's/old/forged/' project.config.json",
+    ],
+)
+def test_arbitrary_sources_cannot_replace_protected_ssot(command: str) -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(command)
+
+    assert reason is not None and "protected SAMVIL" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cp /tmp/forged ~/.samvil/samvil.db",
+        "mv /tmp/forged ~/.samvil/samvil.db",
+        "ln -sf /tmp/forged ~/.samvil/samvil.db",
+        "sed -i 's/old/forged/' ~/.samvil/samvil.db",
+    ],
+)
+def test_shell_commands_cannot_replace_samvil_event_store(command: str) -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(command)
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
+def test_event_store_symlink_alias_cannot_bypass_write_or_overwrite_guard(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    db_path = tmp_path / ".samvil" / "samvil.db"
+    db_path.parent.mkdir()
+    db_path.touch()
+    alias = tmp_path / "event-store-alias.db"
+    alias.symlink_to(db_path)
+
+    assert (
+        guard.analyze_command(f"sqlite3 {alias} 'UPDATE events SET stage=\"qa\"'")
+        == "direct SAMVIL EventStore mutation"
+    )
+    assert (
+        guard.analyze_command(f"cp /tmp/forged {alias}")
+        == "protected SAMVIL EventStore overwrite"
+    )
+
+
+def test_event_store_file_cannot_be_removed_or_replaced_by_runtime() -> None:
+    guard = load_guard_module()
+
+    assert (
+        guard.analyze_command("rm -f ~/.samvil/samvil.db")
+        == "protected SAMVIL EventStore removal"
+    )
+    assert (
+        guard.analyze_command(
+            "python3 -c \"import shutil; "
+            "shutil.copyfile('/tmp/forged', '/tmp/home/.samvil/samvil.db')\""
+        )
+        == "inline language runtime may mutate protected SAMVIL SSOT"
+    )
+
+
+def test_safe_file_copy_and_in_place_edit_still_pass() -> None:
+    guard = load_guard_module()
+
+    assert guard.analyze_command("cp /tmp/source /tmp/destination") is None
+    assert guard.analyze_command("sed -i 's/old/new/' /tmp/cache.json") is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
         "rm -f tmp.log",
         "rm -f *.tmp",
         "rm -f .samvil/cache/tmp.json",

@@ -51,10 +51,15 @@ SHELL_CONTROL_PREFIXES = {
 SIMPLE_WRAPPERS = {"builtin", "command", "exec", "nohup"}
 DETECTABLE_EXECUTABLES = SQL_CLIENTS | SHELLS | {
     "builtin",
+    "cp",
     "eval",
     "find",
     "git",
+    "install",
+    "ln",
+    "mv",
     "rm",
+    "sed",
     "timeout",
     "nohup",
     "nice",
@@ -105,9 +110,9 @@ INLINE_LANGUAGE_RUNTIME_OPTIONS = {
     "ruby": {"-e"},
 }
 INLINE_LANGUAGE_MUTATION = re.compile(
-    r"(?:\bFile\.write\b|\b(?:copyfile|createWriteStream|delete|file_put_contents|"
+    r"(?:\bFile\.write\b|\b(?:copy|copy2|copyfile|createWriteStream|delete|file_put_contents|"
     r"fopen|remove|rename|replace|rmSync|rmtree|"
-    r"truncate|truncateSync|unlink|unlinkSync|write_bytes|write_text|"
+    r"move|symlink|symlink_to|truncate|truncateSync|unlink|unlinkSync|write_bytes|write_text|"
     r"writeFile|writeFileSync)\b)",
     re.IGNORECASE,
 )
@@ -634,6 +639,33 @@ def _is_protected_ssot_target(target: str) -> bool:
     )
 
 
+def _is_samvil_event_store_target(target: str) -> bool:
+    """Recognize the canonical EventStore through URI, home, or symlink aliases."""
+    normalized = target.replace("\\", "/")
+    if normalized.startswith("file:"):
+        normalized = normalized.removeprefix("file:").split("?", 1)[0]
+    candidates = {normalized}
+    try:
+        path = Path(normalized).expanduser()
+        candidates.add(str(path).replace("\\", "/"))
+        candidates.add(str(path.resolve(strict=False)).replace("\\", "/"))
+    except (OSError, RuntimeError):
+        pass
+    return any(
+        candidate == SAMVIL_EVENT_STORE_RELATIVE
+        or candidate.endswith(SAMVIL_EVENT_STORE_SUFFIX)
+        for candidate in candidates
+    )
+
+
+def _protected_mutation_reason(target: str) -> str | None:
+    if _is_samvil_event_store_target(target):
+        return "protected SAMVIL EventStore overwrite"
+    if _is_protected_ssot_target(target):
+        return "protected SAMVIL SSOT overwrite"
+    return None
+
+
 def _brace_expansion_candidates(target: str, *, limit: int = 32) -> list[str] | None:
     candidates = [target]
     while len(candidates) < limit:
@@ -699,6 +731,8 @@ def _rm_reason(args: list[str]) -> str | None:
         for token in args
     )
     targets = [token for token in args if not token.startswith("-")]
+    if any(_is_samvil_event_store_target(target) for target in targets):
+        return "protected SAMVIL EventStore removal"
     if any(_is_protected_ssot_target(target) for target in targets):
         return "protected SAMVIL SSOT removal"
     if any(_rm_target_may_expand_to_protected_ssot(target) for target in targets):
@@ -739,40 +773,53 @@ def _rm_reason(args: list[str]) -> str | None:
 
 def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
     if executable in {">", ">>", ">|", "<>", "&>", "&>>"} and args:
-        if _is_protected_ssot_target(args[0]):
-            return "protected SAMVIL SSOT shell overwrite"
+        reason = _protected_mutation_reason(args[0])
+        if reason:
+            return reason
 
     for index, token in enumerate(args[:-1]):
-        if token in {">", ">>", ">|", "<>", "&>", "&>>"} and _is_protected_ssot_target(
-            args[index + 1]
-        ):
-            return "protected SAMVIL SSOT shell overwrite"
+        if token in {">", ">>", ">|", "<>", "&>", "&>>"}:
+            reason = _protected_mutation_reason(args[index + 1])
+            if reason:
+                return reason
 
-    if executable == "truncate" and any(
-        _is_protected_ssot_target(token) for token in args if not token.startswith("-")
-    ):
-        return "protected SAMVIL SSOT truncation"
+    if executable == "truncate":
+        for token in args:
+            if not token.startswith("-"):
+                reason = _protected_mutation_reason(token)
+                if reason:
+                    return reason
 
-    if (
-        executable in {"cp", "install"}
-        and len(args) >= 2
-        and _normalized_rm_target(args[-2]) == "/dev/null"
-        and _is_protected_ssot_target(args[-1])
-    ):
-        return "protected SAMVIL SSOT overwrite from /dev/null"
+    if executable in {"cp", "install", "ln", "mv"} and len(args) >= 2:
+        operands = [token for token in args if token == "-" or not token.startswith("-")]
+        reason = _protected_mutation_reason(operands[-1]) if len(operands) >= 2 else None
+        if reason:
+            return reason
 
-    if executable == "tee" and any(
-        _is_protected_ssot_target(token) for token in args if not token.startswith("-")
+    if executable == "sed" and any(
+        token == "-i"
+        or token.startswith("-i")
+        or token == "--in-place"
+        or token.startswith("--in-place=")
+        for token in args
     ):
-        return "protected SAMVIL SSOT tee overwrite"
+        for token in args:
+            reason = _protected_mutation_reason(token)
+            if reason:
+                return reason
+
+    if executable == "tee":
+        for token in args:
+            if not token.startswith("-"):
+                reason = _protected_mutation_reason(token)
+                if reason:
+                    return reason
 
     if executable == "dd":
         options = dict(token.split("=", 1) for token in args if "=" in token)
-        if (
-            _normalized_rm_target(options.get("if", "")) == "/dev/null"
-            and _is_protected_ssot_target(options.get("of", ""))
-        ):
-            return "protected SAMVIL SSOT overwrite from /dev/null"
+        reason = _protected_mutation_reason(options.get("of", ""))
+        if reason:
+            return reason
     return None
 
 
@@ -822,7 +869,8 @@ def _language_runtime_payload_mutates(payload: str, command_context: str = "") -
             return True
 
     protected_paths = PROTECTED_ROOT_SSOT_PATHS | PROTECTED_SAMVIL_SSOT_PATHS | {
-        ".samvil"
+        ".samvil",
+        SAMVIL_EVENT_STORE_RELATIVE,
     }
     normalized_context = command_context.replace("\\", "/")
     protected_context = f"{normalized}\n{normalized_context}"
@@ -1069,14 +1117,7 @@ def _sql_reason(executable: str, args: list[str]) -> str | None:
 def _direct_samvil_event_store_reason(args: list[str]) -> bool:
     database_index: int | None = None
     for index, token in enumerate(args):
-        normalized = token.replace("\\", "/")
-        if normalized.startswith("file:"):
-            normalized = normalized.removeprefix("file:").split("?", 1)[0]
-        try:
-            normalized = str(Path(normalized).expanduser()).replace("\\", "/")
-        except RuntimeError:
-            pass
-        if normalized.endswith(SAMVIL_EVENT_STORE_SUFFIX):
+        if _is_samvil_event_store_target(token):
             database_index = index
             break
     if database_index is None:
