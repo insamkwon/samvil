@@ -1577,23 +1577,26 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 - [x] **4.106 nested creator·경로 변형·directory destination alias 추적**
   (스코프 보정: 4.102는 outer `ln` 뒤 nested consumer만 처리했다. `sh -c`/`eval` 내부에서
   생성된 alias를 후속 outer segment로 전파하고, `alias`→`./alias` canonicalization과
-  `ln source directory`가 실제 만드는 `directory/samvil.db`까지 추적한다.)
+  분석 전에 이미 존재한 directory에 대한 `ln source directory`가 실제 만드는
+  `directory/samvil.db`까지 추적한다. 같은 명령에서 새로 만든 directory는 4.110에서 완료한다.)
   - 완료 증거: `0a2bb2c`; `hooks/guard_destructive.py:683`,
-    `hooks/guard_destructive.py:748`, `hooks/guard_destructive.py:780`,
-    `hooks/guard_destructive.py:815`, `mcp/tests/test_guard_destructive.py:681`,
-    `mcp/tests/test_guard_destructive.py:695`, `mcp/tests/test_guard_destructive.py:711`.
+    `hooks/guard_destructive.py:808`, `hooks/guard_destructive.py:849`,
+    `hooks/guard_destructive.py:884`, `mcp/tests/test_guard_destructive.py:662`,
+    `mcp/tests/test_guard_destructive.py:703`, `mcp/tests/test_guard_destructive.py:719`.
 - [x] **4.107 Perl alphanumeric in-place backup extension 차단**
-  (`-i0`, `-piABC`, `-0777pi0`처럼 `-i[extension]`의 영숫자 suffix도 mutation으로 판정하되,
-  `-Mstrict`처럼 `i`가 module 이름에 포함된 read-only option은 오탐하지 않는다.)
-  - 완료 증거: `89cfab5`; `hooks/guard_destructive.py:1029`,
-    `hooks/guard_destructive.py:1031`, `mcp/tests/test_guard_destructive.py:547`,
-    `mcp/tests/test_guard_destructive.py:569`.
+  (스코프 보정: `-i0`, `-piABC`, `-0777pi0`처럼 `-i[extension]`의 영숫자 suffix와
+  `-Mstrict` module argument는 구분했다. 대문자 `-U` cluster와 `-x`·`-d` argument
+  소비 경계는 각각 4.111~4.112에서 완료한다.)
+  - 완료 증거: `89cfab5`; `hooks/guard_destructive.py:1082`,
+    `hooks/guard_destructive.py:1165`, `mcp/tests/test_guard_destructive.py:547`,
+    `mcp/tests/test_guard_destructive.py:561`.
 - [x] **4.108 rootless legacy schema의 지연 attach·일관 복구**
-  (`project_root` 컬럼이 없던 실제 구형 DB는 migration에서 DB-only rewind하지 않고 기존 stage에
+  (스코프 보정: `project_root` 컬럼이 없던 실제 구형 DB는 migration에서 DB-only rewind하지 않고 기존 stage에
   보류한다. 첫 marker/resume 요청의 project state session_id로 root를 attach한 뒤 DB·state·marker를
-  같은 interview 재검증 상태로 전환한다.)
+  같은 interview 재검증 상태로 전환한다. 이미 interview인 DB·state와 어긋난 marker 및 attach
+  직전 session 소유권 재검증은 4.113~4.114에서 완료한다.)
   - 완료 증거: `fd93661`; `mcp/samvil_mcp/event_store.py:251`,
-    `mcp/samvil_mcp/event_store.py:285`, `mcp/samvil_mcp/server.py:5479`,
+    `mcp/samvil_mcp/event_store.py:288`, `mcp/samvil_mcp/server.py:5479`,
     `mcp/samvil_mcp/server.py:5493`, `mcp/tests/test_event_store.py:298`,
     `mcp/tests/test_orchestrator_mcp.py:41`.
 - [x] **4.109 legacy file compensation의 best-effort 전체 원복**
@@ -1601,8 +1604,39 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   보상 예외는 집계해 명시적으로 반환하며, 지속 marker 실패에서도 DB·schema·state·marker가
   원래 build 상태를 유지한다.)
   - 완료 증거: `2df3914`; `mcp/samvil_mcp/event_store.py:124`,
-    `mcp/samvil_mcp/event_store.py:144`, `mcp/tests/test_event_store.py:356`,
-    `mcp/tests/test_event_store.py:406`.
+    `mcp/samvil_mcp/event_store.py:144`, `mcp/tests/test_event_store.py:402`,
+    `mcp/tests/test_event_store.py:449`.
+- [x] **4.110 같은 명령에서 생성한 directory의 symlink destination 추적**
+  (`mkdir`와 `ln -s`가 한 shell command에 이어져 분석 시점에는 destination directory가
+  없어도 생성 예정 경로를 기억한다. 일반 destination과 `-t`·`--target-directory` 형식을
+  실제 `directory/samvil.db` alias로 해석해 후속 overwrite를 차단한다.)
+  - 완료 증거: `a506e2d`; `hooks/guard_destructive.py:683`,
+    `hooks/guard_destructive.py:764`, `hooks/guard_destructive.py:808`,
+    `hooks/guard_destructive.py:884`, `mcp/tests/test_guard_destructive.py:749`.
+- [x] **4.111 Perl 대문자 U cluster 뒤 in-place mutation 차단**
+  (유효한 no-argument `-U`가 `-p`·`-i[extension]`과 결합된 `-Upi0`도 보호 SSOT를
+  수정하는 명령으로 판정한다.)
+  - 완료 증거: `75932a0`; `hooks/guard_destructive.py:1132`,
+    `hooks/guard_destructive.py:1165`, `mcp/tests/test_guard_destructive.py:548`.
+- [x] **4.112 Perl option argument와 in-place flag의 문법 경계 구분**
+  (`-xinput` directory와 `-di0` debugger argument 안의 `i`는 read-only로 허용하되,
+  `-dpi0`·숫자 record separator·backup extension처럼 실제 cluster의 `-i`는 계속 차단한다.)
+  - 완료 증거: `9cee181`; `hooks/guard_destructive.py:1082`,
+    `hooks/guard_destructive.py:1117`, `hooks/guard_destructive.py:1134`,
+    `mcp/tests/test_guard_destructive.py:549`, `mcp/tests/test_guard_destructive.py:575`.
+- [x] **4.113 rootless attach의 stale chain marker 재검증**
+  (DB와 project state가 이미 interview여도 marker가 build이거나 missing/corrupt이면
+  attach-only로 끝내지 않고 세 SSOT를 모두 `samvil-interview` 재검증 상태로 맞춘다.)
+  - 완료 증거: `ec81da5`; `mcp/samvil_mcp/event_store.py:327`,
+    `mcp/samvil_mcp/event_store.py:343`, `mcp/samvil_mcp/event_store.py:346`,
+    `mcp/tests/test_event_store.py:355`, `mcp/tests/test_event_store.py:385`.
+- [x] **4.114 rootless attach의 교차 세션 TOCTOU 차단**
+  (server가 읽은 session ID와 실제 lock 획득 시점의 project state 소유자가 다르면
+  DB attach와 state·marker rewind를 모두 중단한다. DB transaction 뒤 state·marker lock을
+  잡고 session 소유권을 재확인해 서로 다른 세션의 DB/file SSOT 결합을 막는다.)
+  - 완료 증거: `16b0df1`; `mcp/samvil_mcp/event_store.py:303`,
+    `mcp/samvil_mcp/event_store.py:313`, `mcp/samvil_mcp/event_store.py:323`,
+    `mcp/tests/test_orchestrator_mcp.py:87`, `mcp/tests/test_orchestrator_mcp.py:128`.
 
 ---
 
