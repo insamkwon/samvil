@@ -300,7 +300,7 @@ def test_apply_migration_does_not_overwrite_seed_changed_between_check_and_repla
 
     def race_on_seed_replace(path, text, **kwargs):
         nonlocal seed_write_calls
-        if Path(path) == seed_path:
+        if Path(path).name.startswith(f".{seed_path.name}.migration-result-"):
             seed_write_calls += 1
             if seed_write_calls == 1:
                 seed_path.write_text(concurrent_text)
@@ -312,6 +312,64 @@ def test_apply_migration_does_not_overwrite_seed_changed_between_check_and_repla
         apply_migration(tmp_path)
 
     assert seed_path.read_text() == concurrent_text
+
+
+def test_apply_migration_rejects_atomic_seed_replacement_before_swap(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from samvil_mcp import migrate_v3_3 as migration
+
+    seed_path = tmp_path / "project.seed.json"
+    original_text = json.dumps(_seed())
+    seed_path.write_text(original_text)
+    concurrent_seed = _seed()
+    concurrent_seed["name"] = "atomic-editor-owner"
+    concurrent_text = json.dumps(concurrent_seed)
+    real_replace = migration.os.replace
+    injected = False
+
+    def race_on_seed_replace(source, destination):
+        nonlocal injected
+        if Path(source) == seed_path and not injected:
+            injected = True
+            concurrent_path = tmp_path / "concurrent-seed.json"
+            concurrent_path.write_text(concurrent_text)
+            real_replace(concurrent_path, seed_path)
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(migration.os, "replace", race_on_seed_replace)
+
+    with pytest.raises(RuntimeError, match="seed changed during migration"):
+        apply_migration(tmp_path)
+
+    assert seed_path.read_text() == concurrent_text
+
+
+def test_apply_migration_rejects_backup_replaced_after_verification(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from samvil_mcp import migrate_v3_3 as migration
+
+    seed_path = tmp_path / "project.seed.json"
+    backup_path = tmp_path / BACKUP_FILENAME
+    seed_path.write_text(json.dumps(_seed()))
+    real_ensure_backup = migration._ensure_verified_backup
+
+    def replace_backup_after_verification(path, seed_text, seed):
+        real_ensure_backup(path, seed_text, seed)
+        corrupt_path = tmp_path / "corrupt-backup.json"
+        corrupt_path.write_text('{"partial":')
+        migration.os.replace(corrupt_path, backup_path)
+
+    monkeypatch.setattr(
+        migration, "_ensure_verified_backup", replace_backup_after_verification
+    )
+
+    with pytest.raises(OSError, match="backup verification failed"):
+        apply_migration(tmp_path)
+
+    assert json.loads(seed_path.read_text())["schema_version"] == "3.2"
+    assert backup_path.read_text() == '{"partial":'
 
 
 def test_migrate_seed_v3_3_mcp_tool(tmp_path: Path) -> None:

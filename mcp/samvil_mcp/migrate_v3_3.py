@@ -38,10 +38,10 @@ def _ensure_verified_backup(
     backup_path: Path,
     seed_text: str,
     seed: dict[str, Any],
-) -> None:
+) -> bool:
     """Preserve the first valid backup or atomically replace an invalid one."""
     if _is_valid_v32_backup(backup_path):
-        return
+        return False
 
     if getattr(_backup_lock_state, "held", False):
         write_backup = (
@@ -59,6 +59,27 @@ def _ensure_verified_backup(
         raise OSError(f"backup verification failed: {exc}") from exc
     if written_text != seed_text or written_seed != seed:
         raise OSError("backup verification failed: content mismatch")
+    return True
+
+
+def _verify_backup_contents(
+    backup_path: Path,
+    seed_text: str | None,
+    seed: dict[str, Any] | None,
+) -> None:
+    try:
+        written_text = backup_path.read_text(encoding="utf-8")
+        written_seed = json.loads(written_text)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise OSError(f"backup verification failed: {exc}") from exc
+    if not (
+        isinstance(written_seed, dict)
+        and str(written_seed.get("schema_version")) == "3.2"
+        and validate_seed(copy.deepcopy(written_seed))["valid"]
+    ):
+        raise OSError("backup verification failed: invalid v3.2 backup")
+    if seed_text is not None and (written_text != seed_text or written_seed != seed):
+        raise OSError("backup verification failed: content mismatch")
 
 
 def _replace_seed_if_unchanged(
@@ -70,20 +91,35 @@ def _replace_seed_if_unchanged(
     snapshot_path = seed_path.with_name(
         f".{seed_path.name}.migration-snapshot-{uuid.uuid4().hex}"
     )
+    result_path = seed_path.with_name(
+        f".{seed_path.name}.migration-result-{uuid.uuid4().hex}"
+    )
+    swap_path = seed_path.with_name(
+        f".{seed_path.name}.migration-swap-{uuid.uuid4().hex}"
+    )
     try:
         os.link(seed_path, snapshot_path)
         if snapshot_path.read_text(encoding="utf-8") != expected_text:
             raise RuntimeError("seed changed during migration; retry from current state")
-        atomic_write_text_unlocked(seed_path, migrated_text)
-        snapshot_text = snapshot_path.read_text(encoding="utf-8")
-        if snapshot_text != expected_text:
-            atomic_write_text_unlocked(seed_path, snapshot_text)
+        atomic_write_text_unlocked(result_path, migrated_text)
+        os.replace(seed_path, swap_path)
+        if (
+            not os.path.samefile(swap_path, snapshot_path)
+            or swap_path.read_text(encoding="utf-8") != expected_text
+        ):
+            os.replace(swap_path, seed_path)
             raise RuntimeError("seed changed during migration; retry from current state")
+        os.replace(result_path, seed_path)
     finally:
         try:
             snapshot_path.unlink(missing_ok=True)
         except OSError:
             pass
+        for temporary in (result_path, swap_path):
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _migrate_seed_dict(seed: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -135,7 +171,12 @@ def apply_migration(project_root: str | Path) -> dict[str, Any]:
         with _locked(backup_path):
             _backup_lock_state.held = True
             try:
-                _ensure_verified_backup(backup_path, seed_text, seed)
+                backup_rewritten = _ensure_verified_backup(backup_path, seed_text, seed)
+                _verify_backup_contents(
+                    backup_path,
+                    seed_text if backup_rewritten else None,
+                    seed if backup_rewritten else None,
+                )
                 if seed_path.read_text(encoding="utf-8") != seed_text:
                     raise RuntimeError(
                         "seed changed during migration; retry from current state"
