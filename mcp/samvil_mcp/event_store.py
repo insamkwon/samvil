@@ -290,6 +290,7 @@ class EventStore:
         """Attach a rootless legacy session and replay its trust gates safely."""
         normalized_root = str(Path(project_root).expanduser().resolve())
         state_path = Path(normalized_root) / "project.state.json"
+        marker_path = Path(normalized_root) / ".samvil" / "next-skill.json"
         file_stage = ""
         if state_path.exists():
             try:
@@ -298,6 +299,14 @@ class EventStore:
                 parsed_state = None
             if isinstance(parsed_state, dict):
                 file_stage = str(parsed_state.get("current_stage") or "")
+        marker_skill = ""
+        if marker_path.exists():
+            try:
+                parsed_marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError, UnicodeError):
+                parsed_marker = None
+            if isinstance(parsed_marker, dict):
+                marker_skill = str(parsed_marker.get("next_skill") or "")
 
         backups: dict[Path, str | None] = {}
         locks = ExitStack()
@@ -323,6 +332,7 @@ class EventStore:
                 needs_revalidation = trusted_count == 0 and (
                     current_stage != "interview"
                     or (file_stage and file_stage != "interview")
+                    or marker_skill != "samvil-interview"
                 )
                 if needs_revalidation:
                     backups = _prepare_legacy_recovery_files(
