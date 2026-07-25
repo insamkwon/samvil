@@ -1458,6 +1458,49 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
     `mcp/samvil_mcp/server.py:1399`, `mcp/samvil_mcp/server.py:1450`,
     `mcp/samvil_mcp/server.py:1479`, `mcp/samvil_mcp/server.py:1644`,
     `mcp/samvil_mcp/server.py:1667`, `mcp/tests/test_orchestrator_mcp.py:720`.
+- [x] **4.85 secret scanner와 redaction 회귀 fixture의 책임 분리**
+  (redaction 테스트가 실제 credential literal을 저장소에 심지 않으면서도 공백·delimiter
+  값 전체가 제거되는 계약을 동일하게 검증한다.)
+  - 완료 증거: `fc57c9c`; `mcp/tests/test_event_sanitizer.py:99`.
+- [x] **4.86 chained SQL·동적 문자열 EventStore mutation 차단**
+  (read-only SELECT 뒤에 이어진 write와 문자열 결합 SQL, imported `DB_PATH`를 통한 직접
+  DB write도 destructive guard가 EventStore mutation으로 판정한다.)
+  - 완료 증거: `2548d5b`; `hooks/guard_destructive.py:885`,
+    `hooks/guard_destructive.py:1117`, `mcp/tests/test_guard_destructive.py:219`,
+    `mcp/tests/test_guard_destructive.py:227`.
+- [x] **4.87 here-string·pipe runtime stdin mutation 차단**
+  (`python - <<<`, `printf | python -`, `echo | node`로 전달한 payload도 inline/heredoc과
+  동일한 SSOT mutation 검사 경계를 통과한다.)
+  - 완료 증거: `12c5f0e`; `hooks/guard_destructive.py:1016`,
+    `hooks/guard_destructive.py:1050`, `mcp/tests/test_guard_destructive.py:135`.
+- [x] **4.88 namespaced env credential·multiline quoted value redaction**
+  (`OPENAI_API_KEY`, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL` 같은 prefix key와 여러 줄
+  quoted password를 canonical event 저장 전에 값 전체 단위로 제거한다.)
+  - 완료 증거: `ef27df6`; `mcp/samvil_mcp/event_sanitizer.py:25`,
+    `mcp/samvil_mcp/event_sanitizer.py:30`, `mcp/tests/test_event_sanitizer.py:120`.
+- [x] **4.89 legacy JSON transition flag의 provenance 승격 금지**
+  (migration 전 event data가 스스로 `trusted_transition=true`를 주장해도 새 DB provenance
+  column은 0으로 유지해 orchestration prerequisite로 소비하지 않는다.)
+  - 완료 증거: `c0c8fc1`; `mcp/samvil_mcp/event_store.py:131`,
+    `mcp/tests/test_event_store.py:122`.
+- [x] **4.90 MCP 프로세스 간 stage 보상 경계 직렬화**
+  (process-local asyncio lock에 DB/session별 flock을 더해 event+stage transaction부터
+  canonical append 실패 보상 완료까지 다른 MCP 프로세스의 후속 전환을 차단한다.)
+  - 완료 증거: `c052a02`; `mcp/samvil_mcp/server.py:273`,
+    `mcp/samvil_mcp/server.py:293`, `mcp/samvil_mcp/server.py:1165`,
+    `mcp/tests/test_orchestrator_mcp.py:1342`.
+- [x] **4.91 보호 SSOT·EventStore의 우회 overwrite 차단**
+  (임의 source의 cp/install/mv, in-place sed, ln, runtime copy와 URI·home·symlink alias를
+  통한 canonical EventStore 교체·삭제·직접 write를 차단하고 안전한 임시 파일은 허용한다.)
+  - 완료 증거: `f80864b`; `hooks/guard_destructive.py:642`,
+    `hooks/guard_destructive.py:661`, `mcp/tests/test_guard_destructive.py:541`,
+    `mcp/tests/test_guard_destructive.py:566`.
+- [x] **4.92 blueprint 화면·장면 referential integrity 검증**
+  (web/dashboard route target, mobile tab screen, game scene-flow source·target이 각 canonical
+  name list에 실제 존재해야 하며 tabs navigation은 비어 있을 수 없다.)
+  - 완료 증거: `bddccb0`; `mcp/samvil_mcp/server.py:1394`,
+    `mcp/samvil_mcp/server.py:1464`, `mcp/samvil_mcp/server.py:1565`,
+    `mcp/tests/test_orchestrator_mcp.py:713`, `mcp/tests/test_orchestrator_mcp.py:718`.
 
 ---
 
