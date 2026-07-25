@@ -150,6 +150,22 @@ def test_event_data_redacts_namespaced_env_credentials_and_multiline_values() ->
     assert all(secret not in serialized for secret in secrets)
 
 
+def test_event_data_redacts_stripe_restricted_keys_in_all_event_shapes() -> None:
+    restricted_key = "_".join(("rk", "live", "fixture", "restricted", "value"))
+    payload = {
+        "note": f"STRIPE_RESTRICTED_KEY={restricted_key}",
+        "stripeRestrictedKey": restricted_key,
+        "unlabelled": restricted_key,
+    }
+
+    sanitized = sanitize_event_data(payload)
+    serialized = str(sanitized)
+
+    assert restricted_key not in serialized
+    assert sanitized["stripeRestrictedKey"] == "[REDACTED]"
+    assert serialized.count("[REDACTED") >= 3
+
+
 def test_stage_label_rejects_arbitrary_sensitive_prose() -> None:
     assert sanitize_stage_label("qa") == "qa"
     assert sanitize_stage_label("ghp_fixture_secret") == "redacted_stage"

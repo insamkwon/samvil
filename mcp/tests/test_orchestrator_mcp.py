@@ -1672,12 +1672,14 @@ def test_save_event_redacts_credentials_embedded_in_plain_strings(
         "client": "-".join(("client", "fixture", "value")),
         "basic": "".join(("QWxh", "ZGRp", "bjpvcGVu", "IHNlc2FtZQ==")),
         "cookie": "-".join(("session", "fixture", "value")),
+        "restricted": "_".join(("rk", "live", "fixture", "restricted", "value")),
     }
     raw_note = (
         f"access_token={secrets['access']} "
         f"client_secret={secrets['client']} "
         f"Authorization: Basic {secrets['basic']} "
-        f"Cookie: session={secrets['cookie']}"
+        f"Cookie: session={secrets['cookie']} "
+        f"STRIPE_RESTRICTED_KEY={secrets['restricted']}"
     )
 
     async def runner():

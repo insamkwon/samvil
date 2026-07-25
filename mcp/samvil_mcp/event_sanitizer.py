@@ -26,7 +26,7 @@ _CREDENTIAL_KEY = (
     r"\b(?:(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?token|"
     r"auth[_-]?token|client[_-]?secret|secret[_-]?access[_-]?key|"
     r"service[_-]?role[_-]?key|private[_-]?key|secret[_-]?key|"
-    r"secret|token|password|passwd)|database[_-]?url)\b"
+    r"restricted[_-]?key|secret|token|password|passwd)|database[_-]?url)\b"
 )
 _QUOTED_CREDENTIAL = re.compile(
     rf"(?P<key_quote>['\"]?)(?P<key>{_CREDENTIAL_KEY})(?P=key_quote)"
@@ -41,7 +41,8 @@ _CREDENTIAL = re.compile(
     re.IGNORECASE,
 )
 _TOKEN_LITERAL = re.compile(
-    r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9_]{8,}|sk-[A-Za-z0-9_-]{8,})\b",
+    r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9_]{8,}|"
+    r"rk_(?:live|test)_[A-Za-z0-9_]{8,}|sk-[A-Za-z0-9_-]{8,})\b",
     re.IGNORECASE,
 )
 _MAX_STRING_LENGTH = 4096
@@ -95,6 +96,7 @@ def sanitize_event_data(value: Any, *, _depth: int = 0) -> Any:
                 "apikey",
                 "authorization",
                 "cookie",
+                "restrictedkey",
             )
             if (
                 _SENSITIVE_KEYS.search(key)
