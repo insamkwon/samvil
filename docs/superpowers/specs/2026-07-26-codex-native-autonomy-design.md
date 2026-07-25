@@ -435,7 +435,13 @@ Dynamic routing examples:
 
 - Seed → Design or Council
 - QA → QA stay / Deploy / Evolve / Retro
-- Evolve rebuild → Scaffold
+- Evolve rebuild → Build
+
+> **스코프 보정 (2026-07-26):** 현재 구현은
+> `materialize_evolve_rebuild_handoff` 후 `project.state.json.current_stage`를
+> `build`로 설정하고 `samvil-build`로 재진입한다
+> (`skills/samvil-evolve/SKILL.md`). 이번 release는 이 검증된 경로를 보존하며,
+> Scaffold 재진입은 별도 설계 변경 없이는 도입하지 않는다.
 
 Driver, marker validation, host parity check, command generator가 같은 catalog를
 사용해야 한다.
