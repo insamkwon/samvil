@@ -683,6 +683,7 @@ def _literal_path_key(target: str) -> str | None:
 def _chained_protected_alias_reason(command: str) -> str | None:
     """Track literal symlinks created earlier in the same shell command."""
     aliases: dict[str, str] = {}
+    alias_literals: dict[str, str] = {}
     for segment in _segments(command):
         tokens = _unwrap_prefix(segment)
         start = _command_start(tokens)
@@ -714,6 +715,8 @@ def _chained_protected_alias_reason(command: str) -> str | None:
                     or _is_protected_ssot_target(protected_source)
                 ):
                     aliases[destination_key] = protected_source
+                    alias_literals[destination] = protected_source
+                    alias_literals[destination_key] = protected_source
             continue
         if not aliases:
             continue
@@ -724,6 +727,24 @@ def _chained_protected_alias_reason(command: str) -> str | None:
             if alias_target is not None:
                 rewritten[index] = alias_target
                 changed = True
+                continue
+            for alias_literal, protected_source in sorted(
+                alias_literals.items(),
+                key=lambda item: len(item[0]),
+                reverse=True,
+            ):
+                pattern = (
+                    rf"(?<![A-Za-z0-9_./~-]){re.escape(alias_literal)}"
+                    r"(?![A-Za-z0-9_./~-])"
+                )
+                rewritten_token, replacements = re.subn(
+                    pattern,
+                    protected_source,
+                    rewritten[index],
+                )
+                if replacements:
+                    rewritten[index] = rewritten_token
+                    changed = True
         if changed:
             reason = analyze_command(shlex.join(rewritten))
             if reason:

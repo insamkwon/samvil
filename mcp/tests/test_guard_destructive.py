@@ -614,6 +614,65 @@ def test_new_event_store_symlink_in_same_command_cannot_bypass_guard(
     }
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "sh -c 'cp /tmp/forged {alias}'",
+        "eval 'cp /tmp/forged {alias}'",
+        (
+            'python -c "from shutil import copyfile; '
+            "copyfile('/tmp/forged', '{alias}')\""
+        ),
+    ],
+)
+def test_new_event_store_symlink_in_nested_payload_cannot_bypass_guard(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    guard = load_guard_module()
+    alias = tmp_path / "new-event-store-nested-alias.db"
+    command = (
+        f"ln -s ~/.samvil/samvil.db {alias} && "
+        + operation.format(alias=alias)
+    )
+
+    reason = guard.analyze_command(command)
+
+    assert reason in {
+        "direct SAMVIL EventStore mutation",
+        "inline language runtime may mutate protected SAMVIL SSOT",
+        "protected SAMVIL EventStore overwrite",
+    }
+
+
+def test_new_event_store_symlink_nested_read_only_query_still_passes(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    alias = tmp_path / "nested-read-only-event-store-alias.db"
+
+    reason = guard.analyze_command(
+        f"ln -s ~/.samvil/samvil.db {alias} && "
+        f"sh -c \"sqlite3 {alias} 'SELECT id FROM events LIMIT 1'\""
+    )
+
+    assert reason is None
+
+
+def test_new_event_store_symlink_name_prefix_in_nested_payload_is_not_rewritten(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    alias = tmp_path / "nested-event-store-alias.db"
+
+    reason = guard.analyze_command(
+        f"ln -s ~/.samvil/samvil.db {alias} && "
+        f"sh -c 'cp /tmp/forged {alias}.backup'"
+    )
+
+    assert reason is None
+
+
 def test_new_event_store_symlink_read_only_query_still_passes(tmp_path: Path) -> None:
     guard = load_guard_module()
     alias = tmp_path / "read-only-event-store-alias.db"
