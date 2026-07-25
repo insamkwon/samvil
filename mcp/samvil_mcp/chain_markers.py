@@ -94,7 +94,7 @@ def read_chain_marker(
 
     try:
         data = json.loads(marker_path.read_text())
-        return data
+        return data if isinstance(data, dict) else None
     except (json.JSONDecodeError, OSError):
         return None
 

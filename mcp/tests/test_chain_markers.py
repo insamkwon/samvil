@@ -102,6 +102,18 @@ class TestReadChainMarker:
         marker_path.write_text("not json{")
         assert read_chain_marker(project_root) is None
 
+    @pytest.mark.parametrize("payload", [[], "samvil-qa", 1, True])
+    def test_handles_parseable_non_object_json(self, project_root, payload):
+        marker_path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        assert read_chain_marker(project_root) is None
+        assert advance_chain(project_root, "codex_cli") == {
+            "next_skill": "",
+            "status": "pipeline_complete",
+        }
+
 
 def test_pm_council_override_is_disabled_for_minimal_tier(project_root):
     root = Path(project_root)
