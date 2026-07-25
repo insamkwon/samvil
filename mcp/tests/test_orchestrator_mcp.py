@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
+import subprocess
+import sys
 import time
 from pathlib import Path
 from threading import Event
@@ -1316,6 +1319,140 @@ def test_failed_canonical_append_blocks_dependent_transition_until_compensation(
         assert events == []
 
     _run(runner())
+    assert read_events(project_root)["entries"] == []
+
+
+@pytest.mark.skipif(os.name != "posix", reason="cross-process flock requires POSIX")
+def test_complete_stage_serializes_compensation_across_mcp_processes(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "cross-process-transition-lock"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+    _write_valid_seed(project_root)
+    signal_path = tmp_path / "append-started"
+    release_path = tmp_path / "release-append"
+    interview_result_path = tmp_path / "interview-result.json"
+    seed_result_path = tmp_path / "seed-result.json"
+
+    async def create_test_session() -> str:
+        result = json.loads(
+            await create_session(
+                "cross-process-transition-lock",
+                "standard",
+                project_root=str(project_root),
+            )
+        )
+        return result["session_id"]
+
+    sid = _run(create_test_session())
+    env = os.environ.copy()
+    env["SAMVIL_MCP_HEALTH_PATH"] = str(tmp_path / "mcp-health.jsonl")
+    interview_script = """
+import asyncio
+import sys
+import time
+from pathlib import Path
+from samvil_mcp import server as srv
+
+db_path, session_id, signal_path, release_path, result_path = sys.argv[1:]
+srv.DB_PATH = Path(db_path)
+srv._store = None
+
+def fail_after_db_commit(*args, **kwargs):
+    Path(signal_path).write_text("started", encoding="utf-8")
+    while not Path(release_path).exists():
+        time.sleep(0.01)
+    raise OSError("interview canonical append failed")
+
+srv._append_project_event = fail_after_db_commit
+result = asyncio.run(srv.complete_stage(session_id, "interview", "pass"))
+Path(result_path).write_text(result, encoding="utf-8")
+"""
+    seed_script = """
+import asyncio
+import sys
+from pathlib import Path
+from samvil_mcp import server as srv
+
+db_path, session_id, result_path = sys.argv[1:]
+srv.DB_PATH = Path(db_path)
+srv._store = None
+result = asyncio.run(srv.complete_stage(session_id, "seed", "pass"))
+Path(result_path).write_text(result, encoding="utf-8")
+"""
+
+    interview_process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            interview_script,
+            str(srv.DB_PATH),
+            sid,
+            str(signal_path),
+            str(release_path),
+            str(interview_result_path),
+        ],
+        cwd=Path(__file__).parents[2],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    seed_process: subprocess.Popen[str] | None = None
+    try:
+        deadline = time.monotonic() + 5
+        while not signal_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert signal_path.exists(), interview_process.communicate(timeout=1)
+
+        seed_process = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                seed_script,
+                str(srv.DB_PATH),
+                sid,
+                str(seed_result_path),
+            ],
+            cwd=Path(__file__).parents[2],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        seed_deadline = time.monotonic() + 3
+        while not seed_result_path.exists() and time.monotonic() < seed_deadline:
+            time.sleep(0.01)
+        assert not seed_result_path.exists(), (
+            "dependent transition escaped the cross-process compensation boundary"
+        )
+        release_path.write_text("release", encoding="utf-8")
+        interview_stdout, interview_stderr = interview_process.communicate(timeout=5)
+        seed_stdout, seed_stderr = seed_process.communicate(timeout=5)
+        assert interview_process.returncode == 0, interview_stdout + interview_stderr
+        assert seed_process.returncode == 0, seed_stdout + seed_stderr
+    finally:
+        release_path.touch()
+        for process in (interview_process, seed_process):
+            if process is not None and process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
+
+    interview_result = json.loads(interview_result_path.read_text(encoding="utf-8"))
+    seed_result = json.loads(seed_result_path.read_text(encoding="utf-8"))
+    assert interview_result["status"] == "error"
+    assert interview_result["db_rolled_back"] is True
+    assert seed_result["status"] == "error"
+    session = _run((srv.get_store()))
+    persisted_session = _run(session.get_session(sid))
+    persisted_events = _run(session.get_events(sid, limit=None))
+    assert persisted_session is not None
+    assert persisted_session.current_stage.value == "interview"
+    assert persisted_events == []
     assert read_events(project_root)["entries"] == []
 
 

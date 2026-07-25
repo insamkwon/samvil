@@ -14,6 +14,7 @@ Graceful Degradation (INV-7):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -267,6 +268,33 @@ mcp = FastMCP("samvil-mcp")
 DB_PATH = Path.home() / ".samvil" / "samvil.db"
 _store: EventStore | None = None
 _stage_transition_locks: dict[str, asyncio.Lock] = {}
+
+
+class _AsyncFileLock:
+    """Acquire the existing cross-process flock without blocking the event loop."""
+
+    def __init__(self, path: Path):
+        self._path = path
+        self._context: Any = None
+
+    async def __aenter__(self) -> "_AsyncFileLock":
+        context = _file_locked(self._path)
+        await asyncio.to_thread(context.__enter__)
+        self._context = context
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        context = self._context
+        self._context = None
+        if context is not None:
+            await asyncio.to_thread(context.__exit__, exc_type, exc, traceback)
+
+
+def _stage_transition_lock_path(store: EventStore, session_id: str) -> Path:
+    """Return one stable lock target for a DB/session pair across MCP processes."""
+    db_path = Path(store.db_path).expanduser().resolve()
+    session_key = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return db_path.parent / f".{db_path.name}.stage-transitions" / session_key
 
 
 async def get_store() -> EventStore:
@@ -1139,54 +1167,59 @@ async def complete_stage(
             asyncio.Lock(),
         )
         async with transition_lock:
-            transition = await store.save_event_and_update_stage(
-                session_id=session_id,
-                event_type=event_type_enum,
-                stage=stage_enum,
-                data=event_data,
-                expected_stage=Stage(stage),
-            )
-            event = transition.event
-            try:
-                await asyncio.to_thread(
-                    _append_project_event,
-                    project_path,
-                    timestamp=event.timestamp,
-                    event_type=plan["event_type"],
-                    stage=_canonical_stage_for_event(
-                        plan["event_type"], stage_enum.value
-                    ),
+            async with _AsyncFileLock(
+                _stage_transition_lock_path(store, session_id)
+            ):
+                transition = await store.save_event_and_update_stage(
                     session_id=session_id,
                     data=event_data,
+                    event_type=event_type_enum,
+                    stage=stage_enum,
+                    expected_stage=Stage(stage),
                 )
-            except Exception as exc:
-                _log_mcp_health("fail", "complete_stage.events_ssot", str(exc))
-                db_rolled_back = False
-                rollback_error = ""
+                event = transition.event
                 try:
-                    db_rolled_back = await store.delete_event_and_restore_stage(transition)
-                except Exception as rollback_exc:
-                    rollback_error = str(rollback_exc)
-                    _log_mcp_health(
-                        "fail",
-                        "complete_stage.events_ssot_rollback",
-                        rollback_error,
-                    )
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "event_id": event.id,
-                        "canonical_saved": False,
-                        "db_rolled_back": db_rolled_back,
-                        "partial_persistence": not db_rolled_back,
-                        "error": str(exc),
-                        **(
-                            {"rollback_error": rollback_error}
-                            if rollback_error
-                            else {}
+                    await asyncio.to_thread(
+                        _append_project_event,
+                        project_path,
+                        timestamp=event.timestamp,
+                        event_type=plan["event_type"],
+                        stage=_canonical_stage_for_event(
+                            plan["event_type"], stage_enum.value
                         ),
-                    }
-                )
+                        session_id=session_id,
+                        data=event_data,
+                    )
+                except Exception as exc:
+                    _log_mcp_health("fail", "complete_stage.events_ssot", str(exc))
+                    db_rolled_back = False
+                    rollback_error = ""
+                    try:
+                        db_rolled_back = await store.delete_event_and_restore_stage(
+                            transition
+                        )
+                    except Exception as rollback_exc:
+                        rollback_error = str(rollback_exc)
+                        _log_mcp_health(
+                            "fail",
+                            "complete_stage.events_ssot_rollback",
+                            rollback_error,
+                        )
+                    return json.dumps(
+                        {
+                            "status": "error",
+                            "event_id": event.id,
+                            "canonical_saved": False,
+                            "db_rolled_back": db_rolled_back,
+                            "partial_persistence": not db_rolled_back,
+                            "error": str(exc),
+                            **(
+                                {"rollback_error": rollback_error}
+                                if rollback_error
+                                else {}
+                            ),
+                        }
+                    )
 
         claim_id = None
         claim_saved = False
