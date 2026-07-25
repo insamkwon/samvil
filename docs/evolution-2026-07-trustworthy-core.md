@@ -1465,14 +1465,14 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 - [x] **4.86 chained SQL·동적 문자열 EventStore mutation 차단**
   (read-only SELECT 뒤에 이어진 write와 문자열 결합 SQL, imported `DB_PATH`를 통한 직접
   DB write도 destructive guard가 EventStore mutation으로 판정한다.)
-  - 완료 증거: `2548d5b`; `hooks/guard_destructive.py:1002`,
-    `hooks/guard_destructive.py:1234`, `mcp/tests/test_guard_destructive.py:219`,
+  - 완료 증거: `2548d5b`; `hooks/guard_destructive.py:1024`,
+    `hooks/guard_destructive.py:1256`, `mcp/tests/test_guard_destructive.py:219`,
     `mcp/tests/test_guard_destructive.py:227`.
 - [x] **4.87 here-string·pipe runtime stdin mutation 차단**
   (`python - <<<`, `printf | python -`, `echo | node`로 전달한 payload도 inline/heredoc과
   동일한 SSOT mutation 검사 경계를 통과한다.)
-  - 완료 증거: `12c5f0e`; `hooks/guard_destructive.py:1133`,
-    `hooks/guard_destructive.py:1167`, `mcp/tests/test_guard_destructive.py:135`.
+  - 완료 증거: `12c5f0e`; `hooks/guard_destructive.py:1155`,
+    `hooks/guard_destructive.py:1189`, `mcp/tests/test_guard_destructive.py:135`.
 - [x] **4.88 namespaced env credential·multiline quoted value redaction**
   (`OPENAI_API_KEY`, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL` 같은 prefix key와 여러 줄
   quoted password를 canonical event 저장 전에 값 전체 단위로 제거한다.)
@@ -1493,8 +1493,8 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   (임의 source의 cp/install/mv, in-place sed, ln, runtime copy와 URI·home·symlink alias를
   통한 canonical EventStore 교체·삭제·직접 write를 차단하고 안전한 임시 파일은 허용한다.)
   - 완료 증거: `f80864b`; `hooks/guard_destructive.py:644`,
-    `hooks/guard_destructive.py:663`, `mcp/tests/test_guard_destructive.py:545`,
-    `mcp/tests/test_guard_destructive.py:571`.
+    `hooks/guard_destructive.py:663`, `mcp/tests/test_guard_destructive.py:548`,
+    `mcp/tests/test_guard_destructive.py:584`.
 - [x] **4.92 blueprint 화면·장면 referential integrity 검증**
   (web/dashboard route target, mobile tab screen, game scene-flow source·target이 각 canonical
   name list에 실제 존재해야 하며 tabs navigation은 비어 있을 수 없다.)
@@ -1504,33 +1504,33 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
 - [x] **4.93 directory destination의 보호 파일 overwrite 차단**
   (`cp source .`, `cp -t`, `cp samvil.db ~/.samvil`처럼 destination directory와 source
   basename이 결합돼 보호 SSOT·EventStore가 되는 경로도 최종 target으로 분석한다.)
-  - 완료 증거: `c1b8c32`; `hooks/guard_destructive.py:734`,
-    `mcp/tests/test_guard_destructive.py:545`.
+  - 완료 증거: `c1b8c32`; `hooks/guard_destructive.py:755`,
+    `mcp/tests/test_guard_destructive.py:548`.
 - [x] **4.94 QA event의 canonical lock·index writer 통합**
   (QA synthesis도 별도 raw append를 하지 않고 공용 canonical writer를 사용해 동시 writer와
   같은 flock·fsync·line index 계약을 따른다.)
   - 완료 증거: `b030da4`; `mcp/samvil_mcp/server.py:687`,
     `mcp/samvil_mcp/qa_synthesis.py:524`, `mcp/tests/test_qa_synthesis.py:269`.
-- [x] **4.95 arbitrary namespaced secret key redaction**
+- [x] **4.95 secret/service-role namespaced key redaction**
   (`STRIPE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY`처럼 vendor prefix 뒤의 secret/service-role
   key도 자유 event 문자열에서 값 전체를 제거한다.)
   - 완료 증거: `de0ab71`; `mcp/samvil_mcp/event_sanitizer.py:25`,
     `mcp/tests/test_event_sanitizer.py:120`.
-- [x] **4.96 rsync·Perl in-place 보호 SSOT mutation 차단**
-  (copy-like rsync와 `perl -pi`가 cp/sed와 동일한 protected destination 검사를 통과하고,
+- [x] **4.96 rsync·기본 Perl in-place 보호 SSOT mutation 차단**
+  (copy-like rsync와 기본 `perl -pi`가 cp/sed와 동일한 protected destination 검사를 통과하고,
   read-only Perl·안전한 임시 rsync는 계속 허용한다.)
   - 완료 증거: `9367340`; `hooks/guard_destructive.py:63`,
-    `hooks/guard_destructive.py:901`, `hooks/guard_destructive.py:907`,
-    `mcp/tests/test_guard_destructive.py:545`.
-- [x] **4.97 same-command symlink EventStore alias 추적**
-  (분석 시점에 존재하지 않는 alias도 앞선 literal `ln -s` segment에서 추적해 후속 DB write·
+    `hooks/guard_destructive.py:922`, `hooks/guard_destructive.py:928`,
+    `mcp/tests/test_guard_destructive.py:548`.
+- [x] **4.97 top-level same-command symlink EventStore alias 추적**
+  (분석 시점에 존재하지 않는 alias도 앞선 literal `ln -s` segment에서 추적해 후속 top-level DB write·
   overwrite는 canonical target 기준으로 차단하고 read-only query는 허용한다.)
   - 완료 증거: `e281ba2`; `hooks/guard_destructive.py:683`,
-    `mcp/tests/test_guard_destructive.py:598`.
+    `mcp/tests/test_guard_destructive.py:611`.
 - [x] **4.98 non-object chain marker의 fail-closed 처리**
   (유효 JSON이어도 list·string·number·bool이면 marker object가 아니므로 `None`으로 처리해
   advance/status `.get()` crash 없이 pipeline-complete 안전 응답을 반환한다.)
-  - 완료 증거: `0f80bea`; `mcp/samvil_mcp/chain_markers.py:97`,
+  - 완료 증거: `0f80bea`; `mcp/samvil_mcp/chain_markers.py:100`,
     `mcp/tests/test_chain_markers.py:106`.
 - [x] **4.99 QA multi-event batch의 원자 append·retry 안전성**
   (여러 QA event 중 후속 직렬화가 실패하면 batch 시작 offset까지 전부 truncate하고,
@@ -1542,11 +1542,39 @@ gate가 LLM 서술과 무관하게 block, (c) static 폴백 강제 시 deploy가
   안내해 보호 정책과 실제 실행 계약을 일치시킨다.)
   - 완료 증거: `b41a100`; `skills/samvil-qa/SKILL.md:107`,
     `skills/samvil-build/SKILL.md:101`, `mcp/tests/test_skill_wiring.py:504`.
-- [x] **4.101 legacy session의 provenance 재검증 복구**
+- [x] **4.101 legacy DB session의 provenance 재검증 복구 시작**
   (과거 JSON flag는 trusted column으로 승격하지 않되 column 최초 migration 때만 session을
-  interview로 되돌려 gate를 재실행할 수 있게 하고, 이후 trusted transition은 유지한다.)
-  - 완료 증거: `eac6f7e`; `mcp/samvil_mcp/event_store.py:135`,
-    `mcp/samvil_mcp/event_store.py:138`, `mcp/tests/test_event_store.py:122`.
+  interview로 되돌려 gate를 재실행할 수 있게 한다. file SSOT 동기화와 실패 보상은 4.105에서
+  최종 완료한다.)
+  - 중간 완료 증거: `eac6f7e`; `mcp/samvil_mcp/event_store.py:222`,
+    `mcp/samvil_mcp/event_store.py:243`, `mcp/tests/test_event_store.py:173`.
+- [x] **4.102 nested payload의 same-command EventStore alias 추적**
+  (스코프 보정: 4.97의 top-level argv 치환만으로는 `sh -c`, `eval`, runtime payload 안의
+  새 alias를 놓쳤다. literal path 경계를 보존해 중첩 payload도 canonical target으로 재분석하고,
+  read-only query와 alias 이름 prefix는 허용한다.)
+  - 완료 증거: `fedbdcb`; `hooks/guard_destructive.py:683`,
+    `hooks/guard_destructive.py:718`, `hooks/guard_destructive.py:737`,
+    `mcp/tests/test_guard_destructive.py:641`, `mcp/tests/test_guard_destructive.py:675`.
+- [x] **4.103 숫자형 Perl combined switch의 in-place mutation 차단**
+  (스코프 보정: 4.96의 alphabetic `-pi` 탐지는 `-0777pi`, `-0pi`, backup suffix 조합을
+  놓쳤다. 숫자 record-separator가 결합된 `-i`는 차단하고 read-only `-0777 -ne`는 허용한다.)
+  - 완료 증거: `386378b`; `hooks/guard_destructive.py:928`,
+    `hooks/guard_destructive.py:930`, `mcp/tests/test_guard_destructive.py:542`,
+    `mcp/tests/test_guard_destructive.py:556`.
+- [x] **4.104 Stripe restricted key의 전 저장 경계 redaction**
+  (스코프 보정: 4.95의 secret/service-role allowlist에 없는 `STRIPE_RESTRICTED_KEY`와
+  `rk_live_*` literal도 자유 문자열·camelCase key·SQLite·canonical JSONL에서 제거한다.)
+  - 완료 증거: `27b66cc`; `mcp/samvil_mcp/event_sanitizer.py:29`,
+    `mcp/samvil_mcp/event_sanitizer.py:43`, `mcp/samvil_mcp/event_sanitizer.py:99`,
+    `mcp/tests/test_event_sanitizer.py:153`, `mcp/tests/test_orchestrator_mcp.py:1675`.
+- [x] **4.105 legacy provenance 재검증의 DB·file SSOT 일관 복구**
+  (스코프 보정: 4.101의 DB-only rewind는 root state와 chain marker를 이전 build stage에 남겼다.
+  state·marker lock을 DB commit/rollback까지 유지해 모두 interview로 맞추고, marker 쓰기나
+  DB rewind 실패 시 원문 파일과 schema·session stage를 함께 복원한다.)
+  - 완료 증거: `e5322a3`; `mcp/samvil_mcp/chain_markers.py:56`,
+    `mcp/samvil_mcp/event_store.py:135`, `mcp/samvil_mcp/event_store.py:212`,
+    `mcp/samvil_mcp/event_store.py:231`, `mcp/tests/test_event_store.py:173`,
+    `mcp/tests/test_event_store.py:257`.
 
 ---
 
