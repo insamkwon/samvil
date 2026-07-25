@@ -94,7 +94,7 @@ mcp__samvil_mcp__evaluate_scaffold_target(project_path="~/dev/<seed.name>", run_
 
 ## Step 5.5 — Test Harness (tests-as-deliverable, B)
 
-Browser solution_types (`web-app`/`dashboard`/`game`): `mcp__samvil_mcp__scaffold_test_harness(project_root="~/dev/<seed.name>", base_url="http://localhost:4173", base_path="/")` → writes `playwright.config.ts` + `tests/e2e/smoke.spec.ts` + patches `package.json` `test` script. The delivered repo gets a runnable `npm test` from here; samvil-qa later appends one spec per AC. `automation` keeps its `tests/test_dry_run.*` (scaffold catalog). On `error`: best-effort, continue (P8) — QA still verifies, just no committed spec.
+Browser solution_types (`web-app`/`dashboard`/`game`/`mobile-app`): `mcp__samvil_mcp__scaffold_test_harness(project_root="~/dev/<seed.name>", base_url="http://localhost:4173", base_path="/")` → writes `playwright.config.ts` + `tests/e2e/smoke.spec.ts` + patches `package.json` `test` script. For Expo/mobile projects the harness detects `expo`, switches to `http://localhost:8081`, and starts `npx expo start --web --non-interactive`; the delivered repo still gets a runnable `npm test` from here, and samvil-qa later appends one spec per AC. `automation` keeps its `tests/test_dry_run.*` (scaffold catalog). On `error`: best-effort, continue (P8) — QA still verifies, just no committed spec.
 
 ## Step 6 — Persist + Chain
 

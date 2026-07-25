@@ -5759,16 +5759,33 @@ async def scaffold_test_harness(
 
         written: list[str] = []
         (root / "tests" / "e2e").mkdir(parents=True, exist_ok=True)
+        pkg_path = root / "package.json"
+        is_expo = False
+        if pkg_path.exists():
+            try:
+                existing_pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+                dependencies = {
+                    **dict(existing_pkg.get("dependencies") or {}),
+                    **dict(existing_pkg.get("devDependencies") or {}),
+                }
+                is_expo = "expo" in dependencies
+            except (json.JSONDecodeError, OSError):
+                is_expo = False
 
         config_path = root / "playwright.config.ts"
-        config_path.write_text(playwright_config(base_url), encoding="utf-8")
+        config_path.write_text(
+            playwright_config(
+                "http://localhost:8081" if is_expo else base_url,
+                mobile=is_expo,
+            ),
+            encoding="utf-8",
+        )
         written.append("playwright.config.ts")
 
         smoke_path = root / "tests" / "e2e" / "smoke.spec.ts"
         smoke_path.write_text(smoke_spec(base_path), encoding="utf-8")
         written.append("tests/e2e/smoke.spec.ts")
 
-        pkg_path = root / "package.json"
         pkg_patched = False
         if pkg_path.exists():
             try:
@@ -5780,8 +5797,16 @@ async def scaffold_test_harness(
                 )
                 pkg_patched = True
                 written.append("package.json (test script + devDep)")
+                dependencies = {
+                    **dict(pkg.get("dependencies") or {}),
+                    **dict(pkg.get("devDependencies") or {}),
+                }
+                is_expo = "expo" in dependencies
             except (json.JSONDecodeError, OSError) as e:
                 _log_mcp_health("warn", "scaffold_test_harness", f"pkg patch: {e}")
+                is_expo = False
+        else:
+            is_expo = False
 
         _log_mcp_health("ok", "scaffold_test_harness")
         return json.dumps(

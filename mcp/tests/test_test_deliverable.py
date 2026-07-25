@@ -144,6 +144,25 @@ def test_scaffold_test_harness_writes_files(tmp_path: Path) -> None:
     assert pkg["scripts"]["test"] == "playwright test"
 
 
+def test_scaffold_test_harness_wires_expo_web_server(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "mobile-app",
+                "dependencies": {"expo": "~52.0.0"},
+                "scripts": {"web": "expo start --web"},
+            }
+        )
+    )
+
+    result = json.loads(asyncio.run(scaffold_test_harness(str(tmp_path))))
+
+    assert result["status"] == "ok"
+    config = (tmp_path / "playwright.config.ts").read_text()
+    assert "npx expo start --web" in config
+    assert "localhost:8081" in config
+
+
 def test_emit_ac_spec_writes_feature_file(tmp_path: Path) -> None:
     acs = json.dumps(
         [
