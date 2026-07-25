@@ -18,6 +18,7 @@ from .ssot_io import atomic_write_text, atomic_write_text_unlocked
 
 V33_SCHEMA_VERSION = "3.3"
 BACKUP_FILENAME = "project.v3-2.backup.json"
+MIGRATION_JOURNAL_FILENAME = ".project.seed.json.migration-journal"
 _backup_lock_state = threading.local()
 _atomic_write_text_original = atomic_write_text
 
@@ -80,6 +81,39 @@ def _verify_backup_contents(
         raise OSError("backup verification failed: invalid v3.2 backup")
     if seed_text is not None and (written_text != seed_text or written_seed != seed):
         raise OSError("backup verification failed: content mismatch")
+
+
+def _migration_journal_path(root: Path) -> Path:
+    return root / MIGRATION_JOURNAL_FILENAME
+
+
+def _recover_interrupted_migration(root: Path) -> None:
+    journal_path = _migration_journal_path(root)
+    if not journal_path.exists():
+        return
+    try:
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+        original_text = str(journal["original_seed_text"])
+        migrated_text = str(journal["migrated_seed_text"])
+        backup_text = str(journal["backup_text"])
+        seed_path = root / "project.seed.json"
+        backup_path = root / BACKUP_FILENAME
+        current_seed = seed_path.read_text(encoding="utf-8")
+        current_backup = backup_path.read_text(encoding="utf-8")
+    except (KeyError, OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise OSError("migration recovery journal is corrupt") from exc
+
+    if current_seed == original_text:
+        journal_path.unlink(missing_ok=True)
+        return
+    if current_seed != migrated_text:
+        raise RuntimeError("migration recovery found an unexpected seed; manual review required")
+    if current_backup == backup_text:
+        journal_path.unlink(missing_ok=True)
+        return
+
+    atomic_write_text_unlocked(seed_path, original_text)
+    journal_path.unlink(missing_ok=True)
 
 
 def _replace_seed_if_unchanged(
@@ -147,6 +181,7 @@ def apply_migration(project_root: str | Path) -> dict[str, Any]:
     root = Path(project_root).expanduser().resolve()
     seed_path = root / "project.seed.json"
     with _locked(seed_path):
+        _recover_interrupted_migration(root)
         seed_text = seed_path.read_text(encoding="utf-8")
         seed = json.loads(seed_text)
         if str(seed.get("schema_version") or "") == "3.2":
@@ -176,20 +211,40 @@ def apply_migration(project_root: str | Path) -> dict[str, Any]:
                     seed_text if backup_rewritten else None,
                     seed if backup_rewritten else None,
                 )
+                backup_snapshot_text = backup_path.read_text(encoding="utf-8")
+                backup_snapshot_seed = json.loads(backup_snapshot_text)
                 if seed_path.read_text(encoding="utf-8") != seed_text:
                     raise RuntimeError(
                         "seed changed during migration; retry from current state"
                     )
+                migrated_text = json.dumps(migrated, indent=2, ensure_ascii=False) + "\n"
+                atomic_write_text_unlocked(
+                    _migration_journal_path(root),
+                    json.dumps(
+                        {
+                            "original_seed_text": seed_text,
+                            "migrated_seed_text": migrated_text,
+                            "backup_text": backup_snapshot_text,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
                 _replace_seed_if_unchanged(
                     seed_path,
                     seed_text,
-                    json.dumps(migrated, indent=2, ensure_ascii=False) + "\n",
+                    migrated_text,
                 )
                 try:
-                    _verify_backup_contents(backup_path, None, None)
+                    _verify_backup_contents(
+                        backup_path,
+                        backup_snapshot_text,
+                        backup_snapshot_seed,
+                    )
                 except OSError:
-                    atomic_write_text_unlocked(seed_path, seed_text)
+                    if seed_path.read_text(encoding="utf-8") == migrated_text:
+                        atomic_write_text_unlocked(seed_path, seed_text)
                     raise
+                _migration_journal_path(root).unlink(missing_ok=True)
             finally:
                 _backup_lock_state.held = False
         return {

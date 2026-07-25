@@ -399,6 +399,96 @@ def test_apply_migration_rolls_back_seed_when_backup_changes_after_final_check(
     assert seed_path.read_text() == original_text
 
 
+def test_apply_migration_preserves_existing_first_backup_contents(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from samvil_mcp import migrate_v3_3 as migration
+
+    seed_path = tmp_path / "project.seed.json"
+    backup_path = tmp_path / BACKUP_FILENAME
+    original_text = json.dumps(_seed())
+    alternate = _seed()
+    alternate["name"] = "alternate-first-backup"
+    seed_path.write_text(original_text)
+    backup_path.write_text(json.dumps(_seed()))
+    real_replace_seed = migration._replace_seed_if_unchanged
+
+    def replace_seed_after_backup_swap(path, expected_text, migrated_text):
+        alternate_path = tmp_path / "alternate-backup.json"
+        alternate_path.write_text(json.dumps(alternate))
+        migration.os.replace(alternate_path, backup_path)
+        return real_replace_seed(path, expected_text, migrated_text)
+
+    monkeypatch.setattr(
+        migration, "_replace_seed_if_unchanged", replace_seed_after_backup_swap
+    )
+
+    with pytest.raises(OSError, match="backup verification failed"):
+        apply_migration(tmp_path)
+
+    assert seed_path.read_text() == original_text
+    assert json.loads(backup_path.read_text())["name"] == "alternate-first-backup"
+
+
+def test_apply_migration_recovers_journal_after_interrupted_seed_replace(
+    tmp_path: Path,
+) -> None:
+    from samvil_mcp import migrate_v3_3 as migration
+
+    seed_path = tmp_path / "project.seed.json"
+    backup_path = tmp_path / BACKUP_FILENAME
+    original_text = json.dumps(_seed())
+    migrated, _ = _migrate_seed_dict(_seed())
+    migrated_text = json.dumps(migrated, indent=2, ensure_ascii=False) + "\n"
+    seed_path.write_text(migrated_text)
+    backup_path.write_text('{"partial":')
+    migration._migration_journal_path(tmp_path).write_text(
+        json.dumps(
+            {
+                "original_seed_text": original_text,
+                "migrated_seed_text": migrated_text,
+                "backup_text": original_text,
+            }
+        )
+    )
+
+    result = apply_migration(tmp_path)
+
+    assert result["changed"] is True
+    assert json.loads(seed_path.read_text())["schema_version"] == V33_SCHEMA_VERSION
+    assert json.loads(backup_path.read_text())["schema_version"] == "3.2"
+    assert not migration._migration_journal_path(tmp_path).exists()
+
+
+def test_apply_migration_does_not_rollback_over_a_concurrent_seed_writer(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from samvil_mcp import migrate_v3_3 as migration
+
+    seed_path = tmp_path / "project.seed.json"
+    backup_path = tmp_path / BACKUP_FILENAME
+    original_text = json.dumps(_seed())
+    concurrent_text = json.dumps({**_seed(), "name": "concurrent-owner"})
+    seed_path.write_text(original_text)
+    real_replace_seed = migration._replace_seed_if_unchanged
+
+    def replace_seed_then_concurrent_write(path, expected_text, migrated_text):
+        real_replace_seed(path, expected_text, migrated_text)
+        concurrent_path = tmp_path / "concurrent-owner.json"
+        concurrent_path.write_text(concurrent_text)
+        migration.os.replace(concurrent_path, seed_path)
+        backup_path.write_text('{"partial":')
+
+    monkeypatch.setattr(
+        migration, "_replace_seed_if_unchanged", replace_seed_then_concurrent_write
+    )
+
+    with pytest.raises(OSError, match="backup verification failed"):
+        apply_migration(tmp_path)
+
+    assert seed_path.read_text() == concurrent_text
+
+
 def test_migrate_seed_v3_3_mcp_tool(tmp_path: Path) -> None:
     from samvil_mcp.server import migrate_seed_v3_3
 
