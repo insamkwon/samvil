@@ -435,6 +435,9 @@ def test_codex_scaffold_reads_root_blueprint_ssot() -> None:
 
     assert "root `project.blueprint.json`" in scaffold
     assert ".samvil/blueprint.json" not in scaffold
+    assert "scaffold_test_harness" in scaffold
+    assert "mobile-app" in scaffold
+    assert "localhost:8081" in scaffold
 
 
 def test_design_stage_preserves_explicit_council_opt_in() -> None:

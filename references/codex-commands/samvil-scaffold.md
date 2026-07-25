@@ -16,9 +16,13 @@ Ensure root `project.seed.json` and `project.blueprint.json` exist.
    - Set up folder structure per blueprint
    - Create base layout and routing
 5. Run `npm run build` to verify scaffold compiles.
-6. Save the successful result to `.samvil/scaffold-results.json` as a non-empty JSON object with `all_passed=true`.
-7. Read `<sid>` from root `project.state.json`, then run MCP tool `complete_stage(session_id=<sid>, stage="scaffold", verdict="pass")`; any error halts.
-8. Only after completion succeeds, run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-scaffold")`.
+6. For browser solution types (`web-app`, `dashboard`, `game`, `mobile-app`), run MCP tool
+   `scaffold_test_harness(project_root="${PWD}", base_url="http://localhost:4173", base_path="/")`.
+   The tool detects Expo/mobile dependencies, switches to `http://localhost:8081`, and
+   wires Playwright plus the Expo web server; harness generation errors halt scaffold QA.
+7. Save the successful result to `.samvil/scaffold-results.json` as a non-empty JSON object with `all_passed=true`.
+8. Read `<sid>` from root `project.state.json`, then run MCP tool `complete_stage(session_id=<sid>, stage="scaffold", verdict="pass")`; any error halts.
+9. Only after completion succeeds, run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-scaffold")`.
 
 ## Chain
 
