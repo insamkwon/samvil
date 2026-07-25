@@ -539,6 +539,9 @@ def test_non_rm_overwrites_cannot_destroy_protected_ssot(command: str) -> None:
         "mv replacement project.state.json",
         "rsync /tmp/forged project.seed.json",
         "perl -pi -e 's/old/forged/' project.config.json",
+        "perl -0777pi -e 's/old/forged/' project.seed.json",
+        "perl -0pi -e 's/old/forged/' project.seed.json",
+        "perl -0777pi.bak -e 's/old/forged/' project.seed.json",
         "sed -i 's/old/forged/' project.config.json",
     ],
 )
@@ -548,6 +551,16 @@ def test_arbitrary_sources_cannot_replace_protected_ssot(command: str) -> None:
     reason = guard.analyze_command(command)
 
     assert reason is not None and "protected SAMVIL" in reason
+
+
+def test_perl_numeric_record_separator_without_in_place_edit_still_passes() -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(
+        "perl -0777 -ne 'print if /project/' project.seed.json"
+    )
+
+    assert reason is None
 
 
 @pytest.mark.parametrize(
