@@ -2060,6 +2060,30 @@ def test_save_event_separates_existing_jsonl_tail_without_newline(tmp_path) -> N
     ]
 
 
+def test_save_event_rejects_malformed_jsonl_prefix_instead_of_appending(
+    tmp_path,
+) -> None:
+    from samvil_mcp import server as srv
+
+    project_root = tmp_path / "project"
+    events_path = project_root / ".samvil" / "events.jsonl"
+    events_path.parent.mkdir(parents=True)
+    malformed = '{"partial":\n'
+    events_path.write_text(malformed, encoding="utf-8")
+
+    with pytest.raises(OSError, match="malformed canonical event log"):
+        srv._append_project_event(
+            project_root,
+            timestamp="2026-07-25T00:00:01Z",
+            event_type="build_pass",
+            stage="build",
+            session_id="session-1",
+            data={},
+        )
+
+    assert events_path.read_text(encoding="utf-8") == malformed
+
+
 def test_save_event_fails_closed_when_project_events_append_fails(
     tmp_path, monkeypatch
 ) -> None:

@@ -742,6 +742,35 @@ async def _reconcile_pending_project_events(
             await store.acknowledge_pending_project_event(event_id)
 
 
+def _validate_existing_event_log(path: Path) -> None:
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    raw = path.read_bytes()
+    offset = 0
+    lines = raw.splitlines(keepends=True)
+    for index, raw_line in enumerate(lines):
+        line = raw_line.strip()
+        if not line:
+            offset += len(raw_line)
+            continue
+        try:
+            parsed = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError) as exc:
+            is_unterminated_tail = index == len(lines) - 1 and not raw_line.endswith(
+                (b"\n", b"\r")
+            )
+            if is_unterminated_tail:
+                with path.open("r+b") as handle:
+                    handle.truncate(offset)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                return
+            raise OSError("malformed canonical event log") from exc
+        if not isinstance(parsed, dict):
+            raise OSError("malformed canonical event log")
+        offset += len(raw_line)
+
+
 def _append_project_event_rows(
     project_root: Path,
     rows: list[dict[str, Any]],
@@ -753,6 +782,7 @@ def _append_project_event_rows(
     index_path = path.with_suffix(path.suffix + ".index")
     path.parent.mkdir(parents=True, exist_ok=True)
     with _file_locked(path):
+        _validate_existing_event_log(path)
         current_size: int | None = None
         try:
             with path.open("a+", encoding="utf-8") as handle:
