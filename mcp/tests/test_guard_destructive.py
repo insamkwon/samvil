@@ -723,6 +723,36 @@ def test_new_event_store_symlink_directory_destination_cannot_bypass_guard(
     assert reason == "protected SAMVIL EventStore overwrite"
 
 
+@pytest.mark.parametrize(
+    "creator",
+    [
+        "mkdir {alias_dir} && ln -s ~/.samvil/samvil.db {alias_dir}",
+        "mkdir -p {alias_dir} && ln -s -t {alias_dir} ~/.samvil/samvil.db",
+        (
+            "mkdir {alias_dir} && ln -s "
+            "--target-directory={alias_dir} ~/.samvil/samvil.db"
+        ),
+        (
+            "sh -c 'mkdir {alias_dir} && "
+            "ln -s ~/.samvil/samvil.db {alias_dir}'"
+        ),
+    ],
+)
+def test_same_command_created_directory_symlink_destination_cannot_bypass_guard(
+    tmp_path: Path,
+    creator: str,
+) -> None:
+    guard = load_guard_module()
+    alias_dir = tmp_path / "future-aliases"
+    alias = alias_dir / "samvil.db"
+
+    reason = guard.analyze_command(
+        creator.format(alias_dir=alias_dir) + f" && cp /tmp/forged {alias}"
+    )
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
 def test_new_event_store_symlink_nested_read_only_query_still_passes(
     tmp_path: Path,
 ) -> None:

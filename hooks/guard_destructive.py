@@ -685,6 +685,7 @@ def _register_literal_symlink_alias(
     args: list[str],
     aliases: dict[str, str],
     alias_literals: dict[str, str],
+    known_directories: set[str],
 ) -> bool:
     if executable != "ln" or not any(
         token == "--symbolic"
@@ -696,35 +697,94 @@ def _register_literal_symlink_alias(
         for token in args
     ):
         return False
-    operands = [
-        token
-        for token in args
-        if token == "-" or not token.startswith("-")
-    ]
-    if len(operands) < 2:
+    target_directory: str | None = None
+    operands: list[str] = []
+    literal_operands = False
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if literal_operands:
+            operands.append(token)
+        elif token == "--":
+            literal_operands = True
+        elif token in {"-t", "--target-directory"} and index + 1 < len(args):
+            target_directory = args[index + 1]
+            index += 1
+        elif token.startswith("--target-directory="):
+            target_directory = token.split("=", 1)[1]
+        elif token.startswith("-t") and len(token) > 2:
+            target_directory = token[2:]
+        elif token == "-S" or token == "--suffix":
+            index += 1
+        elif not token.startswith("-") or token == "-":
+            operands.append(token)
+        index += 1
+    if target_directory is None and len(operands) < 2:
         return True
-    source, destination = operands[-2:]
-    source_key = _literal_path_key(source)
-    protected_source = aliases.get(source_key or "", source)
-    if not (
-        _is_samvil_event_store_target(protected_source)
-        or _is_protected_ssot_target(protected_source)
-    ):
+    if target_directory is not None and not operands:
         return True
+    if target_directory is None:
+        sources = operands[:-1]
+        destination = operands[-1]
+    else:
+        sources = operands
+        destination = target_directory
+    destination_key = _literal_path_key(destination)
+    destination_is_directory = destination_key in known_directories
     try:
-        destination_path = Path(destination).expanduser()
-        if destination_path.is_dir():
-            destination = str(destination_path / Path(source).name)
+        destination_is_directory = (
+            destination_is_directory or Path(destination).expanduser().is_dir()
+        )
     except (OSError, RuntimeError):
         pass
-    destination_key = _literal_path_key(destination)
-    if destination_key:
-        aliases[destination_key] = protected_source
-        spellings = {destination, destination_key}
-        if not Path(destination).is_absolute() and not destination.startswith("./"):
-            spellings.add(f"./{destination}")
-        for spelling in spellings:
-            alias_literals[spelling] = protected_source
+    for source in sources:
+        source_key = _literal_path_key(source)
+        protected_source = aliases.get(source_key or "", source)
+        if not (
+            _is_samvil_event_store_target(protected_source)
+            or _is_protected_ssot_target(protected_source)
+        ):
+            continue
+        alias = (
+            str(PurePath(destination) / PurePath(source).name)
+            if destination_is_directory
+            else destination
+        )
+        alias_key = _literal_path_key(alias)
+        if alias_key:
+            aliases[alias_key] = protected_source
+            spellings = {alias, alias_key}
+            if not Path(alias).is_absolute() and not alias.startswith("./"):
+                spellings.add(f"./{alias}")
+            for spelling in spellings:
+                alias_literals[spelling] = protected_source
+    return True
+
+
+def _register_literal_directory_creation(
+    executable: str,
+    args: list[str],
+    known_directories: set[str],
+) -> bool:
+    if executable != "mkdir":
+        return False
+    literal_operands = False
+    skip_next = False
+    for token in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if not literal_operands and token == "--":
+            literal_operands = True
+            continue
+        if not literal_operands and token in {"-m", "--mode", "-Z", "--context"}:
+            skip_next = True
+            continue
+        if not literal_operands and token.startswith("-"):
+            continue
+        directory_key = _literal_path_key(token)
+        if directory_key:
+            known_directories.add(directory_key)
     return True
 
 
@@ -749,6 +809,7 @@ def _collect_literal_symlink_aliases(
     command: str,
     aliases: dict[str, str],
     alias_literals: dict[str, str],
+    known_directories: set[str],
     *,
     depth: int = 0,
 ) -> None:
@@ -761,11 +822,18 @@ def _collect_literal_symlink_aliases(
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
+        if _register_literal_directory_creation(
+            executable,
+            args,
+            known_directories,
+        ):
+            continue
         if _register_literal_symlink_alias(
             executable,
             args,
             aliases,
             alias_literals,
+            known_directories,
         ):
             continue
         for nested in _nested_alias_commands(executable, args):
@@ -773,6 +841,7 @@ def _collect_literal_symlink_aliases(
                 nested,
                 aliases,
                 alias_literals,
+                known_directories,
                 depth=depth + 1,
             )
 
@@ -816,6 +885,7 @@ def _chained_protected_alias_reason(command: str) -> str | None:
     """Track literal symlinks created earlier in the same shell command."""
     aliases: dict[str, str] = {}
     alias_literals: dict[str, str] = {}
+    known_directories: set[str] = set()
     for segment in _segments(command):
         tokens = _unwrap_prefix(segment)
         start = _command_start(tokens)
@@ -823,11 +893,18 @@ def _chained_protected_alias_reason(command: str) -> str | None:
             continue
         executable = _executable(tokens[start])
         args = tokens[start + 1 :]
+        if _register_literal_directory_creation(
+            executable,
+            args,
+            known_directories,
+        ):
+            continue
         if _register_literal_symlink_alias(
             executable,
             args,
             aliases,
             alias_literals,
+            known_directories,
         ):
             continue
         if aliases:
@@ -849,6 +926,7 @@ def _chained_protected_alias_reason(command: str) -> str | None:
                 nested,
                 aliases,
                 alias_literals,
+                known_directories,
             )
     return None
 
