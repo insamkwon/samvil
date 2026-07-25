@@ -1256,6 +1256,8 @@ def test_complete_stage_reconciles_db_committed_event_after_process_crash(
         events = read_events(project_root)["entries"]
         assert len(events) == 1
         assert events[0]["event_id"] == transition.event.id
+        assert events[0]["event_type"] == "interview_complete"
+        assert events[0]["stage"] == "interview"
 
     _run(runner())
 

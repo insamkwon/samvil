@@ -722,12 +722,19 @@ async def _reconcile_pending_project_events(
                 project_path,
                 event_id,
             ):
+                canonical_event_type = str(
+                    item["data"].get("event_type_raw") or item["event_type"]
+                )
+                canonical_stage = _canonical_stage_for_event(
+                    canonical_event_type,
+                    str(item["stage"]),
+                )
                 await asyncio.to_thread(
                     _append_project_event,
                     project_path,
                     timestamp=str(item["timestamp"]),
-                    event_type=str(item["event_type"]),
-                    stage=str(item["stage"]),
+                    event_type=canonical_event_type,
+                    stage=canonical_stage,
                     session_id=session_id,
                     data=dict(item["data"]),
                     event_id=event_id,
