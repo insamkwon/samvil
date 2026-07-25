@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from samvil_mcp.qa_synthesis import (
     evaluate_qa_convergence,
     materialize_qa_synthesis,
@@ -300,6 +302,52 @@ def test_materialize_qa_synthesis_updates_shared_canonical_event_index(tmp_path)
     )
     assert result["events_appended"] == 2
     assert index == {"size": events_path.stat().st_size, "line_count": 3}
+
+
+def test_materialize_qa_synthesis_rolls_back_partial_event_batch_for_safe_retry(
+    tmp_path,
+    monkeypatch,
+):
+    from samvil_mcp import server as srv
+
+    (tmp_path / "project.state.json").write_text(
+        json.dumps({"session_id": "s1", "current_stage": "qa", "qa_history": []}),
+        encoding="utf-8",
+    )
+    synthesis = synthesize_qa_evidence(
+        _base(
+            [
+                {
+                    "id": "AC-1",
+                    "criterion": "Create task",
+                    "verdict": "UNIMPLEMENTED",
+                    "reason": "stub",
+                }
+            ]
+        )
+    )
+    real_dumps = srv.json.dumps
+
+    def fail_second_event(value, *args, **kwargs):
+        if isinstance(value, dict) and value.get("event_type") == "qa_verdict":
+            raise OSError("second QA event serialization failed")
+        return real_dumps(value, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(srv.json, "dumps", fail_second_event)
+        with pytest.raises(OSError, match="second QA event serialization failed"):
+            materialize_qa_synthesis(tmp_path, synthesis)
+
+    events_path = tmp_path / ".samvil" / "events.jsonl"
+    assert not events_path.exists() or events_path.read_text(encoding="utf-8") == ""
+
+    result = materialize_qa_synthesis(tmp_path, synthesis)
+    event_types = [
+        json.loads(line)["event_type"]
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert result["events_appended"] == 2
+    assert event_types == ["qa_unimplemented", "qa_verdict"]
 
 
 def test_materialize_qa_synthesis_marks_blocked_on_repeated_issues(tmp_path):

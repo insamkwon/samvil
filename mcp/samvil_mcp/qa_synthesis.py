@@ -524,21 +524,23 @@ def _convergence_events(convergence: dict[str, Any]) -> list[dict[str, Any]]:
 def _append_event_drafts(root: Path, events: list[dict[str, Any]]) -> int:
     if not events:
         return 0
-    from .server import _append_project_event
+    from .server import _append_project_event_rows
 
     state = _load_project_state(root)
     session_id = state.get("session_id")
     now = _now_iso()
-    for event in events:
-        _append_project_event(
-            root,
-            timestamp=now,
-            session_id=str(session_id or ""),
-            event_type=str(event.get("event_type") or "qa_event"),
-            stage=str(event.get("stage") or "qa"),
-            data=event.get("data") or {},
-            source="qa_synthesis",
-        )
+    rows = [
+        {
+            "timestamp": now,
+            "session_id": str(session_id or ""),
+            "event_type": str(event.get("event_type") or "qa_event"),
+            "stage": str(event.get("stage") or "qa"),
+            "data": event.get("data") or {},
+            "source": "qa_synthesis",
+        }
+        for event in events
+    ]
+    _append_project_event_rows(root, rows)
     return len(events)
 
 

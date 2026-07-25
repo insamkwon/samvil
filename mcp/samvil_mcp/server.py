@@ -672,9 +672,6 @@ def _append_project_event(
     source: str | None = None,
 ) -> str:
     """Append one canonical project event and return its file-backed evidence."""
-    path = project_root / ".samvil" / "events.jsonl"
-    index_path = path.with_suffix(path.suffix + ".index")
-    path.parent.mkdir(parents=True, exist_ok=True)
     row = {
         "timestamp": timestamp,
         "event_type": event_type,
@@ -684,6 +681,19 @@ def _append_project_event(
     }
     if source:
         row["source"] = source
+    return _append_project_event_rows(project_root, [row])[0]
+
+
+def _append_project_event_rows(
+    project_root: Path,
+    rows: list[dict[str, Any]],
+) -> list[str]:
+    """Atomically append a canonical event batch and update its line index."""
+    if not rows:
+        return []
+    path = project_root / ".samvil" / "events.jsonl"
+    index_path = path.with_suffix(path.suffix + ".index")
+    path.parent.mkdir(parents=True, exist_ok=True)
     with _file_locked(path):
         current_size: int | None = None
         try:
@@ -696,10 +706,10 @@ def _append_project_event(
                     index_path,
                     current_size=current_size,
                 )
-                line_number = line_count + 1
                 if needs_separator:
                     handle.write("\n")
-                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                for row in rows:
+                    handle.write(json.dumps(row, ensure_ascii=False) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
                 new_size = handle.tell()
@@ -716,15 +726,19 @@ def _append_project_event(
                         f"{rollback_exc}"
                     ) from exc
             raise
+        final_line_count = line_count + len(rows)
         try:
             atomic_write_text(
                 index_path,
-                json.dumps({"size": new_size, "line_count": line_number}),
+                json.dumps({"size": new_size, "line_count": final_line_count}),
             )
         except OSError as exc:
             _log_mcp_health("warn", "save_event.events_index", str(exc))
     relative_path = path.relative_to(project_root).as_posix()
-    return f"{relative_path}:{line_number}"
+    return [
+        f"{relative_path}:{line_number}"
+        for line_number in range(line_count + 1, final_line_count + 1)
+    ]
 
 
 def _event_file_needs_separator(path: Path) -> bool:
