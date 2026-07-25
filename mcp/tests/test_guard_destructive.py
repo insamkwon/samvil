@@ -570,7 +570,7 @@ def test_perl_numeric_record_separator_without_in_place_edit_still_passes() -> N
 
 @pytest.mark.parametrize(
     "options",
-    ["-Mstrict -ne", "-xinput", "-di0"],
+    ["-Mstrict -ne", "-xinput"],
 )
 def test_perl_option_arguments_containing_i_are_not_mistaken_for_in_place_edit(
     options: str,
@@ -582,6 +582,17 @@ def test_perl_option_arguments_containing_i_are_not_mistaken_for_in_place_edit(
     )
 
     assert reason is None
+
+
+@pytest.mark.parametrize("option", ["-di0", "-di.bak"])
+def test_perl_debugger_option_with_i_prefix_is_fail_closed(option: str) -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(
+        f"perl {option} -e 'print if /project/' project.seed.json"
+    )
+
+    assert reason == "protected SAMVIL SSOT overwrite"
 
 
 @pytest.mark.parametrize(

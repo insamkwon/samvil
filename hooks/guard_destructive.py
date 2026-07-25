@@ -1216,7 +1216,7 @@ def _perl_option_enables_in_place_edit(token: str) -> bool:
         if option == "d":
             remainder = cluster[index:]
             if remainder.startswith("i"):
-                return False
+                return True
             if remainder.startswith(":"):
                 return False
             if remainder.startswith("t"):
