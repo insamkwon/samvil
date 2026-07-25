@@ -814,7 +814,11 @@ def _register_literal_directory_creation(
             continue
         if not literal_operands and token.startswith("-"):
             continue
-        candidates = _brace_expansion_candidates(token)
+        candidates = (
+            _brace_expansion_candidates(token)
+            if "{" in token and "," in token
+            else [token]
+        )
         if candidates is None:
             candidates = [token]
         for candidate in candidates:
@@ -2425,6 +2429,8 @@ def _dynamic_rm_flag_reason(command: str) -> str | None:
 
 
 def analyze_command(command: str) -> str | None:
+    if command.count("eval ") >= MAX_ANALYSIS_DEPTH:
+        return NESTED_ANALYSIS_LIMIT_REASON
     depth = _ANALYSIS_DEPTH.get()
     if depth >= MAX_ANALYSIS_DEPTH:
         return NESTED_ANALYSIS_LIMIT_REASON
