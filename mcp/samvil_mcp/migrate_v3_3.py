@@ -104,6 +104,8 @@ def _recover_interrupted_migration(root: Path) -> None:
         raise OSError("migration recovery journal is corrupt") from exc
 
     if current_seed == original_text:
+        if current_backup != backup_text:
+            atomic_write_text_unlocked(backup_path, backup_text)
         journal_path.unlink(missing_ok=True)
         return
     if current_seed != migrated_text:
@@ -113,6 +115,7 @@ def _recover_interrupted_migration(root: Path) -> None:
         return
 
     atomic_write_text_unlocked(seed_path, original_text)
+    atomic_write_text_unlocked(backup_path, backup_text)
     journal_path.unlink(missing_ok=True)
 
 

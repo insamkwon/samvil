@@ -460,6 +460,34 @@ def test_apply_migration_recovers_journal_after_interrupted_seed_replace(
     assert not migration._migration_journal_path(tmp_path).exists()
 
 
+def test_apply_migration_journal_restores_first_backup_before_retry(
+    tmp_path: Path,
+) -> None:
+    from samvil_mcp import migrate_v3_3 as migration
+
+    seed_path = tmp_path / "project.seed.json"
+    backup_path = tmp_path / BACKUP_FILENAME
+    original = _seed()
+    original_text = json.dumps(original)
+    alternate = {**original, "name": "alternate-backup"}
+    seed_path.write_text(original_text)
+    backup_path.write_text(json.dumps(alternate))
+    migration._migration_journal_path(tmp_path).write_text(
+        json.dumps(
+            {
+                "original_seed_text": original_text,
+                "migrated_seed_text": "migrated-text",
+                "backup_text": original_text,
+            }
+        )
+    )
+
+    apply_migration(tmp_path)
+
+    assert json.loads(backup_path.read_text()) == original
+    assert not migration._migration_journal_path(tmp_path).exists()
+
+
 def test_apply_migration_does_not_rollback_over_a_concurrent_seed_writer(
     tmp_path: Path, monkeypatch
 ) -> None:
