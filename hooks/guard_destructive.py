@@ -634,6 +634,15 @@ def _normalized_rm_target(target: str) -> str:
 
 def _is_protected_ssot_target(target: str) -> bool:
     normalized = _normalized_rm_target(target)
+    try:
+        path = Path(normalized).expanduser()
+        if path.exists():
+            for protected in PROTECTED_ROOT_SSOT_PATHS | PROTECTED_SAMVIL_SSOT_PATHS:
+                canonical = Path(protected).expanduser()
+                if canonical.exists() and os.path.samefile(path, canonical):
+                    return True
+    except (OSError, RuntimeError):
+        pass
     return (
         normalized == ".samvil"
         or normalized in PROTECTED_ROOT_SSOT_PATHS
@@ -1335,9 +1344,13 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
         _perl_option_enables_in_place_edit(token) for token in args
     ):
         for token in args:
-            reason = _protected_mutation_reason(token)
-            if reason:
-                return reason
+            targets = _brace_expansion_candidates(token)
+            if targets is None:
+                targets = [token]
+            for target in targets:
+                reason = _protected_mutation_reason(target)
+                if reason:
+                    return reason
 
     if executable == "sed" and any(
         token == "-i"
@@ -1347,9 +1360,13 @@ def _protected_overwrite_reason(executable: str, args: list[str]) -> str | None:
         for token in args
     ):
         for token in args:
-            reason = _protected_mutation_reason(token)
-            if reason:
-                return reason
+            targets = _brace_expansion_candidates(token)
+            if targets is None:
+                targets = [token]
+            for target in targets:
+                reason = _protected_mutation_reason(target)
+                if reason:
+                    return reason
 
     if executable == "tee":
         for token in args:

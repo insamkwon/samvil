@@ -782,6 +782,21 @@ def test_existing_event_store_hard_link_cannot_be_overwritten(
     assert reason == "protected SAMVIL EventStore overwrite"
 
 
+def test_existing_ssot_hard_link_cannot_be_overwritten(
+    tmp_path: Path, monkeypatch
+) -> None:
+    guard = load_guard_module()
+    monkeypatch.chdir(tmp_path)
+    canonical = Path("project.seed.json")
+    canonical.write_text("ORIGINAL")
+    alias = Path("existing-seed-alias.json")
+    alias.hardlink_to(canonical)
+
+    reason = guard.analyze_command(f"cp /tmp/forged {alias}")
+
+    assert reason == "protected SAMVIL SSOT overwrite"
+
+
 @pytest.mark.parametrize(
     "creator",
     [
@@ -907,6 +922,23 @@ def test_brace_expanded_tee_cannot_mutate_protected_seed() -> None:
     reason = guard.analyze_command(
         "printf FORGED | tee {safe.txt,project.seed.json} >/dev/null"
     )
+
+    assert reason == "protected SAMVIL SSOT overwrite"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sed -i.bak 's/ORIGINAL/FORGED/' {safe.txt,project.seed.json}",
+        "perl -pi.bak -e 's/ORIGINAL/FORGED/' {safe.txt,project.seed.json}",
+    ],
+)
+def test_brace_expanded_in_place_edit_cannot_mutate_protected_seed(
+    command: str,
+) -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(command)
 
     assert reason == "protected SAMVIL SSOT overwrite"
 
