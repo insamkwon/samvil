@@ -243,6 +243,47 @@ def test_apply_migration_holds_seed_lock_until_atomic_replace(
     assert seed_path.read_text() == concurrent_text
 
 
+def test_apply_migration_holds_backup_lock_through_seed_replace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from samvil_mcp import migrate_v3_3 as migration
+    from samvil_mcp.ssot_io import atomic_write_text as concurrent_atomic_write
+
+    seed_path = tmp_path / "project.seed.json"
+    backup_path = tmp_path / BACKUP_FILENAME
+    seed_path.write_text(json.dumps(_seed()))
+    backup_ready = Event()
+    release_migration = Event()
+    writer_started = Event()
+    writer_finished = Event()
+    real_ensure_backup = migration._ensure_verified_backup
+
+    def pause_after_backup(path, seed_text, seed):
+        real_ensure_backup(path, seed_text, seed)
+        backup_ready.set()
+        assert release_migration.wait(timeout=2)
+
+    def write_concurrently() -> None:
+        writer_started.set()
+        concurrent_atomic_write(backup_path, "corrupt")
+        writer_finished.set()
+
+    monkeypatch.setattr(migration, "_ensure_verified_backup", pause_after_backup)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        migration_future = executor.submit(apply_migration, tmp_path)
+        assert backup_ready.wait(timeout=2)
+        writer_future = executor.submit(write_concurrently)
+        assert writer_started.wait(timeout=2)
+        with pytest.raises(FutureTimeoutError):
+            writer_future.result(timeout=0.1)
+        release_migration.set()
+        result = migration_future.result(timeout=2)
+        writer_future.result(timeout=2)
+
+    assert result["changed"] is True
+    assert json.loads(seed_path.read_text())["schema_version"] == "3.3"
+
+
 def test_migrate_seed_v3_3_mcp_tool(tmp_path: Path) -> None:
     from samvil_mcp.server import migrate_seed_v3_3
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,8 @@ from .ssot_io import atomic_write_text, atomic_write_text_unlocked
 
 V33_SCHEMA_VERSION = "3.3"
 BACKUP_FILENAME = "project.v3-2.backup.json"
+_backup_lock_state = threading.local()
+_atomic_write_text_original = atomic_write_text
 
 
 def _is_valid_v32_backup(path: Path) -> bool:
@@ -38,7 +41,15 @@ def _ensure_verified_backup(
     if _is_valid_v32_backup(backup_path):
         return
 
-    atomic_write_text(backup_path, seed_text)
+    if getattr(_backup_lock_state, "held", False):
+        write_backup = (
+            atomic_write_text
+            if atomic_write_text is not _atomic_write_text_original
+            else atomic_write_text_unlocked
+        )
+    else:
+        write_backup = atomic_write_text
+    write_backup(backup_path, seed_text)
     try:
         written_text = backup_path.read_text(encoding="utf-8")
         written_seed = json.loads(written_text)
@@ -94,13 +105,20 @@ def apply_migration(project_root: str | Path) -> dict[str, Any]:
             }
 
         backup_path = root / BACKUP_FILENAME
-        _ensure_verified_backup(backup_path, seed_text, seed)
-        if seed_path.read_text(encoding="utf-8") != seed_text:
-            raise RuntimeError("seed changed during migration; retry from current state")
-        atomic_write_text_unlocked(
-            seed_path,
-            json.dumps(migrated, indent=2, ensure_ascii=False) + "\n",
-        )
+        with _locked(backup_path):
+            _backup_lock_state.held = True
+            try:
+                _ensure_verified_backup(backup_path, seed_text, seed)
+                if seed_path.read_text(encoding="utf-8") != seed_text:
+                    raise RuntimeError(
+                        "seed changed during migration; retry from current state"
+                    )
+                atomic_write_text_unlocked(
+                    seed_path,
+                    json.dumps(migrated, indent=2, ensure_ascii=False) + "\n",
+                )
+            finally:
+                _backup_lock_state.held = False
         return {
             "changed": True,
             "changes": changes,
