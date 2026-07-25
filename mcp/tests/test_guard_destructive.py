@@ -825,6 +825,21 @@ def test_moved_symlink_alias_keeps_event_store_provenance(
     assert reason == "protected SAMVIL EventStore overwrite"
 
 
+def test_runtime_string_concatenation_cannot_bypass_event_store_alias(
+    tmp_path: Path,
+) -> None:
+    guard = load_guard_module()
+    alias = tmp_path / "runtime-alias.db"
+
+    reason = guard.analyze_command(
+        f"ln -s ~/.samvil/samvil.db {alias} && "
+        "python3 -c \"from pathlib import Path; "
+        "Path('runtime-alias' + '.db').write_text('forged')\""
+    )
+
+    assert reason == "protected SAMVIL EventStore overwrite"
+
+
 def test_new_event_store_symlink_nested_read_only_query_still_passes(
     tmp_path: Path,
 ) -> None:

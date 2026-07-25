@@ -863,6 +863,34 @@ def _register_literal_alias_move(
     return True
 
 
+def _runtime_payload_mutates_alias(
+    executable: str,
+    args: list[str],
+    aliases: dict[str, str],
+) -> bool:
+    runtime = re.sub(r"(?:\d+(?:\.\d+)*)$", "", executable.casefold())
+    if runtime not in INLINE_LANGUAGE_RUNTIME_OPTIONS:
+        return False
+    payload = " ".join(args)
+    if not re.search(
+        r"(?:write_text|writeFileSync|writeFile|open\s*\([^)]*['\"](?:w|a)|unlink|rename)",
+        payload,
+        re.IGNORECASE,
+    ):
+        return False
+    for alias_literal in alias_literals_from_aliases(aliases):
+        name = PurePath(alias_literal).name
+        stem = PurePath(name).stem
+        suffix = PurePath(name).suffix
+        if stem and stem in payload and (not suffix or suffix in payload):
+            return True
+    return False
+
+
+def alias_literals_from_aliases(aliases: dict[str, str]) -> set[str]:
+    return set(aliases)
+
+
 def _nested_alias_commands(executable: str, args: list[str]) -> list[str]:
     if executable in SHELLS:
         invocation = _shell_command_invocation(args)
@@ -1007,6 +1035,8 @@ def _chained_protected_alias_reason(command: str) -> str | None:
         ):
             continue
         if aliases:
+            if _runtime_payload_mutates_alias(executable, args, aliases):
+                return "protected SAMVIL EventStore overwrite"
             rewritten = list(tokens[start:])
             changed = False
             for index, command_token in enumerate(rewritten):
