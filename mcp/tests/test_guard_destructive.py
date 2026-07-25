@@ -923,6 +923,23 @@ def test_pushd_stack_variants_cannot_bypass_ssot_hard_link(
     assert reason == "protected SAMVIL SSOT overwrite"
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "pushd +0 && cp forged alias.json",
+        "pushd +1 && cp forged alias.json",
+        "pushd sub >/dev/null && popd +0 && cp forged alias.json",
+        "pushd sub >/dev/null && popd -1 && cp forged alias.json",
+    ],
+)
+def test_unmodeled_directory_stack_index_fails_closed(command: str) -> None:
+    guard = load_guard_module()
+
+    reason = guard.analyze_command(command)
+
+    assert reason == "uninspectable directory stack operation"
+
+
 def test_brace_expanded_hard_link_source_cannot_alias_protected_seed() -> None:
     guard = load_guard_module()
     choices = ["safe.txt", "project.seed.json"]
