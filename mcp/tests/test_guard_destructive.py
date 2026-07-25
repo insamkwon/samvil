@@ -876,6 +876,23 @@ def test_nested_working_directory_cannot_bypass_event_store_hard_link(
     assert reason == "protected SAMVIL EventStore overwrite"
 
 
+def test_popd_restores_root_for_existing_ssot_hard_link(
+    tmp_path: Path, monkeypatch
+) -> None:
+    guard = load_guard_module()
+    monkeypatch.chdir(tmp_path)
+    canonical = Path("project.seed.json")
+    canonical.write_text("ORIGINAL")
+    (tmp_path / "alias.json").hardlink_to(canonical)
+    (tmp_path / "sub").mkdir()
+
+    reason = guard.analyze_command(
+        "pushd sub >/dev/null && popd >/dev/null && cp forged alias.json"
+    )
+
+    assert reason == "protected SAMVIL SSOT overwrite"
+
+
 def test_brace_expanded_hard_link_source_cannot_alias_protected_seed() -> None:
     guard = load_guard_module()
     choices = ["safe.txt", "project.seed.json"]

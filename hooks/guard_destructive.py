@@ -2564,6 +2564,7 @@ def _analyze_command_impl(command: str) -> str | None:
     if runtime_stdin_reason:
         return runtime_stdin_reason
     analysis_cwd = _ANALYSIS_CWD.get() or Path.cwd()
+    analysis_cwd_stack: list[Path] = []
     for tokens in _segments(command):
         command_context = shlex.join(tokens)
         segment_cwd = _env_command_cwd(tokens, analysis_cwd)
@@ -2594,6 +2595,10 @@ def _analyze_command_impl(command: str) -> str | None:
         )
         if runtime_script_reason:
             return runtime_script_reason
+        if executable == "popd":
+            if analysis_cwd_stack:
+                analysis_cwd = analysis_cwd_stack.pop()
+            continue
         if executable in {"cd", "pushd"}:
             cd_args = [
                 token
@@ -2602,6 +2607,8 @@ def _analyze_command_impl(command: str) -> str | None:
                 and not token.startswith((">", "<"))
             ]
             if cd_args:
+                if executable == "pushd":
+                    analysis_cwd_stack.append(analysis_cwd)
                 target = Path(
                     cd_args[0] if executable == "pushd" else cd_args[-1]
                 ).expanduser()
