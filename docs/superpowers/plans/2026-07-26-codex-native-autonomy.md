@@ -12,14 +12,15 @@ stage가 자동 진행되고 중단 후에도 정확히 한 번만 안전하게 
 
 **Architecture:** Codex plugin은 discovery와 public skill surface만 소유한다.
 Codex는 internal stage instruction을 실행하고, MCP transition controller는 stage
-claim, gate, event/session/claim/marker 전이와 복구를 소유한다. 파일 SSOT는
+claim, gate, DB event/session, canonical JSONL, claim, `project.state.json`, marker,
+receipt 전이와 복구를 소유한다. 파일 SSOT는
 transition journal과 receipt를 포함해 task·process가 끊겨도 복구 가능한 근거를
 남긴다. 기존 Claude Code stage corpus와 domain MCP tool은 복제하지 않고 재사용한다.
 
 **Tech Stack:** Codex CLI 0.144.1 native plugin surface,
 `.codex-plugin/plugin.json`, plugin-relative MCP JSON, Python 3.11+, FastMCP,
 SQLite/aiosqlite, append-only JSONL, pytest, shell installer wrapper, actual
-`codex exec`, Codex Desktop smoke.
+`codex exec`, actual `claude`, Codex Desktop smoke.
 
 **Approved design:**
 `docs/superpowers/specs/2026-07-26-codex-native-autonomy-design.md`
@@ -46,11 +47,21 @@ SQLite/aiosqlite, append-only JSONL, pytest, shell installer wrapper, actual
    contract-stage-end gate를 우회하지 않는다.
 9. correctness-critical MCP가 없거나 marker/state/journal 해석이 모호하면
    fail-closed다. read-only status만 파일 fallback을 허용한다.
-10. 실제 Codex CLI와 Desktop 증거 전에는 `host.py`의 native capability를 먼저
-    올리지 않는다.
+10. 실제 Codex CLI와 Claude Code machine receipt, 별도 분류된 Desktop 증거 전에는
+    `host.py`의 native capability를 먼저 올리지 않는다.
 11. push, force push, PR 생성은 이 계획의 구현 커밋 범위가 아니다. 최종 검증 후
     사용자가 별도로 결정한다.
 12. 각 커밋 메시지는 Conventional Commit prefix와 친절한 한글 한 줄을 사용한다.
+13. `requested_next_skill`은 catalog-valid 비파괴 route 선택일 뿐 trusted user
+    approval이 아니다. v4.33에서는 gate override/irreversible approval claim을
+    발급하지 않고 checkpoint에서 transition 없이 `waiting_user`로 정지한다.
+    다음 사용자 turn은 새 호출로 처리하며, 정상 gate는 새 stage artifact를 다시
+    검증해 충족할 수 있지만 기존 판정을 무시하는 override로 취급하지 않는다.
+14. runtime receipt는 dirty tree나 receipt를 생성하는 동일 커밋을 증명하지 않는다.
+    harness를 먼저 commit하고 clean `HEAD`와 git tree를 실제 실행한 뒤 evidence-only
+    commit으로 영수증을 남긴다.
+15. 실제 web/mobile E2E 전에 ephemeral `127.0.0.1` localhost bind/release probe를
+    실행한다. 같은 bind failure가 두 번 반복되면 회로 차단한다.
 
 ### Baseline before Task 1
 
@@ -94,6 +105,14 @@ Expected:
    repository가 아니라 사용자 home으로 등록된 것이다.
 8. `scripts/setup-codex.sh`가 전역 `~/.codex/AGENTS.md`와 absolute MCP block을
    만드는 legacy 동작은 Codex 경로에서만 retire한다.
+9. `project.state.json`은 현재 stage의 공식 SSOT다. controller journal은 DB/JSONL/
+   claim/marker뿐 아니라 project state의 이전/new hash와 stage patch까지 소유한다.
+10. `ClaimLedger.record_host_user_approval()`은 현재 신뢰할 수 있는 host adapter가
+    없어서 의도적으로 예외를 낸다. 이번 release는 이 경계를 우회하거나 MCP 입력을
+    trusted approval로 승격하지 않는다.
+11. 실제 profile installer 활성화는 controller와 public `run/resume/status`가 모두
+    구현된 뒤로 미룬다. 초반 installer Task는 fake/isolated Codex에서만 mutation을
+    검증한다.
 
 ---
 
@@ -103,6 +122,7 @@ Expected:
 |---|---|---|
 | `.codex-plugin/plugin.json` | Create | Codex-native plugin manifest |
 | `.codex-mcp.json` | Create | Installed plugin root relative MCP launcher |
+| `codex/skills/README.md` | Create early | Track future skill root without exposing a stub skill |
 | `codex/skills/run/SKILL.md` | Create | Public same-task host driver entry |
 | `codex/skills/resume/SKILL.md` | Create | Durable fail-closed resume entry |
 | `codex/skills/status/SKILL.md` | Create | Fully read-only status entry |
@@ -120,6 +140,7 @@ Expected:
 | `scripts/setup-codex.sh` | Modify | Codex native path; preserve other hosts |
 | `scripts/check-host-parity.py` | Modify | Runtime receipt-aware honesty |
 | `scripts/codex-native-e2e.py` | Create | Actual CLI E2E and receipt generation |
+| `scripts/claude-native-e2e.py` | Create | Actual Claude runtime E2E and receipt generation |
 | `hooks/validate-version-sync.sh` | Modify | Claude + Codex manifest version sync |
 | `mcp/tests/test_codex_plugin.py` | Create | Manifest/MCP/public inventory contract |
 | `mcp/tests/test_setup_codex.py` | Create | Installer planning and isolated mutation tests |
@@ -127,18 +148,20 @@ Expected:
 | `mcp/tests/test_transition_controller.py` | Create | CAS, atomicity, idempotency, recovery |
 | `mcp/tests/test_codex_driver.py` | Create | Driver stop/continue integration contracts |
 | `mcp/tests/test_codex_native_e2e.py` | Create | E2E harness/receipt validation |
-| `docs/evidence/codex-native-autonomy/` | Create late | CLI/Desktop/runtime receipts |
+| `mcp/tests/test_claude_native_e2e.py` | Create | Claude harness/receipt validation |
+| `docs/evidence/codex-native-autonomy/` | Create late | CLI/Claude machine and Desktop manual receipts |
 
 ---
 
 ## Wave A — Native packaging and safe ownership
 
-### Task 1: Add the Codex plugin manifest and relative MCP launcher
+### Task 1: Add the Codex plugin manifest, tracked skill root, and relative MCP launcher
 
 **Files:**
 
 - Create: `.codex-plugin/plugin.json`
 - Create: `.codex-mcp.json`
+- Create: `codex/skills/README.md`
 - Create: `mcp/tests/test_codex_plugin.py`
 - Modify: `hooks/validate-version-sync.sh`
 - Modify: `scripts/pre-commit-check.sh`
@@ -155,6 +178,8 @@ Add tests asserting:
 - interface uses only fields observed in installed Codex manifest fixtures.
 - `.codex-mcp.json` uses `cwd: "."` and a plugin-relative `./mcp` source.
 - neither file contains an author-machine absolute path.
+- the manifest skill root exists in git, contains no temporary `SKILL.md`, and therefore
+  exposes no stub/public skill before Task 10.
 - version sync script fails when Codex manifest version is intentionally changed
   in an isolated copied fixture.
 
@@ -214,11 +239,11 @@ bash hooks/validate-version-sync.sh
 - [ ] **Step 5: Stage explicitly, run the full gate, and commit**
 
 ```bash
-git add .codex-plugin/plugin.json .codex-mcp.json \
+git add .codex-plugin/plugin.json .codex-mcp.json codex/skills/README.md \
   mcp/tests/test_codex_plugin.py hooks/validate-version-sync.sh \
   scripts/pre-commit-check.sh
 bash scripts/pre-commit-check.sh
-git commit -m "feat: Codex 전용 플러그인 매니페스트와 상대 경로 MCP 실행기를 추가한다"
+git commit -m "feat: Codex 플러그인 매니페스트와 비어 있는 공개 스킬 경계를 추가한다"
 ```
 
 Do not stage `$CODEX_HOME/`.
@@ -289,21 +314,19 @@ git commit -m "feat: Codex 마켓플레이스 소유권과 개인 스킬 보존 
 
 ---
 
-### Task 3: Execute clean install and reversible legacy migration safely
+### Task 3: Build the reversible installer executor in an isolated Codex environment
 
 **Files:**
 
 - Modify: `mcp/samvil_mcp/codex_installer.py`
 - Modify: `mcp/tests/test_setup_codex.py`
-- Modify: `scripts/setup-codex.sh`
-- Modify: `README.md`
 
 - [ ] **Step 1: Add failing isolated integration tests**
 
 Create a fake `codex` executable in `tmp_path/bin`, set an explicit temporary
 `CODEX_HOME`, and record commands. Cover:
 
-1. clean install
+1. planned clean install in a fake Codex registry
 2. repeated install idempotency
 3. update of an already-correct install
 4. current home-root marketplace correction with JSON backup receipt
@@ -317,8 +340,10 @@ Create a fake `codex` executable in `tmp_path/bin`, set an explicit temporary
     `--migrate`
 12. user-modified `samvil*` copies block and remain byte-identical
 13. unrelated personal skill inventory is unchanged after install/update/uninstall
-14. uninstall removes only `samvil@samvil` registration/cache ownership
+14. uninstall removes only fake `samvil@samvil` registration/cache ownership
 15. OpenCode and Gemini branches retain their current behavior
+16. executor refuses real-profile activation while public skills/controller readiness
+    proof is absent
 
 Tests must never point `CODEX_HOME` at the real user home or at the working tree.
 
@@ -328,45 +353,38 @@ Add CLI modes to `python -m samvil_mcp.codex_installer`:
 
 ```text
 --check       read-only capability/inventory report
---install     clean install and safe registry correction
---migrate     include only proven legacy generated artifacts
---uninstall   remove plugin registration without personal skill deletion
+--install     isolated clean install and safe registry correction
+--migrate     isolated execution including only proven generated artifacts
+--uninstall   isolated plugin removal without personal skill deletion
 --json        machine-readable receipt
 ```
 
-Use atomic receipt writes and timestamped backups. On any ambiguous ownership,
+The module accepts explicit config/registry roots and command runner injection; it must
+not default to mutating the actual user profile in this Task. Use atomic receipt writes
+and timestamped backups. On any ambiguous ownership,
 stop before mutation and print exact path/hash/blocker. Never edit
 `.claude-plugin/marketplace.json` in the user home; correct only the Codex registry
 reference.
 
-- [ ] **Step 3: Make the shell wrapper delegate only the Codex branch**
+- [ ] **Step 3: Keep actual-profile activation unavailable**
 
-`scripts/setup-codex.sh codex` should:
-
-1. verify/install uv
-2. prepare the MCP environment
-3. invoke the Python installer
-4. run plugin/MCP/namespace smoke
-
-It must stop copying global AGENTS or appending an absolute Codex MCP block.
-OpenCode/Gemini branches remain isolated and covered by regression tests.
+Do not change `scripts/setup-codex.sh` yet. The executor and fake Codex integration prove
+rollback and ownership semantics, but actual plugin install is Task 13 after the three
+public skills and transition controller exist.
 
 - [ ] **Step 4: Run targeted tests and shell syntax**
 
 ```bash
 cd mcp
 .venv/bin/python -m pytest tests/test_setup_codex.py -q
-cd ..
-bash -n scripts/setup-codex.sh
 ```
 
 - [ ] **Step 5: Stage, full gate, commit**
 
 ```bash
-git add mcp/samvil_mcp/codex_installer.py mcp/tests/test_setup_codex.py \
-  scripts/setup-codex.sh README.md
+git add mcp/samvil_mcp/codex_installer.py mcp/tests/test_setup_codex.py
 bash scripts/pre-commit-check.sh
-git commit -m "feat: 개인 설정을 보존하며 Codex 플러그인을 안전하게 설치하고 이전한다"
+git commit -m "feat: 격리된 Codex 환경에서 되돌릴 수 있는 설치와 이전을 검증한다"
 ```
 
 ---
@@ -543,7 +561,8 @@ Cover:
 
 Extend the EventStore schema with a narrowly scoped `stage_claims` table keyed by
 `(session_id, stage, marker_revision)`. Store claim id, status, timestamps, and
-completed transition id. Migration must be idempotent.
+completed transition id. Migration must be idempotent, preserve existing sessions and
+events, and leave the pre-migration schema/data usable if migration fails midway.
 
 - [ ] **Step 3: Implement envelope and begin APIs**
 
@@ -588,8 +607,9 @@ For one trusted completion, inject failure at each boundary:
 1. transition journal prepared, before DB transaction
 2. DB event/session/claim receipt committed, before canonical event append
 3. canonical event appended, before transition claim append
-4. claim appended, before marker replace
-5. marker replaced, before DB/journal acknowledgement
+4. claim appended, before `project.state.json` atomic replace
+5. project state replaced, before marker replace
+6. marker replaced, before DB/journal acknowledgement
 
 After each failure, rerun recovery/commit and assert:
 
@@ -597,12 +617,15 @@ After each failure, rerun recovery/commit and assert:
 - exactly one canonical `.samvil/events.jsonl` row by transition/event id
 - exactly one transition claim identity in `.samvil/claims.jsonl`
 - one session-stage advancement
+- one `project.state.json` stage advancement preserving all unrelated fields
+- `current_stage`, `completed_stages`, transition revision/id agree with the receipt
 - marker revision increments exactly once
 - duplicate completion returns the original committed receipt
 - no later transition is rolled back by an older retry
 
 Also cover concurrent commits, stale revision, wrong claim id, wrong stage,
-unsupported marker schema, terminal marker cleanup, and two identical root-cause
+unsupported marker schema, terminal marker cleanup, fixed lock ordering/no deadlock,
+SQLite unavailable or lost after PREPARED/DB commit, and two identical root-cause
 failures triggering the circuit breaker.
 
 - [ ] **Step 2: Define the durable transition protocol**
@@ -610,26 +633,39 @@ failures triggering the circuit breaker.
 Use one active atomic file journal at `.samvil/transition-journal.json` plus a
 durable transition receipt. The journal must contain `transition_id`, run/session,
 claim, expected revision, from/to stage, event payload hash, claim payload hash,
-marker payload, and phase.
+previous/new project-state hash, intended stage patch, marker payload, and phase.
+The project-state patch updates `current_stage`, `completed_stages`, and transition
+revision/id while preserving every non-stage field.
 
 Protocol:
 
 ```text
-lock
+transition lock
   → validate claim/revision/gate/evidence
   → atomically write PREPARED journal
   → one SQLite transaction: event + session stage + claim status + pending receipt
   → idempotently materialize events JSONL by event_id
   → idempotently materialize claim by transition_id
+  → atomically replace and verify project.state.json
   → atomically replace v1.1 marker
   → acknowledge DB receipt and close journal
 unlock
 ```
 
-Before the SQLite commit, failure removes the prepared journal and leaves no durable
-transition. After SQLite commit, failure leaves a recoverable journal; it must not
-perform an unsafe broad rollback. The next envelope/retry reconciles it before any
-new stage begins.
+The global order is invariant:
+
+```text
+transition lock → journal → DB → events → claims → project.state → marker → receipt/ack
+```
+
+Before the SQLite commit, recovery removes PREPARED only after it proves no DB commit;
+if SQLite is unavailable it leaves the journal and all later file materialization
+untouched. After SQLite commit, failure leaves a recoverable DB_COMMITTED journal; it
+must not perform an unsafe broad rollback. The next envelope/retry reconciles it before
+any new stage begins. If SQLite is lost, journal + file SSOT must prove one transition
+before recreating only the required schema/session/transition rows; unrelated DB history
+is not declared recovered. Otherwise recovery blocks instead of guessing. An older retry
+may never overwrite a newer project state or marker revision.
 
 - [ ] **Step 3: Add internal idempotent claim append**
 
@@ -639,9 +675,9 @@ public claim type, evidence, Generator/Judge, or host-only checks.
 - [ ] **Step 4: Keep QA routing fail-closed**
 
 `commit_stage_transition` computes QA next stage from trusted materialized QA state.
-Missing/corrupt/invalid QA evidence keeps the marker and session at QA and returns a
-blocked receipt. It must not reinterpret `resolve_stage_next_skill() is None` as
-Deploy.
+Missing/corrupt/invalid QA evidence keeps the marker, DB session, and project state at QA
+and returns a blocked receipt. It must not reinterpret
+`resolve_stage_next_skill() is None` as Deploy.
 
 - [ ] **Step 5: Run targeted and adversarial tests**
 
@@ -692,6 +728,10 @@ Cover every approved condition:
 | corrupt marker + ambiguous state | blocked |
 | marker/state mismatch + matching open journal | recover journal |
 | marker/state mismatch without proof | blocked |
+| PREPARED + DB commit unknown + SQLite unavailable | blocked/retryable, no later file advancement |
+| DB_COMMITTED + SQLite temporarily unavailable | blocked/retryable, no guess or rollback |
+| prepared journal + SQLite lost + one file-SSOT interpretation | reconstruct scoped DB rows + receipt |
+| prepared journal + SQLite lost + ambiguous file SSOT | blocked |
 | MCP unavailable during status | file fallback `DEGRADED` |
 | MCP unavailable during transition | blocked |
 | terminal receipt | complete and no active marker |
@@ -756,8 +796,16 @@ Assertions:
 - wrappers parse inputs and return controller JSON without stage logic.
 - filesystem/SQLite work is offloaded appropriately.
 - invalid JSON or booleans-as-revisions fail closed.
-- requested dynamic next stage is catalog-valid and, where applicable,
-  backed by trusted user approval or deterministic QA policy.
+- requested dynamic next stage is catalog-valid and backed by deterministic QA policy
+  or recorded only as an ordinary non-destructive route choice.
+- `requested_next_skill` never authorizes a gate override or irreversible action.
+- a Restate/irreversible checkpoint returns `waiting_user`, writes no transition, and
+  cannot resume within the same MCP call.
+- a later user turn is a new call; ordinary route choice is recorded as untrusted
+  `user_choice`, while a normal gate may proceed only after deterministic artifact
+  revalidation.
+- caller-supplied `approval_claim_id`, host event id, or prose cannot mint trusted
+  approval; gate override remains fail-closed.
 - all tools appear in the MCP import/tool registry.
 
 - [ ] **Step 2: Implement thin wrappers**
@@ -944,7 +992,8 @@ Pin that:
 - [ ] **Step 2: Thin the compatibility wrapper**
 
 Map existing stage/verdict calls into the shared controller. Update stage instructions
-so they do not perform a second competing marker transition. Claude may immediately
+so they do not perform a second competing DB session, `project.state.json`, completed
+stages, event, claim, or marker transition. Claude may immediately
 invoke the returned next Skill after a committed transition; the marker remains only
 as recovery evidence.
 
@@ -971,94 +1020,208 @@ git commit -m "refactor: Claude와 Codex가 같은 신뢰 전이 컨트롤러를
 
 ---
 
-## Wave D — Actual runtime proof
+## Wave D — Native activation after the runtime is complete
 
-### Task 13: Build and run the real Codex CLI E2E harness
+### Task 13: Activate the real Codex installer and migrate proven legacy state
+
+**Files:**
+
+- Modify: `mcp/samvil_mcp/codex_installer.py`
+- Modify: `mcp/tests/test_setup_codex.py`
+- Modify: `scripts/setup-codex.sh`
+- Modify: `README.md`
+
+- [ ] **Step 1: Write readiness and real-wrapper tests first**
+
+Tests must prove that actual-profile activation is unavailable unless the manifest,
+relative MCP launcher, transition tools, and exactly three public skills are complete.
+The shell wrapper must preserve OpenCode/Gemini behavior and stop copying global AGENTS
+or appending an absolute Codex MCP block.
+
+- [ ] **Step 2: Activate the shell wrapper**
+
+`scripts/setup-codex.sh codex` performs capability probe, environment preparation,
+read-only `--check`, blocker review, explicit requested mode, MCP smoke, and namespace
+inventory comparison. Ambiguous user-modified state blocks before mutation.
+
+- [ ] **Step 3: Exercise the actual profile with explicit migration**
+
+Before any mutation, persist registry/plugin/personal-skill inventory. Run `--check`
+first. If and only if all legacy objects are proven generated, run explicit `--migrate`
+before install/update. Verify:
+
+1. unrelated personal skills remain byte/hash-equivalent
+2. proven legacy SAMVIL skills/global AGENTS/direct MCP move to timestamped backup
+3. ambiguous user-modified candidates remain byte-identical and block
+4. public plugin surface is exactly `samvil:run`, `samvil:resume`, `samvil:status`
+5. registry/plugin/cache restore from backup if activation fails
+
+- [ ] **Step 4: Run targeted tests and shell smoke**
+
+```bash
+cd mcp
+.venv/bin/python -m pytest tests/test_setup_codex.py tests/test_codex_plugin.py -q
+cd ..
+bash -n scripts/setup-codex.sh
+bash scripts/setup-codex.sh codex --check
+```
+
+- [ ] **Step 5: Stage, full gate, commit**
+
+```bash
+git add mcp/samvil_mcp/codex_installer.py mcp/tests/test_setup_codex.py \
+  scripts/setup-codex.sh README.md
+bash scripts/pre-commit-check.sh
+git commit -m "feat: 완성된 Codex 실행 경로만 실제 프로필에 안전하게 설치하고 이전한다"
+```
+
+---
+
+## Wave E — Clean-commit runtime proof
+
+### Task 14: Build Codex and Claude runtime harnesses without generating evidence
 
 **Files:**
 
 - Create: `scripts/codex-native-e2e.py`
+- Create: `scripts/claude-native-e2e.py`
 - Create: `mcp/tests/test_codex_native_e2e.py`
-- Create: `docs/evidence/codex-native-autonomy/cli-runtime.json`
-- Create: `docs/evidence/codex-native-autonomy/cli-runtime.md`
+- Create: `mcp/tests/test_claude_native_e2e.py`
 
 - [ ] **Step 1: Write harness contract tests**
 
-Validate that the harness:
+Both harnesses must call the real host binary, use Python
+`subprocess.run(..., timeout=...)`, create projects under a temporary directory, redact
+auth/config secrets, reject stub/mock/hardcoded PASS, and record exact clean git commit
+and tree hash plus command/runtime/plugin versions and artifact hashes.
 
-- calls the real `codex` binary and records `codex --version`.
-- uses Python `subprocess.run(..., timeout=...)`, not GNU `timeout`.
-- creates projects under `mktemp`/temporary directories.
-- redacts auth/config secrets from JSONL output.
-- captures command, exit code, task/session id, starting/ending marker revision,
-  event ids, transition ids, and artifact hashes.
-- rejects mock/stub completion and hardcoded PASS receipts.
-- validates receipt schema and current git commit.
-- never targets the repository literal `$CODEX_HOME/` path.
+`codex-native-e2e.py --check` must bind and release an ephemeral `127.0.0.1` port before
+web/mobile scenarios. Neither harness may target the repository literal `$CODEX_HOME/`.
 
-- [ ] **Step 2: Implement dry-run and real modes**
+- [ ] **Step 2: Implement check/scenario/receipt modes**
 
 ```text
---check          environment/plugin/MCP readiness only
+--check          host/plugin/MCP/localhost readiness only
 --scenario NAME  run one scenario
 --all            run required matrix
 --repeat N       repeat full green scenarios
 --receipt PATH   write sanitized machine-readable evidence
 ```
 
-- [ ] **Step 3: Safely install/update the plugin on the actual Codex profile**
+The harness refuses to write a PASS receipt with tracked changes or unexpected untracked
+paths; the literal user-owned `$CODEX_HOME/` is the sole explicit exclusion. A repeated
+identical runtime or localhost failure trips the circuit breaker after the second
+occurrence.
 
-Before mutation, save installer plan and personal skill inventory receipt. Run the
-installer only if there are no ambiguous blockers. Compare personal inventory after
-installation and stop immediately on any drift.
-
-- [ ] **Step 4: Run required actual scenarios**
-
-1. greenfield web minimal
-2. greenfield mobile-app standard with Expo web/Playwright evidence
-3. brownfield analyze → selected build path
-4. Interview interruption + `codex exec resume`
-5. Build interruption + resume
-6. QA missing/corrupt fail-closed
-7. marker stale/corrupt recovery
-8. MCP process failure/restart
-9. duplicate completion replay
-10. three repeated greenfield end-to-end runs
-
-External deployment is not performed automatically. The run stops at its explicit
-deployment/user checkpoint after QA evidence is committed.
-
-- [ ] **Step 5: Validate receipts and targeted tests**
+- [ ] **Step 3: Run harness unit/contract tests only**
 
 ```bash
 python3 scripts/codex-native-e2e.py --check
+python3 scripts/claude-native-e2e.py --check
 cd mcp
-.venv/bin/python -m pytest tests/test_codex_native_e2e.py -q
+.venv/bin/python -m pytest \
+  tests/test_codex_native_e2e.py tests/test_claude_native_e2e.py -q
 ```
 
-Then run the real matrix with a bounded timeout and preserve sanitized output.
+Do not create final runtime receipts in this Task.
 
-- [ ] **Step 6: Stage, full gate, commit**
+- [ ] **Step 4: Stage, full gate, commit**
 
 ```bash
-git add scripts/codex-native-e2e.py mcp/tests/test_codex_native_e2e.py \
-  docs/evidence/codex-native-autonomy/cli-runtime.json \
-  docs/evidence/codex-native-autonomy/cli-runtime.md
+git add scripts/codex-native-e2e.py scripts/claude-native-e2e.py \
+  mcp/tests/test_codex_native_e2e.py mcp/tests/test_claude_native_e2e.py
 bash scripts/pre-commit-check.sh
-git commit -m "test: 실제 Codex CLI에서 자동 진행 중단 복구 중복 방지를 끝까지 검증한다"
+git commit -m "test: Codex와 Claude의 실제 실행을 깨끗한 커밋에서 검증할 하네스를 추가한다"
 ```
-
-If the same runtime failure repeats twice, stop and report the exact blocker instead
-of weakening the harness.
 
 ---
 
-### Task 14: Capture Codex Desktop proof and enable runtime-proven capability
+### Task 15: Run actual Codex CLI and Claude Code and commit machine receipts
 
 **Files:**
 
+- Create: `docs/evidence/codex-native-autonomy/cli-runtime.json`
+- Create: `docs/evidence/codex-native-autonomy/cli-runtime.md`
+- Create: `docs/evidence/codex-native-autonomy/claude-runtime.json`
+- Create: `docs/evidence/codex-native-autonomy/claude-runtime.md`
+
+- [ ] **Step 1: Assert a clean tested revision**
+
+Record `git rev-parse HEAD` and `git rev-parse HEAD^{tree}`. The worktree must contain
+no tracked diff. The only tolerated untracked path is the untouched literal
+`$CODEX_HOME/`, which the harness excludes. Receipts bind to this exact Task 14 commit
+and tree, not to the later evidence commit.
+
+- [ ] **Step 2: Run the actual Codex CLI matrix**
+
+Run real `codex exec` scenarios for greenfield web minimal, mobile-app standard with
+Expo web/Playwright browser AC evidence, brownfield routing, Interview/Build resume,
+QA missing/corrupt fail-closed, marker recovery, MCP restart, duplicate replay, and
+three repeated greenfield runs. External deploy remains a user checkpoint.
+
+- [ ] **Step 3: Run the actual Claude Code matrix**
+
+Run the real `claude` binary with the installed plugin. At minimum prove plugin load,
+actual Skill-tool Interview → Seed or Build → QA chaining, marker fallback resume,
+shared controller persistence, and user checkpoint stop without same-call auto-resume.
+
+- [ ] **Step 4: Validate evidence-only delta**
+
+The JSON verifier checks schema, tested commit/tree, versions, commands, exit codes,
+transition/event/artifact hashes, and secret redaction. Combined tracked/untracked
+`git status --short` output must list only the four evidence files plus the untouched
+literal `$CODEX_HOME/` before commit.
+
+- [ ] **Step 5: Stage, full gate, commit**
+
+```bash
+git add docs/evidence/codex-native-autonomy/cli-runtime.json \
+  docs/evidence/codex-native-autonomy/cli-runtime.md \
+  docs/evidence/codex-native-autonomy/claude-runtime.json \
+  docs/evidence/codex-native-autonomy/claude-runtime.md
+bash scripts/pre-commit-check.sh
+git commit -m "test: 깨끗한 커밋에서 Codex와 Claude의 실제 단계 실행 증거를 남긴다"
+```
+
+---
+
+### Task 16: Capture a separately classified Codex Desktop manual receipt
+
+**Files:**
+
+- Create: `docs/evidence/codex-native-autonomy/desktop-runtime.json`
 - Create: `docs/evidence/codex-native-autonomy/desktop-smoke.md`
-- Add screenshot/receipt files under the same evidence directory if used
+- Add screenshots under the same evidence directory only when they materially prove UX
+
+- [ ] **Step 1: Run the actual Desktop smoke**
+
+In a fresh/restarted Codex Desktop task verify plugin enablement, bare personal skill
+names, exactly three SAMVIL public skills, natural-language entry selection, task
+close/reopen resume, read-only status, and checkpoint stop.
+
+- [ ] **Step 2: Classify the evidence honestly**
+
+Set `verification_level="manual_desktop"`. Record app/plugin version, tested commit/tree,
+task id, observations, and screenshots. Separate observation from inference. This receipt
+does not attest user identity, authorize gate override, or count as cryptographic proof.
+
+- [ ] **Step 3: Stage, full gate, commit**
+
+```bash
+git add docs/evidence/codex-native-autonomy/desktop-runtime.json \
+  docs/evidence/codex-native-autonomy/desktop-smoke.md
+bash scripts/pre-commit-check.sh
+git commit -m "test: Codex Desktop 사용자 흐름을 수동 증거로 구분해 기록한다"
+```
+
+If screenshots were actually created, add only their exact paths before the full gate.
+
+---
+
+### Task 17: Enable receipt-backed host capability and parity reporting
+
+**Files:**
+
 - Modify: `mcp/samvil_mcp/host.py`
 - Modify: `mcp/samvil_mcp/host_adapters.py`
 - Modify: `scripts/check-host-parity.py`
@@ -1068,41 +1231,18 @@ of weakening the harness.
 
 - [ ] **Step 1: Write receipt-aware capability tests**
 
-Before valid current receipts, parity output must continue to say `UNTESTED` and
-tests must reject a premature capability declaration. A valid CLI + Desktop receipt
-allows the target declaration:
+Before valid current Codex CLI and Claude machine receipts, parity remains `UNTESTED`.
+Manual Desktop evidence is reported separately. Tests reject stale commit/tree, dirty-tree
+proof, evidence mixed with code delta, and premature capability declaration.
 
-```text
-skill_invocation=plugin_driver
-chain_via=host_driver
-file_marker_handoff=true
-native_task_update=true
-parallel_agents=false
-```
+- [ ] **Step 2: Update capability and parity honesty**
 
-- [ ] **Step 2: Run the actual Desktop smoke**
+After valid receipts, Codex may declare `skill_invocation=plugin_driver`,
+`chain_via=host_driver`, recovery marker support, and native task continuation.
+`parallel_agents` remains false. Claude compatibility reports actual runtime proof.
+Gemini/OpenCode native execution remains explicitly untested.
 
-In a fresh/restarted Codex Desktop task verify:
-
-1. `samvil@samvil` installed and enabled
-2. personal skills display bare names
-3. only SAMVIL plugin skills use `samvil:`
-4. only `samvil:run`, `samvil:resume`, `samvil:status` are public
-5. natural-language SAMVIL request selects the run entry
-6. task close/reopen resumes from durable state
-7. status is read-only
-8. user checkpoint does not auto-advance
-
-Record app version, plugin version, repository commit, task id, observed result, and
-screenshots where useful. Separate confirmed observations from manual inference.
-
-- [ ] **Step 3: Update host capability and parity honesty**
-
-`check-host-parity.py` validates receipt schema/version/commit and enumerates any
-remaining untested host surface. Do not convert Gemini/OpenCode native execution to
-green.
-
-- [ ] **Step 4: Run targeted tests**
+- [ ] **Step 3: Run targeted and quick runtime regression**
 
 ```bash
 cd mcp
@@ -1110,22 +1250,25 @@ cd mcp
   tests/test_host.py tests/test_host_adapters.py tests/test_host_parity.py -q
 cd ..
 python3 scripts/check-host-parity.py --strict
+python3 scripts/codex-native-e2e.py --check
+python3 scripts/claude-native-e2e.py --check
 ```
 
-- [ ] **Step 5: Stage, full gate, commit**
-
-Stage exact evidence and changed code files, then:
+- [ ] **Step 4: Stage, full gate, commit**
 
 ```bash
+git add mcp/samvil_mcp/host.py mcp/samvil_mcp/host_adapters.py \
+  scripts/check-host-parity.py mcp/tests/test_host.py \
+  mcp/tests/test_host_adapters.py mcp/tests/test_host_parity.py
 bash scripts/pre-commit-check.sh
-git commit -m "feat: 실제 Codex CLI와 Desktop 증거를 바탕으로 네이티브 실행을 활성화한다"
+git commit -m "feat: 실제 Codex와 Claude 실행 영수증으로 호스트 기능을 정직하게 활성화한다"
 ```
 
 ---
 
-## Wave E — Release synchronization and final review
+## Wave F — Release synchronization and final review
 
-### Task 15: Synchronize v4.33.0 docs, evidence, and release gates
+### Task 18: Synchronize v4.33.0 docs, evidence, and release gates
 
 **Files:**
 
@@ -1149,8 +1292,10 @@ Extend tests/checks to require:
 - docs do not claim all personal skills are SAMVIL-owned.
 - public Codex skill docs mention only run/resume/status.
 - host continuation clearly distinguishes execution from recovery.
-- real runtime receipt remains current for the release candidate commit or records
-  the exact pre-release commit plus final code-only delta justification.
+- machine receipts point to the exact clean Task 14 commit/tree and Tasks 15–18 contain
+  only classified evidence, capability declaration, docs, and version deltas.
+- Desktop evidence remains explicitly `manual_desktop`.
+- no documentation claims trusted user approval or gate override support in v4.33.
 
 - [ ] **Step 2: Update user-facing documentation**
 
@@ -1181,6 +1326,7 @@ cd mcp
 .venv/bin/python -m pytest tests/ -q
 cd ..
 python3 scripts/codex-native-e2e.py --check
+python3 scripts/claude-native-e2e.py --check
 python3 scripts/check-host-parity.py --strict
 python3 scripts/check-skill-wiring.py
 python3 scripts/check-skill-forward-integrity.py
@@ -1200,7 +1346,9 @@ Review specifically:
 - QA missing/corrupt fallback
 - `resolve_stage_next_skill(None)` semantic regression
 - Claude hook gate bypass
-- actual vs structural host parity claims
+- actual machine vs manual Desktop vs structural host parity claims
+- runtime receipt commit/tree provenance and evidence-only delta
+- actual Claude Code Skill-tool runtime path
 - accidental `$CODEX_HOME/` staging
 
 - [ ] **Step 5: Run `samvil:pre-pr-review` R3 read-only**
@@ -1234,18 +1382,23 @@ Implementation is complete only when all statements below have persisted evidenc
 - [ ] Only SAMVIL plugin skills appear with the `samvil:` prefix.
 - [ ] Public Codex surface is exactly run/resume/status.
 - [ ] A trusted completed stage continues in the same Codex task automatically.
-- [ ] User checkpoint, BLOCK, corrupt state, or critical MCP failure stops the loop.
-- [ ] Restart/resume creates no duplicate event, claim, session advancement, or marker
-      revision.
-- [ ] Failure injection passes at every transition journal boundary.
+- [ ] User checkpoint returns `waiting_user` without a transition commit or same-call
+      auto-resume; BLOCK, corrupt state, or critical MCP failure also stops the loop.
+- [ ] v4.33 cannot mint trusted user approval or gate-override claims from MCP input.
+- [ ] Restart/resume creates no duplicate DB event, JSONL event, claim, project-state
+      advancement, session advancement, marker revision, or receipt.
+- [ ] Failure injection passes at every transition journal boundary, including before
+      and after project-state replace and with SQLite unavailable/lost.
 - [ ] QA missing/corrupt evidence remains in QA without changing
       `resolve_stage_next_skill()` semantics.
 - [ ] Clean install, repeat install, update, migration, and uninstall preserve
       unrelated user-owned paths.
 - [ ] Actual Codex CLI scenario matrix passes, including three repeated runs.
-- [ ] Actual Codex Desktop smoke passes after restart/reopen.
-- [ ] Claude Code plugin and stage chain regressions pass.
-- [ ] Host parity reports structural proof and runtime proof separately.
+- [ ] Actual Claude Code plugin and Skill-tool runtime matrix passes.
+- [ ] Codex CLI and Claude receipts bind to one exact clean commit and tree.
+- [ ] Actual Codex Desktop smoke passes after restart/reopen and remains classified
+      `manual_desktop`.
+- [ ] Host parity reports machine runtime, manual Desktop, and structural proof separately.
 - [ ] Full pre-commit exits 0 before every commit.
 - [ ] R3 review has no unresolved P1/P2.
 - [ ] Final working tree contains no accidental tracked `$CODEX_HOME/` content.
@@ -1254,9 +1407,9 @@ Implementation is complete only when all statements below have persisted evidenc
 
 ## 4. Expected commit sequence
 
-1. `feat: Codex 전용 플러그인 매니페스트와 상대 경로 MCP 실행기를 추가한다`
+1. `feat: Codex 플러그인 매니페스트와 비어 있는 공개 스킬 경계를 추가한다`
 2. `feat: Codex 마켓플레이스 소유권과 개인 스킬 보존 규칙을 검증한다`
-3. `feat: 개인 설정을 보존하며 Codex 플러그인을 안전하게 설치하고 이전한다`
+3. `feat: 격리된 Codex 환경에서 되돌릴 수 있는 설치와 이전을 검증한다`
 4. `refactor: 모든 호스트가 같은 단계 카탈로그와 전이 규칙을 사용하게 한다`
 5. `feat: 기존 마커 호환성을 유지하며 재시도 가능한 v1.1 전이 마커를 추가한다`
 6. `feat: 단계 실행 봉투와 중복 없는 실행 claim을 원자적으로 관리한다`
@@ -1266,9 +1419,12 @@ Implementation is complete only when all statements below have persisted evidenc
 10. `feat: Codex 사용자에게 실행 재개 상태 확인 세 가지 스킬만 제공한다`
 11. `test: Codex가 중단과 컨텍스트 압축 뒤에도 같은 작업에서 안전하게 이어지는지 검증한다`
 12. `refactor: Claude와 Codex가 같은 신뢰 전이 컨트롤러를 사용하게 한다`
-13. `test: 실제 Codex CLI에서 자동 진행 중단 복구 중복 방지를 끝까지 검증한다`
-14. `feat: 실제 Codex CLI와 Desktop 증거를 바탕으로 네이티브 실행을 활성화한다`
-15. `docs: Codex 네이티브 실행 v4.33.0의 사용법과 검증 증거를 동기화한다`
+13. `feat: 완성된 Codex 실행 경로만 실제 프로필에 안전하게 설치하고 이전한다`
+14. `test: Codex와 Claude의 실제 실행을 깨끗한 커밋에서 검증할 하네스를 추가한다`
+15. `test: 깨끗한 커밋에서 Codex와 Claude의 실제 단계 실행 증거를 남긴다`
+16. `test: Codex Desktop 사용자 흐름을 수동 증거로 구분해 기록한다`
+17. `feat: 실제 Codex와 Claude 실행 영수증으로 호스트 기능을 정직하게 활성화한다`
+18. `docs: Codex 네이티브 실행 v4.33.0의 사용법과 검증 증거를 동기화한다`
 
-Review findings, if any, are appended as separate commits after Task 15 rather than
+Review findings, if any, are appended as separate commits after Task 18 rather than
 folded into unrelated history.
