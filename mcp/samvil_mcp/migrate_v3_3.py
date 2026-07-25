@@ -94,28 +94,27 @@ def _replace_seed_if_unchanged(
     result_path = seed_path.with_name(
         f".{seed_path.name}.migration-result-{uuid.uuid4().hex}"
     )
-    swap_path = seed_path.with_name(
-        f".{seed_path.name}.migration-swap-{uuid.uuid4().hex}"
-    )
     try:
         os.link(seed_path, snapshot_path)
         if snapshot_path.read_text(encoding="utf-8") != expected_text:
             raise RuntimeError("seed changed during migration; retry from current state")
         atomic_write_text_unlocked(result_path, migrated_text)
-        os.replace(seed_path, swap_path)
         if (
-            not os.path.samefile(swap_path, snapshot_path)
-            or swap_path.read_text(encoding="utf-8") != expected_text
+            not os.path.samefile(seed_path, snapshot_path)
+            or snapshot_path.read_text(encoding="utf-8") != expected_text
         ):
-            os.replace(swap_path, seed_path)
             raise RuntimeError("seed changed during migration; retry from current state")
         os.replace(result_path, seed_path)
+        snapshot_text = snapshot_path.read_text(encoding="utf-8")
+        if snapshot_text != expected_text:
+            atomic_write_text_unlocked(seed_path, snapshot_text)
+            raise RuntimeError("seed changed during migration; retry from current state")
     finally:
         try:
             snapshot_path.unlink(missing_ok=True)
         except OSError:
             pass
-        for temporary in (result_path, swap_path):
+        for temporary in (result_path,):
             try:
                 temporary.unlink(missing_ok=True)
             except OSError:
@@ -186,6 +185,11 @@ def apply_migration(project_root: str | Path) -> dict[str, Any]:
                     seed_text,
                     json.dumps(migrated, indent=2, ensure_ascii=False) + "\n",
                 )
+                try:
+                    _verify_backup_contents(backup_path, None, None)
+                except OSError:
+                    atomic_write_text_unlocked(seed_path, seed_text)
+                    raise
             finally:
                 _backup_lock_state.held = False
         return {
