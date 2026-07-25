@@ -2640,6 +2640,8 @@ def _analyze_command_impl(command: str) -> str | None:
                 if token.startswith((">", "<")) or token in {"--", "-n"}:
                     continue
                 cd_args.append(token)
+            if executable == "pushd" and pushd_no_cd and not cd_args:
+                return "uninspectable directory stack operation"
             if executable == "pushd" and not cd_args:
                 if analysis_cwd_stack:
                     analysis_cwd, analysis_cwd_stack[-1] = (
