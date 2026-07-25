@@ -169,6 +169,48 @@ def _create_legacy_trust_db(db_path, project_root) -> None:
         )
 
 
+def _create_rootless_legacy_trust_db(db_path) -> None:
+    with sqlite3.connect(db_path) as db:
+        db.executescript(
+            """
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY, project_name TEXT NOT NULL,
+                seed_version INTEGER DEFAULT 1,
+                current_stage TEXT DEFAULT 'interview',
+                stage_transition_id TEXT DEFAULT '',
+                samvil_tier TEXT DEFAULT 'standard', created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE events (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                event_type TEXT NOT NULL, stage TEXT NOT NULL,
+                data TEXT DEFAULT '{}', token_count INTEGER DEFAULT NULL,
+                timestamp TEXT NOT NULL
+            );
+            CREATE TABLE seed_versions (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                version INTEGER NOT NULL, seed_json TEXT NOT NULL,
+                change_summary TEXT DEFAULT '', created_at TEXT NOT NULL,
+                UNIQUE(session_id, version)
+            );
+            CREATE INDEX idx_events_trusted_transition
+            ON events(session_id, json_extract(data, '$.trusted_transition'), timestamp DESC);
+            """
+        )
+        db.execute(
+            """INSERT INTO sessions
+            (id, project_name, current_stage, stage_transition_id, created_at, updated_at)
+            VALUES ('session', 'legacy-app', 'build', 'legacy',
+                    '2026-07-25', '2026-07-25')"""
+        )
+        db.execute(
+            """INSERT INTO events
+            (id, session_id, event_type, stage, data, timestamp)
+            VALUES ('legacy', 'session', 'stage_change', 'build', ?, '2026-07-25')""",
+            (json.dumps({"event_type_raw": "interview_complete"}),),
+        )
+
+
 @pytest.mark.asyncio
 async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
     tmp_path,
@@ -250,6 +292,63 @@ async def test_trusted_transition_migration_does_not_promote_legacy_json_flags(
     migrated_session = await legacy_store.get_session("session")
     assert migrated_session is not None
     assert migrated_session.current_stage == Stage.SEED
+
+
+@pytest.mark.asyncio
+async def test_rootless_legacy_migration_waits_for_project_attach_before_rewind(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "rootless-legacy.db"
+    project_root = tmp_path / "legacy-project"
+    (project_root / ".samvil").mkdir(parents=True)
+    state_path = project_root / "project.state.json"
+    marker_path = project_root / ".samvil" / "next-skill.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "session_id": "session",
+                "current_stage": "build",
+                "completed_stages": ["interview", "seed", "design", "scaffold"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    marker_path.write_text(
+        json.dumps(
+            {
+                "next_skill": "samvil-build",
+                "from_stage": "samvil-scaffold",
+                "host_name": "codex_cli",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _create_rootless_legacy_trust_db(db_path)
+
+    store = EventStore(str(db_path))
+    await store.initialize()
+
+    pending = await store.get_session("session")
+    assert pending is not None
+    assert pending.current_stage == Stage.BUILD
+    assert pending.project_root == ""
+    assert json.loads(state_path.read_text())["current_stage"] == "build"
+    assert json.loads(marker_path.read_text())["next_skill"] == "samvil-build"
+
+    assert await store.recover_legacy_session_project_root(
+        "session",
+        str(project_root),
+    ) is True
+    recovered = await store.get_session("session")
+    assert recovered is not None
+    assert recovered.current_stage == Stage.INTERVIEW
+    assert recovered.project_root == str(project_root.resolve())
+    assert json.loads(state_path.read_text())["current_stage"] == "interview"
+    assert json.loads(marker_path.read_text())["next_skill"] == "samvil-interview"
+    assert await store.recover_legacy_session_project_root(
+        "session",
+        str(project_root),
+    ) is False
 
 
 @pytest.mark.parametrize("failure_mode", ["marker", "database"])

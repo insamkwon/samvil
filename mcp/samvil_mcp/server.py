@@ -5476,6 +5476,34 @@ async def write_chain_marker(
         return json.dumps({"error": str(e)})
 
 
+def _project_state_session_id(project_root: str) -> str:
+    root = Path(project_root)
+    for path in (root / "project.state.json", root / ".samvil" / "state.json"):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeError):
+            continue
+        if isinstance(state, dict):
+            session_id = state.get("session_id")
+            if isinstance(session_id, str) and session_id.strip():
+                return session_id
+    return ""
+
+
+async def _recover_rootless_legacy_session(project_root: str) -> bool:
+    session_id = await asyncio.to_thread(
+        _project_state_session_id,
+        project_root,
+    )
+    if not session_id:
+        return False
+    store = await get_store()
+    return await store.recover_legacy_session_project_root(
+        session_id,
+        project_root,
+    )
+
+
 @mcp.tool()
 async def read_chain_marker(project_root: str) -> str:
     """Read current next-skill marker.
@@ -5483,6 +5511,7 @@ async def read_chain_marker(project_root: str) -> str:
     Returns marker dict or null if no marker exists.
     """
     try:
+        await _recover_rootless_legacy_session(project_root)
         result = await asyncio.to_thread(_read_chain_marker, project_root)
         _log_mcp_health("ok", "read_chain_marker")
         return json.dumps(result)
@@ -6165,6 +6194,7 @@ async def resume_session(project_root: str) -> str:
     completed_features, failed_acs, samvil_tier, project_name.
     """
     try:
+        await _recover_rootless_legacy_session(project_root)
         result = _resume_session(project_root)
         _log_mcp_health("ok", "resume_session")
         return json.dumps(result)

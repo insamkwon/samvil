@@ -38,6 +38,52 @@ def _isolated_server(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(srv, "_store", None)
 
 
+def test_read_chain_marker_recovers_rootless_legacy_session_before_read(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from samvil_mcp import server as srv
+
+    project_root = tmp_path / "legacy-project"
+    marker_path = project_root / ".samvil" / "next-skill.json"
+    marker_path.parent.mkdir(parents=True)
+    (project_root / "project.state.json").write_text(
+        json.dumps({"session_id": "legacy-session", "current_stage": "build"}),
+        encoding="utf-8",
+    )
+    marker_path.write_text(
+        json.dumps({"next_skill": "samvil-build", "from_stage": "samvil-scaffold"}),
+        encoding="utf-8",
+    )
+
+    class FakeStore:
+        called = False
+
+        async def recover_legacy_session_project_root(self, session_id, root):
+            self.called = True
+            assert session_id == "legacy-session"
+            assert root == str(project_root)
+            marker_path.write_text(
+                json.dumps(
+                    {"next_skill": "samvil-interview", "from_stage": "samvil"}
+                ),
+                encoding="utf-8",
+            )
+            return True
+
+    fake_store = FakeStore()
+
+    async def fake_get_store():
+        return fake_store
+
+    monkeypatch.setattr(srv, "get_store", fake_get_store)
+
+    result = json.loads(_run(srv.read_chain_marker(str(project_root))))
+
+    assert fake_store.called is True
+    assert result["next_skill"] == "samvil-interview"
+
+
 def _prepare_interview_exit(project_root: Path) -> None:
     (project_root / "interview-summary.md").write_text(
         "# Interview Summary\n\nValidated interview output.\n",

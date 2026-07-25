@@ -230,7 +230,7 @@ class EventStore:
                     # untrusted.
                     recovery_cursor = await db.execute(
                         """SELECT id, project_root FROM sessions
-                        WHERE current_stage != 'interview'"""
+                        WHERE current_stage != 'interview' AND project_root != ''"""
                     )
                     legacy_recovery_backups = _prepare_legacy_recovery_files(
                         [
@@ -242,7 +242,7 @@ class EventStore:
                     await db.execute(
                         """UPDATE sessions
                         SET current_stage = 'interview', stage_transition_id = ''
-                        WHERE current_stage != 'interview'"""
+                        WHERE current_stage != 'interview' AND project_root != ''"""
                     )
                 index_cursor = await db.execute(
                     "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
@@ -263,6 +263,76 @@ class EventStore:
                 raise
             else:
                 legacy_recovery_locks.close()
+
+    async def recover_legacy_session_project_root(
+        self,
+        session_id: str,
+        project_root: str,
+    ) -> bool:
+        """Attach a rootless legacy session and replay its trust gates safely."""
+        normalized_root = str(Path(project_root).expanduser().resolve())
+        state_path = Path(normalized_root) / "project.state.json"
+        file_stage = ""
+        if state_path.exists():
+            try:
+                parsed_state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError, UnicodeError):
+                parsed_state = None
+            if isinstance(parsed_state, dict):
+                file_stage = str(parsed_state.get("current_stage") or "")
+
+        backups: dict[Path, str | None] = {}
+        locks = ExitStack()
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """SELECT project_root, current_stage FROM sessions
+                    WHERE id = ?""",
+                    (session_id,),
+                )
+                row = await cursor.fetchone()
+                if row is None or str(row[0] or ""):
+                    await db.rollback()
+                    return False
+                trusted_cursor = await db.execute(
+                    """SELECT COUNT(*) FROM events
+                    WHERE session_id = ? AND trusted_transition = 1""",
+                    (session_id,),
+                )
+                trusted_count = int((await trusted_cursor.fetchone())[0])
+                current_stage = str(row[1] or "interview")
+                needs_revalidation = trusted_count == 0 and (
+                    current_stage != "interview"
+                    or (file_stage and file_stage != "interview")
+                )
+                if needs_revalidation:
+                    backups = _prepare_legacy_recovery_files(
+                        [(session_id, normalized_root)],
+                        locks,
+                    )
+                    await db.execute(
+                        """UPDATE sessions
+                        SET project_root = ?, current_stage = 'interview',
+                            stage_transition_id = '', updated_at = ?
+                        WHERE id = ? AND project_root = ''""",
+                        (normalized_root, _now(), session_id),
+                    )
+                else:
+                    await db.execute(
+                        """UPDATE sessions SET project_root = ?, updated_at = ?
+                        WHERE id = ? AND project_root = ''""",
+                        (normalized_root, _now(), session_id),
+                    )
+                await db.commit()
+                return needs_revalidation
+            except Exception:
+                await db.rollback()
+                if backups:
+                    _restore_legacy_recovery_files(backups)
+                raise
+            finally:
+                locks.close()
 
     # ── Sessions ──────────────────────────────────────────
 
