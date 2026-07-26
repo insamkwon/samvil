@@ -1,7 +1,5 @@
 # Codex public skills
 
-This directory is the reserved Codex plugin skill root. Public SAMVIL skills are
-added only after their complete contract and runtime behavior are implemented.
-
-The empty root is intentional: an incomplete skill must never be exposed as a
-working Codex command.
+This directory is the Codex plugin-owned public skill root. Its supported surface
+is intentionally limited to `run`, `resume`, and `status`; internal stage
+instructions remain hidden behind the durable MCP stage envelope.

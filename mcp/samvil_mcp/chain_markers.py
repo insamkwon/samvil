@@ -57,6 +57,15 @@ def write_chain_marker(
     Creates `.samvil/next-skill.json` with chain continuation data.
     Returns the marker dict that was written.
     """
+    inspection = inspect_chain_marker(project_root)
+    if inspection.classification == "valid" and host_name == "codex_cli":
+        existing = dict(inspection.marker or {})
+        if (
+            existing.get("status") in {"ready", "terminal"}
+            and existing.get("from_stage") == current_skill
+        ):
+            return existing
+        raise ValueError("host driver owns transition marker")
     marker = _build_chain_marker(host_name, current_skill, next_skill)
     marker_path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
     atomic_write_text(marker_path, json.dumps(marker, indent=2))

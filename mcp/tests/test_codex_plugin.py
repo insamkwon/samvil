@@ -81,3 +81,12 @@ def test_public_codex_skills_have_bare_names_and_shared_tools() -> None:
     assert "mcp__samvil_mcp__get_stage_envelope" in status
     assert "mcp__samvil_mcp__begin_stage" not in status
     assert "mcp__samvil_mcp__commit_stage_transition" not in status
+
+
+def test_run_skill_bootstraps_fresh_projects_and_avoids_duplicate_commit() -> None:
+    run = (CODEX_SKILLS / "run" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "fresh" in run
+    assert "create_session" in run
+    assert "reread" in run.lower()
+    assert "already advanced" in run.lower()

@@ -40,6 +40,48 @@ class TestDriverMarkerV11:
         assert marker["chain_via"] == "host_driver"
         assert marker["revision"] == 3
 
+    def test_legacy_writer_preserves_completed_driver_marker(self, project_root):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=4,
+            status="ready",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="samvil-qa",
+            reason="build completed",
+        )
+        write_driver_marker(project_root, marker)
+
+        result = write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        assert result == marker
+        assert inspect_chain_marker(project_root).classification == "valid"
+
+    def test_legacy_writer_cannot_bypass_in_progress_driver_claim(self, project_root):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=4,
+            status="in_progress",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="",
+            reason="build started",
+        )
+        write_driver_marker(project_root, marker)
+
+        with pytest.raises(ValueError, match="host driver owns transition"):
+            write_chain_marker(
+                project_root,
+                "codex_cli",
+                "samvil-build",
+                next_skill="samvil-qa",
+            )
+
     @pytest.mark.parametrize("revision", [True, False, -1, "3"])
     def test_v11_rejects_invalid_revision(self, revision):
         with pytest.raises(ValueError):
