@@ -125,14 +125,8 @@ class TransitionController:
         try:
             journal = self._read_json(self._journal_path(root))
             if journal:
-                self._validate_journal_integrity(journal)
+                journal, _persisted_event = await self._authoritative_journal_context(root, journal)
                 journal_run_id = str(journal["run_id"])
-                journal_session = await self.store.get_session(journal_run_id)
-                if (
-                    journal_session is None
-                    or Path(journal_session.project_root).expanduser().resolve(strict=False) != root
-                ):
-                    raise TransitionError("transition journal run does not own project root")
                 event_payload = dict(journal.get("event_payload") or {})
                 return {
                     "run_id": journal_run_id,
@@ -348,6 +342,68 @@ class TransitionController:
         ):
             raise TransitionError("transition journal integrity check failed")
 
+    async def _authoritative_journal_context(
+        self,
+        root: Path,
+        journal: dict[str, Any],
+    ) -> tuple[dict[str, Any], Any | None]:
+        self._validate_journal_integrity(journal)
+        run_id = str(journal["run_id"])
+        from_stage = str(journal["from_stage"])
+        target_state = str(journal["target_state"])
+        event_id = str(journal["event_id"])
+        session = await self.store.get_session(run_id)
+        if (
+            session is None
+            or Path(session.project_root).expanduser().resolve(strict=False) != root
+        ):
+            raise TransitionError("transition journal run does not own project root")
+
+        persisted_event = await self.store.get_event_by_id(event_id)
+        if persisted_event is not None:
+            if (
+                persisted_event.session_id != run_id
+                or persisted_event.stage.value != target_state
+                or persisted_event.data.get("transition_id") != journal["transition_id"]
+                or persisted_event.data.get("from_stage") != from_stage
+                or persisted_event.data.get("to_stage") != journal["to_stage"]
+            ):
+                raise TransitionError("transition journal integrity check failed")
+            try:
+                journal.update(
+                    {
+                        "claim_id": str(persisted_event.data["claim_id"]),
+                        "expected_revision": int(persisted_event.data["expected_revision"]),
+                        "host_name": str(persisted_event.data["host_name"]),
+                        "event_payload": dict(persisted_event.data),
+                        "event_type": persisted_event.event_type.value,
+                        "event_timestamp": persisted_event.timestamp,
+                        "event_payload_hash": hashlib.sha256(
+                            json.dumps(persisted_event.data, sort_keys=True).encode()
+                        ).hexdigest(),
+                    }
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise TransitionError("persisted transition metadata is incomplete") from exc
+        else:
+            inspection = inspect_chain_marker(str(root))
+            if (
+                inspection.classification != "valid"
+                or inspection.marker.get("run_id") != run_id
+                or self._marker_revision(inspection) != int(journal["expected_revision"])
+            ):
+                raise TransitionError("transition journal does not match active marker")
+            journal["host_name"] = str(inspection.marker.get("host_name") or "codex_cli")
+
+        claim = await self.store.get_stage_claim(
+            run_id,
+            from_stage,
+            int(journal["expected_revision"]),
+        )
+        if claim is None or claim["claim_id"] != journal["claim_id"]:
+            raise TransitionError("transition journal does not match stage claim")
+        return journal, persisted_event
+
     async def _finish_materialization(
         self,
         root: Path,
@@ -355,7 +411,7 @@ class TransitionController:
     ) -> dict[str, Any]:
         from .server import _append_project_event, _canonical_project_event_exists
 
-        self._validate_journal_integrity(journal)
+        journal, persisted_event = await self._authoritative_journal_context(root, journal)
         transition_id = str(journal["transition_id"])
         run_id = str(journal["run_id"])
         claim_id = str(journal["claim_id"])
@@ -363,15 +419,7 @@ class TransitionController:
         to_stage = str(journal["to_stage"])
         target_state = str(journal["target_state"])
         event_id = str(journal["event_id"])
-        persisted_event = await self.store.get_event_by_id(event_id)
-        if (
-            persisted_event is None
-            or persisted_event.session_id != run_id
-            or persisted_event.stage.value != target_state
-            or persisted_event.data.get("transition_id") != transition_id
-            or persisted_event.data.get("from_stage") != from_stage
-            or persisted_event.data.get("to_stage") != to_stage
-        ):
+        if persisted_event is None:
             raise TransitionError("transition journal integrity check failed")
         event_payload = dict(persisted_event.data)
         event_type = persisted_event.event_type.value
@@ -506,6 +554,7 @@ class TransitionController:
                     ("claim_id", claim_id),
                     ("from_stage", from_stage),
                     ("to_stage", to_stage),
+                    ("marker_revision", expected_revision + 1),
                 )
             ):
                 raise TransitionError("transition id conflicts with a different transition")
@@ -520,7 +569,7 @@ class TransitionController:
 
         journal = self._read_json(self._journal_path(root))
         if journal:
-            self._validate_journal_integrity(journal)
+            journal, persisted_event = await self._authoritative_journal_context(root, journal)
             if journal.get("transition_id") != transition_id:
                 raise TransitionError("another transition journal is in progress")
             if any(
@@ -538,7 +587,7 @@ class TransitionController:
                 return await self._finish_materialization(root, journal)
             transition_state = await self.store.get_session_transition_state(run_id)
             if transition_state == (str(journal["target_state"]), transition_id):
-                event = await self.store.get_event_by_id(str(journal["event_id"]))
+                event = persisted_event or await self.store.get_event_by_id(str(journal["event_id"]))
                 if (
                     event is None
                     or event.session_id != run_id
@@ -588,7 +637,16 @@ class TransitionController:
                 )
 
         event_payload = sanitize_event_data(dict(data or {}))
-        event_payload.update({"transition_id": transition_id, "from_stage": from_stage, "to_stage": to_stage})
+        event_payload.update(
+            {
+                "transition_id": transition_id,
+                "from_stage": from_stage,
+                "to_stage": to_stage,
+                "claim_id": claim_id,
+                "expected_revision": expected_revision,
+                "host_name": host_name,
+            }
+        )
         event_id = f"event-{transition_id}"
         target_state = "complete" if terminal_completion else state_stage_for(to_stage)
         journal = {

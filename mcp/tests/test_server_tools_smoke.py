@@ -177,9 +177,17 @@ def test_terminal_transition_wrapper_retry_returns_identical_receipt(
 
     first = json.loads(_run(commit_stage_transition(*args)))
     second = json.loads(_run(commit_stage_transition(*args)))
+    other_project = tmp_path / "other-terminal-wrapper"
+    (other_project / ".samvil").mkdir(parents=True)
+    (other_project / ".samvil" / "retro-results.md").write_text("complete\n", encoding="utf-8")
+    cross_project = json.loads(_run(commit_stage_transition(
+        str(other_project), *args[1:]
+    )))
 
     assert first["status"] == "committed"
     assert second == first
+    assert cross_project["status"] == "blocked"
+    assert "project root" in cross_project["error"]
 
 
 def test_qa_recovery_transition_requires_current_pass_gate_receipt(
@@ -222,11 +230,79 @@ def test_qa_recovery_transition_requires_current_pass_gate_receipt(
     gate = json.loads(_run(gate_check(
         "any_to_retro", "minimal", '{"always_run":true}', str(project)
     )))
+    (project / ".samvil" / "qa-results.json").write_text(
+        json.dumps({
+            "synthesis": {"verdict": "FAIL"},
+            "convergence": {"verdict": "blocked"},
+            "rerun": 2,
+        }),
+        encoding="utf-8",
+    )
+    latest_gate = json.loads(_run(gate_check(
+        "any_to_retro", "minimal", '{"always_run":true}', str(project)
+    )))
     committed = json.loads(_run(commit_stage_transition(*args)))
 
     assert blocked["status"] == "blocked"
     assert gate["verdict"] == "pass"
+    assert latest_gate["verdict"] == "pass"
     assert committed["status"] == "committed"
+
+
+def test_build_transition_requires_mechanical_gate_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "build-gate-required"
+    (project / ".samvil").mkdir(parents=True)
+    (project / ".samvil" / "build.log").write_text("stub\n", encoding="utf-8")
+    store = EventStore(str(tmp_path / "build-gate.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("display-name", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-build", 0)))
+
+    gate = json.loads(_run(gate_check(
+        "build_to_qa", "minimal", '{"implementation_rate":1.0}', str(project)
+    )))
+    result = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-build", 0, claim["claim_id"], "PASS",
+        '{"artifact":".samvil/build.log:1"}', "", "build-without-proof",
+    )))
+
+    assert gate["verdict"] == "block"
+    assert result["status"] == "blocked"
+    assert "mechanical build_to_qa" in result["reason"]
+
+
+def test_qa_to_evolve_gate_ignores_conflicting_reported_pass(tmp_path: Path) -> None:
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / ".samvil" / "qa-results.json").write_text(
+        json.dumps({
+            "synthesis": {
+                "verdict": "FAIL",
+                "pass1": {"status": "FAIL"},
+                "pass2": {"counts": {"FAIL": 1, "UNIMPLEMENTED": 1}},
+                "pass3": {"verdict": "FAIL"},
+            },
+            "convergence": {"verdict": "blocked"},
+        }),
+        encoding="utf-8",
+    )
+
+    gate = json.loads(_run(gate_check(
+        "qa_to_evolve",
+        "minimal",
+        '{"three_pass_pass":true,"zero_stubs":true}',
+        str(tmp_path),
+    )))
+
+    assert gate["verdict"] == "block"
+    assert gate["mechanical_metrics"]["three_pass_pass"] is False
+    assert gate["metrics"]["zero_stubs"] is False
 
 
 # ── Tier phases (Polish #5) ────────────────────────────────────

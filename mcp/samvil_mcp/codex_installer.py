@@ -303,7 +303,7 @@ def validate_cli_environment(
     if codex_binary:
         result = command_runner(
             (str(codex_binary), "plugin", "--help"),
-            {"CODEX_HOME": str(root)},
+            {"CODEX_HOME": str(root), "HOME": str(root.parent)},
         )
         output = f"{getattr(result, 'stdout', '')}\n{getattr(result, 'stderr', '')}".lower()
         plugin_commands_supported = (
@@ -371,7 +371,19 @@ def _configured_marketplace_root(config_path: Path, name: str) -> Path | None:
 
 
 def _codex_marketplace_wrapper(root: Path, canonical_root: Path) -> tuple[Path, bool]:
-    wrapper = root / "marketplaces" / "samvil-codex"
+    marketplaces_root = root / "marketplaces"
+    resolved_marketplaces = marketplaces_root.resolve(strict=False)
+    if (
+        marketplaces_root.is_symlink()
+        or (
+            resolved_marketplaces != root
+            and root not in resolved_marketplaces.parents
+        )
+    ):
+        raise InstallBlocked(
+            f"Codex marketplaces path escapes isolated profile: {marketplaces_root}"
+        )
+    wrapper = marketplaces_root / "samvil-codex"
     manifest = wrapper / ".claude-plugin" / "marketplace.json"
     plugin_link = wrapper / "samvil"
     payload = {
@@ -453,7 +465,7 @@ def execute_isolated_install(
     remove_marketplace = ("codex", "plugin", "marketplace", "remove", "samvil-codex")
     add_marketplace = ("codex", "plugin", "marketplace", "add", str(wrapper))
     add_plugin = ("codex", "plugin", "add", "samvil@samvil-codex")
-    command_env = {"CODEX_HOME": str(root)}
+    command_env = {"CODEX_HOME": str(root), "HOME": str(root.parent)}
     planned_commands = []
     if legacy_samvil_root is not None:
         planned_commands.append(remove_legacy_marketplace)

@@ -328,6 +328,56 @@ async def test_db_committed_recovery_uses_persisted_event_not_rehashed_journal(
 
 
 @pytest.mark.asyncio
+async def test_db_committed_recovery_restores_claim_revision_and_host_from_event(
+    controller, tmp_path, monkeypatch
+):
+    import samvil_mcp.server as server
+
+    project = tmp_path / "db-authoritative-metadata"
+    project.mkdir()
+    session = await controller.store.create_session("db-metadata", "standard", str(project))
+    claim = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+    original_append = server._append_project_event
+    monkeypatch.setattr(
+        server,
+        "_append_project_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("stop")),
+    )
+    with pytest.raises(OSError, match="stop"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="db-metadata-transition",
+        )
+
+    journal_path = project / ".samvil" / "transition-journal.json"
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal.update({
+        "claim_id": "forged-claim-id",
+        "expected_revision": 41,
+        "host_name": "forged-host",
+    })
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+
+    envelope = await controller.get_stage_envelope(str(project), "codex_cli")
+    monkeypatch.setattr(server, "_append_project_event", original_append)
+    receipt = await controller.commit_stage_transition(
+        str(project), session.id, envelope["claim_id"],
+        envelope["stage"], envelope["requested_next_skill"],
+        envelope["marker_revision"], transition_id=envelope["transition_id"],
+    )
+    recovered_claim = await controller.store.get_stage_claim(
+        session.id, "samvil-interview", 0
+    )
+
+    assert envelope["claim_id"] == claim["claim_id"]
+    assert envelope["marker_revision"] == 0
+    assert receipt["claim_id"] == claim["claim_id"]
+    assert receipt["marker_revision"] == 1
+    assert recovered_claim["status"] == "completed"
+
+
+@pytest.mark.asyncio
 async def test_existing_receipt_retry_finishes_claim_completion(controller, tmp_path, monkeypatch):
     project = tmp_path / "receipt-claim-recovery"
     project.mkdir()

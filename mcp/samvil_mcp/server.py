@@ -1269,6 +1269,13 @@ async def commit_stage_transition(
                 owner, existing = existing_record
                 if owner != run_id:
                     raise ValueError("transition receipt belongs to another run")
+                root = Path(project_root).expanduser().resolve(strict=False)
+                session = await controller.store.get_session(run_id)
+                if (
+                    session is None
+                    or Path(session.project_root).expanduser().resolve(strict=False) != root
+                ):
+                    raise ValueError("run_id does not own project root")
                 if any(
                     existing.get(key) != expected
                     for key, expected in (
@@ -1278,7 +1285,34 @@ async def commit_stage_transition(
                     )
                 ):
                     raise ValueError("transition id conflicts with a different transition")
-                return json.dumps(existing, ensure_ascii=False)
+                to_stage = str(existing.get("to_stage") or "")
+                if requested_next_skill and requested_next_skill != to_stage:
+                    raise ValueError("transition id conflicts with a different route")
+                event = await controller.store.get_event_by_id(str(existing.get("event_id") or ""))
+                expected_data = sanitize_event_data(
+                    {
+                        "verdict": verdict,
+                        "evidence": evidence,
+                        "user_choice": bool(requested_next_skill),
+                    }
+                )
+                if (
+                    event is None
+                    or event.session_id != run_id
+                    or any(event.data.get(key) != value for key, value in expected_data.items())
+                ):
+                    raise ValueError("transition id conflicts with different commit inputs")
+                replayed = await controller.commit_stage_transition(
+                    project_root,
+                    run_id,
+                    claim_id,
+                    stage,
+                    to_stage,
+                    expected_revision,
+                    data=expected_data,
+                    transition_id=transition_id,
+                )
+                return json.dumps(replayed, ensure_ascii=False)
         if str(verdict or "").upper() in {"PASS", "PASSED", "OK", "COMPLETE"}:
             from .evidence_validator import parse_evidence, validate_evidence_list
 
@@ -1350,6 +1384,40 @@ async def commit_stage_transition(
                 },
                 ensure_ascii=False,
             )
+        if stage == "samvil-build":
+            root = Path(project_root).expanduser().resolve(strict=False)
+            build_path = root / ".samvil" / "build.log"
+            build_hash = hashlib.sha256(build_path.read_bytes()).hexdigest() if build_path.is_file() else ""
+            receipt = controller._read_json(
+                root / ".samvil" / "gate-receipts" / "build_to_qa.json"
+            )
+            gate_events = await controller.store.get_events(run_id)
+            db_receipt = next(
+                (
+                    event.data
+                    for event in gate_events
+                    if event.event_type == EventType.DECISION
+                    and event.stage == Stage.BUILD
+                    and event.data.get("kind") == "gate_receipt"
+                    and event.data.get("gate") == "build_to_qa"
+                ),
+                {},
+            )
+            if (
+                receipt.get("verdict") != "pass"
+                or receipt.get("authority_path") != ".samvil/build.log"
+                or receipt.get("authority_sha256") != build_hash
+                or db_receipt.get("verdict") != "pass"
+                or db_receipt.get("authority_sha256") != build_hash
+            ):
+                return json.dumps(
+                    {
+                        "status": "blocked",
+                        "stage": stage,
+                        "reason": "persisted mechanical build_to_qa PASS receipt is required",
+                    },
+                    ensure_ascii=False,
+                )
         if stage == "samvil-qa":
             gate_for_route = {
                 "samvil-evolve": "qa_to_evolve",
@@ -1369,7 +1437,7 @@ async def commit_stage_transition(
             db_receipt = next(
                 (
                     event.data
-                    for event in reversed(gate_events)
+                    for event in gate_events
                     if event.event_type == EventType.DECISION
                     and event.stage == Stage.QA
                     and event.data.get("kind") == "gate_receipt"
@@ -3812,6 +3880,33 @@ def _mechanical_gate_evidence(
             },
             evidence,
         )
+    if gate_name == "qa_to_evolve":
+        root = Path(project_root).expanduser().resolve(strict=False)
+        qa_path = root / ".samvil" / "qa-results.json"
+        qa = json.loads(qa_path.read_text(encoding="utf-8")) if qa_path.is_file() else {}
+        synthesis = qa.get("synthesis") if isinstance(qa, dict) else {}
+        if not isinstance(synthesis, dict):
+            synthesis = {}
+        pass1_status = str((synthesis.get("pass1") or {}).get("status") or "").upper()
+        pass3_verdict = str((synthesis.get("pass3") or {}).get("verdict") or "").upper()
+        counts = (synthesis.get("pass2") or {}).get("counts") or {}
+        fail_count = int(counts.get("FAIL", 0) or 0)
+        unimplemented_count = int(counts.get("UNIMPLEMENTED", 0) or 0)
+        three_pass_pass = (
+            str(synthesis.get("verdict") or "").upper() == "PASS"
+            and pass1_status == "PASS"
+            and pass3_verdict == "PASS"
+            and fail_count == 0
+            and unimplemented_count == 0
+        )
+        return (
+            {
+                "three_pass_pass": three_pass_pass,
+                "zero_stubs": unimplemented_count == 0,
+            },
+            {},
+            {"qa_results": str(qa_path), "synthesis": synthesis},
+        )
     raise ValueError(
         f"evidence_mode='mechanical' is unsupported for gate {gate_name!r}"
     )
@@ -3846,6 +3941,8 @@ async def gate_check(
         reported_metrics = json.loads(metrics_json or "{}")
         if not isinstance(reported_metrics, dict):
             raise ValueError("metrics_json must decode to an object")
+        if gate_name in {"build_to_qa", "qa_to_evolve", "qa_to_deploy"}:
+            evidence_mode = "mechanical"
         metrics = dict(reported_metrics)
         cfg_path = _config_path_for(project_root)
         cfg = _load_gate_config(cfg_path) if cfg_path else _load_gate_config(None)
@@ -3906,6 +4003,13 @@ async def gate_check(
                 )
         root = Path(project_root).expanduser().resolve(strict=False)
         qa_path = root / ".samvil" / "qa-results.json"
+        authority_paths = {
+            "build_to_qa": root / ".samvil" / "build.log",
+            "qa_to_evolve": qa_path,
+            "qa_to_deploy": qa_path,
+            "any_to_retro": qa_path,
+        }
+        authority_path = authority_paths.get(gate_name)
         receipt = {
             "kind": "gate_receipt",
             "gate": gate_name,
@@ -3913,6 +4017,12 @@ async def gate_check(
             "samvil_tier": samvil_tier,
             "qa_results_sha256": hashlib.sha256(qa_path.read_bytes()).hexdigest()
             if qa_path.is_file()
+            else "",
+            "authority_path": str(authority_path.relative_to(root))
+            if authority_path is not None
+            else "",
+            "authority_sha256": hashlib.sha256(authority_path.read_bytes()).hexdigest()
+            if authority_path is not None and authority_path.is_file()
             else "",
             "result_sha256": hashlib.sha256(
                 json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")

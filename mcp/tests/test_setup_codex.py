@@ -235,11 +235,17 @@ def test_isolated_executor_backups_config_and_preserves_personal_skills(tmp_path
                 "codex", "plugin", "marketplace", "add",
                 str((codex_home / "marketplaces" / "samvil-codex").resolve()),
             ),
-            {"CODEX_HOME": str(codex_home.resolve())},
+            {
+                "CODEX_HOME": str(codex_home.resolve()),
+                "HOME": str(codex_home.resolve().parent),
+            },
         ),
         (
             ("codex", "plugin", "add", "samvil@samvil-codex"),
-            {"CODEX_HOME": str(codex_home.resolve())},
+            {
+                "CODEX_HOME": str(codex_home.resolve()),
+                "HOME": str(codex_home.resolve().parent),
+            },
         ),
     ]
     assert receipt.to_dict()["personal_skills_unchanged"] is True
@@ -368,6 +374,27 @@ def test_isolated_executor_blocks_ambiguous_codex_wrapper_before_commands(tmp_pa
 
     assert commands == []
     assert (wrapper / "user-file.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+def test_isolated_executor_blocks_marketplaces_parent_symlink(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    outside = tmp_path / "user-owned-marketplaces"
+    repo.mkdir()
+    codex_home.mkdir(parents=True)
+    outside.mkdir()
+    (codex_home / "marketplaces").symlink_to(outside, target_is_directory=True)
+    commands = []
+
+    with pytest.raises(InstallBlocked, match="marketplaces path escapes isolated profile"):
+        execute_isolated_install(
+            CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+            codex_home=codex_home,
+            command_runner=lambda command, env: commands.append((command, env)),
+        )
+
+    assert commands == []
+    assert list(outside.iterdir()) == []
 
 
 def test_isolated_executor_refuses_blockers_and_unsafe_root(tmp_path: Path) -> None:
