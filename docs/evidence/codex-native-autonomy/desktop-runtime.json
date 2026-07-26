@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "verification_level": "manual_desktop",
+  "host": "codex_desktop",
+  "observed_at": "2026-07-26T15:53:23Z",
+  "repository_head_at_observation": "b2709e0e096fa8a9f86591d250dc6b3c9289b668",
+  "repository_tree_at_observation": "57c565c1345752414e3e40da880b18132f489a9c",
+  "runtime_code_provenance": "unbound_stale_process",
+  "display_name": "codex-desktop-display-name-final-idempotency",
+  "canonical_project_root": "/private/tmp/samvil-codex-desktop-mcp-final-7w1pNb",
+  "session_id": "397dfdd3e6a4",
+  "stage": "samvil-interview",
+  "claim_id": "claim-0453ff8ef900",
+  "transition_id": "codex-desktop-live-retry-b2709e0-397dfdd3e6a4",
+  "first_receipt": {
+    "transition_id": "codex-desktop-live-retry-b2709e0-397dfdd3e6a4",
+    "status": "committed",
+    "event_id": "event-codex-desktop-live-retry-b2709e0-397dfdd3e6a4",
+    "claim_id": "claim-0453ff8ef900",
+    "from_stage": "samvil-interview",
+    "to_stage": "samvil-seed",
+    "marker_revision": 1
+  },
+  "second_receipt": {
+    "transition_id": "codex-desktop-live-retry-b2709e0-397dfdd3e6a4",
+    "status": "committed",
+    "event_id": "event-codex-desktop-live-retry-b2709e0-397dfdd3e6a4",
+    "claim_id": "claim-0453ff8ef900",
+    "from_stage": "samvil-interview",
+    "to_stage": "samvil-seed",
+    "marker_revision": 1
+  },
+  "receipts_identical": true,
+  "database_event_count": 1,
+  "project_jsonl_event_count": 1,
+  "project_claim_count": 1,
+  "events_jsonl_sha256": "c3efca5078e3475c59c701a6ae11422db2bfc701f3583953fd4ebae14d4435ec",
+  "scope_pass": true,
+  "native_parity_pass": false,
+  "codex_home_modified": false,
+  "blockers": [
+    "The Desktop MCP process returned a relative instruction_path although repository HEAD requires an absolute path, so the running process cannot be bound to the recorded HEAD/tree.",
+    "Restart or reopen Codex Desktop and repeat the smoke before claiming current-HEAD runtime parity.",
+    "Codex CLI OAuth remains blocked_auth in the separate CLI receipt."
+  ]
+}
