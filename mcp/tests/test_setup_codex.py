@@ -21,6 +21,7 @@ from samvil_mcp.codex_installer import (
     inventory_personal_skills,
     parse_capability_probe,
     validate_marketplace_root,
+    validate_activation_readiness,
 )
 
 
@@ -37,6 +38,22 @@ def test_capability_probe_uses_feature_outputs_not_only_version(tmp_path: Path) 
     assert probe.marketplaces == ({"name": "samvil", "root": str(tmp_path)},)
     assert probe.plugins == ({"name": "samvil", "enabled": True},)
     assert probe.blockers == ()
+
+
+def test_activation_readiness_requires_complete_public_surface() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    readiness = validate_activation_readiness(repo)
+    assert readiness["ready"] is True
+    assert readiness["public_skills"] == ["resume", "run", "status"]
+
+
+def test_activation_readiness_blocks_incomplete_copy(tmp_path: Path) -> None:
+    (tmp_path / ".codex-plugin").mkdir()
+    (tmp_path / ".codex-plugin" / "plugin.json").write_text("{}")
+    (tmp_path / ".codex-mcp.json").write_text("{}")
+    result = validate_activation_readiness(tmp_path)
+    assert result["ready"] is False
+    assert result["blockers"]
 
 
 def test_marketplace_root_must_not_claim_user_owned_codex_paths(tmp_path: Path) -> None:

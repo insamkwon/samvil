@@ -15,11 +15,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SAMVIL_ROOT="$(dirname "$SCRIPT_DIR")"
 MCP_DIR="$SAMVIL_ROOT/mcp"
 HOST="${1:-codex}"
+MODE="${2:-install}"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " SAMVIL 자동 설치 (v$(grep -o '"version": "[^"]*"' "$SAMVIL_ROOT/.claude-plugin/plugin.json" | grep -o '[0-9][^"]*'))"
 echo " 대상 호스트: $HOST"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+if [[ "$HOST" == "codex" && "$MODE" == "--check" ]]; then
+  echo ""
+  echo "Codex activation readiness (read-only)..."
+  PYTHONPATH="$SAMVIL_ROOT/mcp" python3 - "$SAMVIL_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+from samvil_mcp.codex_installer import validate_activation_readiness
+
+result = validate_activation_readiness(Path(sys.argv[1]))
+print(json.dumps(result, ensure_ascii=False, indent=2))
+if not result["ready"]:
+    raise SystemExit(1)
+PY
+  echo "✓ Codex activation readiness passed; no profile mutation performed."
+  exit 0
+fi
 
 # ── Step 1. uv ──────────────────────────────────────────────────────────────
 echo ""

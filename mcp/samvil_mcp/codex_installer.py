@@ -236,6 +236,38 @@ class InstallBlocked(RuntimeError):
     """Raised when a plan contains an ambiguous or unsafe mutation."""
 
 
+def validate_activation_readiness(repo_root: Path) -> dict[str, Any]:
+    """Prove the repository is complete enough for actual-profile activation."""
+    root = Path(repo_root).expanduser().resolve(strict=False)
+    blockers: list[str] = []
+    manifest = root / ".codex-plugin" / "plugin.json"
+    launcher = root / ".codex-mcp.json"
+    skills_root = root / "codex" / "skills"
+    if not manifest.is_file():
+        blockers.append("Codex plugin manifest is missing")
+    if not launcher.is_file():
+        blockers.append("relative Codex MCP launcher is missing")
+    try:
+        manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+        launcher_data = json.loads(launcher.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        manifest_data = {}
+        launcher_data = {}
+        blockers.append("Codex manifest or launcher is invalid JSON")
+    public_skills = sorted(path.name for path in skills_root.iterdir() if path.is_dir()) if skills_root.is_dir() else []
+    if public_skills != ["resume", "run", "status"]:
+        blockers.append("Codex public skill surface must be exactly run/resume/status")
+    for name in ("run", "resume", "status"):
+        if not (skills_root / name / "SKILL.md").is_file():
+            blockers.append(f"missing public Codex skill: {name}")
+    if manifest_data.get("skills") != "./codex/skills/" or manifest_data.get("mcpServers") != "./.codex-mcp.json":
+        blockers.append("Codex manifest does not use relative public surfaces")
+    server = (launcher_data.get("mcpServers") or {}).get("samvil-mcp")
+    if not isinstance(server, dict) or server.get("args") != ["--from", "./mcp", "samvil-mcp"]:
+        blockers.append("Codex MCP launcher is not the relative package launcher")
+    return {"ready": not blockers, "blockers": blockers, "public_skills": public_skills, "manifest": str(manifest), "launcher": str(launcher)}
+
+
 @dataclass(frozen=True)
 class InstallReceipt:
     mode: str
