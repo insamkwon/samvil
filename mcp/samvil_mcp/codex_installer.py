@@ -15,13 +15,13 @@ import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .ssot_io import atomic_write_text
-
 
 _FRONTMATTER_NAME = re.compile(r"^name:\s*([^\n#]+?)\s*$", re.MULTILINE)
 
@@ -354,6 +354,54 @@ def _atomic_copy(source: Path, destination: Path) -> None:
     Path(temporary.name).replace(destination)
 
 
+def _configured_marketplace_root(config_path: Path, name: str) -> Path | None:
+    if not config_path.exists():
+        return None
+    try:
+        parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise InstallBlocked(f"invalid Codex config TOML: {config_path}") from exc
+    marketplaces = parsed.get("marketplaces")
+    if not isinstance(marketplaces, dict):
+        return None
+    entry = marketplaces.get(name)
+    if not isinstance(entry, dict) or not entry.get("source"):
+        return None
+    return Path(str(entry["source"])).expanduser().resolve(strict=False)
+
+
+def _codex_marketplace_wrapper(root: Path, canonical_root: Path) -> tuple[Path, bool]:
+    wrapper = root / "marketplaces" / "samvil-codex"
+    manifest = wrapper / ".claude-plugin" / "marketplace.json"
+    plugin_link = wrapper / "samvil"
+    payload = {
+        "name": "samvil-codex",
+        "owner": {"name": "insam"},
+        "plugins": [
+            {
+                "name": "samvil",
+                "source": "./samvil",
+                "description": "Codex-first trustworthy app-building harness.",
+                "category": "development",
+            }
+        ],
+    }
+    expected = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+    if wrapper.exists():
+        if (
+            not manifest.is_file()
+            or manifest.read_text(encoding="utf-8") != expected
+            or not plugin_link.is_symlink()
+            or plugin_link.resolve(strict=False) != canonical_root
+        ):
+            raise InstallBlocked(f"ambiguous Codex marketplace wrapper: {wrapper}")
+        return wrapper, False
+    manifest.parent.mkdir(parents=True, exist_ok=False)
+    atomic_write_text(manifest, expected)
+    plugin_link.symlink_to(canonical_root, target_is_directory=True)
+    return wrapper, True
+
+
 def execute_isolated_install(
     plan: CodexInstallPlan,
     *,
@@ -384,76 +432,48 @@ def execute_isolated_install(
     protected_before = tuple(entry for entry in before if entry.path not in migrated_paths)
     backup_paths: list[Path] = []
     commands: list[tuple[str, ...]] = []
-    registry = root / "marketplaces.json"
-    registry_existed = registry.exists()
-    try:
-        content = json.loads(registry.read_text(encoding="utf-8")) if registry_existed else {}
-    except (OSError, json.JSONDecodeError) as exc:
-        raise InstallBlocked(f"invalid Codex registry JSON: {registry}") from exc
-    if not isinstance(content, dict):
-        raise InstallBlocked(f"Codex registry JSON must be an object: {registry}")
-    registry_backup: Path | None = None
-    if registry_existed:
+    config = root / "config.toml"
+    if config.is_symlink():
+        raise InstallBlocked(f"Codex config symlink is not safe to mutate: {config}")
+    config_existed = config.exists()
+    legacy_samvil_root = _configured_marketplace_root(config, "samvil")
+    current_samvil_root = _configured_marketplace_root(config, "samvil-codex")
+    wrapper_path = root / "marketplaces" / "samvil-codex"
+    if wrapper_path.exists():
+        _codex_marketplace_wrapper(root, plan.canonical_root)
+    config_backup: Path | None = None
+    if config_existed:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        backup = root / "backups" / f"marketplaces-{stamp}.json"
-        _atomic_copy(registry, backup)
+        backup = root / "backups" / f"config-{stamp}.toml"
+        _atomic_copy(config, backup)
         backup_paths.append(backup)
-        registry_backup = backup
-
-    existing_marketplaces = content.get("marketplaces")
-    current_samvil = next(
-        (
-            item
-            for item in existing_marketplaces
-            if isinstance(item, dict) and item.get("name") == "samvil"
-        ),
-        None,
-    ) if isinstance(existing_marketplaces, list) else None
-    remove_marketplace = ("codex", "plugin", "marketplace", "remove", "samvil")
-    add_marketplace = ("codex", "plugin", "marketplace", "add", str(plan.canonical_root))
-    add_plugin = ("codex", "plugin", "add", "samvil@samvil")
+        config_backup = backup
+    wrapper, wrapper_created = _codex_marketplace_wrapper(root, plan.canonical_root)
+    remove_legacy_marketplace = ("codex", "plugin", "marketplace", "remove", "samvil")
+    remove_marketplace = ("codex", "plugin", "marketplace", "remove", "samvil-codex")
+    add_marketplace = ("codex", "plugin", "marketplace", "add", str(wrapper))
+    add_plugin = ("codex", "plugin", "add", "samvil@samvil-codex")
     command_env = {"CODEX_HOME": str(root)}
     planned_commands = []
-    if current_samvil and Path(str(current_samvil.get("root") or "")).expanduser().resolve(strict=False) != plan.canonical_root:
+    if legacy_samvil_root is not None:
+        planned_commands.append(remove_legacy_marketplace)
+    if current_samvil_root is not None and current_samvil_root != wrapper:
         planned_commands.append(remove_marketplace)
-    planned_commands.extend((add_marketplace, add_plugin))
+    if current_samvil_root != wrapper:
+        planned_commands.append(add_marketplace)
+    planned_commands.append(add_plugin)
     try:
         for command in planned_commands:
             command_runner(command, command_env)
             commands.append(command)
-        registry.parent.mkdir(parents=True, exist_ok=True)
-        content = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else content
-        if not isinstance(content, dict):
-            raise InstallBlocked(f"Codex registry JSON must be an object: {registry}")
     except Exception as exc:
-        if registry_backup is not None:
-            _atomic_copy(registry_backup, registry)
-        elif not registry_existed:
-            registry.unlink(missing_ok=True)
-        raise InstallBlocked(f"Codex activation failed; registry restored: {exc}") from exc
-
-    def upsert_named(items: Any, replacement: dict[str, Any]) -> list[dict[str, Any]]:
-        existing = [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
-        kept = [item for item in existing if item.get("name") != replacement["name"]]
-        kept.append(replacement)
-        return kept
-
-    content["marketplaces"] = upsert_named(
-        content.get("marketplaces"),
-        {"name": "samvil", "root": str(plan.canonical_root)},
-    )
-    content["plugins"] = upsert_named(
-        content.get("plugins"),
-        {"name": "samvil", "enabled": True},
-    )
-    try:
-        atomic_write_text(registry, json.dumps(content, indent=2, sort_keys=True) + "\n")
-    except Exception as exc:
-        if registry_backup is not None:
-            _atomic_copy(registry_backup, registry)
-        elif not registry_existed:
-            registry.unlink(missing_ok=True)
-        raise InstallBlocked(f"Codex activation failed; registry restored: {exc}") from exc
+        if config_backup is not None:
+            _atomic_copy(config_backup, config)
+        elif not config_existed:
+            config.unlink(missing_ok=True)
+        if wrapper_created:
+            shutil.rmtree(wrapper)
+        raise InstallBlocked(f"Codex activation failed; config restored: {exc}") from exc
 
     if migrate:
         for action in plan.actions:

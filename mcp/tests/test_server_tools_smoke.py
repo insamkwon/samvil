@@ -39,6 +39,7 @@ from samvil_mcp.server import (
     get_stage_envelope,
     begin_stage,
     commit_stage_transition,
+    gate_check,
 )
 from samvil_mcp.event_store import EventStore
 
@@ -128,6 +129,104 @@ def test_commit_stage_transition_wrapper_rejects_failed_verdict_and_sanitizes_ev
     serialized = str(_run(store.get_events(session.id))[0].data)
     assert "person@example.com" not in serialized
     assert secret not in serialized
+
+
+def test_commit_stage_transition_rejects_evidence_outside_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+
+    project = tmp_path / "contained-evidence"
+    project.mkdir()
+    (tmp_path / "interview-summary.md").write_text("outside\n", encoding="utf-8")
+    store = EventStore(str(tmp_path / "contained.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("display-name", "minimal", str(project)))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-interview", 0)))
+
+    result = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-interview", 0,
+        claim["claim_id"], "PASS", '{"artifact":"../interview-summary.md:1"}',
+        "", "outside-evidence-transition",
+    )))
+
+    assert result["status"] == "blocked"
+    assert result["evidence_validation"]["all_valid"] is False
+
+
+def test_terminal_transition_wrapper_retry_returns_identical_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "terminal-wrapper"
+    (project / ".samvil").mkdir(parents=True)
+    (project / ".samvil" / "retro-results.md").write_text("complete\n", encoding="utf-8")
+    store = EventStore(str(tmp_path / "terminal.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("display-name", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.RETRO))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-retro", 0)))
+    args = (
+        str(project), session.id, "samvil-retro", 0, claim["claim_id"],
+        "PASS", '{"artifact":".samvil/retro-results.md:1"}', "", "terminal-wrapper-id",
+    )
+
+    first = json.loads(_run(commit_stage_transition(*args)))
+    second = json.loads(_run(commit_stage_transition(*args)))
+
+    assert first["status"] == "committed"
+    assert second == first
+
+
+def test_qa_recovery_transition_requires_current_pass_gate_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "qa-recovery-receipt"
+    (project / ".samvil").mkdir(parents=True)
+    (project / ".samvil" / "qa-results.json").write_text(
+        json.dumps({"synthesis": {"verdict": "FAIL"}, "convergence": {"verdict": "blocked"}}),
+        encoding="utf-8",
+    )
+    store = EventStore(str(tmp_path / "qa-recovery.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("display-name", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.QA))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-qa", 0)))
+    import hashlib
+    qa_hash = hashlib.sha256((project / ".samvil" / "qa-results.json").read_bytes()).hexdigest()
+    fake_receipt = project / ".samvil" / "gate-receipts" / "any_to_retro.json"
+    fake_receipt.parent.mkdir(parents=True)
+    fake_receipt.write_text(
+        json.dumps({
+            "kind": "gate_receipt",
+            "gate": "any_to_retro",
+            "verdict": "pass",
+            "qa_results_sha256": qa_hash,
+        }),
+        encoding="utf-8",
+    )
+    args = (
+        str(project), session.id, "samvil-qa", 0, claim["claim_id"], "FAIL",
+        '{"artifact":".samvil/qa-results.json:1"}', "samvil-retro", "qa-recovery-transition",
+    )
+
+    blocked = json.loads(_run(commit_stage_transition(*args)))
+    gate = json.loads(_run(gate_check(
+        "any_to_retro", "minimal", '{"always_run":true}', str(project)
+    )))
+    committed = json.loads(_run(commit_stage_transition(*args)))
+
+    assert blocked["status"] == "blocked"
+    assert gate["verdict"] == "pass"
+    assert committed["status"] == "committed"
 
 
 # ── Tier phases (Polish #5) ────────────────────────────────────

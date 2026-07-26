@@ -23,7 +23,9 @@ python3 scripts/check-host-parity.py --strict
 bash scripts/setup-codex.sh codex --install
 ```
 
-The native path registers the repository marketplace and `samvil@samvil` plugin.
+The native path creates an isolated `samvil-codex` marketplace wrapper and
+registers the `samvil@samvil-codex` plugin. The distinct marketplace name avoids
+colliding with an existing Claude marketplace named `samvil`.
 It does not install a global `AGENTS.md` or append an absolute MCP block. The
 installer passes an explicit `CODEX_HOME` to every child command, preserves
 unrelated marketplace/plugin entries, backs up the registry, and verifies that

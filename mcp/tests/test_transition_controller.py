@@ -281,6 +281,53 @@ async def test_recovery_rejects_tampered_journal_payload(controller, tmp_path, m
 
 
 @pytest.mark.asyncio
+async def test_db_committed_recovery_uses_persisted_event_not_rehashed_journal(
+    controller, tmp_path, monkeypatch
+):
+    import hashlib
+    import samvil_mcp.server as server
+
+    project = tmp_path / "db-authoritative-journal"
+    project.mkdir()
+    session = await controller.store.create_session("db-authoritative", "standard", str(project))
+    claim = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+    original_append = server._append_project_event
+    monkeypatch.setattr(
+        server,
+        "_append_project_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("stop")),
+    )
+    with pytest.raises(OSError, match="stop"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            data={"evidence": {"artifact": "interview-summary.md:1"}},
+            transition_id="db-authoritative-transition",
+        )
+
+    journal_path = project / ".samvil" / "transition-journal.json"
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal["event_payload"]["evidence"] = {"artifact": "forged.txt:1"}
+    journal["event_type"] = "qa_pass"
+    journal["event_payload_hash"] = hashlib.sha256(
+        json.dumps(journal["event_payload"], sort_keys=True).encode()
+    ).hexdigest()
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    monkeypatch.setattr(server, "_append_project_event", original_append)
+
+    receipt = await controller.commit_stage_transition(
+        str(project), session.id, claim["claim_id"],
+        "samvil-interview", "samvil-seed", 0,
+        transition_id="db-authoritative-transition",
+    )
+    canonical = json.loads((project / ".samvil" / "events.jsonl").read_text(encoding="utf-8"))
+
+    assert receipt["status"] == "committed"
+    assert canonical["event_type"] == "stage_end"
+    assert canonical["data"]["evidence"]["artifact"] == "interview-summary.md:1"
+
+
+@pytest.mark.asyncio
 async def test_existing_receipt_retry_finishes_claim_completion(controller, tmp_path, monkeypatch):
     project = tmp_path / "receipt-claim-recovery"
     project.mkdir()

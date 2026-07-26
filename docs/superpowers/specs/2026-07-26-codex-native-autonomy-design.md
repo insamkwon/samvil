@@ -167,7 +167,7 @@ transition verdict만 신뢰한다.
 
 ```text
 Codex plugin registry
-  └─ samvil@samvil
+  └─ samvil@samvil-codex
       ├─ samvil:run
       ├─ samvil:resume
       ├─ samvil:status
@@ -277,8 +277,8 @@ Codex hook이 설치되지 않아도 stage correctness가 달라지면 안 된�
 1. SAMVIL install/update/uninstall 전후 개인 skill inventory가 동일해야 한다.
 2. 개인 skill에 `samvil:` prefix가 붙으면 설치 실패다.
 3. SAMVIL public skill에 plugin namespace가 없으면 설치 실패다.
-4. plugin marketplace root는 resolved SAMVIL repository/plugin root여야 한다.
-5. marketplace root가 `$HOME` 또는 `.codex/skills`의 ancestor면 설치를 차단한다.
+4. `samvil-codex` marketplace wrapper의 plugin symlink는 resolved SAMVIL repository/plugin root를 가리켜야 한다.
+5. canonical repository root가 `$HOME` 또는 `.codex/skills`의 ancestor면 설치를 차단한다.
 6. namespace 문제를 alias skill 복제로 숨기지 않는다.
 7. user-owned modified skill은 자동 이동·삭제하지 않는다.
 
@@ -315,7 +315,7 @@ capability probe
   → reversible backup
   → public skills/controller readiness verify
   → correct repository marketplace add
-  → samvil@samvil install/enable
+  → samvil@samvil-codex install/enable
   → MCP import/stdio smoke
   → namespace inventory compare
   → Codex plugin/skill/status smoke
@@ -346,9 +346,9 @@ probe한다.
 Codex registry의 `samvil` marketplace root가 canonical root와 다르면:
 
 1. 현재 marketplace/plugin inventory를 JSON receipt로 backup
-2. `codex plugin marketplace remove samvil`
-3. canonical repository root를 `codex plugin marketplace add`로 등록
-4. `codex plugin add samvil@samvil`
+2. 기존 Codex `samvil` 등록이 있으면 `codex plugin marketplace remove samvil`
+3. canonical repository를 가리키는 격리 wrapper를 `samvil-codex` marketplace로 등록
+4. `codex plugin add samvil@samvil-codex`
 5. resolved plugin path와 version 검증
 
 원본 `~/.claude-plugin/marketplace.json` 파일 자체는 Codex migration이 삭제하거나
@@ -833,7 +833,7 @@ skills with bare names and only SAMVIL-owned skills with the `samvil:` prefix.
 ### AC-2 — Native plugin install
 
 Given a clean supported Codex installation, one setup command installs/enables
-`samvil@samvil`, starts its MCP server, and leaves no direct absolute-path MCP duplicate.
+`samvil@samvil-codex`, starts its MCP server, and leaves no direct absolute-path MCP duplicate.
 
 ### AC-3 — Same-task automatic continuation
 

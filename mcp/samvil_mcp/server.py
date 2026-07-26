@@ -1262,6 +1262,23 @@ async def commit_stage_transition(
         evidence = json.loads(evidence_json or "{}")
         if not isinstance(evidence, dict):
             raise ValueError("evidence_json must encode an object")
+        controller = TransitionController(await get_store())
+        if transition_id:
+            existing_record = await controller.store.get_transition_receipt_record(transition_id)
+            if existing_record is not None:
+                owner, existing = existing_record
+                if owner != run_id:
+                    raise ValueError("transition receipt belongs to another run")
+                if any(
+                    existing.get(key) != expected
+                    for key, expected in (
+                        ("claim_id", claim_id),
+                        ("from_stage", stage),
+                        ("marker_revision", expected_revision + 1),
+                    )
+                ):
+                    raise ValueError("transition id conflicts with a different transition")
+                return json.dumps(existing, ensure_ascii=False)
         if str(verdict or "").upper() in {"PASS", "PASSED", "OK", "COMPLETE"}:
             from .evidence_validator import parse_evidence, validate_evidence_list
 
@@ -1276,17 +1293,37 @@ async def commit_stage_transition(
 
             references = [item for item in evidence_strings(evidence) if parse_evidence(item)]
             validation = validate_evidence_list(references, project_root)
-            if not references or not validation["all_valid"]:
+            required_artifacts = {
+                "samvil-interview": {"interview-summary.md"},
+                "samvil-seed": {"project.seed.json"},
+                "samvil-council": {".samvil/council-results.md"},
+                "samvil-design": {"project.blueprint.json"},
+                "samvil-scaffold": {".samvil/scaffold-results.json"},
+                "samvil-build": {".samvil/build.log"},
+                "samvil-qa": {".samvil/qa-results.json"},
+                "samvil-deploy": {".samvil/deploy-results.json"},
+                "samvil-evolve": {"project.seed.json"},
+                "samvil-retro": {".samvil/retro-results.md"},
+            }.get(stage, set())
+            cited_paths = set()
+            for item in references:
+                parsed = parse_evidence(item)
+                if not parsed:
+                    continue
+                cited = str(parsed["file"])
+                cited_paths.add(cited[2:] if cited.startswith("./") else cited)
+            artifact_valid = not required_artifacts or bool(required_artifacts & cited_paths)
+            if not references or not validation["all_valid"] or not artifact_valid:
                 return json.dumps(
                     {
                         "status": "blocked",
                         "stage": stage,
-                        "reason": "trusted file:line evidence is required",
+                        "reason": "trusted stage artifact file:line evidence is required",
+                        "required_artifacts": sorted(required_artifacts),
                         "evidence_validation": validation,
                     },
                     ensure_ascii=False,
                 )
-        controller = TransitionController(await get_store())
         envelope = await controller.get_stage_envelope(project_root, "codex_cli")
         if envelope.get("status") in {"waiting_user", "blocked", "complete"}:
             return json.dumps({"status": envelope["status"], "stop_reason": envelope.get("stop_reason", "")})
@@ -1313,6 +1350,49 @@ async def commit_stage_transition(
                 },
                 ensure_ascii=False,
             )
+        if stage == "samvil-qa":
+            gate_for_route = {
+                "samvil-evolve": "qa_to_evolve",
+                "samvil-retro": "any_to_retro",
+                "samvil-deploy": "qa_to_deploy",
+            }.get(next_skill, "")
+            receipt_path = (
+                Path(project_root).expanduser().resolve(strict=False)
+                / ".samvil"
+                / "gate-receipts"
+                / f"{gate_for_route}.json"
+            )
+            qa_path = Path(project_root).expanduser().resolve(strict=False) / ".samvil" / "qa-results.json"
+            receipt = controller._read_json(receipt_path) if gate_for_route else {}
+            qa_hash = hashlib.sha256(qa_path.read_bytes()).hexdigest() if qa_path.is_file() else ""
+            gate_events = await controller.store.get_events(run_id)
+            db_receipt = next(
+                (
+                    event.data
+                    for event in reversed(gate_events)
+                    if event.event_type == EventType.DECISION
+                    and event.stage == Stage.QA
+                    and event.data.get("kind") == "gate_receipt"
+                    and event.data.get("gate") == gate_for_route
+                ),
+                {},
+            )
+            if (
+                not gate_for_route
+                or receipt.get("gate") != gate_for_route
+                or receipt.get("verdict") != "pass"
+                or receipt.get("qa_results_sha256") != qa_hash
+                or db_receipt.get("verdict") != "pass"
+                or db_receipt.get("qa_results_sha256") != qa_hash
+            ):
+                return json.dumps(
+                    {
+                        "status": "blocked",
+                        "stage": stage,
+                        "reason": f"persisted {gate_for_route or 'QA route'} PASS receipt is required",
+                    },
+                    ensure_ascii=False,
+                )
         result = await controller.commit_stage_transition(
             project_root, run_id, claim_id, stage, next_skill, expected_revision,
             data={"verdict": verdict, "evidence": evidence, "user_choice": bool(requested_next_skill)},
@@ -3824,6 +3904,31 @@ async def gate_check(
                     "gate_check.metric_mismatch",
                     json.dumps(metric_mismatches, ensure_ascii=False),
                 )
+        root = Path(project_root).expanduser().resolve(strict=False)
+        qa_path = root / ".samvil" / "qa-results.json"
+        receipt = {
+            "kind": "gate_receipt",
+            "gate": gate_name,
+            "verdict": result.get("verdict"),
+            "samvil_tier": samvil_tier,
+            "qa_results_sha256": hashlib.sha256(qa_path.read_bytes()).hexdigest()
+            if qa_path.is_file()
+            else "",
+            "result_sha256": hashlib.sha256(
+                json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest(),
+        }
+        receipt_path = root / ".samvil" / "gate-receipts" / f"{gate_name}.json"
+        atomic_write_text(receipt_path, json.dumps(receipt, indent=2, ensure_ascii=False))
+        store = await get_store()
+        session = await store.find_session_by_root(str(root))
+        if session is not None:
+            await store.save_event(
+                session.id,
+                EventType.DECISION,
+                session.current_stage,
+                receipt,
+            )
         _log_mcp_health("ok", "gate_check")
         return json.dumps(result)
     except Exception as e:

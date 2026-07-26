@@ -42,12 +42,18 @@ def validate_file_exists(evidence: dict, project_root: str) -> dict:
     Returns:
         Dict with exists, abs_path, error.
     """
-    root = Path(project_root)
+    root = Path(project_root).expanduser().resolve(strict=False)
     file_path = evidence.get("file", "")
     if not file_path:
         return {"exists": False, "error": "No file path in evidence"}
 
-    abs_path = root / file_path
+    abs_path = (root / file_path).expanduser().resolve(strict=False)
+    if abs_path != root and root not in abs_path.parents:
+        return {
+            "exists": False,
+            "abs_path": str(abs_path),
+            "error": f"Evidence path escapes project root: {file_path}",
+        }
     return {
         "exists": abs_path.exists() and abs_path.is_file(),
         "abs_path": str(abs_path),
@@ -98,7 +104,10 @@ def read_evidence_snippet(evidence: dict, project_root: str, context: int = 2) -
     if not validation["valid"]:
         return ""
 
-    abs_path = Path(project_root) / evidence["file"]
+    check = validate_file_exists(evidence, project_root)
+    if not check["exists"]:
+        return ""
+    abs_path = Path(check["abs_path"])
     try:
         with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()

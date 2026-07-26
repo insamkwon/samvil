@@ -113,9 +113,9 @@ Expected:
    `skills/samvil-evolve/SKILL.md`의 기존 동작을 보존한다.
 6. Brownfield Analyze는 terminal stage가 아니다. 사용자 결정에 따라 Interview,
    Seed, Design, QA로 갈 수 있는 checkpointed dynamic stage다.
-7. `.claude-plugin/marketplace.json`의 plugin source `./`는 canonical repository
-   root가 marketplace로 등록될 때는 정상이다. 현재 문제는 marketplace root가
-   repository가 아니라 사용자 home으로 등록된 것이다.
+7. 사용자 홈의 Claude `samvil` marketplace와 Codex 등록 이름이 충돌할 수 있다.
+   Codex installer는 canonical repository를 가리키는 격리 `samvil-codex` wrapper를
+   만들어 기존 Claude marketplace를 수정하지 않고 충돌을 피한다.
 8. `scripts/setup-codex.sh`가 전역 `~/.codex/AGENTS.md`와 absolute MCP block을
    만드는 legacy 동작은 Codex 경로에서만 retire한다.
 9. `project.state.json`은 현재 stage의 공식 SSOT다. controller journal은 DB/JSONL/
@@ -353,7 +353,7 @@ Create a fake `codex` executable in `tmp_path/bin`, set an explicit temporary
     `--migrate`
 12. user-modified `samvil*` copies block and remain byte-identical
 13. unrelated personal skill inventory is unchanged after install/update/uninstall
-14. uninstall removes only fake `samvil@samvil` registration/cache ownership
+14. uninstall removes only generated `samvil@samvil-codex` registration/cache ownership
 15. OpenCode and Gemini branches retain their current behavior
 16. executor refuses real-profile activation while public skills/controller readiness
     proof is absent

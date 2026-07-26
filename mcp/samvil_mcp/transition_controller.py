@@ -363,9 +363,29 @@ class TransitionController:
         to_stage = str(journal["to_stage"])
         target_state = str(journal["target_state"])
         event_id = str(journal["event_id"])
-        event_payload = dict(journal["event_payload"])
-        event_type = str(journal["event_type"])
-        timestamp = str(journal["event_timestamp"])
+        persisted_event = await self.store.get_event_by_id(event_id)
+        if (
+            persisted_event is None
+            or persisted_event.session_id != run_id
+            or persisted_event.stage.value != target_state
+            or persisted_event.data.get("transition_id") != transition_id
+            or persisted_event.data.get("from_stage") != from_stage
+            or persisted_event.data.get("to_stage") != to_stage
+        ):
+            raise TransitionError("transition journal integrity check failed")
+        event_payload = dict(persisted_event.data)
+        event_type = persisted_event.event_type.value
+        timestamp = persisted_event.timestamp
+        journal.update(
+            {
+                "event_payload": event_payload,
+                "event_type": event_type,
+                "event_timestamp": timestamp,
+                "event_payload_hash": hashlib.sha256(
+                    json.dumps(event_payload, sort_keys=True).encode()
+                ).hexdigest(),
+            }
+        )
         expected_revision = int(journal["expected_revision"])
         host_name = str(journal["host_name"])
 

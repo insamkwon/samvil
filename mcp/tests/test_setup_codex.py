@@ -205,25 +205,17 @@ def test_install_plan_is_deterministic_and_read_only(tmp_path: Path) -> None:
     assert personal.read_bytes() == before
 
 
-def test_isolated_executor_backups_registry_and_preserves_personal_skills(tmp_path: Path) -> None:
+def test_isolated_executor_backups_config_and_preserves_personal_skills(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     codex_home = tmp_path / "codex-home" / ".codex"
     repo.mkdir()
     personal = codex_home / "skills" / "commit"
     personal.mkdir(parents=True)
     (personal / "SKILL.md").write_text("---\nname: commit\n---\nkeep\n", encoding="utf-8")
-    registry = codex_home / "marketplaces.json"
-    registry.parent.mkdir(parents=True, exist_ok=True)
-    registry.write_text(
-        json.dumps(
-            {
-                "old": True,
-                "marketplaces": [{"name": "other", "root": "/other"}],
-                "plugins": [{"name": "other", "enabled": False}],
-            }
-        ),
-        encoding="utf-8",
-    )
+    config = codex_home / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    original = '[marketplaces.other]\nsource_type = "local"\nsource = "/other"\n'
+    config.write_text(original, encoding="utf-8")
     commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
 
     plan = CodexInstallPlan(
@@ -239,21 +231,22 @@ def test_isolated_executor_backups_registry_and_preserves_personal_skills(tmp_pa
 
     assert commands == [
         (
-            ("codex", "plugin", "marketplace", "add", str(repo.resolve())),
+            (
+                "codex", "plugin", "marketplace", "add",
+                str((codex_home / "marketplaces" / "samvil-codex").resolve()),
+            ),
             {"CODEX_HOME": str(codex_home.resolve())},
         ),
         (
-            ("codex", "plugin", "add", "samvil@samvil"),
+            ("codex", "plugin", "add", "samvil@samvil-codex"),
             {"CODEX_HOME": str(codex_home.resolve())},
         ),
     ]
     assert receipt.to_dict()["personal_skills_unchanged"] is True
     assert receipt.backup_paths
-    registry_data = json.loads(registry.read_text(encoding="utf-8"))
-    assert registry_data["old"] is True
-    assert {item["name"] for item in registry_data["marketplaces"]} == {"other", "samvil"}
-    assert {item["name"] for item in registry_data["plugins"]} == {"other", "samvil"}
+    assert config.read_text(encoding="utf-8") == original
     assert (codex_home / "skills" / "commit" / "SKILL.md").exists()
+    assert (codex_home / "marketplaces" / "samvil-codex" / "samvil").resolve() == repo.resolve()
 
 
 def test_isolated_executor_corrects_existing_samvil_marketplace_root(tmp_path: Path) -> None:
@@ -261,9 +254,9 @@ def test_isolated_executor_corrects_existing_samvil_marketplace_root(tmp_path: P
     codex_home = tmp_path / "codex-home" / ".codex"
     repo.mkdir()
     codex_home.mkdir(parents=True)
-    registry = codex_home / "marketplaces.json"
-    registry.write_text(
-        json.dumps({"marketplaces": [{"name": "samvil", "root": "/old/root"}]}),
+    config = codex_home / "config.toml"
+    config.write_text(
+        '[marketplaces.samvil]\nsource_type = "local"\nsource = "/old/root"\n',
         encoding="utf-8",
     )
     commands = []
@@ -277,22 +270,25 @@ def test_isolated_executor_corrects_existing_samvil_marketplace_root(tmp_path: P
 
     assert [command for command, _env in commands] == [
         ("codex", "plugin", "marketplace", "remove", "samvil"),
-        ("codex", "plugin", "marketplace", "add", str(repo.resolve())),
-        ("codex", "plugin", "add", "samvil@samvil"),
+        (
+            "codex", "plugin", "marketplace", "add",
+            str((codex_home / "marketplaces" / "samvil-codex").resolve()),
+        ),
+        ("codex", "plugin", "add", "samvil@samvil-codex"),
     ]
 
 
-def test_isolated_executor_blocks_invalid_registry_before_commands(tmp_path: Path) -> None:
+def test_isolated_executor_blocks_invalid_config_before_commands(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     codex_home = tmp_path / "codex-home" / ".codex"
     repo.mkdir()
     codex_home.mkdir(parents=True)
-    registry = codex_home / "marketplaces.json"
-    registry.write_text("{broken", encoding="utf-8")
+    config = codex_home / "config.toml"
+    config.write_text("[broken", encoding="utf-8")
     commands = []
     plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
 
-    with pytest.raises(InstallBlocked, match="invalid Codex registry JSON"):
+    with pytest.raises(InstallBlocked, match="invalid Codex config TOML"):
         execute_isolated_install(
             plan,
             codex_home=codex_home,
@@ -300,56 +296,78 @@ def test_isolated_executor_blocks_invalid_registry_before_commands(tmp_path: Pat
         )
 
     assert commands == []
-    assert registry.read_text(encoding="utf-8") == "{broken"
+    assert config.read_text(encoding="utf-8") == "[broken"
 
 
-def test_isolated_executor_restores_registry_when_plugin_add_fails(tmp_path: Path) -> None:
+def test_isolated_executor_restores_config_when_plugin_add_fails(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     codex_home = tmp_path / "codex-home" / ".codex"
     repo.mkdir()
     codex_home.mkdir(parents=True)
-    registry = codex_home / "marketplaces.json"
-    original = '{"marketplaces": [{"name": "other", "root": "/other"}]}\n'
-    registry.write_text(original, encoding="utf-8")
+    config = codex_home / "config.toml"
+    original = '[marketplaces.other]\nsource_type = "local"\nsource = "/other"\n'
+    config.write_text(original, encoding="utf-8")
     plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
     calls = 0
 
     def failing_runner(_command, _env):
         nonlocal calls
         calls += 1
-        registry.write_text('{"partially_mutated": true}\n', encoding="utf-8")
+        config.write_text('[marketplaces.samvil]\nsource = "/partial"\n', encoding="utf-8")
         if calls == 2:
             raise RuntimeError("plugin add failed")
 
-    with pytest.raises(InstallBlocked, match="registry restored"):
+    with pytest.raises(InstallBlocked, match="config restored"):
         execute_isolated_install(plan, codex_home=codex_home, command_runner=failing_runner)
 
-    assert registry.read_text(encoding="utf-8") == original
+    assert config.read_text(encoding="utf-8") == original
+    assert not (codex_home / "marketplaces" / "samvil-codex").exists()
 
 
-def test_isolated_executor_replaces_registry_symlink_without_overwriting_target(tmp_path: Path) -> None:
+def test_isolated_executor_blocks_config_symlink_without_overwriting_target(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     codex_home = tmp_path / "codex-home" / ".codex"
-    target = tmp_path / "user-owned.json"
+    target = tmp_path / "user-owned.toml"
     repo.mkdir()
     codex_home.mkdir(parents=True)
-    target.write_text('{"owner": "user"}\n', encoding="utf-8")
-    registry = codex_home / "marketplaces.json"
-    registry.symlink_to(target)
+    original = '[marketplaces.other]\nsource = "/other"\n'
+    target.write_text(original, encoding="utf-8")
+    config = codex_home / "config.toml"
+    config.symlink_to(target)
     plan = CodexInstallPlan(
         canonical_root=repo.resolve(),
         capability=CodexCapabilityProbe(True, True),
     )
 
-    execute_isolated_install(
-        plan,
-        codex_home=codex_home,
-        command_runner=lambda _command, _env: None,
-    )
+    with pytest.raises(InstallBlocked, match="config symlink is not safe"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: (_ for _ in ()).throw(AssertionError("no command")),
+        )
 
-    assert target.read_text(encoding="utf-8") == '{"owner": "user"}\n'
-    assert registry.is_symlink() is False
-    assert json.loads(registry.read_text(encoding="utf-8"))["owner"] == "user"
+    assert target.read_text(encoding="utf-8") == original
+    assert config.is_symlink() is True
+
+
+def test_isolated_executor_blocks_ambiguous_codex_wrapper_before_commands(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    wrapper = codex_home / "marketplaces" / "samvil-codex"
+    repo.mkdir()
+    wrapper.mkdir(parents=True)
+    (wrapper / "user-file.txt").write_text("keep\n", encoding="utf-8")
+    commands = []
+
+    with pytest.raises(InstallBlocked, match="ambiguous Codex marketplace wrapper"):
+        execute_isolated_install(
+            CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+            codex_home=codex_home,
+            command_runner=lambda command, env: commands.append((command, env)),
+        )
+
+    assert commands == []
+    assert (wrapper / "user-file.txt").read_text(encoding="utf-8") == "keep\n"
 
 
 def test_isolated_executor_refuses_blockers_and_unsafe_root(tmp_path: Path) -> None:
