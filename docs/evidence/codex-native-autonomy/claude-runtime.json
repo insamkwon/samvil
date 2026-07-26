@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "verification_level": "blocked_auth",
+  "host": "claude_code",
+  "tested_commit": "46c550c828f0932f48572e516b5589af41be2ed9",
+  "tested_tree": "062758516ad907a23b371e333cd6e3dc26ca22a1",
+  "host_version": "2.1.207",
+  "command": "claude -p --bare --no-session-persistence --add-dir <temporary-git-project> --output-format json <read-only runtime smoke prompt>",
+  "exit_code": 1,
+  "plugin_loaded": true,
+  "observed": [
+    "Claude initialized with the samvil plugin in its actual plugin list.",
+    "The model request stopped before tool execution because Claude reported Not logged in; Please run /login."
+  ],
+  "pass": false,
+  "blockers": ["Claude Code is not authenticated in the current host session."]
+}

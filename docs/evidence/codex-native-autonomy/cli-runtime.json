@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "verification_level": "blocked_auth",
+  "host": "codex_cli",
+  "tested_commit": "46c550c828f0932f48572e516b5589af41be2ed9",
+  "tested_tree": "062758516ad907a23b371e333cd6e3dc26ca22a1",
+  "host_version": "codex-cli 0.144.1",
+  "command": "codex exec --ephemeral --sandbox read-only -C <temporary-git-project> --skip-git-repo-check --json <read-only runtime smoke prompt>",
+  "exit_code": 124,
+  "localhost_bind": true,
+  "observed": [
+    "Codex started a real thread and called samvil-mcp read_chain_marker.",
+    "MCP auth transport failed with invalid_grant: Invalid refresh token.",
+    "The bounded 90-second smoke timed out before a terminal runtime receipt could be produced."
+  ],
+  "pass": false,
+  "blockers": ["Codex OAuth refresh token is invalid; reauthorization is required."]
+}
