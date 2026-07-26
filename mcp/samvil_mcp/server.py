@@ -1353,6 +1353,54 @@ async def complete_stage(
         )
         event_data = dict(plan["event_data"])
         event_data["trusted_transition"] = True
+
+        # Codex-native callers begin a v1.1 claim before invoking this legacy
+        # compatibility tool. In that case use the shared controller as the
+        # single persistence boundary; the historical path below remains only
+        # for Claude/older hosts that have not established a driver claim.
+        from .chain_markers import inspect_chain_marker
+        from .transition_controller import TransitionController
+
+        marker_inspection = inspect_chain_marker(str(project_path))
+        if (
+            verdict in ("pass", "complete")
+            and marker_inspection.classification == "valid"
+            and marker_inspection.marker.get("run_id") == session_id
+            and marker_inspection.marker.get("status") == "in_progress"
+        ):
+            controller = TransitionController(store)
+            expected_revision = int(marker_inspection.marker.get("revision", 0))
+            from_skill = f"samvil-{stage}"
+            next_stage = plan.get("next_stage")
+            if not next_stage:
+                raise OrchestratorError(f"stage {stage!r} has no shared-controller next stage")
+            to_skill = f"samvil-{next_stage}"
+            claim = await store.get_stage_claim(session_id, from_skill, expected_revision)
+            if claim is None:
+                raise OrchestratorError("Codex driver claim is missing for shared transition")
+            event_data["event_type_raw"] = plan["event_type"]
+            receipt = await controller.commit_stage_transition(
+                str(project_path),
+                session_id,
+                claim["claim_id"],
+                from_skill,
+                to_skill,
+                expected_revision,
+                event_type="stage_change",
+                data=event_data,
+                transition_id=f"legacy-{session_id}-{stage}-{expected_revision}",
+            )
+            if receipt.get("status") == "blocked":
+                return json.dumps({"status": "error", "error": receipt.get("reason", "transition blocked")})
+            return json.dumps({
+                "status": "ok",
+                "event_id": receipt.get("event_id"),
+                "claim_id": receipt.get("claim_id"),
+                "claim_saved": True,
+                "next_stage": next_stage,
+                "shared_controller": True,
+            })
+
         try:
             event_type_enum = EventType(plan["event_type"])
         except ValueError:

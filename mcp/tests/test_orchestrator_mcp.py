@@ -416,6 +416,29 @@ def test_stage_history_is_not_truncated_by_large_telemetry_volume(
     _run(runner())
 
 
+def test_complete_stage_delegates_codex_claims_to_shared_controller(tmp_path, monkeypatch) -> None:
+    from samvil_mcp import server as srv
+    from samvil_mcp.transition_controller import TransitionController
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "shared-controller"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+
+    async def runner():
+        session = json.loads(await create_session("shared-controller", "standard", project_root=str(project_root)))
+        sid = session["session_id"]
+        controller = TransitionController(await srv.get_store())
+        claim = await controller.begin_stage(str(project_root), sid, "samvil-interview", 0)
+        result = json.loads(await complete_stage(sid, "interview", "pass"))
+        assert result["status"] == "ok"
+        assert result["shared_controller"] is True
+        assert result["claim_id"] == claim["claim_id"]
+        assert result["next_stage"] == "seed"
+
+    _run(runner())
+
+
 def test_get_orchestration_state_tool_reads_progress(tmp_path, monkeypatch) -> None:
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "orch-state"
