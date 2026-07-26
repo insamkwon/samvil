@@ -9,11 +9,15 @@ import pytest
 
 from samvil_mcp.codex_installer import (
     CodexInstallPlan,
+    CodexCapabilityProbe,
+    InstallBlocked,
+    MigrationAction,
     LegacyOwnership,
     build_install_plan,
     classify_generated_file,
     classify_legacy_skill,
     compare_skill_inventories,
+    execute_isolated_install,
     inventory_personal_skills,
     parse_capability_probe,
     validate_marketplace_root,
@@ -145,3 +149,83 @@ def test_install_plan_is_deterministic_and_read_only(tmp_path: Path) -> None:
     assert any(action.kind == "report_blocker" for action in plan.actions)
     json.dumps(plan.to_dict())
     assert personal.read_bytes() == before
+
+
+def test_isolated_executor_backups_registry_and_preserves_personal_skills(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    repo.mkdir()
+    personal = codex_home / "skills" / "commit"
+    personal.mkdir(parents=True)
+    (personal / "SKILL.md").write_text("---\nname: commit\n---\nkeep\n", encoding="utf-8")
+    registry = codex_home / "marketplaces.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text('{"old": true}\n', encoding="utf-8")
+    commands: list[tuple[str, ...]] = []
+
+    plan = CodexInstallPlan(
+        canonical_root=repo.resolve(),
+        capability=CodexCapabilityProbe(True, True),
+        actions=(),
+    )
+    receipt = execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=commands.append,
+    )
+
+    assert commands == [
+        ("codex", "plugin", "marketplace", "add", str(repo.resolve())),
+        ("codex", "plugin", "add", "samvil@samvil"),
+    ]
+    assert receipt.to_dict()["personal_skills_unchanged"] is True
+    assert receipt.backup_paths
+    assert json.loads(registry.read_text(encoding="utf-8"))["plugins"][0]["name"] == "samvil"
+    assert (codex_home / "skills" / "commit" / "SKILL.md").exists()
+
+
+def test_isolated_executor_refuses_blockers_and_unsafe_root(tmp_path: Path) -> None:
+    plan = CodexInstallPlan(
+        canonical_root=(tmp_path / "repo").resolve(),
+        capability=CodexCapabilityProbe(False, False, blockers=("missing capability",)),
+        blockers=("ambiguous user config",),
+    )
+
+    with pytest.raises(InstallBlocked):
+        execute_isolated_install(
+            plan,
+            codex_home=tmp_path / "codex-home" / ".codex",
+            command_runner=lambda _: None,
+        )
+
+    clean = CodexInstallPlan(
+        canonical_root=(tmp_path / "repo").resolve(),
+        capability=CodexCapabilityProbe(True, True),
+    )
+    with pytest.raises(InstallBlocked):
+        execute_isolated_install(clean, codex_home=tmp_path / "home", command_runner=lambda _: None)
+
+
+def test_isolated_migrate_moves_only_explicit_generated_action_to_backup(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    legacy = codex_home / "skills" / "samvil-run" / "SKILL.md"
+    repo.mkdir()
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("generated legacy\n", encoding="utf-8")
+    commands: list[tuple[str, ...]] = []
+    plan = CodexInstallPlan(
+        canonical_root=repo.resolve(),
+        capability=CodexCapabilityProbe(True, True),
+        actions=(MigrationAction("migrate_generated", legacy.resolve(), "hash match"),),
+    )
+
+    receipt = execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=commands.append,
+        migrate=True,
+    )
+
+    assert not legacy.exists()
+    assert any(path.name.startswith("samvil-run-") for path in receipt.backup_paths)

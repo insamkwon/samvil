@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
+from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -230,6 +232,120 @@ class CodexInstallPlan:
         }
 
 
+class InstallBlocked(RuntimeError):
+    """Raised when a plan contains an ambiguous or unsafe mutation."""
+
+
+@dataclass(frozen=True)
+class InstallReceipt:
+    mode: str
+    canonical_root: Path
+    backup_paths: tuple[Path, ...]
+    commands: tuple[tuple[str, ...], ...]
+    personal_skills_before: tuple[SkillInventoryEntry, ...]
+    personal_skills_after: tuple[SkillInventoryEntry, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "canonical_root": str(self.canonical_root),
+            "backup_paths": [str(path) for path in self.backup_paths],
+            "commands": [list(command) for command in self.commands],
+            "personal_skills_before": [entry.to_dict() for entry in self.personal_skills_before],
+            "personal_skills_after": [entry.to_dict() for entry in self.personal_skills_after],
+            "personal_skills_unchanged": compare_skill_inventories(
+                self.personal_skills_before, self.personal_skills_after
+            ),
+        }
+
+
+def _atomic_copy(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="wb", dir=destination.parent, prefix=f".{destination.name}.", delete=False
+    ) as temporary:
+        temporary.write(source.read_bytes())
+        temporary.flush()
+    Path(temporary.name).replace(destination)
+
+
+def execute_isolated_install(
+    plan: CodexInstallPlan,
+    *,
+    codex_home: Path,
+    command_runner: Any,
+    migrate: bool = False,
+) -> InstallReceipt:
+    """Execute only inside an explicitly supplied isolated Codex root.
+
+    This executor intentionally has no default home/config path. Task 13 will add
+    the real profile wrapper after public skills and transition MCP are complete.
+    """
+
+    if plan.blockers:
+        raise InstallBlocked("; ".join(plan.blockers))
+    root = Path(codex_home).expanduser().resolve(strict=False)
+    if root == Path(root.anchor) or root.name != ".codex":
+        raise InstallBlocked(f"isolated Codex root must be a named .codex directory: {root}")
+    root.mkdir(parents=True, exist_ok=True)
+    personal_root = root / "skills"
+    before = inventory_personal_skills(personal_root)
+    migrated_paths = set()
+    for action in plan.actions:
+        if action.kind != "migrate_generated":
+            continue
+        candidate = action.path.expanduser().resolve(strict=False)
+        migrated_paths.add(candidate.parent if candidate.name == "SKILL.md" else candidate)
+    protected_before = tuple(entry for entry in before if entry.path not in migrated_paths)
+    backup_paths: list[Path] = []
+    commands: list[tuple[str, ...]] = []
+    registry = root / "marketplaces.json"
+    if registry.exists():
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup = root / "backups" / f"marketplaces-{stamp}.json"
+        _atomic_copy(registry, backup)
+        backup_paths.append(backup)
+
+    add_marketplace = ("codex", "plugin", "marketplace", "add", str(plan.canonical_root))
+    add_plugin = ("codex", "plugin", "add", "samvil@samvil")
+    for command in (add_marketplace, add_plugin):
+        command_runner(command)
+        commands.append(command)
+
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    content = {
+        "marketplaces": [{"name": "samvil", "root": str(plan.canonical_root)}],
+        "plugins": [{"name": "samvil", "enabled": True}],
+    }
+    temporary = registry.with_name(f".{registry.name}.tmp")
+    temporary.write_text(json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(registry)
+
+    if migrate:
+        for action in plan.actions:
+            if action.kind != "migrate_generated":
+                continue
+            source = action.path
+            label = source.parent.name if source.name == "SKILL.md" else source.name
+            backup = root / "backups" / f"{label}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            source.replace(backup)
+            backup_paths.append(backup)
+
+    after = inventory_personal_skills(personal_root)
+    protected_after = tuple(entry for entry in after if entry.path not in migrated_paths)
+    if not compare_skill_inventories(protected_before, protected_after):
+        raise InstallBlocked("personal Codex skill inventory changed during isolated install")
+    return InstallReceipt(
+        mode="migrate" if migrate else "install",
+        canonical_root=plan.canonical_root,
+        backup_paths=tuple(backup_paths),
+        commands=tuple(commands),
+        personal_skills_before=protected_before,
+        personal_skills_after=protected_after,
+    )
+
+
 def build_install_plan(
     *,
     repo_root: Path,
@@ -287,6 +403,8 @@ def build_install_plan(
 __all__ = [
     "CodexCapabilityProbe",
     "CodexInstallPlan",
+    "InstallBlocked",
+    "InstallReceipt",
     "LegacyOwnership",
     "MigrationAction",
     "SkillInventoryEntry",
@@ -295,6 +413,7 @@ __all__ = [
     "classify_legacy_skill",
     "compare_skill_inventories",
     "inventory_personal_skills",
+    "execute_isolated_install",
     "parse_capability_probe",
     "validate_marketplace_root",
 ]
