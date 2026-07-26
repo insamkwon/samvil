@@ -68,6 +68,22 @@ CREATE TABLE IF NOT EXISTS pending_project_events (
 
 CREATE INDEX IF NOT EXISTS idx_pending_project_events_session
 ON pending_project_events(session_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS stage_claims (
+    session_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    marker_revision INTEGER NOT NULL,
+    claim_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_transition_id TEXT DEFAULT '',
+    UNIQUE(session_id, stage, marker_revision),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stage_claims_session
+ON stage_claims(session_id, marker_revision);
 """
 
 # In-place migrations for already-initialized DBs. Initialization first
@@ -431,6 +447,125 @@ class EventStore:
             )
             await db.commit()
         return session
+
+    async def get_stage_claim(
+        self,
+        session_id: str,
+        stage: str,
+        marker_revision: int,
+    ) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT session_id, stage, marker_revision, claim_id, status,
+                   created_at, updated_at, completed_transition_id
+                   FROM stage_claims
+                   WHERE session_id = ? AND stage = ? AND marker_revision = ?""",
+                (session_id, stage, marker_revision),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return dict(
+            zip(
+                (
+                    "session_id",
+                    "stage",
+                    "marker_revision",
+                    "claim_id",
+                    "status",
+                    "created_at",
+                    "updated_at",
+                    "completed_transition_id",
+                ),
+                row,
+            )
+        )
+
+    async def get_stage_claims_for_revision(
+        self,
+        session_id: str,
+        marker_revision: int,
+    ) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT session_id, stage, marker_revision, claim_id, status,
+                   created_at, updated_at, completed_transition_id
+                   FROM stage_claims
+                   WHERE session_id = ? AND marker_revision = ?""",
+                (session_id, marker_revision),
+            )
+            rows = await cursor.fetchall()
+        keys = (
+            "session_id",
+            "stage",
+            "marker_revision",
+            "claim_id",
+            "status",
+            "created_at",
+            "updated_at",
+            "completed_transition_id",
+        )
+        return [dict(zip(keys, row)) for row in rows]
+
+    async def create_stage_claim(
+        self,
+        session_id: str,
+        stage: str,
+        marker_revision: int,
+        *,
+        claim_id: str | None = None,
+    ) -> dict[str, Any]:
+        claim_id = claim_id or f"claim-{_uuid()}"
+        now = _now()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                """SELECT session_id, stage, marker_revision, claim_id, status,
+                   created_at, updated_at, completed_transition_id
+                   FROM stage_claims
+                   WHERE session_id = ? AND stage = ? AND marker_revision = ?""",
+                (session_id, stage, marker_revision),
+            )
+            existing = await cursor.fetchone()
+            if existing is not None:
+                await db.commit()
+                return dict(
+                    zip(
+                        (
+                            "session_id",
+                            "stage",
+                            "marker_revision",
+                            "claim_id",
+                            "status",
+                            "created_at",
+                            "updated_at",
+                            "completed_transition_id",
+                        ),
+                        existing,
+                    )
+                )
+            await db.execute(
+                """INSERT INTO stage_claims
+                (session_id, stage, marker_revision, claim_id, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'in_progress', ?, ?)""",
+                (session_id, stage, marker_revision, claim_id, now, now),
+            )
+            await db.commit()
+        return {
+            "session_id": session_id,
+            "stage": stage,
+            "marker_revision": marker_revision,
+            "claim_id": claim_id,
+            "status": "in_progress",
+            "created_at": now,
+            "updated_at": now,
+            "completed_transition_id": "",
+        }
+
+    async def delete_stage_claim(self, claim_id: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM stage_claims WHERE claim_id = ?", (claim_id,))
+            await db.commit()
 
     async def get_session(self, session_id: str) -> Session | None:
         async with aiosqlite.connect(self.db_path) as db:
