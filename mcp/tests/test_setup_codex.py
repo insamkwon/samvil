@@ -1,0 +1,147 @@
+"""Pure ownership and capability planning tests for Codex setup."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from samvil_mcp.codex_installer import (
+    CodexInstallPlan,
+    LegacyOwnership,
+    build_install_plan,
+    classify_generated_file,
+    classify_legacy_skill,
+    compare_skill_inventories,
+    inventory_personal_skills,
+    parse_capability_probe,
+    validate_marketplace_root,
+)
+
+
+def test_capability_probe_uses_feature_outputs_not_only_version(tmp_path: Path) -> None:
+    probe = parse_capability_probe(
+        help_output="plugin marketplace list --json\nplugin add",
+        marketplace_output=json.dumps({"marketplaces": [{"name": "samvil", "root": str(tmp_path)}]}),
+        plugin_output=json.dumps({"plugins": [{"name": "samvil", "enabled": True}]}),
+        feature_output=json.dumps({"features": {"plugins": True, "mcp_servers": True}}),
+    )
+
+    assert probe.plugin_commands_supported is True
+    assert probe.plugins_feature_enabled is True
+    assert probe.marketplaces == ({"name": "samvil", "root": str(tmp_path)},)
+    assert probe.plugins == ({"name": "samvil", "enabled": True},)
+    assert probe.blockers == ()
+
+
+def test_marketplace_root_must_not_claim_user_owned_codex_paths(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    skills = home / ".codex" / "skills"
+    repo = tmp_path / "repo"
+    skills.mkdir(parents=True)
+    repo.mkdir()
+
+    assert validate_marketplace_root(repo, user_home=home, codex_skills_root=skills) == repo.resolve()
+
+    for unsafe in (home, home.parent, skills, skills.parent, Path(skills.anchor)):
+        with pytest.raises(ValueError):
+            validate_marketplace_root(unsafe, user_home=home, codex_skills_root=skills)
+
+
+def test_symlinked_marketplace_root_is_resolved_before_safety_check(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    skills = home / ".codex" / "skills"
+    skills.mkdir(parents=True)
+    unsafe_link = tmp_path / "repo-link"
+    unsafe_link.symlink_to(home, target_is_directory=True)
+
+    with pytest.raises(ValueError):
+        validate_marketplace_root(unsafe_link, user_home=home, codex_skills_root=skills)
+
+
+def test_personal_skill_inventory_records_bare_name_and_content_hash(tmp_path: Path) -> None:
+    skills = tmp_path / "skills"
+    skill = skills / "pre-pr-review"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: pre-pr-review\ndescription: review\n---\ncontent\n",
+        encoding="utf-8",
+    )
+
+    inventory = inventory_personal_skills(skills)
+
+    assert len(inventory) == 1
+    assert inventory[0].name == "pre-pr-review"
+    assert inventory[0].path == skill.resolve()
+    assert len(inventory[0].content_hash) == 64
+    assert "samvil:" not in inventory[0].name
+
+
+def test_personal_skill_inventory_compare_detects_name_or_hash_drift(tmp_path: Path) -> None:
+    skills = tmp_path / "skills"
+    skill = skills / "commit"
+    skill.mkdir(parents=True)
+    file = skill / "SKILL.md"
+    file.write_text("---\nname: commit\n---\noriginal\n", encoding="utf-8")
+    before = inventory_personal_skills(skills)
+
+    file.write_text("---\nname: samvil:commit\n---\nchanged\n", encoding="utf-8")
+    after = inventory_personal_skills(skills)
+
+    assert compare_skill_inventories(before, before) is True
+    assert compare_skill_inventories(before, after) is False
+
+
+def test_legacy_skill_classification_requires_byte_identity(tmp_path: Path) -> None:
+    canonical = tmp_path / "canonical" / "run" / "SKILL.md"
+    legacy = tmp_path / "legacy" / "samvil-run" / "SKILL.md"
+    canonical.parent.mkdir(parents=True)
+    legacy.parent.mkdir(parents=True)
+    canonical.write_text("canonical skill\n", encoding="utf-8")
+    legacy.write_text(canonical.read_text(encoding="utf-8"), encoding="utf-8")
+
+    generated = classify_legacy_skill(legacy, canonical)
+    assert isinstance(generated, LegacyOwnership)
+    assert generated.classification == "generated_legacy"
+
+    legacy.write_text("user changed\n", encoding="utf-8")
+    modified = classify_legacy_skill(legacy, canonical)
+    assert modified.classification == "user_modified"
+    assert modified.blocks_mutation is True
+
+
+def test_generated_file_classifier_distinguishes_ambiguous_content(tmp_path: Path) -> None:
+    file = tmp_path / "AGENTS.md"
+    expected = "generated\n"
+    file.write_text(expected, encoding="utf-8")
+    assert classify_generated_file(file, expected).classification == "generated_legacy"
+
+    file.write_text(expected + "user section\n", encoding="utf-8")
+    result = classify_generated_file(file, expected)
+    assert result.classification == "user_modified"
+    assert result.blocks_mutation is True
+
+
+def test_install_plan_is_deterministic_and_read_only(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    home = tmp_path / "home"
+    repo.mkdir()
+    (home / ".codex" / "skills" / "personal").mkdir(parents=True)
+    personal = home / ".codex" / "skills" / "personal" / "SKILL.md"
+    personal.write_text("---\nname: personal\n---\nkeep\n", encoding="utf-8")
+    before = personal.read_bytes()
+
+    plan = build_install_plan(
+        repo_root=repo,
+        codex_home=home / ".codex",
+        current_marketplace_root=home,
+        capability_help="plugin marketplace list --json",
+    )
+
+    assert isinstance(plan, CodexInstallPlan)
+    assert plan.canonical_root == repo.resolve()
+    assert plan.blockers
+    assert any(action.kind == "report_blocker" for action in plan.actions)
+    json.dumps(plan.to_dict())
+    assert personal.read_bytes() == before
