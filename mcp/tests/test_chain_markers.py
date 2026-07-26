@@ -11,9 +11,82 @@ from samvil_mcp.chain_markers import (
     clear_chain_marker,
     advance_chain,
     get_pipeline_status,
+    build_driver_marker,
+    inspect_chain_marker,
+    write_driver_marker,
     MARKER_FILENAME,
     SAMVIL_DIR,
 )
+
+
+class TestDriverMarkerV11:
+    def test_v10_reader_remains_compatible(self, project_root):
+        write_chain_marker(project_root, "codex_cli", "samvil-build")
+        inspection = inspect_chain_marker(project_root)
+        assert inspection.classification == "legacy"
+        assert inspection.marker["schema_version"] == "1.0"
+
+    def test_v11_requires_revision_status_and_host_driver(self):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=3,
+            status="ready",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="samvil-qa",
+            reason="build gate passed",
+        )
+        assert marker["schema_version"] == "1.1"
+        assert marker["chain_via"] == "host_driver"
+        assert marker["revision"] == 3
+
+    @pytest.mark.parametrize("revision", [True, False, -1, "3"])
+    def test_v11_rejects_invalid_revision(self, revision):
+        with pytest.raises(ValueError):
+            build_driver_marker(
+                run_id="run-1",
+                revision=revision,
+                status="ready",
+                host_name="codex_cli",
+                from_stage="samvil-build",
+                next_skill="samvil-qa",
+                reason="build gate passed",
+            )
+
+    def test_inspection_classifies_missing_corrupt_and_unknown(self, project_root):
+        assert inspect_chain_marker(project_root).classification == "missing"
+        path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
+        path.parent.mkdir(parents=True)
+        path.write_text("{broken", encoding="utf-8")
+        assert inspect_chain_marker(project_root).classification == "corrupt"
+        path.write_text(json.dumps({"schema_version": "9.9"}), encoding="utf-8")
+        assert inspect_chain_marker(project_root).classification == "unsupported"
+
+    def test_v11_writer_is_atomic_and_catalog_validates_stages(self, project_root):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=0,
+            status="in_progress",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="samvil-qa",
+            reason="stage started",
+        )
+        written = write_driver_marker(project_root, marker)
+        assert written == marker
+        inspection = inspect_chain_marker(project_root)
+        assert inspection.classification == "valid"
+        assert inspection.marker["run_id"] == "run-1"
+        with pytest.raises(ValueError):
+            build_driver_marker(
+                run_id="run-1",
+                revision=1,
+                status="ready",
+                host_name="codex_cli",
+                from_stage="samvil-design",
+                next_skill="samvil-interview",
+                reason="invalid backwards route",
+            )
 
 
 @pytest.fixture
