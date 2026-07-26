@@ -84,6 +84,18 @@ CREATE TABLE IF NOT EXISTS stage_claims (
 
 CREATE INDEX IF NOT EXISTS idx_stage_claims_session
 ON stage_claims(session_id, marker_revision);
+
+CREATE TABLE IF NOT EXISTS transition_receipts (
+    transition_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transition_receipts_session
+ON transition_receipts(session_id, updated_at);
 """
 
 # In-place migrations for already-initialized DBs. Initialization first
@@ -567,6 +579,58 @@ class EventStore:
             await db.execute("DELETE FROM stage_claims WHERE claim_id = ?", (claim_id,))
             await db.commit()
 
+    async def get_transition_receipt(self, transition_id: str) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT receipt_json FROM transition_receipts WHERE transition_id = ?",
+                (transition_id,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return json.loads(str(row[0]))
+
+    async def save_transition_receipt(
+        self,
+        transition_id: str,
+        session_id: str,
+        receipt: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT receipt_json FROM transition_receipts WHERE transition_id = ?",
+                (transition_id,),
+            )
+            existing = await cursor.fetchone()
+            if existing is not None:
+                await db.commit()
+                return json.loads(str(existing[0]))
+            await db.execute(
+                """INSERT INTO transition_receipts
+                (transition_id, session_id, receipt_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)""",
+                (transition_id, session_id, json.dumps(receipt, ensure_ascii=False), now, now),
+            )
+            await db.commit()
+        return receipt
+
+    async def mark_stage_claim_completed(
+        self,
+        claim_id: str,
+        transition_id: str,
+    ) -> bool:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """UPDATE stage_claims SET status = 'completed',
+                   completed_transition_id = ?, updated_at = ?
+                   WHERE claim_id = ?""",
+                (transition_id, _now(), claim_id),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
+
     async def get_session(self, session_id: str) -> Session | None:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -693,13 +757,15 @@ class EventStore:
         data: dict | None = None,
         token_count: int | None = None,
         expected_stage: Stage | None = None,
+        event_id: str | None = None,
+        transition_id: str | None = None,
     ) -> StageTransition:
         """Persist an event and its session-stage transition atomically."""
         async with aiosqlite.connect(self.db_path) as db:
             try:
                 await db.execute("BEGIN IMMEDIATE")
                 event = Event(
-                    id=_uuid(),
+                    id=event_id or _uuid(),
                     session_id=session_id,
                     event_type=event_type,
                     stage=stage,
@@ -747,7 +813,7 @@ class EventStore:
                 )
                 cursor = await db.execute(
                     "UPDATE sessions SET current_stage = ?, stage_transition_id = ?, updated_at = ? WHERE id = ?",
-                    (stage.value, event.id, event.timestamp, session_id),
+                    (stage.value, transition_id or event.id, event.timestamp, session_id),
                 )
                 if cursor.rowcount != 1:
                     raise ValueError(f"session {session_id} not found")

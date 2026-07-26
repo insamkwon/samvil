@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +14,10 @@ from .chain_markers import (
     write_driver_marker,
 )
 from .event_store import EventStore
-from .stage_catalog import get_stage_spec, skill_for_state_stage
+from .claim_ledger import ClaimLedger
+from .models import EventType, Stage
+from .ssot_io import atomic_write_text
+from .stage_catalog import get_stage_spec, skill_for_state_stage, state_stage_for, validate_stage_transition
 
 
 class TransitionError(RuntimeError):
@@ -122,6 +128,131 @@ class TransitionController:
             await self.store.delete_stage_claim(claim["claim_id"])
             raise
         return claim
+
+    @staticmethod
+    def _journal_path(root: Path) -> Path:
+        return root / ".samvil" / "transition-journal.json"
+
+    @staticmethod
+    def _state_path(root: Path) -> Path:
+        return root / "project.state.json"
+
+    @staticmethod
+    def _read_json(path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(parsed, dict):
+            raise TransitionError(f"invalid JSON object: {path}")
+        return parsed
+
+    async def commit_stage_transition(
+        self,
+        project_root: str,
+        run_id: str,
+        claim_id: str,
+        from_stage: str,
+        to_stage: str,
+        expected_revision: int,
+        *,
+        event_type: str = "stage_end",
+        data: dict[str, Any] | None = None,
+        transition_id: str | None = None,
+        host_name: str = "codex_cli",
+    ) -> dict[str, Any]:
+        """Materialize one trusted transition in a fixed, recoverable order."""
+        root = Path(project_root).expanduser().resolve(strict=False)
+        transition_id = transition_id or f"transition-{uuid.uuid4().hex}"
+        existing = await self.store.get_transition_receipt(transition_id)
+        if existing is not None:
+            return existing
+        if not validate_stage_transition(from_stage, to_stage):
+            raise TransitionError(f"invalid stage transition: {from_stage} -> {to_stage}")
+        session = await self.store.get_session(run_id)
+        if session is None or Path(session.project_root).expanduser().resolve(strict=False) != root:
+            raise TransitionError("run_id does not own project root")
+        if state_stage_for(from_stage) != session.current_stage.value:
+            raise TransitionError("from_stage does not match current session stage")
+        claim = await self.store.get_stage_claim(run_id, from_stage, expected_revision)
+        if claim is None or claim["claim_id"] != claim_id:
+            raise TransitionError("stage claim does not match transition")
+        inspection = inspect_chain_marker(str(root))
+        revision = self._marker_revision(inspection)
+        if revision != expected_revision:
+            raise TransitionError(f"stale marker revision: expected {expected_revision}, current {revision}")
+        if from_stage == "samvil-qa":
+            qa = self._read_json(root / ".samvil" / "qa-results.json")
+            if not qa:
+                return await self.store.save_transition_receipt(
+                    transition_id,
+                    run_id,
+                    {"transition_id": transition_id, "status": "blocked", "stage": "samvil-qa", "reason": "missing QA evidence"},
+                )
+
+        event_payload = dict(data or {})
+        event_payload.update({"transition_id": transition_id, "from_stage": from_stage, "to_stage": to_stage})
+        event_id = f"event-{transition_id}"
+        journal = {
+            "transition_id": transition_id,
+            "run_id": run_id,
+            "claim_id": claim_id,
+            "expected_revision": expected_revision,
+            "from_stage": from_stage,
+            "to_stage": to_stage,
+            "event_id": event_id,
+            "event_payload_hash": hashlib.sha256(json.dumps(event_payload, sort_keys=True).encode()).hexdigest(),
+            "phase": "PREPARED",
+        }
+        atomic_write_text(self._journal_path(root), json.dumps(journal, indent=2, ensure_ascii=False))
+
+        transition = await self.store.save_event_and_update_stage(
+            run_id,
+            EventType(event_type),
+            Stage(state_stage_for(to_stage)),
+            event_payload,
+            expected_stage=Stage(state_stage_for(from_stage)),
+            event_id=event_id,
+            transition_id=transition_id,
+        )
+        journal["phase"] = "DB_COMMITTED"
+        atomic_write_text(self._journal_path(root), json.dumps(journal, indent=2, ensure_ascii=False))
+
+        from .server import _append_project_event
+        await __import__("asyncio").to_thread(
+            _append_project_event,
+            root,
+            timestamp=transition.event.timestamp,
+            event_type=event_type,
+            stage=state_stage_for(to_stage),
+            session_id=run_id,
+            data=event_payload,
+            event_id=event_id,
+        )
+        ledger = ClaimLedger(root / ".samvil" / "claims.jsonl")
+        ledger.append_transition_claim(
+            transition_id=transition_id,
+            subject=f"stage:{to_stage}",
+            statement=f"{from_stage} transitioned to {to_stage}",
+            authority_file=".samvil/events.jsonl",
+            evidence=[f".samvil/events.jsonl:1"],
+        )
+
+        state = self._read_json(self._state_path(root))
+        completed = list(state.get("completed_stages") or [])
+        from_state = state_stage_for(from_stage)
+        if from_state not in completed:
+            completed.append(from_state)
+        state.update({"current_stage": state_stage_for(to_stage), "completed_stages": completed, "stage_transition_id": transition_id, "transition_revision": expected_revision + 1})
+        atomic_write_text(self._state_path(root), json.dumps(state, indent=2, ensure_ascii=False))
+        next_skill = "" if to_stage == "samvil-retro" else to_stage
+        marker_from_stage = from_stage if next_skill else to_stage
+        marker = build_driver_marker(run_id=run_id, revision=expected_revision + 1, status="terminal" if not next_skill else "ready", host_name=host_name, from_stage=marker_from_stage, next_skill=next_skill, reason=f"{from_stage} completed")
+        write_driver_marker(str(root), marker)
+        receipt = {"transition_id": transition_id, "status": "committed", "event_id": event_id, "claim_id": claim_id, "from_stage": from_stage, "to_stage": to_stage, "marker_revision": expected_revision + 1}
+        await self.store.save_transition_receipt(transition_id, run_id, receipt)
+        await self.store.mark_stage_claim_completed(claim_id, transition_id)
+        (self._journal_path(root)).unlink(missing_ok=True)
+        return receipt
 
 
 __all__ = ["TransitionController", "TransitionError"]

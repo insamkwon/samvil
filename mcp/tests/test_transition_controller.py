@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import json
 from pathlib import Path
 
 import pytest
@@ -87,3 +88,41 @@ async def test_marker_write_failure_compensates_new_claim(controller, tmp_path, 
     with pytest.raises(OSError, match="marker unavailable"):
         await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
     assert await controller.store.get_stage_claim(session.id, "samvil-interview", 0) is None
+
+
+@pytest.mark.asyncio
+async def test_commit_stage_transition_materializes_each_ssot_once(controller, tmp_path):
+    project = tmp_path / "commit-app"
+    project.mkdir()
+    (project / "project.state.json").write_text(
+        '{"current_stage":"interview","completed_stages":[],"unrelated":"keep"}',
+        encoding="utf-8",
+    )
+    session = await controller.store.create_session("commit-app", "standard", str(project))
+    claim = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+
+    first = await controller.commit_stage_transition(
+        str(project), session.id, claim["claim_id"], "samvil-interview", "samvil-seed", 0,
+    )
+    second = await controller.commit_stage_transition(
+        str(project), session.id, claim["claim_id"], "samvil-interview", "samvil-seed", 0,
+        transition_id=first["transition_id"],
+    )
+    assert first == second
+    assert json.loads((project / "project.state.json").read_text())["unrelated"] == "keep"
+    assert len((project / ".samvil" / "events.jsonl").read_text().splitlines()) == 1
+    assert not (project / ".samvil" / "transition-journal.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_qa_commit_without_evidence_stays_blocked(controller, tmp_path):
+    project = tmp_path / "qa-blocked-app"
+    project.mkdir()
+    session = await controller.store.create_session("qa-blocked-app", "standard", str(project))
+    await controller.store.update_session_stage(session.id, Stage.QA)
+    claim = await controller.store.create_stage_claim(session.id, "samvil-qa", 0)
+    receipt = await controller.commit_stage_transition(
+        str(project), session.id, claim["claim_id"], "samvil-qa", "samvil-deploy", 0,
+    )
+    assert receipt["status"] == "blocked"
+    assert await controller.store.get_events(session.id) == []
