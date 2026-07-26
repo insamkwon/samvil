@@ -29,7 +29,7 @@ async def test_envelope_is_read_only_and_reports_fresh_then_ready(controller, tm
     envelope = await controller.get_stage_envelope(str(project), "codex_cli")
     assert envelope["status"] == "fresh"
 
-    session = await controller.store.create_session("fresh-app", "standard", str(project))
+    session = await controller.store.create_session("display-name-does-not-match-root", "standard", str(project))
     ready = await controller.get_stage_envelope(str(project), "codex_cli")
     assert ready["run_id"] == session.id
     assert ready["status"] == "ready"

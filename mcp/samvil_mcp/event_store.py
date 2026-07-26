@@ -683,6 +683,29 @@ class EventStore:
                 updated_at=row["updated_at"],
             )
 
+    async def find_session_by_root(self, project_root: str) -> Session | None:
+        """Find the newest session by canonical root, independent of display name."""
+        normalized_root = str(Path(project_root).expanduser().resolve())
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM sessions WHERE project_root = ? ORDER BY updated_at DESC LIMIT 1",
+                (normalized_root,),
+            )
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        return Session(
+            id=row["id"],
+            project_name=row["project_name"],
+            project_root=row["project_root"],
+            seed_version=row["seed_version"],
+            current_stage=Stage(row["current_stage"]),
+            samvil_tier=row["samvil_tier"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
     async def list_sessions(self, limit: int = 10) -> list[Session]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row

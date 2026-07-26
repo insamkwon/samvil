@@ -74,7 +74,7 @@ class TransitionController:
 
     async def _session_for_project(self, project_root: str):
         root = Path(project_root).expanduser().resolve(strict=False)
-        return await self.store.find_session_by_project(root.name, str(root))
+        return await self.store.find_session_by_root(str(root))
 
     @staticmethod
     def _marker_revision(inspection) -> int:
