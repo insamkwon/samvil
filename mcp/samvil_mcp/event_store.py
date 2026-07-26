@@ -588,6 +588,34 @@ class EventStore:
         record = await self.get_transition_receipt_record(transition_id)
         return record[1] if record is not None else None
 
+    async def get_event_by_id(self, event_id: str) -> Event | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM events WHERE id = ?", (event_id,))
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return Event(
+            id=row["id"],
+            session_id=row["session_id"],
+            event_type=EventType(row["event_type"]),
+            stage=Stage(row["stage"]),
+            data=json.loads(row["data"]),
+            token_count=row["token_count"],
+            timestamp=row["timestamp"],
+        )
+
+    async def get_session_transition_state(self, session_id: str) -> tuple[str, str] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT current_stage, stage_transition_id FROM sessions WHERE id = ?",
+                (session_id,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return str(row[0]), str(row[1] or "")
+
     async def get_transition_receipt_record(
         self,
         transition_id: str,

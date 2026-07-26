@@ -15,17 +15,22 @@ Loop:
    execute its boot sequence, including `mcp__samvil_mcp__create_session`. Then
    reread the envelope. Never call `begin_stage` with an empty `run_id`.
 3. Stop on `waiting_user`, `blocked`, or `complete` and report the exact reason.
-4. Call `mcp__samvil_mcp__begin_stage` with the returned run, stage, and revision.
-5. Read the exact absolute catalog instruction path returned by the envelope
+4. When `recovery_mode=retry_commit`, do not rerun the stage. Call
+   `mcp__samvil_mcp__commit_stage_transition` immediately with the envelope's
+   `claim_id`, `transition_id`, `requested_next_skill`, `verdict`, `evidence`,
+   run, stage, and revision. Then reread the envelope.
+5. Otherwise call `mcp__samvil_mcp__begin_stage` with the returned run, stage,
+   and revision.
+6. Read the exact absolute catalog instruction path returned by the envelope
    completely and execute the stage.
-6. Reread the envelope before committing. Some compatibility instructions call
+7. Reread the envelope before committing. Some compatibility instructions call
    `complete_stage`, which already advances through the shared transition
    controller. If the envelope already advanced to another stage or revision,
    do not commit the same stage again; continue from that durable envelope.
-7. Only when the envelope still shows the same in-progress claim, commit proven
+8. Only when the envelope still shows the same in-progress claim, commit proven
    evidence with `mcp__samvil_mcp__commit_stage_transition`. Reuse one fixed
    `transition_id` for retries of that exact transition.
-8. Continue from the returned receipt/envelope; never infer completion from prose
+9. Continue from the returned receipt/envelope; never infer completion from prose
    and never edit marker or state files directly.
 
 Keep only `run_id`, `stage`, `claim_id`, `expected_revision`, and the exact

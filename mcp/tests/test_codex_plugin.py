@@ -90,3 +90,17 @@ def test_run_skill_bootstraps_fresh_projects_and_avoids_duplicate_commit() -> No
     assert "create_session" in run
     assert "reread" in run.lower()
     assert "already advanced" in run.lower()
+    assert "recovery_mode" in run
+    assert "retry_commit" in run
+
+
+def test_native_evolve_and_retro_instructions_leave_marker_to_driver() -> None:
+    references = REPO / "references" / "codex-commands"
+    for name in ("samvil-evolve.md", "samvil-retro.md"):
+        instruction = (references / name).read_text(encoding="utf-8")
+        normalized = " ".join(instruction.split())
+        assert "Do not call `write_chain_marker`" in instruction
+        assert "native host driver" in normalized
+    assert "Do not call `write_chain_marker` or `clear_chain_marker`" in (
+        references / "samvil-retro.md"
+    ).read_text(encoding="utf-8")

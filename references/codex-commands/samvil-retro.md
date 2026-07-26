@@ -31,8 +31,9 @@ Ensure the pipeline has completed at least one full cycle.
    - Observations with severity (CRITICAL/HIGH/MEDIUM/LOW)
    - Concrete suggestions (ISS-ID, target_file, reason, expected_impact)
 7. Save retro to `.samvil/retro-results.md`.
-8. Run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-retro")` to record completion.
-9. Run MCP tool `clear_chain_marker(project_root="${PWD}")` — pipeline complete.
+8. Do not call `write_chain_marker` or `clear_chain_marker`. Return the completed
+   report to the native host driver so it can commit `samvil-retro -> complete`
+   exactly once.
 
 ## Chain
 

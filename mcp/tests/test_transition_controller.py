@@ -76,8 +76,20 @@ async def test_conflicting_stage_claim_is_rejected_without_mutation(controller, 
     session = await controller.store.create_session("conflict-app", "standard", str(project))
     await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
 
-    with pytest.raises(TransitionError, match="conflicting stage claim"):
+    with pytest.raises(TransitionError, match="does not match current session stage"):
         await controller.begin_stage(str(project), session.id, "samvil-design", 0)
+
+
+@pytest.mark.asyncio
+async def test_begin_stage_rejects_stage_that_is_not_session_current_stage(controller, tmp_path):
+    project = tmp_path / "wrong-first-claim"
+    project.mkdir()
+    session = await controller.store.create_session("wrong-first-claim", "standard", str(project))
+
+    with pytest.raises(TransitionError, match="does not match current session stage"):
+        await controller.begin_stage(str(project), session.id, "samvil-design", 0)
+
+    assert await controller.store.get_stage_claims_for_revision(session.id, 0) == []
 
 
 @pytest.mark.asyncio
@@ -169,6 +181,138 @@ async def test_db_committed_journal_replays_remaining_materialization(
     assert len((project / ".samvil" / "events.jsonl").read_text().splitlines()) == 1
     assert await controller.store.get_pending_project_events(session.id) == []
     assert not (project / ".samvil" / "transition-journal.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_prepared_journal_with_committed_db_event_recovers_on_retry(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    project = tmp_path / "prepared-db-replay"
+    project.mkdir()
+    session = await controller.store.create_session("prepared-db-replay", "standard", str(project))
+    claim = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+    original_write = controller._write_journal
+    failed = False
+
+    def fail_db_committed(root, journal, phase):
+        nonlocal failed
+        if phase == "DB_COMMITTED" and not failed:
+            failed = True
+            raise OSError("injected DB_COMMITTED journal failure")
+        return original_write(root, journal, phase)
+
+    monkeypatch.setattr(controller, "_write_journal", fail_db_committed)
+    with pytest.raises(OSError, match="DB_COMMITTED"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="prepared-db-replay-transition",
+        )
+
+    recovered = await controller.commit_stage_transition(
+        str(project), session.id, claim["claim_id"],
+        "samvil-interview", "samvil-seed", 0,
+        transition_id="prepared-db-replay-transition",
+    )
+
+    assert recovered["status"] == "committed"
+    assert len((project / ".samvil" / "events.jsonl").read_text().splitlines()) == 1
+    assert await controller.store.get_pending_project_events(session.id) == []
+
+
+@pytest.mark.asyncio
+async def test_envelope_exposes_interrupted_transition_retry_context(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    import samvil_mcp.server as server
+
+    project = tmp_path / "reopen-recovery"
+    project.mkdir()
+    session = await controller.store.create_session("reopen-recovery", "standard", str(project))
+    claim = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+
+    monkeypatch.setattr(server, "_append_project_event", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("stop")))
+    with pytest.raises(OSError, match="stop"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            data={"verdict": "PASS", "evidence": {"artifact": "interview-summary.md:1"}},
+            transition_id="reopen-recovery-transition",
+        )
+
+    envelope = await controller.get_stage_envelope(str(project), "codex_cli")
+
+    assert envelope["status"] == "in_progress"
+    assert envelope["stage"] == "samvil-interview"
+    assert envelope["recovery_mode"] == "retry_commit"
+    assert envelope["transition_id"] == "reopen-recovery-transition"
+    assert envelope["claim_id"] == claim["claim_id"]
+    assert envelope["requested_next_skill"] == "samvil-seed"
+
+
+@pytest.mark.asyncio
+async def test_recovery_rejects_tampered_journal_payload(controller, tmp_path, monkeypatch):
+    import samvil_mcp.server as server
+
+    project = tmp_path / "tampered-journal"
+    project.mkdir()
+    session = await controller.store.create_session("tampered-journal", "standard", str(project))
+    claim = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+    monkeypatch.setattr(server, "_append_project_event", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("stop")))
+    with pytest.raises(OSError, match="stop"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="tampered-journal-transition",
+        )
+
+    journal_path = project / ".samvil" / "transition-journal.json"
+    journal = json.loads(journal_path.read_text())
+    journal["target_state"] = "deploy"
+    journal["event_payload"]["forged"] = True
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+
+    with pytest.raises(TransitionError, match="journal integrity"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="tampered-journal-transition",
+        )
+
+
+@pytest.mark.asyncio
+async def test_existing_receipt_retry_finishes_claim_completion(controller, tmp_path, monkeypatch):
+    project = tmp_path / "receipt-claim-recovery"
+    project.mkdir()
+    session = await controller.store.create_session("receipt-claim-recovery", "standard", str(project))
+    claim = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+    original_complete = controller.store.mark_stage_claim_completed
+    failed = False
+
+    async def fail_once(claim_id, transition_id):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise OSError("claim completion interrupted")
+        return await original_complete(claim_id, transition_id)
+
+    monkeypatch.setattr(controller.store, "mark_stage_claim_completed", fail_once)
+    with pytest.raises(OSError, match="claim completion interrupted"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="receipt-claim-recovery-transition",
+        )
+
+    receipt = await controller.commit_stage_transition(
+        str(project), session.id, claim["claim_id"],
+        "samvil-interview", "samvil-seed", 0,
+        transition_id="receipt-claim-recovery-transition",
+    )
+    recovered_claim = await controller.store.get_stage_claim(session.id, "samvil-interview", 0)
+
+    assert receipt["status"] == "committed"
+    assert recovered_claim["status"] == "completed"
 
 
 @pytest.mark.asyncio
