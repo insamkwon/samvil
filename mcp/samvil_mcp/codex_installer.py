@@ -7,14 +7,19 @@ can refuse ambiguous user-owned state before changing anything.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import os
 import re
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .ssot_io import atomic_write_text
 
 
 _FRONTMATTER_NAME = re.compile(r"^name:\s*([^\n#]+?)\s*$", re.MULTILINE)
@@ -104,15 +109,15 @@ def validate_marketplace_root(
     resolved = Path(root).expanduser().resolve(strict=False)
     home = Path(user_home).expanduser().resolve(strict=False)
     skills = Path(codex_skills_root).expanduser().resolve(strict=False)
+    codex_root = skills.parent
     filesystem_root = Path(resolved.anchor)
 
     unsafe = (
         resolved == filesystem_root
-        or resolved == home
-        or home in resolved.parents
-        or resolved == skills
+        or resolved in codex_root.parents
+        or resolved == codex_root
+        or codex_root in resolved.parents
         or skills in resolved.parents
-        or resolved in skills.parents
     )
     if unsafe:
         raise ValueError(f"unsafe Codex marketplace root: {resolved}")
@@ -310,8 +315,8 @@ def execute_isolated_install(
 ) -> InstallReceipt:
     """Execute only inside an explicitly supplied isolated Codex root.
 
-    This executor intentionally has no default home/config path. Task 13 will add
-    the real profile wrapper after public skills and transition MCP are complete.
+    This executor intentionally has no default home/config path. Callers must pass
+    an explicit root and the runner receives a pinned ``CODEX_HOME`` environment.
     """
 
     if plan.blockers:
@@ -340,18 +345,34 @@ def execute_isolated_install(
 
     add_marketplace = ("codex", "plugin", "marketplace", "add", str(plan.canonical_root))
     add_plugin = ("codex", "plugin", "add", "samvil@samvil")
+    command_env = {"CODEX_HOME": str(root)}
     for command in (add_marketplace, add_plugin):
-        command_runner(command)
+        command_runner(command, command_env)
         commands.append(command)
 
     registry.parent.mkdir(parents=True, exist_ok=True)
-    content = {
-        "marketplaces": [{"name": "samvil", "root": str(plan.canonical_root)}],
-        "plugins": [{"name": "samvil", "enabled": True}],
-    }
-    temporary = registry.with_name(f".{registry.name}.tmp")
-    temporary.write_text(json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    temporary.replace(registry)
+    try:
+        content = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InstallBlocked(f"invalid Codex registry JSON: {registry}") from exc
+    if not isinstance(content, dict):
+        raise InstallBlocked(f"Codex registry JSON must be an object: {registry}")
+
+    def upsert_named(items: Any, replacement: dict[str, Any]) -> list[dict[str, Any]]:
+        existing = [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+        kept = [item for item in existing if item.get("name") != replacement["name"]]
+        kept.append(replacement)
+        return kept
+
+    content["marketplaces"] = upsert_named(
+        content.get("marketplaces"),
+        {"name": "samvil", "root": str(plan.canonical_root)},
+    )
+    content["plugins"] = upsert_named(
+        content.get("plugins"),
+        {"name": "samvil", "enabled": True},
+    )
+    atomic_write_text(registry, json.dumps(content, indent=2, sort_keys=True) + "\n")
 
     if migrate:
         for action in plan.actions:
@@ -430,6 +451,57 @@ def build_install_plan(
         actions=tuple(actions),
         blockers=tuple(blockers),
     )
+
+
+def _subprocess_runner(command: tuple[str, ...], env: dict[str, str]) -> None:
+    subprocess.run(
+        command,
+        check=True,
+        env={**os.environ, **env},
+        text=True,
+    )
+
+
+def _main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Activate the native SAMVIL Codex plugin")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--install", action="store_true")
+    mode.add_argument("--migrate", action="store_true")
+    parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument("--codex-home", type=Path, required=True)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+
+    readiness = validate_activation_readiness(args.repo_root)
+    if args.check:
+        print(json.dumps(readiness, ensure_ascii=False, indent=2))
+        return 0 if readiness["ready"] else 1
+    if not readiness["ready"]:
+        raise InstallBlocked("; ".join(readiness["blockers"]))
+
+    canonical = validate_marketplace_root(
+        args.repo_root,
+        user_home=args.codex_home.expanduser().resolve(strict=False).parent,
+        codex_skills_root=args.codex_home / "skills",
+    )
+    plan = CodexInstallPlan(
+        canonical_root=canonical,
+        capability=CodexCapabilityProbe(True, True),
+    )
+    receipt = execute_isolated_install(
+        plan,
+        codex_home=args.codex_home,
+        command_runner=_subprocess_runner,
+        migrate=args.migrate,
+    )
+    payload = receipt.to_dict()
+    print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json else f"Codex native plugin activated: {canonical}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
 
 
 __all__ = [

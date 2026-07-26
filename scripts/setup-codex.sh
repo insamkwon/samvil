@@ -22,22 +22,35 @@ echo " SAMVIL 자동 설치 (v$(grep -o '"version": "[^"]*"' "$SAMVIL_ROOT/.clau
 echo " 대상 호스트: $HOST"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-if [[ "$HOST" == "codex" && "$MODE" == "--check" ]]; then
+_setup_codex_native() {
+  local requested_mode="$1"
+  local codex_profile_root="${CODEX_HOME:-$HOME/.codex}"
+  local installer_mode="--install"
+  case "$requested_mode" in
+    --check) installer_mode="--check" ;;
+    install|--install) installer_mode="--install" ;;
+    migrate|--migrate) installer_mode="--migrate" ;;
+    *)
+      echo "❌ Codex mode must be --check, --install, or --migrate."
+      return 2
+      ;;
+  esac
   echo ""
-  echo "Codex activation readiness (read-only)..."
-  PYTHONPATH="$SAMVIL_ROOT/mcp" python3 - "$SAMVIL_ROOT" <<'PY'
-import json
-import sys
-from pathlib import Path
-from samvil_mcp.codex_installer import validate_activation_readiness
+  echo "Codex native plugin activation (${installer_mode})..."
+  PYTHONPATH="$MCP_DIR" python3 -m samvil_mcp.codex_installer \
+    "$installer_mode" \
+    --repo-root "$SAMVIL_ROOT" \
+    --codex-home "$codex_profile_root" \
+    --json
+}
 
-result = validate_activation_readiness(Path(sys.argv[1]))
-print(json.dumps(result, ensure_ascii=False, indent=2))
-if not result["ready"]:
-    raise SystemExit(1)
-PY
-  echo "✓ Codex activation readiness passed; no profile mutation performed."
+if [[ "$HOST" == "codex" ]]; then
+  _setup_codex_native "$MODE"
   exit 0
+fi
+
+if [[ "$HOST" == "all" ]]; then
+  _setup_codex_native "$MODE"
 fi
 
 # ── Step 1. uv ──────────────────────────────────────────────────────────────
@@ -102,9 +115,6 @@ _install_agents() {
   echo "      ✓ $dest (paths → ${SAMVIL_ROOT})"
 }
 
-if [[ "$HOST" == "codex" || "$HOST" == "all" ]]; then
-  _install_agents "$HOME/.codex"
-fi
 if [[ "$HOST" == "opencode" || "$HOST" == "all" ]]; then
   _install_agents "$HOME/.opencode"
 fi
@@ -115,27 +125,6 @@ fi
 # ── Step 5. MCP config 자동 등록 ────────────────────────────────────────────
 echo ""
 echo "[5/5] 호스트 MCP 설정 자동 등록..."
-
-# ── Codex CLI ────────────────────────────────────────────────────────────────
-_setup_codex() {
-  local cfg="$HOME/.codex/config.toml"
-  mkdir -p "$HOME/.codex"
-
-  if [ -f "$cfg" ] && grep -q "samvil-mcp" "$cfg" 2>/dev/null; then
-    echo "      ✓ Codex CLI: 이미 등록됨 ($cfg)"
-    return
-  fi
-
-  # Append block (file may or may not exist)
-  cat >> "$cfg" <<TOML
-
-[mcp_servers.samvil-mcp]
-command = "$PYTHON_BIN"
-args    = ["-m", "samvil_mcp.server"]
-env     = {}
-TOML
-  echo "      ✓ Codex CLI: $cfg 에 등록 완료"
-}
 
 # ── OpenCode ─────────────────────────────────────────────────────────────────
 _setup_opencode() {
@@ -215,7 +204,6 @@ PY
   echo "      ✓ Gemini CLI: $cfg 에 등록 완료"
 }
 
-if [[ "$HOST" == "codex"    || "$HOST" == "all" ]]; then _setup_codex;    fi
 if [[ "$HOST" == "opencode" || "$HOST" == "all" ]]; then _setup_opencode; fi
 if [[ "$HOST" == "gemini"   || "$HOST" == "all" ]]; then _setup_gemini;   fi
 
