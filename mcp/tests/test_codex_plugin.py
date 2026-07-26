@@ -62,7 +62,22 @@ def test_manifest_version_matches_claude_manifest_and_mcp_package() -> None:
     assert f'__version__ = "{codex_version}"' in init_text
 
 
-def test_codex_skill_root_is_tracked_without_exposing_stub_skills() -> None:
+def test_codex_skill_root_exposes_exactly_three_public_skills() -> None:
     assert CODEX_SKILLS.is_dir()
     assert (CODEX_SKILLS / "README.md").is_file()
-    assert not list(CODEX_SKILLS.rglob("SKILL.md"))
+    assert sorted(path.name for path in CODEX_SKILLS.iterdir() if path.is_dir()) == ["resume", "run", "status"]
+
+
+def test_public_codex_skills_have_bare_names_and_shared_tools() -> None:
+    for name in ("run", "resume", "status"):
+        text = (CODEX_SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
+        assert f"name: {name}" in text
+    run = (CODEX_SKILLS / "run" / "SKILL.md").read_text(encoding="utf-8")
+    resume = (CODEX_SKILLS / "resume" / "SKILL.md").read_text(encoding="utf-8")
+    status = (CODEX_SKILLS / "status" / "SKILL.md").read_text(encoding="utf-8")
+    for tool in ("get_stage_envelope", "begin_stage", "commit_stage_transition"):
+        assert f"mcp__samvil_mcp__{tool}" in run
+        assert f"mcp__samvil_mcp__{tool}" in resume
+    assert "mcp__samvil_mcp__get_stage_envelope" in status
+    assert "mcp__samvil_mcp__begin_stage" not in status
+    assert "mcp__samvil_mcp__commit_stage_transition" not in status
