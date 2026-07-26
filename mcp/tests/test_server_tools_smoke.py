@@ -131,6 +131,36 @@ def test_wrapper_recovery_accepts_envelope_route_after_default_route_receipt(
     assert retry["status"] == "committed"
 
 
+def test_wrapper_replay_rejects_explicit_nondefault_route_changed_to_blank(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "wrapper-explicit-route-conflict"
+    project.mkdir()
+    (project / "project.seed.json").write_text('{"schema_version":"3.3"}\n', encoding="utf-8")
+    store = EventStore(str(tmp_path / "explicit-route-conflict.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("display-name", "standard", str(project)))
+    _run(store.update_session_stage(session.id, Stage.SEED))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-seed", 0)))
+
+    first = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-seed", 0, claim["claim_id"], "PASS",
+        '{"artifact":"project.seed.json:1"}', "samvil-council", "explicit-route-id",
+    )))
+    changed = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-seed", 0, claim["claim_id"], "PASS",
+        '{"artifact":"project.seed.json:1"}', "", "explicit-route-id",
+    )))
+
+    assert first["to_stage"] == "samvil-council"
+    assert changed["status"] == "blocked"
+    assert "different route" in changed["error"]
+
+
 def test_commit_stage_transition_wrapper_rejects_failed_verdict_and_sanitizes_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

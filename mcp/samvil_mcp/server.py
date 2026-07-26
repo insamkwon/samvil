@@ -1286,9 +1286,16 @@ async def commit_stage_transition(
                 ):
                     raise ValueError("transition id conflicts with a different transition")
                 to_stage = str(existing.get("to_stage") or "")
-                if requested_next_skill and requested_next_skill != to_stage:
-                    raise ValueError("transition id conflicts with a different route")
                 event = await controller.store.get_event_by_id(str(existing.get("event_id") or ""))
+                if (
+                    (requested_next_skill and requested_next_skill != to_stage)
+                    or (
+                        event is not None
+                        and bool(event.data.get("user_choice"))
+                        and not requested_next_skill
+                    )
+                ):
+                    raise ValueError("transition id conflicts with a different route")
                 expected_data = sanitize_event_data(
                     {
                         "verdict": verdict,
