@@ -29,8 +29,10 @@ installer passes an explicit `CODEX_HOME` to every child command, preserves
 unrelated marketplace/plugin entries, backs up the registry, and verifies that
 personal skill names and hashes are unchanged.
 
-Use `--migrate` only for artifacts already classified as generated legacy state.
-Ambiguous user-modified files are blockers and must remain byte-identical.
+Legacy `--migrate` is fail-closed in this candidate until the CLI can construct
+provenance-backed actions for generated AGENTS, direct MCP blocks, and legacy
+skills. Do not move those files manually; ambiguous user-modified files must
+remain byte-identical.
 
 ## `invalid_grant: Invalid refresh token`
 

@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+import samvil_mcp.codex_installer as installer
+
 from samvil_mcp.codex_installer import (
     CodexInstallPlan,
     CodexCapabilityProbe,
@@ -22,6 +24,7 @@ from samvil_mcp.codex_installer import (
     parse_capability_probe,
     validate_marketplace_root,
     validate_activation_readiness,
+    validate_cli_environment,
 )
 
 
@@ -54,6 +57,30 @@ def test_activation_readiness_blocks_incomplete_copy(tmp_path: Path) -> None:
     result = validate_activation_readiness(tmp_path)
     assert result["ready"] is False
     assert result["blockers"]
+
+
+def test_cli_environment_check_requires_codex_uvx_and_plugin_commands(tmp_path: Path) -> None:
+    missing = validate_cli_environment(
+        tmp_path / ".codex",
+        which=lambda _name: None,
+        command_runner=lambda _command, _env: None,
+    )
+    assert missing["ready"] is False
+    assert "codex binary is unavailable" in missing["blockers"]
+    assert "uvx binary is unavailable" in missing["blockers"]
+
+    class Result:
+        returncode = 0
+        stdout = "Commands: add marketplace list remove"
+        stderr = ""
+
+    ready = validate_cli_environment(
+        tmp_path / ".codex",
+        which=lambda name: f"/fake/{name}",
+        command_runner=lambda _command, _env: Result(),
+    )
+    assert ready["ready"] is True
+    assert ready["plugin_commands_supported"] is True
 
 
 def test_marketplace_root_must_not_claim_user_owned_codex_paths(tmp_path: Path) -> None:
@@ -229,6 +256,77 @@ def test_isolated_executor_backups_registry_and_preserves_personal_skills(tmp_pa
     assert (codex_home / "skills" / "commit" / "SKILL.md").exists()
 
 
+def test_isolated_executor_corrects_existing_samvil_marketplace_root(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    repo.mkdir()
+    codex_home.mkdir(parents=True)
+    registry = codex_home / "marketplaces.json"
+    registry.write_text(
+        json.dumps({"marketplaces": [{"name": "samvil", "root": "/old/root"}]}),
+        encoding="utf-8",
+    )
+    commands = []
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=lambda command, env: commands.append((command, env)),
+    )
+
+    assert [command for command, _env in commands] == [
+        ("codex", "plugin", "marketplace", "remove", "samvil"),
+        ("codex", "plugin", "marketplace", "add", str(repo.resolve())),
+        ("codex", "plugin", "add", "samvil@samvil"),
+    ]
+
+
+def test_isolated_executor_blocks_invalid_registry_before_commands(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    repo.mkdir()
+    codex_home.mkdir(parents=True)
+    registry = codex_home / "marketplaces.json"
+    registry.write_text("{broken", encoding="utf-8")
+    commands = []
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    with pytest.raises(InstallBlocked, match="invalid Codex registry JSON"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda command, env: commands.append((command, env)),
+        )
+
+    assert commands == []
+    assert registry.read_text(encoding="utf-8") == "{broken"
+
+
+def test_isolated_executor_restores_registry_when_plugin_add_fails(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    repo.mkdir()
+    codex_home.mkdir(parents=True)
+    registry = codex_home / "marketplaces.json"
+    original = '{"marketplaces": [{"name": "other", "root": "/other"}]}\n'
+    registry.write_text(original, encoding="utf-8")
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+    calls = 0
+
+    def failing_runner(_command, _env):
+        nonlocal calls
+        calls += 1
+        registry.write_text('{"partially_mutated": true}\n', encoding="utf-8")
+        if calls == 2:
+            raise RuntimeError("plugin add failed")
+
+    with pytest.raises(InstallBlocked, match="registry restored"):
+        execute_isolated_install(plan, codex_home=codex_home, command_runner=failing_runner)
+
+    assert registry.read_text(encoding="utf-8") == original
+
+
 def test_isolated_executor_replaces_registry_symlink_without_overwriting_target(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     codex_home = tmp_path / "codex-home" / ".codex"
@@ -312,3 +410,18 @@ def test_setup_shell_routes_codex_to_native_installer_without_legacy_global_writ
     assert "python3 -m samvil_mcp.codex_installer" in script
     assert '_install_agents "$HOME/.codex"' not in script
     assert "[mcp_servers.samvil-mcp]" not in script
+
+
+def test_migrate_cli_fails_closed_until_legacy_actions_are_classified(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[2]
+
+    with pytest.raises(InstallBlocked, match="legacy migration is unavailable"):
+        installer._main(
+            [
+                "--migrate",
+                "--repo-root",
+                str(repo),
+                "--codex-home",
+                str(tmp_path / ".codex"),
+            ]
+        )

@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -273,6 +274,53 @@ def validate_activation_readiness(repo_root: Path) -> dict[str, Any]:
     return {"ready": not blockers, "blockers": blockers, "public_skills": public_skills, "manifest": str(manifest), "launcher": str(launcher)}
 
 
+def _capability_probe_runner(command: tuple[str, ...], env: dict[str, str]) -> Any:
+    return subprocess.run(
+        command,
+        env={**os.environ, **env},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def validate_cli_environment(
+    codex_home: Path,
+    *,
+    which: Any = shutil.which,
+    command_runner: Any = _capability_probe_runner,
+) -> dict[str, Any]:
+    """Read-only proof that native Codex and the relative MCP launcher can run."""
+    root = Path(codex_home).expanduser().resolve(strict=False)
+    blockers: list[str] = []
+    codex_binary = which("codex") or ""
+    uvx_binary = which("uvx") or ""
+    if not codex_binary:
+        blockers.append("codex binary is unavailable")
+    if not uvx_binary:
+        blockers.append("uvx binary is unavailable")
+    plugin_commands_supported = False
+    if codex_binary:
+        result = command_runner(
+            (str(codex_binary), "plugin", "--help"),
+            {"CODEX_HOME": str(root)},
+        )
+        output = f"{getattr(result, 'stdout', '')}\n{getattr(result, 'stderr', '')}".lower()
+        plugin_commands_supported = (
+            getattr(result, "returncode", 1) == 0
+            and all(token in output for token in ("add", "marketplace", "list", "remove"))
+        )
+        if not plugin_commands_supported:
+            blockers.append("Codex native plugin commands are unavailable")
+    return {
+        "ready": not blockers,
+        "blockers": blockers,
+        "codex_binary": str(codex_binary),
+        "uvx_binary": str(uvx_binary),
+        "plugin_commands_supported": plugin_commands_supported,
+    }
+
+
 @dataclass(frozen=True)
 class InstallReceipt:
     mode: str
@@ -337,26 +385,52 @@ def execute_isolated_install(
     backup_paths: list[Path] = []
     commands: list[tuple[str, ...]] = []
     registry = root / "marketplaces.json"
-    if registry.exists():
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        backup = root / "backups" / f"marketplaces-{stamp}.json"
-        _atomic_copy(registry, backup)
-        backup_paths.append(backup)
-
-    add_marketplace = ("codex", "plugin", "marketplace", "add", str(plan.canonical_root))
-    add_plugin = ("codex", "plugin", "add", "samvil@samvil")
-    command_env = {"CODEX_HOME": str(root)}
-    for command in (add_marketplace, add_plugin):
-        command_runner(command, command_env)
-        commands.append(command)
-
-    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_existed = registry.exists()
     try:
-        content = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else {}
+        content = json.loads(registry.read_text(encoding="utf-8")) if registry_existed else {}
     except (OSError, json.JSONDecodeError) as exc:
         raise InstallBlocked(f"invalid Codex registry JSON: {registry}") from exc
     if not isinstance(content, dict):
         raise InstallBlocked(f"Codex registry JSON must be an object: {registry}")
+    registry_backup: Path | None = None
+    if registry_existed:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup = root / "backups" / f"marketplaces-{stamp}.json"
+        _atomic_copy(registry, backup)
+        backup_paths.append(backup)
+        registry_backup = backup
+
+    existing_marketplaces = content.get("marketplaces")
+    current_samvil = next(
+        (
+            item
+            for item in existing_marketplaces
+            if isinstance(item, dict) and item.get("name") == "samvil"
+        ),
+        None,
+    ) if isinstance(existing_marketplaces, list) else None
+    remove_marketplace = ("codex", "plugin", "marketplace", "remove", "samvil")
+    add_marketplace = ("codex", "plugin", "marketplace", "add", str(plan.canonical_root))
+    add_plugin = ("codex", "plugin", "add", "samvil@samvil")
+    command_env = {"CODEX_HOME": str(root)}
+    planned_commands = []
+    if current_samvil and Path(str(current_samvil.get("root") or "")).expanduser().resolve(strict=False) != plan.canonical_root:
+        planned_commands.append(remove_marketplace)
+    planned_commands.extend((add_marketplace, add_plugin))
+    try:
+        for command in planned_commands:
+            command_runner(command, command_env)
+            commands.append(command)
+        registry.parent.mkdir(parents=True, exist_ok=True)
+        content = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else content
+        if not isinstance(content, dict):
+            raise InstallBlocked(f"Codex registry JSON must be an object: {registry}")
+    except Exception as exc:
+        if registry_backup is not None:
+            _atomic_copy(registry_backup, registry)
+        elif not registry_existed:
+            registry.unlink(missing_ok=True)
+        raise InstallBlocked(f"Codex activation failed; registry restored: {exc}") from exc
 
     def upsert_named(items: Any, replacement: dict[str, Any]) -> list[dict[str, Any]]:
         existing = [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
@@ -372,7 +446,14 @@ def execute_isolated_install(
         content.get("plugins"),
         {"name": "samvil", "enabled": True},
     )
-    atomic_write_text(registry, json.dumps(content, indent=2, sort_keys=True) + "\n")
+    try:
+        atomic_write_text(registry, json.dumps(content, indent=2, sort_keys=True) + "\n")
+    except Exception as exc:
+        if registry_backup is not None:
+            _atomic_copy(registry_backup, registry)
+        elif not registry_existed:
+            registry.unlink(missing_ok=True)
+        raise InstallBlocked(f"Codex activation failed; registry restored: {exc}") from exc
 
     if migrate:
         for action in plan.actions:
@@ -474,6 +555,14 @@ def _main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     readiness = validate_activation_readiness(args.repo_root)
+    if args.migrate:
+        raise InstallBlocked(
+            "legacy migration is unavailable until generated artifacts are classified"
+        )
+    environment = validate_cli_environment(args.codex_home)
+    readiness["environment"] = environment
+    readiness["blockers"] = [*readiness["blockers"], *environment["blockers"]]
+    readiness["ready"] = not readiness["blockers"]
     if args.check:
         print(json.dumps(readiness, ensure_ascii=False, indent=2))
         return 0 if readiness["ready"] else 1
@@ -520,4 +609,5 @@ __all__ = [
     "execute_isolated_install",
     "parse_capability_probe",
     "validate_marketplace_root",
+    "validate_cli_environment",
 ]
