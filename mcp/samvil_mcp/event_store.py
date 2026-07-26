@@ -580,15 +580,22 @@ class EventStore:
             await db.commit()
 
     async def get_transition_receipt(self, transition_id: str) -> dict[str, Any] | None:
+        record = await self.get_transition_receipt_record(transition_id)
+        return record[1] if record is not None else None
+
+    async def get_transition_receipt_record(
+        self,
+        transition_id: str,
+    ) -> tuple[str, dict[str, Any]] | None:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
-                "SELECT receipt_json FROM transition_receipts WHERE transition_id = ?",
+                "SELECT session_id, receipt_json FROM transition_receipts WHERE transition_id = ?",
                 (transition_id,),
             )
             row = await cursor.fetchone()
         if row is None:
             return None
-        return json.loads(str(row[0]))
+        return str(row[0]), json.loads(str(row[1]))
 
     async def save_transition_receipt(
         self,
@@ -605,6 +612,14 @@ class EventStore:
             )
             existing = await cursor.fetchone()
             if existing is not None:
+                owner_cursor = await db.execute(
+                    "SELECT session_id FROM transition_receipts WHERE transition_id = ?",
+                    (transition_id,),
+                )
+                owner = await owner_cursor.fetchone()
+                if owner is None or str(owner[0]) != session_id:
+                    await db.rollback()
+                    raise ValueError("transition receipt belongs to another run")
                 await db.commit()
                 return json.loads(str(existing[0]))
             await db.execute(

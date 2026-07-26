@@ -84,6 +84,41 @@ def test_commit_stage_transition_wrapper_retries_with_same_transition_id(
     assert second == first
 
 
+def test_commit_stage_transition_wrapper_rejects_failed_verdict_and_sanitizes_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+
+    project = tmp_path / "wrapper-authority"
+    project.mkdir()
+    store = EventStore(str(tmp_path / "authority.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("display-name", "minimal", str(project)))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-interview", 0)))
+
+    rejected = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-interview", 0,
+        claim["claim_id"], "FAIL", "{}", "samvil-seed", "failed-transition",
+    )))
+
+    assert rejected["status"] == "ready"
+    assert rejected["next_skill"] == "samvil-interview"
+    assert _run(store.get_events(session.id)) == []
+
+    secret = "ghp_fixture_secret"
+    committed = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-interview", 0,
+        claim["claim_id"], "PASS",
+        json.dumps({"contact": "person@example.com", "token": secret}),
+        "samvil-seed", "sanitized-transition",
+    )))
+    assert committed["status"] == "committed"
+    serialized = str(_run(store.get_events(session.id))[0].data)
+    assert "person@example.com" not in serialized
+    assert secret not in serialized
+
+
 # ── Tier phases (Polish #5) ────────────────────────────────────
 
 

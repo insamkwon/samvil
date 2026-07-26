@@ -14,10 +14,17 @@ from .chain_markers import (
     write_driver_marker,
 )
 from .event_store import EventStore
+from .event_sanitizer import sanitize_event_data
 from .claim_ledger import ClaimLedger
 from .models import EventType, Stage
 from .ssot_io import atomic_write_text
-from .stage_catalog import get_stage_spec, skill_for_state_stage, state_stage_for, validate_stage_transition
+from .stage_catalog import (
+    get_stage_spec,
+    instruction_path_for,
+    skill_for_state_stage,
+    state_stage_for,
+    validate_stage_transition,
+)
 
 
 class TransitionError(RuntimeError):
@@ -77,6 +84,11 @@ class TransitionController:
         return await self.store.find_session_by_root(str(root))
 
     @staticmethod
+    def _instruction_path(stage: str) -> str:
+        repository_root = Path(__file__).resolve().parents[2]
+        return str(instruction_path_for(stage, repository_root))
+
+    @staticmethod
     def _marker_revision(inspection) -> int:
         if inspection.classification in {"missing", "legacy"}:
             return int((inspection.marker or {}).get("revision", 0))
@@ -86,7 +98,25 @@ class TransitionController:
 
     async def get_stage_envelope(self, project_root: str, host_name: str) -> dict[str, Any]:
         root = Path(project_root).expanduser().resolve(strict=False)
-        session = await self._session_for_project(str(root))
+        inspection = inspect_chain_marker(str(root))
+        session = None
+        if inspection.classification == "valid":
+            marker_run_id = str(inspection.marker.get("run_id") or "")
+            marker_session = await self.store.get_session(marker_run_id)
+            if marker_session is None or Path(marker_session.project_root).expanduser().resolve(strict=False) != root:
+                return {
+                    "run_id": marker_run_id,
+                    "host_name": host_name,
+                    "stage": "",
+                    "status": "blocked",
+                    "marker_revision": 0,
+                    "instruction_path": "",
+                    "execution_policy": "stop",
+                    "stop_reason": "marker run does not own project root",
+                }
+            session = marker_session
+        if session is None:
+            session = await self._session_for_project(str(root))
         if session is None:
             return {
                 "run_id": "",
@@ -94,12 +124,11 @@ class TransitionController:
                 "stage": "samvil-interview",
                 "status": "fresh",
                 "marker_revision": 0,
-                "instruction_path": "references/codex-commands/samvil-interview.md",
+                "instruction_path": self._instruction_path("samvil"),
                 "execution_policy": "auto",
                 "stop_reason": "",
             }
 
-        inspection = inspect_chain_marker(str(root))
         if inspection.classification in {"corrupt", "unsupported"}:
             return {
                 "run_id": session.id,
@@ -122,7 +151,7 @@ class TransitionController:
             "stage": stage,
             "status": status,
             "marker_revision": self._marker_revision(inspection),
-            "instruction_path": spec.instruction,
+            "instruction_path": self._instruction_path(stage),
             "execution_policy": "stop" if status == "waiting_user" else "auto",
             "stop_reason": "user checkpoint" if status == "waiting_user" else "",
         }
@@ -145,6 +174,11 @@ class TransitionController:
             raise TransitionError("stage requires user checkpoint")
 
         inspection = inspect_chain_marker(str(root))
+        if (
+            inspection.classification == "valid"
+            and inspection.marker.get("run_id") != run_id
+        ):
+            raise TransitionError("marker belongs to another run")
         revision = self._marker_revision(inspection)
         if revision != expected_revision:
             raise TransitionError(f"stale marker revision: expected {expected_revision}, current {revision}")
@@ -207,20 +241,37 @@ class TransitionController:
         """Materialize one trusted transition in a fixed, recoverable order."""
         root = Path(project_root).expanduser().resolve(strict=False)
         transition_id = transition_id or f"transition-{uuid.uuid4().hex}"
-        existing = await self.store.get_transition_receipt(transition_id)
-        if existing is not None:
-            return existing
-        if not validate_stage_transition(from_stage, to_stage):
-            raise TransitionError(f"invalid stage transition: {from_stage} -> {to_stage}")
         session = await self.store.get_session(run_id)
         if session is None or Path(session.project_root).expanduser().resolve(strict=False) != root:
             raise TransitionError("run_id does not own project root")
+        existing_record = await self.store.get_transition_receipt_record(transition_id)
+        if existing_record is not None:
+            owner, existing = existing_record
+            if owner != run_id:
+                raise TransitionError("transition receipt belongs to another run")
+            if any(
+                existing.get(key) != expected
+                for key, expected in (
+                    ("claim_id", claim_id),
+                    ("from_stage", from_stage),
+                    ("to_stage", to_stage),
+                )
+            ):
+                raise TransitionError("transition id conflicts with a different transition")
+            return existing
+        if not validate_stage_transition(from_stage, to_stage):
+            raise TransitionError(f"invalid stage transition: {from_stage} -> {to_stage}")
         if state_stage_for(from_stage) != session.current_stage.value:
             raise TransitionError("from_stage does not match current session stage")
         claim = await self.store.get_stage_claim(run_id, from_stage, expected_revision)
         if claim is None or claim["claim_id"] != claim_id:
             raise TransitionError("stage claim does not match transition")
         inspection = inspect_chain_marker(str(root))
+        if (
+            inspection.classification == "valid"
+            and inspection.marker.get("run_id") != run_id
+        ):
+            raise TransitionError("marker belongs to another run")
         revision = self._marker_revision(inspection)
         if revision != expected_revision:
             raise TransitionError(f"stale marker revision: expected {expected_revision}, current {revision}")
@@ -233,7 +284,7 @@ class TransitionController:
                     {"transition_id": transition_id, "status": "blocked", "stage": "samvil-qa", "reason": "missing QA evidence"},
                 )
 
-        event_payload = dict(data or {})
+        event_payload = sanitize_event_data(dict(data or {}))
         event_payload.update({"transition_id": transition_id, "from_stage": from_stage, "to_stage": to_stage})
         event_id = f"event-{transition_id}"
         journal = {

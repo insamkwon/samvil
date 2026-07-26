@@ -34,7 +34,23 @@ async def test_envelope_is_read_only_and_reports_fresh_then_ready(controller, tm
     assert ready["run_id"] == session.id
     assert ready["status"] == "ready"
     assert ready["stage"] == "samvil-interview"
+    assert Path(ready["instruction_path"]).is_absolute()
+    assert Path(ready["instruction_path"]).is_file()
     assert not (project / ".samvil").exists()
+
+
+@pytest.mark.asyncio
+async def test_envelope_preserves_in_progress_marker_owner(controller, tmp_path):
+    project = tmp_path / "same-root-sessions"
+    project.mkdir()
+    first = await controller.store.create_session("first-display", "standard", str(project))
+    await controller.begin_stage(str(project), first.id, "samvil-interview", 0)
+    await controller.store.create_session("second-display", "standard", str(project))
+
+    envelope = await controller.get_stage_envelope(str(project), "codex_cli")
+
+    assert envelope["run_id"] == first.id
+    assert envelope["status"] == "in_progress"
 
 
 @pytest.mark.asyncio
@@ -112,6 +128,42 @@ async def test_commit_stage_transition_materializes_each_ssot_once(controller, t
     assert json.loads((project / "project.state.json").read_text())["unrelated"] == "keep"
     assert len((project / ".samvil" / "events.jsonl").read_text().splitlines()) == 1
     assert not (project / ".samvil" / "transition-journal.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_transition_id_cannot_replay_another_projects_receipt(controller, tmp_path):
+    first_project = tmp_path / "first-project"
+    second_project = tmp_path / "second-project"
+    first_project.mkdir()
+    second_project.mkdir()
+    first_session = await controller.store.create_session("first", "standard", str(first_project))
+    second_session = await controller.store.create_session("second", "standard", str(second_project))
+    first_claim = await controller.begin_stage(
+        str(first_project), first_session.id, "samvil-interview", 0
+    )
+    second_claim = await controller.begin_stage(
+        str(second_project), second_session.id, "samvil-interview", 0
+    )
+    await controller.commit_stage_transition(
+        str(first_project),
+        first_session.id,
+        first_claim["claim_id"],
+        "samvil-interview",
+        "samvil-seed",
+        0,
+        transition_id="shared-transition-id",
+    )
+
+    with pytest.raises(TransitionError, match="another run"):
+        await controller.commit_stage_transition(
+            str(second_project),
+            second_session.id,
+            second_claim["claim_id"],
+            "samvil-interview",
+            "samvil-seed",
+            0,
+            transition_id="shared-transition-id",
+        )
 
 
 @pytest.mark.asyncio

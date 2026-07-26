@@ -1254,7 +1254,6 @@ async def commit_stage_transition(
     transition_id: str = "",
 ) -> str:
     """Commit one trusted stage transition; caller choice never overrides a gate."""
-    from .stage_catalog import get_stage_spec
     from .transition_controller import TransitionController
 
     try:
@@ -1267,12 +1266,29 @@ async def commit_stage_transition(
         envelope = await controller.get_stage_envelope(project_root, "codex_cli")
         if envelope.get("status") in {"waiting_user", "blocked", "complete"}:
             return json.dumps({"status": envelope["status"], "stop_reason": envelope.get("stop_reason", "")})
-        spec = get_stage_spec(stage)
-        next_skill = requested_next_skill or (spec.valid_next[0] if spec.valid_next else "")
-        if stage == "samvil-qa" and not requested_next_skill:
-            next_skill = "samvil-qa"
-        if not next_skill:
-            raise ValueError("next stage is required for a non-terminal transition")
+        qa_results = None
+        if stage == "samvil-qa":
+            qa_results = controller._read_json(
+                Path(project_root).expanduser().resolve(strict=False)
+                / ".samvil"
+                / "qa-results.json"
+            )
+        decision = controller.decide_next_stage(
+            stage,
+            verdict,
+            requested_next_skill=requested_next_skill,
+            qa_results=qa_results,
+        )
+        next_skill = str(decision.get("next_skill") or "")
+        if decision.get("status") != "ready" or next_skill == stage or not next_skill:
+            return json.dumps(
+                {
+                    **decision,
+                    "stage": stage,
+                    "marker_revision": expected_revision,
+                },
+                ensure_ascii=False,
+            )
         result = await controller.commit_stage_transition(
             project_root, run_id, claim_id, stage, next_skill, expected_revision,
             data={"verdict": verdict, "evidence": evidence, "user_choice": bool(requested_next_skill)},
