@@ -132,6 +132,8 @@ def test_resume_session_primary_state_path(tmp_path: Path) -> None:
     assert r["last_stage"] == "design"
     assert r["next_skill"] == "samvil-design"
     assert r["samvil_tier"] == "thorough"
+    assert r["status"] == "ready"
+    assert r["marker_revision"] == 0
 
 
 def test_resume_session_fallback_samvil_dir(tmp_path: Path) -> None:
@@ -206,6 +208,29 @@ def test_resume_session_handoff_included(tmp_path: Path) -> None:
     (tmp_path / "project.state.json").write_text(json.dumps({"current_stage": "evolve"}))
     r = resume_session(str(tmp_path))
     assert r["handoff_excerpt"] == "last note here"
+
+
+def test_resume_session_corrupt_marker_is_blocked(tmp_path: Path) -> None:
+    (tmp_path / "project.state.json").write_text(json.dumps({"current_stage": "build"}))
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / ".samvil" / "next-skill.json").write_text("not json{")
+    r = resume_session(str(tmp_path))
+    assert r["status"] == "blocked"
+    assert "repair" in r["recovery_recommendation"]
+
+
+def test_resume_session_terminal_marker_is_complete(tmp_path: Path) -> None:
+    (tmp_path / "project.state.json").write_text(json.dumps({"current_stage": "retro"}))
+    (tmp_path / ".samvil").mkdir()
+    (tmp_path / ".samvil" / "next-skill.json").write_text(json.dumps({
+        "schema_version": "1.1", "run_id": "run-1", "revision": 2,
+        "status": "terminal", "chain_via": "host_driver", "host_name": "codex_cli",
+        "from_stage": "samvil-retro", "next_skill": "", "reason": "done",
+        "written_at": "2026-07-26T00:00:00Z",
+    }))
+    r = resume_session(str(tmp_path))
+    assert r["status"] == "complete"
+    assert r["marker_revision"] == 2
 
 
 def test_resume_session_in_progress_leaf_none_by_default(tmp_path: Path) -> None:
