@@ -19,5 +19,9 @@ Loop:
 6. Continue from the returned receipt/envelope; never infer completion from prose
    and never edit marker or state files directly.
 
+Keep only `run_id`, `stage`, `claim_id`, `expected_revision`, and the exact
+`stop_reason` in conversation. After compaction, reread the envelope and files;
+conversation history is not recovery evidence.
+
 The public plugin owns the `samvil:` namespace; the frontmatter name remains bare
 so unrelated personal skills are not renamed.

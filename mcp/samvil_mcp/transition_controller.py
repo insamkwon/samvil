@@ -28,6 +28,50 @@ class TransitionController:
     def __init__(self, store: EventStore):
         self.store = store
 
+    @staticmethod
+    def decide_next_stage(
+        stage: str,
+        verdict: str,
+        *,
+        requested_next_skill: str = "",
+        council_opt_in: bool = False,
+        qa_results: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return a deterministic, non-authorizing driver route decision."""
+        spec = get_stage_spec(stage)
+        normalized = str(verdict or "").upper()
+        if spec.requires_user_checkpoint:
+            return {"status": "waiting_user", "next_skill": "", "reason": "user checkpoint"}
+        if stage == "samvil-qa":
+            synthesis = (qa_results or {}).get("synthesis") or {}
+            if normalized not in {"PASS", "PASSED"} or synthesis.get("verdict") not in {"PASS", "PASSED"}:
+                return {"status": "ready", "next_skill": "samvil-qa", "reason": "QA evidence requires revision"}
+            candidate = requested_next_skill or "samvil-deploy"
+            if candidate not in spec.valid_next or candidate == "samvil-deploy" and not qa_results:
+                candidate = "samvil-qa"
+            return {"status": "ready", "next_skill": candidate, "reason": "trusted QA route"}
+        if normalized not in {"PASS", "PASSED", "OK", "COMPLETE"}:
+            return {"status": "ready", "next_skill": stage, "reason": "stage remains for revision"}
+        if stage == "samvil-seed" and council_opt_in:
+            return {"status": "ready", "next_skill": "samvil-council", "reason": "explicit council opt-in"}
+        default_next = "samvil-design" if stage == "samvil-seed" else (spec.valid_next[0] if spec.valid_next else "")
+        candidate = requested_next_skill or default_next
+        if candidate and candidate not in spec.valid_next:
+            raise TransitionError(f"invalid requested next skill: {candidate}")
+        return {"status": "ready", "next_skill": candidate, "reason": "catalog route"}
+
+    @staticmethod
+    def circuit_breaker(root_causes: list[str], *, threshold: int = 2) -> dict[str, Any]:
+        """Trip only when the same normalized root cause repeats consecutively."""
+        normalized = [str(item).strip().lower() for item in root_causes if str(item).strip()]
+        latest = normalized[-1] if normalized else ""
+        consecutive = 0
+        for item in reversed(normalized):
+            if item != latest:
+                break
+            consecutive += 1
+        return {"halt": bool(latest and consecutive >= threshold), "root_cause": latest, "consecutive": consecutive, "threshold": threshold}
+
     async def _session_for_project(self, project_root: str):
         root = Path(project_root).expanduser().resolve(strict=False)
         return await self.store.find_session_by_project(root.name, str(root))
