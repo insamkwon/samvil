@@ -40,6 +40,7 @@ from samvil_mcp.server import (
     begin_stage,
     commit_stage_transition,
 )
+from samvil_mcp.event_store import EventStore
 
 
 def _run(coro):
@@ -55,6 +56,32 @@ def test_codex_transition_tools_are_thin_and_fail_closed(tmp_path: Path) -> None
         str(tmp_path), "run", "samvil-interview", 0, "claim", "PASS", "[]"
     )))
     assert malformed["status"] == "blocked"
+
+
+def test_commit_stage_transition_wrapper_retries_with_same_transition_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+
+    project = tmp_path / "wrapper-idempotency"
+    project.mkdir()
+    store = EventStore(str(tmp_path / "events.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("display-name", "minimal", str(project)))
+    monkeypatch.setattr(server, "_store", store)
+
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-interview", 0)))
+    first = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-interview", 0,
+        claim["claim_id"], "PASS", "{}", "", "wrapper-transition-1",
+    )))
+    second = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-interview", 0,
+        claim["claim_id"], "PASS", "{}", "", "wrapper-transition-1",
+    )))
+
+    assert first["status"] == "committed"
+    assert second == first
 
 
 # ── Tier phases (Polish #5) ────────────────────────────────────

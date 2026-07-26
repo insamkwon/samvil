@@ -1251,6 +1251,7 @@ async def commit_stage_transition(
     verdict: str,
     evidence_json: str = "{}",
     requested_next_skill: str = "",
+    transition_id: str = "",
 ) -> str:
     """Commit one trusted stage transition; caller choice never overrides a gate."""
     from .stage_catalog import get_stage_spec
@@ -1275,6 +1276,7 @@ async def commit_stage_transition(
         result = await controller.commit_stage_transition(
             project_root, run_id, claim_id, stage, next_skill, expected_revision,
             data={"verdict": verdict, "evidence": evidence, "user_choice": bool(requested_next_skill)},
+            transition_id=transition_id or None,
         )
         return json.dumps(result, ensure_ascii=False)
     except Exception as exc:
