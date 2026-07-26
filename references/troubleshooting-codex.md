@@ -1,112 +1,81 @@
-# Troubleshooting Codex on SAMVIL v3.2
+# Troubleshooting Codex on SAMVIL v4.33
 
-Covers the "QA on Codex" path from the Sprint 2 exit gate. Because
-SAMVIL itself does not make provider calls, most issues surface in the
-Claude Code session executing the QA skill, not in SAMVIL core.
+This guide covers the native Codex plugin candidate. It distinguishes repository
+readiness, profile activation, MCP transition behavior, and actual CLI runtime
+authentication; a green result in one layer does not prove another.
 
-## Before you start
-
-- [ ] Codex CLI installed (`codex --version`) or equivalent adapter
-      (OpenRouter, direct API) configured in your shell.
-- [ ] `OPENAI_API_KEY` (or your provider's key) is present in the
-      environment that Claude Code spawns.
-- [ ] `.samvil/model_profiles.yaml` lists a `cost_tier: frontier` entry
-      with `provider: openai` and `model_id: gpt-5-codex` (or whatever
-      id your installation uses).
-- [ ] `role_overrides.qa-functional` is either unset (relies on default
-      `frontier`) or explicitly set to `frontier`.
-
-## Common failures
-
-### "RoutingError: no profile matches cost_tier=frontier"
-
-Your profiles file has no frontier entry. Either:
-
-1. Copy the defaults:
-   ```bash
-   cp references/model_profiles.defaults.yaml .samvil/model_profiles.yaml
-   ```
-2. Or add just the Codex entry:
-   ```yaml
-   profiles:
-     - provider: openai
-       model_id: gpt-5-codex
-       cost_tier: frontier
-       nickname: codex
-       max_tokens_out: 16000
-   ```
-
-### The QA skill still picks Opus, not Codex
-
-Per the deterministic tie-break rule (routing.py), the **first** profile
-in the chosen tier wins. If Opus is listed before Codex and both are
-`frontier`, Opus wins.
-
-To force Codex for QA, either:
-
-- Put the Codex profile first under `profiles:` (affects all
-  frontier-bound roles).
-- Use a per-task override strategy — Sprint 3 will ship a
-  `preferred_provider` field on `role_overrides`. In v3.2 the workaround
-  is to split profile files per stage, which is documented in the
-  Sprint 3 migration notes (to be written in that sprint).
-
-### Codex returns empty / timeout / 503
-
-1. SAMVIL's router only picks the model. The actual invocation happens
-   in your skill execution environment. Check that environment's logs
-   first (e.g., `~/.codex/logs/`).
-2. If the task fails but the downstream gate expects a verdict, the
-   failure is a **mechanical failure** per CLAUDE.md K3 — treat it as a
-   bug, not a retro observation. Fix infrastructure first.
-3. On two consecutive failures, escalation kicks in (already at
-   `frontier`, so escalation is a no-op). The router will emit a
-   decision with `escalation_depth=2`. The skill then forces a user
-   decision per §3.⑥ escalation loop safety.
-
-### "The QA verdict looks wrong even though Codex returned something"
-
-This is a **semantic failure**. The code ran, the output was parsed, but
-the content is off. Per K3, this is an observation for retro, not a bug.
-Per ①, every verdict is a `claim` with `verified_by != claimed_by` — so
-the failure is caught at ledger level before it becomes authoritative.
-Investigate with:
-
-```
-python3 scripts/view-claims.py --type ac_verdict --subject AC-<id>
-```
-
-### Cost spike
-
-Check `scripts/samvil-status.py` — the budget pane (ships fully in
-Sprint 6) shows cumulative cost per run. If Codex usage spikes,
-temporarily move `qa-functional` to `balanced`:
-
-```yaml
-role_overrides:
-  qa-functional: balanced
-```
-
-Remove the override once you've identified whether the spike was a real
-workload change or a runaway escalation loop.
-
-## Sanity check
+## Read-only checks first
 
 ```bash
-# 1. Validate your profiles file.
-python3 - <<'PY'
-from samvil_mcp.routing import load_profiles, validate_profiles
-issues = validate_profiles(load_profiles(".samvil/model_profiles.yaml"))
-print("issues:", issues or "none")
-PY
-
-# 2. Check what the router picks for build and QA.
-python3 - <<'PY'
-from samvil_mcp.routing import route_task
-print("build:", route_task(task_role="build-worker").to_dict())
-print("qa:   ", route_task(task_role="qa-functional").to_dict())
-PY
+codex --version
+bash scripts/setup-codex.sh codex --check
+python3 scripts/codex-native-e2e.py --check
+python3 scripts/check-host-parity.py --strict
 ```
 
-If `build.model_id` is Opus and `qa.model_id` is Codex, the Sprint 2
-exit-gate scenario is wired up correctly.
+`--check` does not modify the Codex profile. The installer must see the relative
+`.codex-plugin/plugin.json`, `.codex-mcp.json`, and exactly three public skills:
+`run`, `resume`, and `status`.
+
+## Safe installation
+
+```bash
+bash scripts/setup-codex.sh codex --install
+```
+
+The native path registers the repository marketplace and `samvil@samvil` plugin.
+It does not install a global `AGENTS.md` or append an absolute MCP block. The
+installer passes an explicit `CODEX_HOME` to every child command, preserves
+unrelated marketplace/plugin entries, backs up the registry, and verifies that
+personal skill names and hashes are unchanged.
+
+Use `--migrate` only for artifacts already classified as generated legacy state.
+Ambiguous user-modified files are blockers and must remain byte-identical.
+
+## `invalid_grant: Invalid refresh token`
+
+This is a Codex authentication blocker, not a SAMVIL stage PASS. Reauthorize the
+Codex CLI using the login flow supported by the installed Codex version, then run
+the real runtime smoke again. Do not convert repository readiness or Desktop MCP
+evidence into a CLI runtime receipt.
+
+The current persisted CLI evidence is intentionally classified `blocked_auth` in
+`docs/evidence/codex-native-autonomy/cli-runtime.json`.
+
+## Stage does not start or resumes the wrong run
+
+1. Call `samvil:status` and inspect the returned `run_id`, stage, revision, and
+   stop reason.
+2. Reread `.samvil/next-skill.json`, `project.state.json`, and the transition
+   receipt/journal. Do not repair them from conversation history.
+3. A fresh envelope must create a session before `begin_stage`; an empty `run_id`
+   is invalid.
+4. A marker or receipt owned by another run/session must fail closed.
+
+## Duplicate commit or event concern
+
+Retry the exact same transition with the same fixed `transition_id`. The second
+call must return the same receipt and must not add another DB event, JSONL event,
+claim, marker revision, or project-state advancement. A new `transition_id` is a
+new operation, not an idempotency retry.
+
+## QA remains in QA
+
+Missing, corrupt, or failing QA evidence must not advance the run. The controller
+keeps the stage in QA until trusted synthesis chooses Deploy, Evolve, or Retro.
+User text cannot mint a gate override or irreversible approval claim.
+
+## Runtime harness reports `not implemented`
+
+`--scenario` and `--all` currently fail closed because the scripts do not yet
+execute a full host scenario matrix. Only `--check` is a readiness check. This is
+intentional: an unexecuted scenario must never produce a green runtime claim.
+
+## Evidence classifications
+
+- `machine_runtime`: actual host process completed the claimed flow.
+- `manual_desktop`: observed in Codex Desktop; useful but not CLI parity.
+- `structural`: manifests, tools, and references are wired.
+- `blocked_auth`: the real host started but authentication prevented completion.
+
+Always report the narrowest classification supported by the receipt.

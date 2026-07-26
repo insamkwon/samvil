@@ -34,6 +34,28 @@ All notable changes to SAMVIL are documented here.
 
 ---
 
+## v4.33.0 — 2026-07-26
+
+**Codex native autonomy candidate with durable, idempotent stage transitions**
+
+- Added the Codex plugin manifest and the deliberately small public surface
+  `samvil:run`, `samvil:resume`, and `samvil:status`.
+- Added stage envelopes, exclusive claims, journal recovery, owner-bound receipts,
+  exact-once event/claim persistence, checkpoint gating, and terminal Retro routing
+  shared by Codex and compatibility paths.
+- Replaced legacy global Codex `AGENTS.md`/absolute MCP writes with native plugin
+  activation that pins `CODEX_HOME`, preserves unrelated registry entries and
+  personal skills, and uses durable atomic registry replacement.
+- Verified a real Codex Desktop MCP retry with one fixed transition id: both
+  receipts matched and only one event was persisted. This is manual Desktop
+  evidence, not Codex CLI runtime parity.
+- Codex CLI runtime remains `blocked_auth` because the tested OAuth refresh token
+  was invalid. Claude Code has authenticated plugin/MCP smoke evidence, but neither
+  host has a completed full stage scenario matrix yet. Scenario flags now fail
+  closed instead of reporting unexecuted runs as green.
+
+---
+
 ## v4.32.1 — 2026-06-14
 
 **README body reflects tests-as-deliverable (PATCH)**

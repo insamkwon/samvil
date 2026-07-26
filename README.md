@@ -1,10 +1,10 @@
-# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.32.2`
+# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.33.0`
 
 > **코딩 몰라도 괜찮아요. AI가 대신 만들어드려요.**
 
-[![버전](https://img.shields.io/badge/버전-v4.32.2-blue)](CHANGELOG.md)
+[![버전](https://img.shields.io/badge/버전-v4.33.0-blue)](CHANGELOG.md)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-네이티브-green)](https://claude.ai/code)
-[![Codex CLI](https://img.shields.io/badge/Codex_CLI-모델_라우팅-yellow)](https://github.com/openai/codex)
+[![Codex CLI](https://img.shields.io/badge/Codex_CLI-네이티브_후보-orange)](https://github.com/openai/codex)
 [![Gemini CLI](https://img.shields.io/badge/Gemini_CLI-실험적_stub-lightgrey)](https://github.com/google-gemini/gemini-cli)
 [![라이선스](https://img.shields.io/badge/라이선스-UNLICENSED-lightgrey)]()
 
@@ -12,9 +12,10 @@
 
 ## 이게 뭐예요?
 
-SAMVIL은 **Claude Code 네이티브 AI 앱 개발 도우미**예요. Codex CLI는 MCP·모델
-라우팅과 파일 기반 continuation을 연결하지만 네이티브 전체 파이프라인 실행 동등성은
-아직 검증하지 않았고, Gemini CLI 어댑터는 실험적 stub 단계입니다.
+SAMVIL은 Claude Code와 Codex를 위한 AI 앱 개발 도우미예요. v4.33.0은 Codex
+플러그인, `samvil:run`/`resume`/`status`, 그리고 재시도 가능한 단계 전이
+컨트롤러를 제공합니다. 다만 실제 Codex CLI 전체 시나리오는 로컬 OAuth 재인증이
+필요해 아직 PASS가 아니며, Gemini CLI 어댑터는 실험적 stub 단계입니다.
 
 "할일 관리 앱 만들어줘" 한 마디면, AI가 알아서 물어보고, 설계하고, 코드를 짜고, 테스트까지 해요.
 당신은 질문에 답하고 기다리기만 하면 돼요.
@@ -49,7 +50,7 @@ SAMVIL은 **Claude Code 네이티브 AI 앱 개발 도우미**예요. Codex CLI�
 | 방법 | 대상 | 설치 |
 |---|---|---|
 | **Claude Code (native)** | 전체 파이프라인 실행 | 명령어 1줄 |
-| **Codex CLI (integration)** | MCP·모델 라우팅·continuation 실험 | 스크립트 1개 |
+| **Codex CLI (native candidate)** | 플러그인 + MCP + durable continuation | 스크립트 1개 |
 
 ---
 
@@ -84,9 +85,9 @@ npm run dev    # → 브라우저에서 localhost:3000
 
 ### Codex CLI로 시작하기
 
-> 현재 지원 경계: 아래 설치는 SAMVIL MCP, 모델 라우팅, AGENTS 지침과 chain
-> marker를 연결합니다. Claude Code와 같은 네이티브 stage 실행 parity는 아직
-> 검증되지 않았습니다.
+> 현재 지원 경계: 설치·공개 스킬·MCP 전이 컨트롤러와 Codex Desktop의 중복 없는
+> transition retry는 검증했습니다. 실제 Codex CLI 전체 stage matrix는 OAuth
+> 재인증 후 별도 runtime receipt가 필요합니다.
 
 **1단계 — 저장소 받기**
 
@@ -95,25 +96,26 @@ git clone https://github.com/insamkwon/samvil.git
 cd samvil
 ```
 
-**2단계 — 자동 설치 스크립트 실행**
+**2단계 — 읽기 전용 점검 후 네이티브 플러그인 설치**
 
 ```bash
-bash scripts/setup-codex.sh
+bash scripts/setup-codex.sh codex --check
+bash scripts/setup-codex.sh codex --install
 ```
 
-스크립트가 모두 자동으로 처리해요:
-- MCP 서버 설치 (Python venv + samvil-mcp)
-- AGENTS.md 전역 등록 (`~/.codex/AGENTS.md`) → 어느 프로젝트에서든 자동 인식
-- MCP 서버를 Codex 설정 파일에 자동 등록
+스크립트는 저장소의 상대 경로 manifest/MCP launcher를 점검하고 Codex native
+marketplace/plugin만 등록합니다. 전역 `AGENTS.md`를 덮어쓰거나 절대 경로 MCP
+설정을 추가하지 않으며, 기존 marketplace와 개인 스킬 inventory를 보존합니다.
 
 **3단계 — 호스트 재시작 후 시작!**
 
 ```bash
 cd ~/dev/내-새-앱
-codex "SAMVIL로 할일 관리 앱 만들어줘"
+codex "samvil:run으로 할일 관리 앱 만들어줘"
 ```
 
-문제 생기면: `bash scripts/setup-codex.sh` 다시 실행하면 돼요 (중복 없이 안전).
+중단 뒤에는 `samvil:resume`, 현재 상태만 볼 때는 `samvil:status`를 사용하세요.
+문제 생기면 먼저 `bash scripts/setup-codex.sh codex --check`를 다시 실행하세요.
 
 <details>
 <summary>⚙️ OpenCode / Gemini CLI 실험적 어댑터</summary>
@@ -295,7 +297,7 @@ AI가 코드를 분석하고, 뭘 개선할지 알려줘요.
 SAMVIL 자체는 완전 무료예요.
 
 - **Claude Code** 구독(월 $20)이 있어야 Claude Code에서 쓸 수 있어요.
-- **Codex CLI**는 OpenAI API 키가 필요해요.
+- **Codex CLI**는 유효한 OpenAI 로그인 또는 지원되는 API 인증이 필요해요.
 
 앱 하나 만들 때 API 비용은 보통 $0.10~$1 수준이에요.
 
@@ -313,7 +315,8 @@ SAMVIL 자체는 완전 무료예요.
 ```bash
 cd ~/samvil   # 설치한 폴더
 git pull
-bash scripts/setup-codex.sh
+bash scripts/setup-codex.sh codex --check
+bash scripts/setup-codex.sh codex --install
 ```
 
 새 버전이 있으면 자동으로 알려주고, 업데이트할지 물어봐요.
@@ -323,8 +326,8 @@ bash scripts/setup-codex.sh
 <details>
 <summary>중간에 멈추면 어떻게 돼요?</summary>
 
-걱정 마세요. SAMVIL은 모든 진행 상황을 파일로 저장해요.
-새 세션을 열고 `/samvil`을 실행하면 "이어서 할까요?"라고 물어봐요.
+걱정 마세요. SAMVIL은 모든 진행 상황을 파일로 저장해요. Claude Code에서는
+새 세션에서 `/samvil`, Codex에서는 `samvil:resume`을 실행하면 이어갈 수 있어요.
 
 </details>
 
@@ -338,7 +341,8 @@ bash scripts/setup-codex.sh
 
 **Codex CLI:**
 ```bash
-python3 scripts/phase2-cross-host-smoke.py
+python3 scripts/codex-native-e2e.py --check
+bash scripts/setup-codex.sh codex --check
 ```
 
 환경 설정, MCP 서버, 버전 등을 자동으로 진단해줘요.
@@ -385,6 +389,7 @@ bash scripts/pre-commit-check.sh   # 모두 PASS 떠야 정상
 
 | 버전 | 주요 변경 |
 |---|---|
+| **v4.33.0** | **Codex native autonomy 후보** — run/resume/status, durable transition controller, 안전한 native installer, Desktop idempotency 증거. |
 | **v4.9.0** | **딥 인터뷰 엔진** — 10차원 모호함 채점 + tier별 최소 질문 수 (5/10/20/30/40). 수렴 전 무제한 질문. |
 | **v4.8.5** | README에 인터뷰 대화 스니펫·AI 팀 회의 스니펫·수치 비교표 추가. |
 | **v4.8.4** | Claude Code + Codex CLI 동등 지원 명시. README 시작하기 섹션 양분. |

@@ -12,6 +12,17 @@
 
 ---
 
+## Implementation status — 2026-07-26
+
+The plugin surface, shared transition controller, idempotent receipt replay,
+journal recovery, safe native installer, and Desktop MCP retry have been
+implemented. The candidate remains evidence-limited: Codex CLI runtime is
+`blocked_auth`, Claude has plugin/MCP smoke only, and the full host scenario
+matrices are not implemented. These gaps block a claim of complete native parity
+but do not invalidate the controller and Desktop manual evidence.
+
+---
+
 ## 1. Goal
 
 SAMVIL을 Codex의 일급(first-class) 플러그인과 실행 호스트로 만든다.

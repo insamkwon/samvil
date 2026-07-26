@@ -1,6 +1,6 @@
 {
   "name": "samvil",
-  "version": "4.32.2",
+  "version": "4.33.0",
   "description": "Codex-first trustworthy app-building harness.",
   "skills": "./codex/skills/",
   "mcpServers": "./.codex-mcp.json",

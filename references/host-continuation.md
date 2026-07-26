@@ -1,14 +1,36 @@
-# Host Continuation Marker
+# Host Continuation and Recovery
 
-SAMVIL hosts without native skill invocation continue through
-`.samvil/next-skill.json`.
+SAMVIL v4.33 uses `.samvil/next-skill.json` as durable recovery state. A native
+Codex task drives stages through `get_stage_envelope`, `begin_stage`, and
+`commit_stage_transition`; the marker records the controller result but is never
+itself authority to commit a transition.
 
-This marker preserves deterministic continuation state; it is not evidence of
-native host parity. Claude Code is the validated native host. Codex consumes
-the marker as an integration path, while Gemini support is an experimental
-stub until host-native stage execution is tested.
+Legacy OpenCode/Gemini hosts may still consume the v1.0 file marker. Structural
+compatibility is not machine-runtime parity, and every evidence report must keep
+those classifications separate.
 
-## Marker Shape
+## Native host-driver marker (v1.1)
+
+```json
+{
+  "schema_version": "1.1",
+  "chain_via": "host_driver",
+  "host": "codex_cli",
+  "run_id": "run-123",
+  "revision": 7,
+  "status": "ready",
+  "from_stage": "samvil-build",
+  "next_skill": "samvil-qa",
+  "reason": "build completed"
+}
+```
+
+`run_id`, monotonic `revision`, and `status` bind recovery to one run. An
+`in_progress` marker is owned by the transition controller; the legacy writer
+must not replace it. Replaying a completed stage may preserve the existing v1.1
+marker, but cannot mint a second transition.
+
+## Legacy file marker (v1.0)
 
 ```json
 {
@@ -22,7 +44,7 @@ stub until host-native stage execution is tested.
 }
 ```
 
-## Required Fields
+## Legacy required fields
 
 | Field | Meaning |
 |---|---|
@@ -34,7 +56,21 @@ stub until host-native stage execution is tested.
 
 `host` and `created_by` are recommended for diagnostics.
 
-## Host Behavior
+## Native Codex behavior
+
+1. Read `get_stage_envelope`.
+2. For `fresh`, run the orchestrator and create a session before beginning a stage.
+3. Begin only the returned run/stage/revision claim.
+4. Execute the exact absolute catalog instruction path.
+5. Reread the envelope; compatibility instructions may already have advanced it.
+6. If still in the same claim, retry `commit_stage_transition` with one fixed
+   `transition_id` until its receipt is returned.
+7. Stop only at `waiting_user`, `blocked`, or `complete`.
+
+Conversation text is not recovery evidence. After restart or compaction, reread
+the envelope and SSOT files.
+
+## Legacy host behavior
 
 Codex/OpenCode/generic hosts should:
 
@@ -43,4 +79,6 @@ Codex/OpenCode/generic hosts should:
 3. Read that skill file and continue its instructions.
 4. Replace the marker after the next stage completes.
 
-Use `scripts/host-continuation-smoke.py <project_root>` to validate a marker.
+Use `scripts/host-continuation-smoke.py <project_root>` for legacy marker
+validation. Native readiness is checked with
+`python3 scripts/codex-native-e2e.py --check`.

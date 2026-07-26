@@ -27,6 +27,18 @@ SQLite/aiosqlite, append-only JSONL, pytest, shell installer wrapper, actual
 
 ---
 
+## Closeout status — 2026-07-26
+
+Implementation and follow-up review fixes cover the public Codex surface,
+controller ownership/gating/idempotency, journal recovery, installer isolation,
+and fail-closed evidence harnesses. The release is a v4.33.0 candidate rather
+than a completed parity claim because Codex CLI authentication is blocked and
+the full Codex/Claude scenario matrices remain unexecuted. The Definition of Done
+checkboxes below intentionally remain unchecked where persisted runtime evidence
+does not exist.
+
+---
+
 ## 0. Non-negotiable execution rules
 
 1. 항목 1개 = 커밋 1개다. 아래 Task 번호가 기본 커밋 경계다.
