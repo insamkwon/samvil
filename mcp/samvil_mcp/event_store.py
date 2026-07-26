@@ -125,6 +125,10 @@ TRUSTED_TRANSITION_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_events_trusted_transition
 ON events(session_id, trusted_transition, timestamp DESC)
 """
+PROJECT_ROOT_UPDATED_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_sessions_project_root_updated
+ON sessions(project_root, updated_at DESC)
+"""
 
 
 def _migration_plan(
@@ -313,6 +317,7 @@ class EventStore:
                 if index_row is not None and "json_extract" in str(index_row[0]):
                     await db.execute("DROP INDEX idx_events_trusted_transition")
                 await db.execute(TRUSTED_TRANSITION_INDEX)
+                await db.execute(PROJECT_ROOT_UPDATED_INDEX)
                 await db.commit()
             except Exception:
                 await db.rollback()

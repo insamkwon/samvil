@@ -128,6 +128,100 @@ async def test_commit_stage_transition_materializes_each_ssot_once(controller, t
     assert json.loads((project / "project.state.json").read_text())["unrelated"] == "keep"
     assert len((project / ".samvil" / "events.jsonl").read_text().splitlines()) == 1
     assert not (project / ".samvil" / "transition-journal.json").exists()
+    assert await controller.store.get_pending_project_events(session.id) == []
+
+
+@pytest.mark.asyncio
+async def test_db_committed_journal_replays_remaining_materialization(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    import samvil_mcp.server as server
+
+    project = tmp_path / "journal-replay"
+    project.mkdir()
+    session = await controller.store.create_session("journal-replay", "standard", str(project))
+    claim = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+    original_append = server._append_project_event
+    attempts = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("injected canonical append failure")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(server, "_append_project_event", fail_once)
+    with pytest.raises(OSError, match="injected canonical append failure"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="journal-replay-transition",
+        )
+
+    recovered = await controller.commit_stage_transition(
+        str(project), session.id, claim["claim_id"],
+        "samvil-interview", "samvil-seed", 0,
+        transition_id="journal-replay-transition",
+    )
+
+    assert recovered["status"] == "committed"
+    assert len((project / ".samvil" / "events.jsonl").read_text().splitlines()) == 1
+    assert await controller.store.get_pending_project_events(session.id) == []
+    assert not (project / ".samvil" / "transition-journal.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_retro_runs_before_terminal_completion(controller, tmp_path):
+    project = tmp_path / "retro-terminal"
+    project.mkdir()
+    session = await controller.store.create_session("retro-terminal", "standard", str(project))
+    await controller.store.update_session_stage(session.id, Stage.EVOLVE)
+    evolve_claim = await controller.begin_stage(str(project), session.id, "samvil-evolve", 0)
+
+    entered = await controller.commit_stage_transition(
+        str(project), session.id, evolve_claim["claim_id"],
+        "samvil-evolve", "samvil-retro", 0, transition_id="enter-retro",
+    )
+    envelope = await controller.get_stage_envelope(str(project), "codex_cli")
+
+    assert entered["status"] == "committed"
+    assert envelope["stage"] == "samvil-retro"
+    assert envelope["status"] == "ready"
+    retro_claim = await controller.begin_stage(str(project), session.id, "samvil-retro", 1)
+    completed = await controller.commit_stage_transition(
+        str(project), session.id, retro_claim["claim_id"],
+        "samvil-retro", "complete", 1, transition_id="complete-retro",
+    )
+    terminal = await controller.get_stage_envelope(str(project), "codex_cli")
+
+    assert completed["to_stage"] == "complete"
+    assert terminal["status"] == "complete"
+    assert terminal["stage"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_transition_claim_points_to_its_actual_event_line(controller, tmp_path):
+    project = tmp_path / "claim-lines"
+    project.mkdir()
+    session = await controller.store.create_session("claim-lines", "standard", str(project))
+    interview = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+    await controller.commit_stage_transition(
+        str(project), session.id, interview["claim_id"],
+        "samvil-interview", "samvil-seed", 0, transition_id="line-one",
+    )
+    seed = await controller.begin_stage(str(project), session.id, "samvil-seed", 1)
+    await controller.commit_stage_transition(
+        str(project), session.id, seed["claim_id"],
+        "samvil-seed", "samvil-design", 1, transition_id="line-two",
+    )
+
+    claims = [
+        json.loads(line)
+        for line in (project / ".samvil" / "claims.jsonl").read_text().splitlines()
+    ]
+    assert claims[0]["evidence"] == [".samvil/events.jsonl:1"]
+    assert claims[1]["evidence"] == [".samvil/events.jsonl:2"]
 
 
 @pytest.mark.asyncio

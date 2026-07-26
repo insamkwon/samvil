@@ -59,6 +59,12 @@ class TransitionController:
             return {"status": "ready", "next_skill": candidate, "reason": "trusted QA route"}
         if normalized not in {"PASS", "PASSED", "OK", "COMPLETE"}:
             return {"status": "ready", "next_skill": stage, "reason": "stage remains for revision"}
+        if spec.terminal:
+            return {
+                "status": "ready",
+                "next_skill": "complete",
+                "reason": "terminal stage completed",
+            }
         if stage == "samvil-seed" and council_opt_in:
             return {"status": "ready", "next_skill": "samvil-council", "reason": "explicit council opt-in"}
         default_next = "samvil-design" if stage == "samvil-seed" else (spec.valid_next[0] if spec.valid_next else "")
@@ -139,6 +145,17 @@ class TransitionController:
                 "instruction_path": "",
                 "execution_policy": "stop",
                 "stop_reason": inspection.reason or inspection.classification,
+            }
+        if session.current_stage == Stage.COMPLETE:
+            return {
+                "run_id": session.id,
+                "host_name": host_name,
+                "stage": "complete",
+                "status": "complete",
+                "marker_revision": self._marker_revision(inspection),
+                "instruction_path": "",
+                "execution_policy": "stop",
+                "stop_reason": "pipeline complete",
             }
         stage = skill_for_state_stage(session.current_stage.value)
         spec = get_stage_spec(stage)
@@ -224,6 +241,134 @@ class TransitionController:
             raise TransitionError(f"invalid JSON object: {path}")
         return parsed
 
+    @staticmethod
+    def _write_journal(root: Path, journal: dict[str, Any], phase: str) -> None:
+        journal["phase"] = phase
+        atomic_write_text(
+            TransitionController._journal_path(root),
+            json.dumps(journal, indent=2, ensure_ascii=False),
+        )
+
+    @staticmethod
+    def _event_evidence(root: Path, event_id: str) -> str:
+        path = root / ".samvil" / "events.jsonl"
+        if not path.is_file():
+            return ""
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            try:
+                row = json.loads(line)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(row, dict) and row.get("event_id") == event_id:
+                return f".samvil/events.jsonl:{line_number}"
+        return ""
+
+    async def _finish_materialization(
+        self,
+        root: Path,
+        journal: dict[str, Any],
+    ) -> dict[str, Any]:
+        from .server import _append_project_event, _canonical_project_event_exists
+
+        transition_id = str(journal["transition_id"])
+        run_id = str(journal["run_id"])
+        claim_id = str(journal["claim_id"])
+        from_stage = str(journal["from_stage"])
+        to_stage = str(journal["to_stage"])
+        target_state = str(journal["target_state"])
+        event_id = str(journal["event_id"])
+        event_payload = dict(journal["event_payload"])
+        event_type = str(journal["event_type"])
+        timestamp = str(journal["event_timestamp"])
+        expected_revision = int(journal["expected_revision"])
+        host_name = str(journal["host_name"])
+
+        evidence = self._event_evidence(root, event_id)
+        if not evidence:
+            exists = await __import__("asyncio").to_thread(
+                _canonical_project_event_exists,
+                root,
+                event_id,
+            )
+            if not exists:
+                evidence = await __import__("asyncio").to_thread(
+                    _append_project_event,
+                    root,
+                    timestamp=timestamp,
+                    event_type=event_type,
+                    stage=target_state,
+                    session_id=run_id,
+                    data=event_payload,
+                    event_id=event_id,
+                )
+            else:
+                evidence = self._event_evidence(root, event_id)
+        if not evidence:
+            raise TransitionError("canonical transition event evidence is missing")
+        journal["event_evidence"] = evidence
+        self._write_journal(root, journal, "EVENT_WRITTEN")
+
+        ledger = ClaimLedger(root / ".samvil" / "claims.jsonl")
+        ledger.append_transition_claim(
+            transition_id=transition_id,
+            subject=f"stage:{to_stage}",
+            statement=f"{from_stage} transitioned to {to_stage}",
+            authority_file=".samvil/events.jsonl",
+            evidence=[evidence],
+        )
+        self._write_journal(root, journal, "CLAIM_WRITTEN")
+
+        state = self._read_json(self._state_path(root))
+        completed = list(state.get("completed_stages") or [])
+        from_state = state_stage_for(from_stage)
+        if from_state not in completed:
+            completed.append(from_state)
+        state.update(
+            {
+                "current_stage": target_state,
+                "completed_stages": completed,
+                "stage_transition_id": transition_id,
+                "transition_revision": expected_revision + 1,
+            }
+        )
+        atomic_write_text(
+            self._state_path(root),
+            json.dumps(state, indent=2, ensure_ascii=False),
+        )
+        self._write_journal(root, journal, "STATE_WRITTEN")
+
+        terminal = to_stage == "complete"
+        marker = build_driver_marker(
+            run_id=run_id,
+            revision=expected_revision + 1,
+            status="terminal" if terminal else "ready",
+            host_name=host_name,
+            from_stage=from_stage,
+            next_skill="" if terminal else to_stage,
+            reason=f"{from_stage} completed",
+        )
+        write_driver_marker(str(root), marker)
+        self._write_journal(root, journal, "MARKER_WRITTEN")
+
+        receipt = {
+            "transition_id": transition_id,
+            "status": "committed",
+            "event_id": event_id,
+            "claim_id": claim_id,
+            "from_stage": from_stage,
+            "to_stage": to_stage,
+            "marker_revision": expected_revision + 1,
+        }
+        receipt = await self.store.save_transition_receipt(
+            transition_id,
+            run_id,
+            receipt,
+        )
+        await self.store.mark_stage_claim_completed(claim_id, transition_id)
+        await self.store.acknowledge_pending_project_event(event_id)
+        self._journal_path(root).unlink(missing_ok=True)
+        return receipt
+
     async def commit_stage_transition(
         self,
         project_root: str,
@@ -258,8 +403,36 @@ class TransitionController:
                 )
             ):
                 raise TransitionError("transition id conflicts with a different transition")
+            journal = self._read_json(self._journal_path(root))
+            if journal.get("transition_id") == transition_id:
+                await self.store.acknowledge_pending_project_event(
+                    str(journal.get("event_id") or existing.get("event_id") or "")
+                )
+                self._journal_path(root).unlink(missing_ok=True)
             return existing
-        if not validate_stage_transition(from_stage, to_stage):
+
+        journal = self._read_json(self._journal_path(root))
+        if journal:
+            if journal.get("transition_id") != transition_id:
+                raise TransitionError("another transition journal is in progress")
+            if any(
+                journal.get(key) != expected
+                for key, expected in (
+                    ("run_id", run_id),
+                    ("claim_id", claim_id),
+                    ("from_stage", from_stage),
+                    ("to_stage", to_stage),
+                    ("expected_revision", expected_revision),
+                )
+            ):
+                raise TransitionError("transition journal conflicts with retry")
+            if journal.get("phase") != "PREPARED":
+                return await self._finish_materialization(root, journal)
+
+        terminal_completion = (
+            to_stage == "complete" and get_stage_spec(from_stage).terminal
+        )
+        if not terminal_completion and not validate_stage_transition(from_stage, to_stage):
             raise TransitionError(f"invalid stage transition: {from_stage} -> {to_stage}")
         if state_stage_for(from_stage) != session.current_stage.value:
             raise TransitionError("from_stage does not match current session stage")
@@ -281,12 +454,22 @@ class TransitionController:
                 return await self.store.save_transition_receipt(
                     transition_id,
                     run_id,
-                    {"transition_id": transition_id, "status": "blocked", "stage": "samvil-qa", "reason": "missing QA evidence"},
+                    {
+                        "transition_id": transition_id,
+                        "status": "blocked",
+                        "stage": "samvil-qa",
+                        "reason": "missing QA evidence",
+                        "claim_id": claim_id,
+                        "from_stage": from_stage,
+                        "to_stage": to_stage,
+                        "marker_revision": expected_revision,
+                    },
                 )
 
         event_payload = sanitize_event_data(dict(data or {}))
         event_payload.update({"transition_id": transition_id, "from_stage": from_stage, "to_stage": to_stage})
         event_id = f"event-{transition_id}"
+        target_state = "complete" if terminal_completion else state_stage_for(to_stage)
         journal = {
             "transition_id": transition_id,
             "run_id": run_id,
@@ -294,60 +477,28 @@ class TransitionController:
             "expected_revision": expected_revision,
             "from_stage": from_stage,
             "to_stage": to_stage,
+            "target_state": target_state,
             "event_id": event_id,
+            "event_type": event_type,
+            "event_payload": event_payload,
+            "host_name": host_name,
             "event_payload_hash": hashlib.sha256(json.dumps(event_payload, sort_keys=True).encode()).hexdigest(),
             "phase": "PREPARED",
         }
-        atomic_write_text(self._journal_path(root), json.dumps(journal, indent=2, ensure_ascii=False))
+        self._write_journal(root, journal, "PREPARED")
 
         transition = await self.store.save_event_and_update_stage(
             run_id,
             EventType(event_type),
-            Stage(state_stage_for(to_stage)),
+            Stage(target_state),
             event_payload,
             expected_stage=Stage(state_stage_for(from_stage)),
             event_id=event_id,
             transition_id=transition_id,
         )
-        journal["phase"] = "DB_COMMITTED"
-        atomic_write_text(self._journal_path(root), json.dumps(journal, indent=2, ensure_ascii=False))
-
-        from .server import _append_project_event
-        await __import__("asyncio").to_thread(
-            _append_project_event,
-            root,
-            timestamp=transition.event.timestamp,
-            event_type=event_type,
-            stage=state_stage_for(to_stage),
-            session_id=run_id,
-            data=event_payload,
-            event_id=event_id,
-        )
-        ledger = ClaimLedger(root / ".samvil" / "claims.jsonl")
-        ledger.append_transition_claim(
-            transition_id=transition_id,
-            subject=f"stage:{to_stage}",
-            statement=f"{from_stage} transitioned to {to_stage}",
-            authority_file=".samvil/events.jsonl",
-            evidence=[f".samvil/events.jsonl:1"],
-        )
-
-        state = self._read_json(self._state_path(root))
-        completed = list(state.get("completed_stages") or [])
-        from_state = state_stage_for(from_stage)
-        if from_state not in completed:
-            completed.append(from_state)
-        state.update({"current_stage": state_stage_for(to_stage), "completed_stages": completed, "stage_transition_id": transition_id, "transition_revision": expected_revision + 1})
-        atomic_write_text(self._state_path(root), json.dumps(state, indent=2, ensure_ascii=False))
-        next_skill = "" if to_stage == "samvil-retro" else to_stage
-        marker_from_stage = from_stage if next_skill else to_stage
-        marker = build_driver_marker(run_id=run_id, revision=expected_revision + 1, status="terminal" if not next_skill else "ready", host_name=host_name, from_stage=marker_from_stage, next_skill=next_skill, reason=f"{from_stage} completed")
-        write_driver_marker(str(root), marker)
-        receipt = {"transition_id": transition_id, "status": "committed", "event_id": event_id, "claim_id": claim_id, "from_stage": from_stage, "to_stage": to_stage, "marker_revision": expected_revision + 1}
-        await self.store.save_transition_receipt(transition_id, run_id, receipt)
-        await self.store.mark_stage_claim_completed(claim_id, transition_id)
-        (self._journal_path(root)).unlink(missing_ok=True)
-        return receipt
+        journal["event_timestamp"] = transition.event.timestamp
+        self._write_journal(root, journal, "DB_COMMITTED")
+        return await self._finish_materialization(root, journal)
 
 
 __all__ = ["TransitionController", "TransitionError"]

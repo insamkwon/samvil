@@ -39,6 +39,15 @@ async def test_create_and_get_session(store: EventStore):
 
 
 @pytest.mark.asyncio
+async def test_sessions_have_project_root_lookup_index(store: EventStore):
+    async with aiosqlite.connect(store.db_path) as db:
+        cursor = await db.execute("PRAGMA index_list(sessions)")
+        indexes = {str(row[1]) for row in await cursor.fetchall()}
+
+    assert "idx_sessions_project_root_updated" in indexes
+
+
+@pytest.mark.asyncio
 async def test_find_session_by_project(store: EventStore):
     await store.create_session("app-one", "minimal")
     await store.create_session("app-two", "standard")
