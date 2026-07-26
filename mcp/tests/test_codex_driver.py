@@ -26,6 +26,20 @@ def test_driver_decisions_cover_catalog_and_checkpoint_boundaries():
     assert TransitionController.decide_next_stage("samvil-seed", "PASS", council_opt_in=False)["next_skill"] == "samvil-design"
     assert TransitionController.decide_next_stage("samvil-seed", "PASS", council_opt_in=True)["next_skill"] == "samvil-council"
     assert TransitionController.decide_next_stage("samvil-qa", "REVISE")["next_skill"] == "samvil-qa"
+    blocked_qa = {
+        "synthesis": {"verdict": "FAIL"},
+        "convergence": {"verdict": "blocked"},
+    }
+    assert TransitionController.decide_next_stage(
+        "samvil-qa", "FAIL", requested_next_skill="samvil-retro", qa_results=blocked_qa
+    )["next_skill"] == "samvil-retro"
+    passed_qa = {"synthesis": {"verdict": "PASS"}}
+    assert TransitionController.decide_next_stage(
+        "samvil-qa", "PASS", qa_results=passed_qa
+    )["next_skill"] == "samvil-retro"
+    assert TransitionController.decide_next_stage(
+        "samvil-qa", "PASS", requested_next_skill="samvil-deploy", qa_results=passed_qa
+    )["status"] == "waiting_user"
     assert TransitionController.decide_next_stage("samvil-deploy", "PASS")["status"] == "waiting_user"
 
 

@@ -67,6 +67,12 @@ Missing, corrupt, or failing QA evidence must not advance the run. The controlle
 keeps the stage in QA until trusted synthesis chooses Deploy, Evolve, or Retro.
 User text cannot mint a gate override or irreversible approval claim.
 
+When QA passes without an explicit safe route, the v4.33 candidate proceeds to
+Retro. A Deploy request returns `waiting_user` because trusted irreversible-action
+attestation is not implemented yet; choose Evolve or Retro to continue. Blocked or
+failed convergence may route to Evolve/Retro only when persisted QA convergence
+evidence says `blocked` or `failed`.
+
 ## Runtime harness reports `not implemented`
 
 `--scenario` and `--all` currently fail closed because the scripts do not yet

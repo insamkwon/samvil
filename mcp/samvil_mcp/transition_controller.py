@@ -51,11 +51,28 @@ class TransitionController:
             return {"status": "waiting_user", "next_skill": "", "reason": "user checkpoint"}
         if stage == "samvil-qa":
             synthesis = (qa_results or {}).get("synthesis") or {}
+            convergence = (qa_results or {}).get("convergence") or synthesis.get("convergence") or {}
+            convergence_verdict = str(convergence.get("verdict") or "").casefold()
             if normalized not in {"PASS", "PASSED"} or synthesis.get("verdict") not in {"PASS", "PASSED"}:
+                if (
+                    convergence_verdict in {"blocked", "failed"}
+                    and requested_next_skill in {"samvil-evolve", "samvil-retro"}
+                ):
+                    return {
+                        "status": "ready",
+                        "next_skill": requested_next_skill,
+                        "reason": "trusted QA convergence recovery route",
+                    }
                 return {"status": "ready", "next_skill": "samvil-qa", "reason": "QA evidence requires revision"}
-            candidate = requested_next_skill or "samvil-deploy"
+            candidate = requested_next_skill or "samvil-retro"
             if candidate not in spec.valid_next or candidate == "samvil-deploy" and not qa_results:
                 candidate = "samvil-qa"
+            if candidate == "samvil-deploy":
+                return {
+                    "status": "waiting_user",
+                    "next_skill": "",
+                    "reason": "deployment approval requires a trusted host attestation",
+                }
             return {"status": "ready", "next_skill": candidate, "reason": "trusted QA route"}
         if normalized not in {"PASS", "PASSED", "OK", "COMPLETE"}:
             return {"status": "ready", "next_skill": stage, "reason": "stage remains for revision"}

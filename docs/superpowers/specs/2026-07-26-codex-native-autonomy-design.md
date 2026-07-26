@@ -20,8 +20,10 @@ implemented. The candidate remains evidence-limited: Codex CLI runtime is
 `blocked_auth`, Claude has plugin/MCP smoke only, and the full host scenario
 matrices are not implemented. The actual installer supports checked native install
 and marketplace-root correction, while legacy `--migrate` remains explicitly
-blocked until provenance actions are wired. These gaps block a claim of complete
-native parity but do not invalidate the controller and Desktop manual evidence.
+blocked until provenance actions are wired. Deploy approval also remains
+fail-closed without trusted host attestation, so the native default PASS route is
+Retro rather than deployment. These gaps block a claim of complete native parity
+but do not invalidate the controller and Desktop manual evidence.
 
 ---
 

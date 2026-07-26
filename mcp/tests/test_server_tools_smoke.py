@@ -69,15 +69,21 @@ def test_commit_stage_transition_wrapper_retries_with_same_transition_id(
     _run(store.initialize())
     session = _run(store.create_session("display-name", "minimal", str(project)))
     monkeypatch.setattr(server, "_store", store)
+    (project / "interview-summary.md").write_text("verified interview\n", encoding="utf-8")
 
     claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-interview", 0)))
+    empty = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-interview", 0,
+        claim["claim_id"], "PASS", "{}", "", "wrapper-empty-evidence",
+    )))
+    assert empty["status"] == "blocked"
     first = json.loads(_run(commit_stage_transition(
         str(project), session.id, "samvil-interview", 0,
-        claim["claim_id"], "PASS", "{}", "", "wrapper-transition-1",
+        claim["claim_id"], "PASS", '{"artifact":"interview-summary.md:1"}', "", "wrapper-transition-1",
     )))
     second = json.loads(_run(commit_stage_transition(
         str(project), session.id, "samvil-interview", 0,
-        claim["claim_id"], "PASS", "{}", "", "wrapper-transition-1",
+        claim["claim_id"], "PASS", '{"artifact":"interview-summary.md:1"}', "", "wrapper-transition-1",
     )))
 
     assert first["status"] == "committed"
@@ -95,6 +101,7 @@ def test_commit_stage_transition_wrapper_rejects_failed_verdict_and_sanitizes_ev
     _run(store.initialize())
     session = _run(store.create_session("display-name", "minimal", str(project)))
     monkeypatch.setattr(server, "_store", store)
+    (project / "interview-summary.md").write_text("verified interview\n", encoding="utf-8")
     claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-interview", 0)))
 
     rejected = json.loads(_run(commit_stage_transition(
@@ -110,7 +117,11 @@ def test_commit_stage_transition_wrapper_rejects_failed_verdict_and_sanitizes_ev
     committed = json.loads(_run(commit_stage_transition(
         str(project), session.id, "samvil-interview", 0,
         claim["claim_id"], "PASS",
-        json.dumps({"contact": "person@example.com", "token": secret}),
+        json.dumps({
+            "artifact": "interview-summary.md:1",
+            "contact": "person@example.com",
+            "token": secret,
+        }),
         "samvil-seed", "sanitized-transition",
     )))
     assert committed["status"] == "committed"

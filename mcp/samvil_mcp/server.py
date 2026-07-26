@@ -1262,6 +1262,30 @@ async def commit_stage_transition(
         evidence = json.loads(evidence_json or "{}")
         if not isinstance(evidence, dict):
             raise ValueError("evidence_json must encode an object")
+        if str(verdict or "").upper() in {"PASS", "PASSED", "OK", "COMPLETE"}:
+            from .evidence_validator import parse_evidence, validate_evidence_list
+
+            def evidence_strings(value: Any) -> list[str]:
+                if isinstance(value, str):
+                    return [value]
+                if isinstance(value, dict):
+                    return [item for nested in value.values() for item in evidence_strings(nested)]
+                if isinstance(value, list):
+                    return [item for nested in value for item in evidence_strings(nested)]
+                return []
+
+            references = [item for item in evidence_strings(evidence) if parse_evidence(item)]
+            validation = validate_evidence_list(references, project_root)
+            if not references or not validation["all_valid"]:
+                return json.dumps(
+                    {
+                        "status": "blocked",
+                        "stage": stage,
+                        "reason": "trusted file:line evidence is required",
+                        "evidence_validation": validation,
+                    },
+                    ensure_ascii=False,
+                )
         controller = TransitionController(await get_store())
         envelope = await controller.get_stage_envelope(project_root, "codex_cli")
         if envelope.get("status") in {"waiting_user", "blocked", "complete"}:
