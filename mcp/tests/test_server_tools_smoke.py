@@ -36,11 +36,25 @@ from samvil_mcp.server import (
     materialize_final_e2e_bundle,
     suggest_ac_split,
     synthesize_qa_evidence,
+    get_stage_envelope,
+    begin_stage,
+    commit_stage_transition,
 )
 
 
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro) if False else asyncio.run(coro)
+
+
+def test_codex_transition_tools_are_thin_and_fail_closed(tmp_path: Path) -> None:
+    envelope = json.loads(_run(get_stage_envelope(str(tmp_path), "codex_cli")))
+    assert envelope["status"] == "fresh"
+    invalid = json.loads(_run(begin_stage(str(tmp_path), "run", "samvil-interview", True)))
+    assert invalid["status"] == "blocked"
+    malformed = json.loads(_run(commit_stage_transition(
+        str(tmp_path), "run", "samvil-interview", 0, "claim", "PASS", "[]"
+    )))
+    assert malformed["status"] == "blocked"
 
 
 # ── Tier phases (Polish #5) ────────────────────────────────────

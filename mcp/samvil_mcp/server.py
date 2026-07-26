@@ -1214,6 +1214,75 @@ async def get_orchestration_state(
 
 
 @mcp.tool()
+async def get_stage_envelope(project_root: str, host_name: str = "codex_cli") -> str:
+    """Read the durable stage envelope without creating or mutating state."""
+    from .transition_controller import TransitionController
+
+    try:
+        result = await TransitionController(await get_store()).get_stage_envelope(project_root, host_name)
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as exc:
+        _log_mcp_health("fail", "get_stage_envelope", str(exc))
+        return json.dumps({"status": "blocked", "error": str(exc)})
+
+
+@mcp.tool()
+async def begin_stage(project_root: str, run_id: str, stage: str, expected_revision: int) -> str:
+    """Create or reuse one durable stage claim through the shared controller."""
+    from .transition_controller import TransitionController
+
+    try:
+        if type(expected_revision) is not int:
+            raise ValueError("expected_revision must be an integer")
+        result = await TransitionController(await get_store()).begin_stage(project_root, run_id, stage, expected_revision)
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as exc:
+        _log_mcp_health("fail", "begin_stage", str(exc))
+        return json.dumps({"status": "blocked", "error": str(exc)})
+
+
+@mcp.tool()
+async def commit_stage_transition(
+    project_root: str,
+    run_id: str,
+    stage: str,
+    expected_revision: int,
+    claim_id: str,
+    verdict: str,
+    evidence_json: str = "{}",
+    requested_next_skill: str = "",
+) -> str:
+    """Commit one trusted stage transition; caller choice never overrides a gate."""
+    from .stage_catalog import get_stage_spec
+    from .transition_controller import TransitionController
+
+    try:
+        if type(expected_revision) is not int:
+            raise ValueError("expected_revision must be an integer")
+        evidence = json.loads(evidence_json or "{}")
+        if not isinstance(evidence, dict):
+            raise ValueError("evidence_json must encode an object")
+        controller = TransitionController(await get_store())
+        envelope = await controller.get_stage_envelope(project_root, "codex_cli")
+        if envelope.get("status") in {"waiting_user", "blocked", "complete"}:
+            return json.dumps({"status": envelope["status"], "stop_reason": envelope.get("stop_reason", "")})
+        spec = get_stage_spec(stage)
+        next_skill = requested_next_skill or (spec.valid_next[0] if spec.valid_next else "")
+        if stage == "samvil-qa" and not requested_next_skill:
+            next_skill = "samvil-qa"
+        if not next_skill:
+            raise ValueError("next stage is required for a non-terminal transition")
+        result = await controller.commit_stage_transition(
+            project_root, run_id, claim_id, stage, next_skill, expected_revision,
+            data={"verdict": verdict, "evidence": evidence, "user_choice": bool(requested_next_skill)},
+        )
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as exc:
+        _log_mcp_health("fail", "commit_stage_transition", str(exc))
+        return json.dumps({"status": "blocked", "error": str(exc)})
+
+
+@mcp.tool()
 async def complete_stage(
     session_id: str,
     stage: str,

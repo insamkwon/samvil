@@ -1,5 +1,8 @@
 # SAMVIL Pipeline Orchestrator (Codex CLI)
 
+Codex-native transition tools: `mcp__samvil_mcp__get_stage_envelope`,
+`mcp__samvil_mcp__begin_stage`, and `mcp__samvil_mcp__commit_stage_transition`.
+
 ## Boot
 
 1. Run MCP tool `health_check()` — log the result (version, MCP tool count).
