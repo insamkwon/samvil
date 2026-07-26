@@ -99,7 +99,7 @@ fi
 
 
 # ── 2. Version sync ─────────────────────────────────────────────────
-_section "2. Version sync (plugin.json / __init__.py / README)"
+_section "2. Version sync (Claude + Codex plugin.json / __init__.py / README)"
 
 if bash hooks/validate-version-sync.sh >/dev/null 2>&1; then
   v=$(python3 -c "import json; print(json.load(open('.claude-plugin/plugin.json'))['version'])")
