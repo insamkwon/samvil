@@ -91,6 +91,46 @@ def test_commit_stage_transition_wrapper_retries_with_same_transition_id(
     assert second == first
 
 
+def test_wrapper_recovery_accepts_envelope_route_after_default_route_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+
+    project = tmp_path / "wrapper-default-route-recovery"
+    project.mkdir()
+    (project / "interview-summary.md").write_text("verified interview\n", encoding="utf-8")
+    store = EventStore(str(tmp_path / "default-route-recovery.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("display-name", "minimal", str(project)))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-interview", 0)))
+    original_complete = store.mark_stage_claim_completed
+    failed = False
+
+    async def fail_once(claim_id, transition_id):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise OSError("after receipt saved")
+        return await original_complete(claim_id, transition_id)
+
+    monkeypatch.setattr(store, "mark_stage_claim_completed", fail_once)
+    first = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-interview", 0, claim["claim_id"], "PASS",
+        '{"artifact":"interview-summary.md:1"}', "", "default-route-recovery-id",
+    )))
+    envelope = json.loads(_run(get_stage_envelope(str(project), "codex_cli")))
+    retry = json.loads(_run(commit_stage_transition(
+        str(project), session.id, envelope["stage"], envelope["marker_revision"],
+        envelope["claim_id"], envelope["verdict"], json.dumps(envelope["evidence"]),
+        envelope["requested_next_skill"], envelope["transition_id"],
+    )))
+
+    assert first["status"] == "blocked"
+    assert envelope["requested_next_skill"] == "samvil-seed"
+    assert retry["status"] == "committed"
+
+
 def test_commit_stage_transition_wrapper_rejects_failed_verdict_and_sanitizes_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

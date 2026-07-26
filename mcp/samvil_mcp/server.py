@@ -1293,7 +1293,6 @@ async def commit_stage_transition(
                     {
                         "verdict": verdict,
                         "evidence": evidence,
-                        "user_choice": bool(requested_next_skill),
                     }
                 )
                 if (
