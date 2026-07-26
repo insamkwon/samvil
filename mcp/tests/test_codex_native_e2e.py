@@ -26,3 +26,12 @@ def test_codex_harness_receipt_is_bound_to_clean_revision():
     assert result["tested_commit"]
     assert result["tested_tree"]
     assert result["localhost_bind"] is True
+
+
+def test_codex_harness_fails_closed_when_runtime_scenario_is_not_implemented():
+    harness = _load("codex_native_e2e_scenario", "codex-native-e2e.py")
+    result = harness.evaluate_mode(harness.readiness(), check=False, scenario="fresh", repeat=2)
+
+    assert result["scenario_executed"] is False
+    assert result["ready"] is False
+    assert "not implemented" in " ".join(result["blockers"])

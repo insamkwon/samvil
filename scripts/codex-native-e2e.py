@@ -42,20 +42,46 @@ def readiness() -> dict[str, object]:
     return result
 
 
+def evaluate_mode(
+    readiness_result: dict[str, object],
+    *,
+    check: bool,
+    scenario: str,
+    repeat: int,
+) -> dict[str, object]:
+    result = dict(readiness_result)
+    blockers = list(result.get("blockers", []))
+    result.update({
+        "mode": "check" if check else "scenario",
+        "scenario": "" if check else scenario,
+        "repeat": repeat,
+        "scenario_executed": False,
+    })
+    if repeat < 1:
+        blockers.append("repeat must be at least 1")
+    if not check:
+        blockers.append("Codex runtime scenario execution is not implemented")
+    if blockers:
+        result["ready"] = False
+    result["blockers"] = blockers
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true")
-    parser.add_argument("--scenario")
-    parser.add_argument("--all", action="store_true")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--scenario")
+    mode.add_argument("--all", action="store_true")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--receipt", type=Path)
     args = parser.parse_args()
-    if not args.check and not args.scenario and not args.all:
-        parser.error("choose --check, --scenario, or --all")
-    result = readiness()
-    result["mode"] = "check" if args.check else "scenario"
-    result["scenario"] = args.scenario or ("all" if args.all else "")
-    result["repeat"] = args.repeat
+    result = evaluate_mode(
+        readiness(),
+        check=args.check,
+        scenario=args.scenario or ("all" if args.all else ""),
+        repeat=args.repeat,
+    )
     if not args.check:
         status = subprocess.run(["git", "status", "--short"], cwd=ROOT, capture_output=True, text=True).stdout.splitlines()
         unexpected = [line for line in status if not line.endswith(" $CODEX_HOME/")]
