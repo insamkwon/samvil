@@ -12,21 +12,16 @@ from pathlib import Path
 from typing import Any
 
 from .ssot_io import atomic_write_text
+from .stage_catalog import iter_stage_specs
 
 _LEAF_CHECKPOINT_FILENAME = "leaf-checkpoint.json"
 _SAMVIL_DIR = ".samvil"
 
+# Compatibility view: state-to-skill mapping is owned by stage_catalog.
 _STAGE_NEXT_SKILL: dict[str, str] = {
-    "interview": "samvil-interview",
-    "seed": "samvil-seed",
-    "council": "samvil-council",
-    "design": "samvil-design",
-    "scaffold": "samvil-scaffold",
-    "build": "samvil-build",
-    "qa": "samvil-qa",
-    "deploy": "samvil-deploy",
-    "evolve": "samvil-evolve",
-    "retro": "samvil-retro",
+    spec.state_stage: spec.skill_name
+    for spec in iter_stage_specs()
+    if spec.state_stage is not None
 }
 
 
