@@ -461,6 +461,55 @@ def test_complete_stage_delegates_codex_claims_to_shared_controller(tmp_path, mo
     _run(runner())
 
 
+def test_complete_stage_rejects_marker_downgrade_with_active_driver_claim(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+    from samvil_mcp.transition_controller import TransitionController
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "downgraded-marker"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+
+    async def runner():
+        session = json.loads(
+            await create_session(
+                "downgraded-marker", "standard", project_root=str(project_root)
+            )
+        )
+        sid = session["session_id"]
+        store = await srv.get_store()
+        controller = TransitionController(store)
+        claim = await controller.begin_stage(
+            str(project_root), sid, "samvil-interview", 0
+        )
+        marker_path = project_root / ".samvil" / "next-skill.json"
+        marker_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "chain_via": "file_marker",
+                    "next_skill": "samvil-interview",
+                    "from_stage": "samvil",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = json.loads(await complete_stage(sid, "interview", "pass"))
+        persisted_claim = await store.get_stage_claim(sid, "samvil-interview", 0)
+        persisted_session = await store.get_session(sid)
+
+        assert result["status"] == "error"
+        assert "active driver claim" in result["error"]
+        assert persisted_claim == claim
+        assert persisted_claim["status"] == "in_progress"
+        assert persisted_session.current_stage.value == "interview"
+
+    _run(runner())
+
+
 def test_get_orchestration_state_tool_reads_progress(tmp_path, monkeypatch) -> None:
     _isolated_server(monkeypatch, tmp_path)
     project_root = tmp_path / "orch-state"

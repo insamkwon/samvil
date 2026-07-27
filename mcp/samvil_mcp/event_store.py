@@ -539,6 +539,38 @@ class EventStore:
             )
         )
 
+    async def get_active_stage_claim(
+        self,
+        session_id: str,
+        stage: str,
+    ) -> dict[str, Any] | None:
+        """Return the sole in-progress claim for a stage, or fail on ambiguity."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT session_id, stage, marker_revision, claim_id, status,
+                   created_at, updated_at, completed_transition_id
+                   FROM stage_claims
+                   WHERE session_id = ? AND stage = ? AND status = 'in_progress'
+                   ORDER BY marker_revision DESC LIMIT 2""",
+                (session_id, stage),
+            )
+            rows = await cursor.fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise ValueError("multiple active stage claims")
+        keys = (
+            "session_id",
+            "stage",
+            "marker_revision",
+            "claim_id",
+            "status",
+            "created_at",
+            "updated_at",
+            "completed_transition_id",
+        )
+        return dict(zip(keys, rows[0]))
+
     async def get_stage_claims_for_revision(
         self,
         session_id: str,

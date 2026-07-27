@@ -1538,22 +1538,34 @@ async def complete_stage(
         from .transition_controller import TransitionController
 
         marker_inspection = inspect_chain_marker(str(project_path))
-        if (
-            verdict in ("pass", "complete")
+        from_skill = f"samvil-{stage}"
+        active_driver_claim = await store.get_active_stage_claim(
+            session_id, from_skill
+        )
+        marker_owns_active_claim = bool(
+            active_driver_claim is not None
             and marker_inspection.classification == "valid"
             and marker_inspection.marker.get("run_id") == session_id
             and marker_inspection.marker.get("status") == "in_progress"
+            and marker_inspection.marker.get("from_stage") == from_skill
+            and int(marker_inspection.marker.get("revision", -1))
+            == active_driver_claim["marker_revision"]
+        )
+        if active_driver_claim is not None and not marker_owns_active_claim:
+            raise OrchestratorError(
+                "active driver claim requires its valid in-progress marker"
+            )
+        if (
+            verdict in ("pass", "complete")
+            and marker_owns_active_claim
         ):
             controller = TransitionController(store)
             expected_revision = int(marker_inspection.marker.get("revision", 0))
-            from_skill = f"samvil-{stage}"
             next_stage = plan.get("next_stage")
             if not next_stage:
                 raise OrchestratorError(f"stage {stage!r} has no shared-controller next stage")
             to_skill = f"samvil-{next_stage}"
-            claim = await store.get_stage_claim(session_id, from_skill, expected_revision)
-            if claim is None:
-                raise OrchestratorError("Codex driver claim is missing for shared transition")
+            claim = active_driver_claim
             event_data["event_type_raw"] = plan["event_type"]
             receipt = await controller.commit_stage_transition(
                 str(project_path),
