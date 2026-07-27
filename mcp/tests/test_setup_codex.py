@@ -397,6 +397,48 @@ def test_isolated_executor_blocks_marketplaces_parent_symlink(tmp_path: Path) ->
     assert list(outside.iterdir()) == []
 
 
+def test_isolated_executor_blocks_backups_parent_symlink(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    outside = tmp_path / "outside-backups"
+    repo.mkdir()
+    codex_home.mkdir(parents=True)
+    outside.mkdir()
+    (codex_home / "config.toml").write_text(
+        '[marketplaces.other]\nsource = "/other"\n', encoding="utf-8"
+    )
+    (codex_home / "backups").symlink_to(outside, target_is_directory=True)
+    commands = []
+
+    with pytest.raises(InstallBlocked, match="backups path escapes isolated profile"):
+        execute_isolated_install(
+            CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+            codex_home=codex_home,
+            command_runner=lambda command, env: commands.append((command, env)),
+        )
+
+    assert commands == []
+    assert list(outside.iterdir()) == []
+
+
+def test_isolated_executor_accepts_explicit_custom_codex_home_name(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "profiles" / "codex-work"
+    repo.mkdir()
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+    commands = []
+
+    receipt = execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=lambda command, env: commands.append((command, env)),
+    )
+
+    assert receipt.canonical_root == repo.resolve()
+    assert commands
+    assert all(env["CODEX_HOME"] == str(codex_home.resolve()) for _, env in commands)
+
+
 def test_isolated_executor_refuses_blockers_and_unsafe_root(tmp_path: Path) -> None:
     plan = CodexInstallPlan(
         canonical_root=(tmp_path / "repo").resolve(),
@@ -418,7 +460,7 @@ def test_isolated_executor_refuses_blockers_and_unsafe_root(tmp_path: Path) -> N
     with pytest.raises(InstallBlocked):
         execute_isolated_install(
             clean,
-            codex_home=tmp_path / "home",
+            codex_home=Path(tmp_path.anchor),
             command_runner=lambda _command, _env: None,
         )
 

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from .ssot_io import atomic_write_text
+from .runtime_layout import RuntimeLayoutError, safe_child_directory
 
 _FRONTMATTER_NAME = re.compile(r"^name:\s*([^\n#]+?)\s*$", re.MULTILINE)
 
@@ -430,9 +431,15 @@ def execute_isolated_install(
     if plan.blockers:
         raise InstallBlocked("; ".join(plan.blockers))
     root = Path(codex_home).expanduser().resolve(strict=False)
-    if root == Path(root.anchor) or root.name != ".codex":
-        raise InstallBlocked(f"isolated Codex root must be a named .codex directory: {root}")
+    if root == Path(root.anchor):
+        raise InstallBlocked(f"isolated Codex root must not be a filesystem root: {root}")
     root.mkdir(parents=True, exist_ok=True)
+    try:
+        backups_root = safe_child_directory(root, "backups", label="backups")
+    except RuntimeLayoutError as exc:
+        raise InstallBlocked(
+            f"backups path escapes isolated profile: {root / 'backups'}"
+        ) from exc
     personal_root = root / "skills"
     before = inventory_personal_skills(personal_root)
     migrated_paths = set()
@@ -456,7 +463,7 @@ def execute_isolated_install(
     config_backup: Path | None = None
     if config_existed:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        backup = root / "backups" / f"config-{stamp}.toml"
+        backup = backups_root / f"config-{stamp}.toml"
         _atomic_copy(config, backup)
         backup_paths.append(backup)
         config_backup = backup
@@ -493,7 +500,7 @@ def execute_isolated_install(
                 continue
             source = action.path
             label = source.parent.name if source.name == "SKILL.md" else source.name
-            backup = root / "backups" / f"{label}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+            backup = backups_root / f"{label}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
             backup.parent.mkdir(parents=True, exist_ok=True)
             source.replace(backup)
             backup_paths.append(backup)

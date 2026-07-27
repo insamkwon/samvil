@@ -17,6 +17,11 @@ from .event_store import EventStore
 from .event_sanitizer import sanitize_event_data
 from .claim_ledger import ClaimLedger
 from .models import EventType, Stage
+from .runtime_layout import (
+    RuntimeLayoutError,
+    discover_repository_root,
+    safe_child_directory,
+)
 from .ssot_io import atomic_write_text
 from .stage_catalog import (
     get_stage_spec,
@@ -108,8 +113,22 @@ class TransitionController:
 
     @staticmethod
     def _instruction_path(stage: str) -> str:
-        repository_root = Path(__file__).resolve().parents[2]
+        relative = get_stage_spec(stage).instruction
+        try:
+            repository_root = discover_repository_root(
+                relative,
+                package_file=__file__,
+            )
+        except RuntimeLayoutError as exc:
+            raise TransitionError(str(exc)) from exc
         return str(instruction_path_for(stage, repository_root))
+
+    @staticmethod
+    def _validate_project_layout(root: Path) -> None:
+        try:
+            safe_child_directory(root, ".samvil", label=".samvil")
+        except RuntimeLayoutError as exc:
+            raise TransitionError(str(exc)) from exc
 
     @staticmethod
     def _marker_revision(inspection) -> int:
@@ -121,6 +140,19 @@ class TransitionController:
 
     async def get_stage_envelope(self, project_root: str, host_name: str) -> dict[str, Any]:
         root = Path(project_root).expanduser().resolve(strict=False)
+        try:
+            self._validate_project_layout(root)
+        except TransitionError as exc:
+            return {
+                "run_id": "",
+                "host_name": host_name,
+                "stage": "",
+                "status": "blocked",
+                "marker_revision": 0,
+                "instruction_path": "",
+                "execution_policy": "stop",
+                "stop_reason": str(exc),
+            }
         inspection = inspect_chain_marker(str(root))
         try:
             journal = self._read_json(self._journal_path(root))
@@ -233,6 +265,7 @@ class TransitionController:
         if type(expected_revision) is not int or expected_revision < 0:
             raise TransitionError("expected revision must be a non-negative integer")
         root = Path(project_root).expanduser().resolve(strict=False)
+        self._validate_project_layout(root)
         session = await self.store.get_session(run_id)
         if session is None or Path(session.project_root).expanduser().resolve(strict=False) != root:
             raise TransitionError("run_id does not own project root")
@@ -539,6 +572,7 @@ class TransitionController:
     ) -> dict[str, Any]:
         """Materialize one trusted transition in a fixed, recoverable order."""
         root = Path(project_root).expanduser().resolve(strict=False)
+        self._validate_project_layout(root)
         transition_id = transition_id or f"transition-{uuid.uuid4().hex}"
         session = await self.store.get_session(run_id)
         if session is None or Path(session.project_root).expanduser().resolve(strict=False) != root:

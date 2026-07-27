@@ -40,6 +40,74 @@ async def test_envelope_is_read_only_and_reports_fresh_then_ready(controller, tm
 
 
 @pytest.mark.asyncio
+async def test_instruction_path_uses_plugin_working_directory_for_installed_package(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    import samvil_mcp.transition_controller as transition_controller
+
+    plugin_root = tmp_path / "installed-plugin"
+    instruction = plugin_root / "references" / "codex-commands" / "samvil-interview.md"
+    instruction.parent.mkdir(parents=True)
+    instruction.write_text("# installed instruction\n", encoding="utf-8")
+    manifest = plugin_root / ".codex-plugin" / "plugin.json"
+    manifest.parent.mkdir()
+    manifest.write_text('{"name":"samvil"}\n', encoding="utf-8")
+    installed_package = tmp_path / "uvx" / "lib" / "python3.12" / "site-packages" / "samvil_mcp"
+    installed_package.mkdir(parents=True)
+
+    monkeypatch.chdir(plugin_root)
+    monkeypatch.setattr(
+        transition_controller,
+        "__file__",
+        str(installed_package / "transition_controller.py"),
+    )
+
+    assert controller._instruction_path("samvil-interview") == str(instruction.resolve())
+
+
+@pytest.mark.asyncio
+async def test_instruction_path_rejects_untrusted_working_directory(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    import samvil_mcp.transition_controller as transition_controller
+
+    untrusted = tmp_path / "user-project"
+    instruction = untrusted / "references" / "codex-commands" / "samvil-interview.md"
+    instruction.parent.mkdir(parents=True)
+    instruction.write_text("# untrusted instruction\n", encoding="utf-8")
+    installed_package = tmp_path / "uvx" / "lib" / "python3.12" / "site-packages" / "samvil_mcp"
+    installed_package.mkdir(parents=True)
+
+    monkeypatch.chdir(untrusted)
+    monkeypatch.delenv("SAMVIL_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(
+        transition_controller,
+        "__file__",
+        str(installed_package / "transition_controller.py"),
+    )
+
+    with pytest.raises(TransitionError, match="repository root is unavailable"):
+        controller._instruction_path("samvil-interview")
+
+
+@pytest.mark.asyncio
+async def test_begin_stage_rejects_project_samvil_symlink(
+    controller, tmp_path
+):
+    project = tmp_path / "symlink-project"
+    outside = tmp_path / "outside-state"
+    project.mkdir()
+    outside.mkdir()
+    (project / ".samvil").symlink_to(outside, target_is_directory=True)
+    session = await controller.store.create_session("symlink-project", "standard", str(project))
+
+    with pytest.raises(TransitionError, match="unsafe .samvil path"):
+        await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.asyncio
 async def test_envelope_preserves_in_progress_marker_owner(controller, tmp_path):
     project = tmp_path / "same-root-sessions"
     project.mkdir()
