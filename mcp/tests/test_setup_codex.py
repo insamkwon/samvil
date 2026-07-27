@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -418,6 +419,77 @@ def test_isolated_executor_quarantines_personal_skill_added_during_failure(
     )
     assert len(quarantined) == 1
     assert quarantined[0].read_text(encoding="utf-8").endswith("keep\n")
+
+
+def test_isolated_executor_rollback_does_not_follow_runtime_skills_symlink(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    personal_root = codex_home / "skills"
+    original_root = codex_home / "skills-moved-by-runner"
+    personal = personal_root / "personal" / "SKILL.md"
+    outside = tmp_path / "outside-skills"
+    external = outside / "external" / "SKILL.md"
+    repo.mkdir()
+    personal.parent.mkdir(parents=True)
+    personal.write_text("---\nname: personal\n---\nkeep\n", encoding="utf-8")
+    external.parent.mkdir(parents=True)
+    external.write_text("---\nname: external\n---\nkeep\n", encoding="utf-8")
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    def swapping_runner(_command, _env):
+        personal_root.replace(original_root)
+        personal_root.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(InstallBlocked, match="skills path escapes isolated profile"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=swapping_runner,
+        )
+
+    assert external.read_text(encoding="utf-8").endswith("keep\n")
+    assert personal.is_file()
+    assert personal_root.is_symlink() is False
+
+
+def test_isolated_executor_preserves_snapshot_when_restore_copy_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    helper = codex_home / "skills" / "personal" / "helper.txt"
+    skill = helper.parent / "SKILL.md"
+    repo.mkdir()
+    helper.parent.mkdir(parents=True)
+    skill.write_text("---\nname: personal\n---\nkeep\n", encoding="utf-8")
+    helper.write_text("before\n", encoding="utf-8")
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+    original_copytree = shutil.copytree
+
+    def fail_restore_copy(source, destination, *args, **kwargs):
+        if Path(source).parent.name.startswith(".personal-skills."):
+            raise OSError("injected restore copy failure")
+        return original_copytree(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "copytree", fail_restore_copy)
+
+    with pytest.raises(InstallBlocked, match="snapshot preserved"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: helper.write_text(
+                "changed\n", encoding="utf-8"
+            ),
+        )
+
+    assert helper.read_text(encoding="utf-8") == "changed\n"
+    snapshots = list((codex_home / "backups").glob(".personal-skills.*"))
+    assert len(snapshots) == 1
+    assert (snapshots[0] / "personal" / "helper.txt").read_text(
+        encoding="utf-8"
+    ) == "before\n"
 
 
 def test_isolated_executor_blocks_config_symlink_without_overwriting_target(tmp_path: Path) -> None:

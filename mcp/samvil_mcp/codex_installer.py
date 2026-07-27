@@ -529,13 +529,40 @@ def execute_isolated_install(
     moved_paths: list[tuple[Path, Path]] = []
     personal_snapshot_ready = False
     unexpected_quarantine: Path | None = None
+    preserve_personal_snapshot = False
 
     def protected_inventory() -> tuple[SkillInventoryEntry, ...]:
+        try:
+            safe_child_directory(root, "skills", label="skills")
+        except RuntimeLayoutError as exc:
+            raise InstallBlocked(
+                f"skills path escapes isolated profile: {personal_root}"
+            ) from exc
         current = inventory_personal_skills(personal_root)
         return tuple(entry for entry in current if entry.path not in migrated_paths)
 
-    def restore_personal_skills() -> None:
+    def quarantine_root() -> Path:
         nonlocal unexpected_quarantine
+        if unexpected_quarantine is None:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            unexpected_quarantine = (
+                backups_root / f"unexpected-personal-skills-{stamp}"
+            )
+            unexpected_quarantine.mkdir(parents=True, exist_ok=False)
+        return unexpected_quarantine
+
+    def restore_personal_skills() -> None:
+        if personal_root.is_symlink():
+            personal_root.replace(quarantine_root() / "skills-symlink")
+            personal_root.mkdir(parents=True, exist_ok=False)
+        else:
+            try:
+                safe_child_directory(root, "skills", label="skills")
+            except RuntimeLayoutError as exc:
+                raise InstallBlocked(
+                    f"skills path escapes isolated profile: {personal_root}"
+                ) from exc
+            personal_root.mkdir(parents=True, exist_ok=True)
         protected_paths = {entry.path for entry in protected_before}
         unexpected = tuple(
             entry
@@ -543,21 +570,37 @@ def execute_isolated_install(
             if entry.path not in protected_paths
         )
         if unexpected:
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-            unexpected_quarantine = backups_root / f"unexpected-personal-skills-{stamp}"
-            unexpected_quarantine.mkdir(parents=True, exist_ok=False)
             for entry in unexpected:
-                entry.path.replace(unexpected_quarantine / entry.path.name)
+                entry.path.replace(quarantine_root() / entry.path.name)
         if not personal_snapshot_ready or personal_snapshot_root is None:
             return
+        current_by_path = {
+            entry.path: entry for entry in protected_inventory()
+        }
         for entry in protected_before:
+            current = current_by_path.get(entry.path)
+            if current == entry:
+                continue
             snapshot = personal_snapshot_root / entry.path.name
-            destination = entry.path
-            if destination.is_symlink() or destination.is_file():
-                destination.unlink(missing_ok=True)
-            elif destination.exists():
-                shutil.rmtree(destination)
-            shutil.copytree(snapshot, destination, symlinks=True)
+            restore_root = Path(
+                tempfile.mkdtemp(prefix=".restore-personal-skill.", dir=backups_root)
+            )
+            candidate = restore_root / entry.path.name
+            try:
+                shutil.copytree(snapshot, candidate, symlinks=True)
+                destination = personal_root / entry.path.name
+                displaced: Path | None = None
+                if destination.is_symlink() or destination.exists():
+                    displaced = quarantine_root() / entry.path.name
+                    destination.replace(displaced)
+                try:
+                    candidate.replace(destination)
+                except BaseException:
+                    if displaced is not None and not destination.exists():
+                        displaced.replace(destination)
+                    raise
+            finally:
+                shutil.rmtree(restore_root, ignore_errors=True)
 
     def rollback_install() -> None:
         for backup, source in reversed(moved_paths):
@@ -637,7 +680,20 @@ def execute_isolated_install(
                 "personal Codex skill inventory changed during isolated install"
             )
     except BaseException as exc:
-        rollback_install()
+        try:
+            rollback_install()
+        except BaseException as rollback_exc:
+            preserve_personal_snapshot = personal_snapshot_root is not None
+            snapshot_note = (
+                f"; personal skill snapshot preserved at {personal_snapshot_root}"
+                if personal_snapshot_root is not None
+                else ""
+            )
+            if isinstance(rollback_exc, Exception):
+                raise InstallBlocked(
+                    f"Codex rollback failed: {rollback_exc}{snapshot_note}"
+                ) from rollback_exc
+            raise
         if isinstance(exc, InstallBlocked):
             if unexpected_quarantine is not None:
                 raise InstallBlocked(
@@ -651,7 +707,7 @@ def execute_isolated_install(
             ) from exc
         raise
     finally:
-        if personal_snapshot_root is not None:
+        if personal_snapshot_root is not None and not preserve_personal_snapshot:
             shutil.rmtree(personal_snapshot_root, ignore_errors=True)
 
     return InstallReceipt(
