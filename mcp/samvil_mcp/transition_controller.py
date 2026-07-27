@@ -433,6 +433,42 @@ class TransitionController:
             json.dumps(journal, indent=2, ensure_ascii=False),
         )
 
+    def matches_transition_retry(
+        self,
+        project_root: str,
+        *,
+        transition_id: str,
+        run_id: str,
+        claim_id: str,
+        from_stage: str,
+        expected_revision: int,
+    ) -> bool:
+        """Return whether a durable journal already owns this exact retry."""
+        root = Path(project_root).expanduser().resolve(strict=False)
+        journal = self._read_json(self._journal_path(root))
+        return bool(
+            journal
+            and journal.get("phase")
+            in {
+                "PREPARED",
+                "DB_COMMITTED",
+                "EVENT_WRITTEN",
+                "CLAIM_WRITTEN",
+                "STATE_WRITTEN",
+                "MARKER_WRITTEN",
+            }
+            and all(
+                journal.get(key) == expected
+                for key, expected in (
+                    ("transition_id", transition_id),
+                    ("run_id", run_id),
+                    ("claim_id", claim_id),
+                    ("from_stage", from_stage),
+                    ("expected_revision", expected_revision),
+                )
+            )
+        )
+
     @staticmethod
     def _json_hash(value: dict[str, Any]) -> str:
         return hashlib.sha256(

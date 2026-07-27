@@ -504,6 +504,60 @@ def test_wrapper_recovery_accepts_envelope_route_after_default_route_receipt(
     assert retry["status"] == "committed"
 
 
+def test_wrapper_recovery_finishes_legacy_transition_without_fresh_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.transition_controller import TransitionController
+
+    project = tmp_path / "legacy-wrapper-recovery"
+    project.mkdir()
+    store = EventStore(str(tmp_path / "legacy-wrapper-recovery.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("display-name", "minimal", str(project)))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-interview", 0)))
+    controller = TransitionController(store)
+    original_append = server._append_project_event
+    failed = False
+
+    def fail_once(*args, **kwargs):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise OSError("stop after DB commit")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(server, "_append_project_event", fail_once)
+    with pytest.raises(OSError, match="stop after DB commit"):
+        _run(controller.commit_stage_transition(
+            str(project),
+            session.id,
+            claim["claim_id"],
+            "samvil-interview",
+            "samvil-seed",
+            0,
+            data={"verdict": "pass", "stage": "interview", "trusted_transition": True},
+            transition_id="legacy-wrapper-recovery-id",
+        ))
+
+    envelope = json.loads(_run(get_stage_envelope(str(project), "codex_cli")))
+    recovered = json.loads(_run(commit_stage_transition(
+        str(project),
+        envelope["run_id"],
+        envelope["stage"],
+        envelope["marker_revision"],
+        envelope["claim_id"],
+        envelope["verdict"],
+        json.dumps(envelope["evidence"]),
+        envelope["requested_next_skill"],
+        envelope["transition_id"],
+    )))
+
+    assert recovered["status"] == "committed"
+    assert recovered["transition_id"] == "legacy-wrapper-recovery-id"
+
+
 def test_wrapper_replay_rejects_explicit_nondefault_route_changed_to_blank(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

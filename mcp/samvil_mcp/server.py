@@ -1300,6 +1300,17 @@ async def commit_stage_transition(
         if not isinstance(evidence, dict):
             raise ValueError("evidence_json must encode an object")
         controller = TransitionController(await get_store())
+        recovery_retry = bool(
+            transition_id
+            and controller.matches_transition_retry(
+                project_root,
+                transition_id=transition_id,
+                run_id=run_id,
+                claim_id=claim_id,
+                from_stage=stage,
+                expected_revision=expected_revision,
+            )
+        )
         if transition_id:
             existing_record = await controller.store.get_transition_receipt_record(transition_id)
             if existing_record is not None:
@@ -1356,7 +1367,11 @@ async def commit_stage_transition(
                     transition_id=transition_id,
                 )
                 return json.dumps(replayed, ensure_ascii=False)
-        if str(verdict or "").upper() in {"PASS", "PASSED", "OK", "COMPLETE"}:
+        if (
+            not recovery_retry
+            and str(verdict or "").upper()
+            in {"PASS", "PASSED", "OK", "COMPLETE"}
+        ):
             from .evidence_validator import parse_evidence, validate_evidence_list
 
             def evidence_strings(value: Any) -> list[str]:
