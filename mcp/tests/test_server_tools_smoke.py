@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import signal
 import sys
 import time
@@ -56,12 +57,20 @@ def test_verification_command_does_not_use_unbounded_capture_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import samvil_mcp.server as server
+    import tempfile
 
     monkeypatch.setattr(
         server.subprocess,
         "run",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("unbounded capture_output is forbidden")
+        ),
+    )
+    monkeypatch.setattr(
+        tempfile,
+        "TemporaryFile",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unbounded temporary capture is forbidden")
         ),
     )
 
@@ -75,6 +84,59 @@ def test_verification_command_does_not_use_unbounded_capture_output(
     assert "bounded output" in output
     assert len(output.encode("utf-8")) <= 2_000_000
 
+    exit_code, output = server._run_verification_command(
+        tmp_path,
+        [sys.executable, "-c", "import os; os.write(1, b'\\xff' * 4_000_000)"],
+        5,
+    )
+
+    assert exit_code == 0
+    assert len(output.encode("utf-8")) <= 2_000_000
+
+
+def test_verification_command_fails_closed_without_process_containment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+
+    monkeypatch.setattr(server.os, "name", "nt")
+
+    with pytest.raises(RuntimeError, match="requires a POSIX host"):
+        server._run_verification_command(
+            tmp_path, [sys.executable, "-c", "print('must not launch')"], 5
+        )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process identity is POSIX-only")
+def test_verification_process_identity_rejects_pid_reuse() -> None:
+    import samvil_mcp.server as server
+
+    identity = server._process_identity(os.getpid())
+
+    assert identity is not None
+    assert server._live_tracked_pids({os.getpid(): identity}) == {os.getpid()}
+    assert server._live_tracked_pids({os.getpid(): f"{identity}:reused"}) == set()
+
+
+def test_verification_tracker_prunes_reused_pid_before_following_children(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import samvil_mcp.server as server
+
+    identities = {100: "leader", 200: "new-owner", 300: "unrelated-child"}
+    descendants = {100: set(), 200: {300}, 300: set()}
+    monkeypatch.setattr(
+        server, "_process_identity", lambda pid: identities.get(pid)
+    )
+    monkeypatch.setattr(
+        server, "_descendant_pids", lambda pid: descendants.get(pid, set())
+    )
+    tracked = {200: "old-owner"}
+
+    server._refresh_tracked_descendants(100, "leader", tracked)
+
+    assert tracked == {}
+
 
 @pytest.mark.skipif(os.name != "posix", reason="process-group semantics are POSIX-only")
 def test_verification_timeout_kills_spawned_process_group(tmp_path: Path) -> None:
@@ -83,17 +145,21 @@ def test_verification_timeout_kills_spawned_process_group(tmp_path: Path) -> Non
     pid_path = tmp_path / "grandchild.pid"
     script = (
         "import pathlib, subprocess, sys, time; "
-        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'], "
+        "start_new_session=True); "
         f"pathlib.Path({str(pid_path)!r}).write_text(str(child.pid)); "
         "time.sleep(30)"
     )
     grandchild_pid = 0
     try:
+        started_at = time.monotonic()
         exit_code, output = server._run_verification_command(
             tmp_path, [sys.executable, "-c", script], 1
         )
+        elapsed = time.monotonic() - started_at
         assert exit_code == 124
         assert "verification timed out" in output
+        assert elapsed < 4
         grandchild_pid = int(pid_path.read_text(encoding="utf-8"))
         for _ in range(20):
             try:
@@ -107,6 +173,123 @@ def test_verification_timeout_kills_spawned_process_group(tmp_path: Path) -> Non
         if grandchild_pid:
             try:
                 os.kill(grandchild_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process tracking is POSIX-only")
+def test_verification_timeout_kills_reparented_double_fork(tmp_path: Path) -> None:
+    import samvil_mcp.server as server
+
+    pid_path = tmp_path / "double-fork-grandchild.pid"
+    grandchild_script = "import time; time.sleep(30)"
+    child_script = (
+        "import pathlib, subprocess, sys; "
+        f"grandchild=subprocess.Popen([sys.executable,'-c',{grandchild_script!r}], "
+        "start_new_session=True); "
+        f"pathlib.Path({str(pid_path)!r}).write_text(str(grandchild.pid))"
+    )
+    parent_script = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable,'-c',{child_script!r}], "
+        "start_new_session=True); "
+        "time.sleep(30)"
+    )
+    grandchild_pid = 0
+    try:
+        exit_code, output = server._run_verification_command(
+            tmp_path, [sys.executable, "-c", parent_script], 1
+        )
+
+        assert exit_code == 124
+        assert "verification timed out" in output
+        grandchild_pid = int(pid_path.read_text(encoding="utf-8"))
+        for _ in range(20):
+            try:
+                os.kill(grandchild_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("reparented verification grandchild survived timeout")
+    finally:
+        if grandchild_pid:
+            try:
+                os.kill(grandchild_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process-group semantics are POSIX-only")
+def test_verification_does_not_wait_for_stdout_inheriting_child(tmp_path: Path) -> None:
+    import samvil_mcp.server as server
+
+    pid_path = tmp_path / "inheriting-child.pid"
+    script = (
+        "import pathlib, subprocess, sys; "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'], "
+        "start_new_session=True); "
+        f"pathlib.Path({str(pid_path)!r}).write_text(str(child.pid)); "
+        "print('parent complete')"
+    )
+    child_pid = 0
+    try:
+        started_at = time.monotonic()
+        exit_code, output = server._run_verification_command(
+            tmp_path, [sys.executable, "-c", script], 2
+        )
+        elapsed = time.monotonic() - started_at
+
+        assert exit_code == 0
+        assert "parent complete" in output
+        assert elapsed < 4
+        child_pid = int(pid_path.read_text(encoding="utf-8"))
+        for _ in range(20):
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("stdout-inheriting verification child survived parent exit")
+    finally:
+        if child_pid:
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process-group semantics are POSIX-only")
+def test_verification_reaps_fast_leader_after_background_group_cleanup(
+    tmp_path: Path,
+) -> None:
+    import samvil_mcp.server as server
+
+    pid_path = tmp_path / "fast-background-child.pid"
+    command = [
+        "/bin/sh",
+        "-c",
+        f"sleep 30 & child=$!; echo $child > {shlex.quote(str(pid_path))}",
+    ]
+    child_pid = 0
+    try:
+        exit_code, _ = server._run_verification_command(tmp_path, command, 2)
+
+        assert exit_code == 0
+        child_pid = int(pid_path.read_text(encoding="utf-8"))
+        for _ in range(20):
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("same-group background child survived leader exit")
+    finally:
+        if child_pid:
+            try:
+                os.kill(child_pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
 
@@ -458,6 +641,49 @@ def test_build_transition_uses_run_bound_trusted_receipts_after_event_growth(
     assert _run(store.get_gate_receipt(active.id, "build_to_qa"))["verdict"] == "pass"
     assert _run(store.get_gate_receipt(active.id, "build_to_qa"))["session_id"] == active.id
     assert result["status"] == "committed"
+
+
+def test_runtime_receipt_projection_failure_does_not_leave_trusted_db_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "runtime-receipt-projection-failure"
+    receipt_root = project / ".samvil" / "runtime-receipts"
+    receipt_root.mkdir(parents=True)
+    (receipt_root / "build.json").mkdir()
+    store = EventStore(str(tmp_path / "runtime-receipt-projection-failure.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("projection-failure", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+
+    runtime = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project),
+                session.id,
+                "samvil-build",
+                json.dumps([sys.executable, "-c", "print('verified build')"]),
+            )
+        )
+    )
+    gate = json.loads(
+        _run(
+            gate_check(
+                "build_to_qa",
+                "minimal",
+                '{"implementation_rate":1.0}',
+                str(project),
+            )
+        )
+    )
+
+    assert runtime["status"] == "blocked"
+    assert _run(store.get_runtime_receipt(session.id, "samvil-build")) is None
+    assert gate["verdict"] == "block"
 
 
 def test_prior_build_receipts_cannot_authorize_a_new_marker_revision(

@@ -14,12 +14,16 @@ Graceful Degradation (INV-7):
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import hashlib
 import json
 import os
+import select
 import signal
 import subprocess
+import sys
 import threading
+import time
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -3959,73 +3963,470 @@ def _run_verification_command(
     command: list[str],
     timeout_seconds: float,
 ) -> tuple[int, str]:
+    if os.name != "posix":
+        raise RuntimeError(
+            "trusted verification process containment requires a POSIX host"
+        )
     max_output_bytes = 2_000_000
     chunks: deque[bytes] = deque()
     output_size = 0
-    output_lock = threading.Lock()
-
-    def drain_output(stream: Any) -> None:
-        nonlocal output_size
-        try:
-            while True:
-                chunk = stream.read(65_536)
-                if not chunk:
-                    return
-                with output_lock:
-                    chunks.append(chunk)
-                    output_size += len(chunk)
-                    while output_size > max_output_bytes and chunks:
-                        overflow = output_size - max_output_bytes
-                        first = chunks[0]
-                        if overflow >= len(first):
-                            output_size -= len(chunks.popleft())
-                        else:
-                            chunks[0] = first[overflow:]
-                            output_size -= overflow
-        except (OSError, ValueError):
-            return
-
-    process = subprocess.Popen(
-        command,
-        cwd=root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        start_new_session=os.name == "posix",
-    )
-    if process.stdout is None:
-        process.kill()
-        raise RuntimeError("verification output pipe is unavailable")
-    reader = threading.Thread(
-        target=drain_output,
-        args=(process.stdout,),
-        name="samvil-verification-output",
-        daemon=True,
-    )
-    reader.start()
     timed_out = False
-    try:
-        exit_code = process.wait(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        exit_code = 124
-        if os.name == "posix":
+    process: subprocess.Popen[bytes] | None = None
+    tracker_stop = threading.Event()
+    tracker_ready = threading.Event()
+    tracked_descendants: dict[int, str] = {}
+    tracker: threading.Thread | None = None
+    leader_identity: str | None = None
+    exit_observer: tuple[str, Any] | None = None
+    release_read = -1
+    release_write = -1
+
+    def append_output(chunk: bytes) -> None:
+        nonlocal output_size
+        chunks.append(chunk)
+        output_size += len(chunk)
+        while output_size > max_output_bytes and chunks:
+            overflow = output_size - max_output_bytes
+            first = chunks[0]
+            if overflow >= len(first):
+                output_size -= len(chunks.popleft())
+            else:
+                chunks[0] = first[overflow:]
+                output_size -= overflow
+
+    def drain_available(fd: int) -> bool:
+        reached_eof = False
+        while True:
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        else:
-            process.kill()
-        process.wait()
+                chunk = os.read(fd, 65_536)
+            except BlockingIOError:
+                break
+            except OSError:
+                reached_eof = True
+                break
+            if not chunk:
+                reached_eof = True
+                break
+            append_output(chunk)
+        return reached_eof
+
+    try:
+        launch_command = command
+        popen_options: dict[str, Any] = {}
+        if os.name == "posix":
+            release_read, release_write = os.pipe()
+            launcher = (
+                "import os,sys; "
+                "fd=int(sys.argv[1]); os.read(fd,1); os.close(fd); "
+                "os.execvpe(sys.argv[2], sys.argv[2:], os.environ)"
+            )
+            launch_command = [
+                sys.executable,
+                "-c",
+                launcher,
+                str(release_read),
+                *command,
+            ]
+            popen_options["pass_fds"] = (release_read,)
+        process = subprocess.Popen(
+            launch_command,
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=os.name == "posix",
+            bufsize=0,
+            **popen_options,
+        )
+        if process.stdout is None:
+            raise RuntimeError("verification output pipe is unavailable")
+        leader_identity = _process_identity(process.pid)
+        if os.name == "posix" and leader_identity is None:
+            raise RuntimeError("verification process identity is unavailable")
+        exit_observer = _open_process_exit_observer(process.pid)
+        output_fd = process.stdout.fileno()
+        os.set_blocking(output_fd, False)
+        if os.name == "posix":
+            os.close(release_read)
+            release_read = -1
+            tracker = threading.Thread(
+                target=_track_verification_descendants,
+                args=(
+                    process.pid,
+                    leader_identity,
+                    tracker_stop,
+                    tracker_ready,
+                    tracked_descendants,
+                ),
+                name="samvil-verification-process-tracker",
+                daemon=True,
+            )
+            tracker.start()
+            if not tracker_ready.wait(timeout=1):
+                raise RuntimeError("verification process tracker did not become ready")
+            os.write(release_write, b"1")
+            os.close(release_write)
+            release_write = -1
+
+        deadline = time.monotonic() + timeout_seconds
+        reached_eof = False
+        while True:
+            reached_eof = drain_available(output_fd) or reached_eof
+            if _process_exit_observed(exit_observer):
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                exit_code = 124
+                break
+            select.select([output_fd], [], [], min(remaining, 0.05))
+
+        tracker_stop.set()
+        if tracker is not None:
+            tracker.join(timeout=1)
+        _refresh_tracked_descendants(
+            process.pid, leader_identity, tracked_descendants
+        )
+        _terminate_verification_processes(
+            process,
+            _live_tracked_pids(tracked_descendants),
+            leader_identity,
+            leader_unreaped=True,
+        )
+        return_code = process.wait(timeout=5)
+        if not timed_out:
+            exit_code = return_code
+
+        drain_deadline = time.monotonic() + 0.5
+        while not reached_eof and time.monotonic() < drain_deadline:
+            reached_eof = drain_available(output_fd)
+            if not reached_eof:
+                select.select([output_fd], [], [], 0.02)
+        process.stdout.close()
     finally:
-        reader.join(timeout=5)
-        if reader.is_alive():
-            process.stdout.close()
-            reader.join(timeout=1)
-    with output_lock:
-        output = b"".join(chunks).decode("utf-8", errors="replace")
+        tracker_stop.set()
+        if tracker is not None and tracker.is_alive():
+            tracker.join(timeout=1)
+        _close_process_exit_observer(exit_observer)
+        for fd in (release_read, release_write):
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        if process is not None and process.returncode is None:
+            _terminate_verification_processes(
+                process,
+                _live_tracked_pids(tracked_descendants),
+                leader_identity,
+                leader_unreaped=True,
+            )
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+    output = b"".join(chunks).decode("utf-8", errors="replace")
     if timed_out:
         output = f"{output}\nverification timed out\n"
+    encoded_output = output.encode("utf-8")
+    if len(encoded_output) > max_output_bytes:
+        output = encoded_output[-max_output_bytes:].decode("utf-8", errors="ignore")
     return exit_code, output
+
+
+def _open_process_exit_observer(pid: int) -> tuple[str, Any]:
+    """Create a non-reaping process exit observer for supported POSIX hosts."""
+    if sys.platform == "darwin" and hasattr(select, "kqueue"):
+        queue = select.kqueue()
+        event = select.kevent(
+            pid,
+            filter=select.KQ_FILTER_PROC,
+            flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE | select.KQ_EV_ONESHOT,
+            fflags=select.KQ_NOTE_EXIT,
+        )
+        queue.control([event], 0, 0)
+        return ("kqueue", queue)
+    if sys.platform.startswith("linux") and hasattr(os, "pidfd_open"):
+        return ("pidfd", os.pidfd_open(pid, 0))
+    raise RuntimeError("non-reaping process exit observation is unavailable")
+
+
+def _process_exit_observed(observer: tuple[str, Any]) -> bool:
+    """Return whether the observed process exited without consuming its PID."""
+    kind, handle = observer
+    if kind == "kqueue":
+        return bool(handle.control(None, 1, 0))
+    readable, _, _ = select.select([handle], [], [], 0)
+    return bool(readable)
+
+
+def _close_process_exit_observer(observer: tuple[str, Any] | None) -> None:
+    if observer is None:
+        return
+    _, handle = observer
+    try:
+        handle.close() if hasattr(handle, "close") else os.close(handle)
+    except OSError:
+        pass
+
+
+def _descendant_pids(parent_pid: int) -> set[int]:
+    """Return the currently visible descendants of one process."""
+    if os.name != "posix":
+        return set()
+    if sys.platform == "darwin" or sys.platform.startswith("linux"):
+        descendants: set[int] = set()
+        pending = list(_direct_child_pids(parent_pid))
+        while pending:
+            pid = pending.pop()
+            if pid in descendants:
+                continue
+            descendants.add(pid)
+            pending.extend(_direct_child_pids(pid))
+        return descendants
+    ps = subprocess.Popen(
+        ["ps", "-axo", "pid=,ppid="],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        output, _ = ps.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        ps.kill()
+        ps.communicate()
+        return set()
+    children: dict[int, set[int]] = {}
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        try:
+            pid, ppid = (int(field) for field in fields)
+        except ValueError:
+            continue
+        children.setdefault(ppid, set()).add(pid)
+    descendants: set[int] = set()
+    pending = list(children.get(parent_pid, set()))
+    while pending:
+        pid = pending.pop()
+        if pid in descendants:
+            continue
+        descendants.add(pid)
+        pending.extend(children.get(pid, set()))
+    return descendants
+
+
+_DARWIN_LIBPROC: Any | None = None
+
+
+class _DarwinProcBSDInfo(ctypes.Structure):
+    _fields_ = [
+        ("pbi_flags", ctypes.c_uint32),
+        ("pbi_status", ctypes.c_uint32),
+        ("pbi_xstatus", ctypes.c_uint32),
+        ("pbi_pid", ctypes.c_uint32),
+        ("pbi_ppid", ctypes.c_uint32),
+        ("pbi_uid", ctypes.c_uint32),
+        ("pbi_gid", ctypes.c_uint32),
+        ("pbi_ruid", ctypes.c_uint32),
+        ("pbi_rgid", ctypes.c_uint32),
+        ("pbi_svuid", ctypes.c_uint32),
+        ("pbi_svgid", ctypes.c_uint32),
+        ("rfu_1", ctypes.c_uint32),
+        ("pbi_comm", ctypes.c_char * 16),
+        ("pbi_name", ctypes.c_char * 32),
+        ("pbi_nfiles", ctypes.c_uint32),
+        ("pbi_pgid", ctypes.c_uint32),
+        ("pbi_pjobc", ctypes.c_uint32),
+        ("e_tdev", ctypes.c_uint32),
+        ("e_tpgid", ctypes.c_uint32),
+        ("pbi_nice", ctypes.c_int32),
+        ("pbi_start_tvsec", ctypes.c_uint64),
+        ("pbi_start_tvusec", ctypes.c_uint64),
+    ]
+
+
+def _direct_child_pids(parent_pid: int) -> set[int]:
+    """Read direct children without spawning a helper on supported POSIX hosts."""
+    global _DARWIN_LIBPROC
+    if sys.platform == "darwin":
+        try:
+            if _DARWIN_LIBPROC is None:
+                _DARWIN_LIBPROC = ctypes.CDLL("/usr/lib/libproc.dylib")
+                _DARWIN_LIBPROC.proc_listchildpids.argtypes = [
+                    ctypes.c_int,
+                    ctypes.c_void_p,
+                    ctypes.c_int,
+                ]
+                _DARWIN_LIBPROC.proc_listchildpids.restype = ctypes.c_int
+                _DARWIN_LIBPROC.proc_pidinfo.argtypes = [
+                    ctypes.c_int,
+                    ctypes.c_int,
+                    ctypes.c_uint64,
+                    ctypes.c_void_p,
+                    ctypes.c_int,
+                ]
+                _DARWIN_LIBPROC.proc_pidinfo.restype = ctypes.c_int
+            capacity = 64
+            while capacity <= 4096:
+                buffer = (ctypes.c_int * capacity)()
+                count = _DARWIN_LIBPROC.proc_listchildpids(
+                    parent_pid, buffer, ctypes.sizeof(buffer)
+                )
+                if count < 0:
+                    return set()
+                if count < capacity:
+                    return {int(buffer[index]) for index in range(count)}
+                capacity *= 2
+        except (AttributeError, OSError):
+            return set()
+        return set()
+    if sys.platform.startswith("linux"):
+        children: set[int] = set()
+        task_root = Path(f"/proc/{parent_pid}/task")
+        try:
+            task_dirs = tuple(task_root.iterdir())
+        except OSError:
+            return set()
+        for task_dir in task_dirs:
+            try:
+                text = (task_dir / "children").read_text(encoding="ascii")
+            except OSError:
+                continue
+            for value in text.split():
+                try:
+                    children.add(int(value))
+                except ValueError:
+                    continue
+        return children
+    return set()
+
+
+def _process_identity(pid: int) -> str | None:
+    """Return a PID-reuse-safe process identity for supported hosts."""
+    if sys.platform == "darwin":
+        try:
+            _direct_child_pids(pid)
+            if _DARWIN_LIBPROC is None:
+                return None
+            info = _DarwinProcBSDInfo()
+            size = ctypes.sizeof(info)
+            result = _DARWIN_LIBPROC.proc_pidinfo(
+                pid, 3, 0, ctypes.byref(info), size
+            )
+            if result != size or int(info.pbi_pid) != pid:
+                return None
+            return f"{pid}:{info.pbi_start_tvsec}:{info.pbi_start_tvusec}"
+        except (AttributeError, OSError):
+            return None
+    if sys.platform.startswith("linux"):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+            fields = stat.rsplit(")", 1)[1].split()
+            return f"{pid}:{fields[19]}"
+        except (IndexError, OSError):
+            return None
+    try:
+        ps = subprocess.Popen(
+            ["ps", "-p", str(pid), "-o", "lstart="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        output, _ = ps.communicate(timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        if "ps" in locals() and ps.poll() is None:
+            ps.kill()
+            ps.communicate()
+        return None
+    started_at = output.strip()
+    return f"{pid}:{started_at}" if started_at else None
+
+
+def _live_tracked_pids(tracked: dict[int, str]) -> set[int]:
+    """Filter tracked PIDs by their original process identity."""
+    return {
+        pid
+        for pid, identity in tracked.items()
+        if _process_identity(pid) == identity
+    }
+
+
+def _refresh_tracked_descendants(
+    parent_pid: int,
+    parent_identity: str | None,
+    tracked: dict[int, str],
+) -> None:
+    """Prune reused PIDs before using them as ancestry roots."""
+    for pid, identity in tuple(tracked.items()):
+        if _process_identity(pid) != identity:
+            tracked.pop(pid, None)
+    roots = set(tracked)
+    if _process_identity(parent_pid) == parent_identity:
+        roots.add(parent_pid)
+    discovered: set[int] = set()
+    for root_pid in roots:
+        discovered.update(_descendant_pids(root_pid))
+    for pid in discovered:
+        identity = _process_identity(pid)
+        if identity is not None:
+            tracked[pid] = identity
+
+
+def _track_verification_descendants(
+    parent_pid: int,
+    parent_identity: str | None,
+    stopped: threading.Event,
+    ready: threading.Event,
+    tracked: dict[int, str],
+) -> None:
+    """Continuously retain descendants even when they detach and get reparented."""
+    interval = (
+        0.001
+        if sys.platform == "darwin" or sys.platform.startswith("linux")
+        else 0.02
+    )
+    _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
+    ready.set()
+    while not stopped.is_set():
+        _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
+        stopped.wait(interval)
+
+
+def _terminate_verification_processes(
+    process: subprocess.Popen[Any],
+    descendants: set[int],
+    leader_identity: str | None = None,
+    *,
+    leader_unreaped: bool = False,
+) -> None:
+    """Kill the verification group and any already-detached descendants."""
+    if os.name == "posix":
+        for pid in descendants:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (PermissionError, ProcessLookupError):
+                pass
+        group_is_owned = leader_unreaped or (
+            _process_identity(process.pid) == leader_identity
+        )
+        if not group_is_owned:
+            for pid in descendants:
+                try:
+                    if os.getpgid(pid) == process.pid:
+                        group_is_owned = True
+                        break
+                except (PermissionError, ProcessLookupError):
+                    continue
+        if group_is_owned:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (PermissionError, ProcessLookupError):
+                pass
+    elif process.poll() is None:
+        process.kill()
 
 
 @mcp.tool()
@@ -4089,11 +4490,12 @@ async def run_stage_verification(
             "marker_revision": marker_revision,
             "claim_id": claim["claim_id"],
         }
-        receipt = await store.save_runtime_receipt(run_id, normalized, receipt)
+        projected_receipt = {**receipt, "session_id": run_id, "stage": normalized}
         atomic_write_text(
             receipt_root / f"{normalized.removeprefix('samvil-')}.json",
-            json.dumps(receipt, indent=2, ensure_ascii=False),
+            json.dumps(projected_receipt, indent=2, ensure_ascii=False),
         )
+        receipt = await store.save_runtime_receipt(run_id, normalized, receipt)
         _log_mcp_health("ok" if exit_code == 0 else "fail", "run_stage_verification")
         return json.dumps(receipt, ensure_ascii=False)
     except Exception as exc:
@@ -4253,9 +4655,17 @@ async def gate_check(
         except RuntimeLayoutError as exc:
             raise ValueError(str(exc)) from exc
         receipt_path = receipt_root / f"{gate_name}.json"
+        projected_receipt = (
+            {**receipt, "session_id": session.id, "gate": gate_name}
+            if session is not None
+            else receipt
+        )
+        atomic_write_text(
+            receipt_path,
+            json.dumps(projected_receipt, indent=2, ensure_ascii=False),
+        )
         if session is not None:
             receipt = await store.save_gate_receipt(session.id, gate_name, receipt)
-        atomic_write_text(receipt_path, json.dumps(receipt, indent=2, ensure_ascii=False))
         _log_mcp_health("ok", "gate_check")
         return json.dumps(result)
     except Exception as e:
