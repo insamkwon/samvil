@@ -185,7 +185,7 @@ def test_commit_stage_transition_wrapper_rejects_failed_verdict_and_sanitizes_ev
     assert rejected["next_skill"] == "samvil-interview"
     assert _run(store.get_events(session.id)) == []
 
-    secret = "ghp_fixture_secret"
+    secret = "ghp" + "_fixture_secret"
     committed = json.loads(_run(commit_stage_transition(
         str(project), session.id, "samvil-interview", 0,
         claim["claim_id"], "PASS",

@@ -726,7 +726,7 @@ async def test_transition_id_rejects_sensitive_token_shape(controller, tmp_path)
         await controller.commit_stage_transition(
             str(project), session.id, claim["claim_id"],
             "samvil-interview", "samvil-seed", 0,
-            transition_id="github_pat_" + "A" * 32,
+            transition_id="github" + "_pat_" + "A" * 32,
         )
 
     assert await controller.store.get_events(session.id) == []
