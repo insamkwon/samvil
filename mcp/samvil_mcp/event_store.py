@@ -1068,6 +1068,8 @@ class EventStore:
         event_timestamp: str,
         transition_id: str,
         active_skill: str,
+        runtime_receipt: dict[str, Any] | None = None,
+        gate_receipt: dict[str, Any] | None = None,
     ) -> None:
         """Recreate only one journal-proven committed transition after DB loss."""
         session_id = str(session_snapshot["id"])
@@ -1149,6 +1151,32 @@ class EventStore:
                         str(claim_snapshot["updated_at"]),
                     ),
                 )
+                if runtime_receipt is not None:
+                    await db.execute(
+                        """INSERT INTO runtime_receipts
+                        (session_id, stage, receipt_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?)""",
+                        (
+                            session_id,
+                            str(runtime_receipt["stage"]),
+                            json.dumps(runtime_receipt, ensure_ascii=False),
+                            event_timestamp,
+                            event_timestamp,
+                        ),
+                    )
+                if gate_receipt is not None:
+                    await db.execute(
+                        """INSERT INTO gate_receipts
+                        (session_id, gate, receipt_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?)""",
+                        (
+                            session_id,
+                            str(gate_receipt["gate"]),
+                            json.dumps(gate_receipt, ensure_ascii=False),
+                            event_timestamp,
+                            event_timestamp,
+                        ),
+                    )
                 await db.commit()
             except BaseException:
                 await asyncio.shield(db.rollback())

@@ -467,6 +467,115 @@ async def test_db_committed_journal_reconstructs_only_its_transition_after_db_lo
 
 
 @pytest.mark.asyncio
+async def test_db_loss_recovery_rejects_project_forged_journal(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    import hashlib
+    import samvil_mcp.server as server
+
+    db_path = tmp_path / "forged-loss.db"
+    project = tmp_path / "forged-loss-project"
+    project.mkdir()
+    store = EventStore(str(db_path))
+    await store.initialize()
+    controller = TransitionController(store)
+    session = await store.create_session("display-name", "standard", str(project))
+    claim = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
+    monkeypatch.setattr(
+        server,
+        "_append_project_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("stop after DB")),
+    )
+    with pytest.raises(OSError, match="stop after DB"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            data={"evidence": {"artifact": "interview-summary.md:1"}},
+            transition_id="forged-loss-transition",
+        )
+
+    journal_path = project / ".samvil" / "transition-journal.json"
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal["event_payload"]["evidence"] = {"artifact": "forged.txt:999"}
+    journal["event_payload_hash"] = hashlib.sha256(
+        json.dumps(journal["event_payload"], sort_keys=True).encode()
+    ).hexdigest()
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    for suffix in ("", "-wal", "-shm"):
+        Path(f"{db_path}{suffix}").unlink(missing_ok=True)
+
+    recovered_store = EventStore(str(db_path))
+    await recovered_store.initialize()
+    envelope = await TransitionController(recovered_store).get_stage_envelope(
+        str(project), "codex_cli"
+    )
+
+    assert envelope["status"] == "blocked"
+    assert "authentication" in envelope["stop_reason"]
+    assert await recovered_store.get_session(session.id) is None
+
+
+@pytest.mark.asyncio
+async def test_db_loss_recovery_restores_signed_build_receipts(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    import samvil_mcp.server as server
+
+    db_path = tmp_path / "build-receipt-loss.db"
+    project = tmp_path / "build-receipt-loss-project"
+    project.mkdir()
+    store = EventStore(str(db_path))
+    await store.initialize()
+    controller = TransitionController(store)
+    session = await store.create_session("display-name", "standard", str(project))
+    await store.update_session_stage(session.id, Stage.BUILD)
+    (project / "project.state.json").write_text(
+        json.dumps(
+            {
+                "session_id": session.id,
+                "project_name": "display-name",
+                "samvil_tier": "standard",
+                "current_stage": "build",
+                "completed_stages": ["interview", "seed", "design", "scaffold"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    claim = await controller.begin_stage(str(project), session.id, "samvil-build", 0)
+    runtime_receipt = await store.save_runtime_receipt(
+        session.id, "build", {"claim_id": claim["claim_id"], "verdict": "pass"}
+    )
+    gate_receipt = await store.save_gate_receipt(
+        session.id,
+        "build_to_qa",
+        {"claim_id": claim["claim_id"], "marker_revision": 0, "verdict": "pass"},
+    )
+    monkeypatch.setattr(
+        server,
+        "_append_project_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("stop after DB")),
+    )
+    with pytest.raises(OSError, match="stop after DB"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-build", "samvil-qa", 0,
+            transition_id="build-receipt-loss-transition",
+        )
+    for suffix in ("", "-wal", "-shm"):
+        Path(f"{db_path}{suffix}").unlink(missing_ok=True)
+
+    recovered_store = EventStore(str(db_path))
+    await recovered_store.initialize()
+    envelope = await TransitionController(recovered_store).get_stage_envelope(
+        str(project), "codex_cli"
+    )
+
+    assert envelope["recovery_mode"] == "retry_commit"
+    assert await recovered_store.get_runtime_receipt(session.id, "build") == runtime_receipt
+    assert await recovered_store.get_gate_receipt(session.id, "build_to_qa") == gate_receipt
+
+
+@pytest.mark.asyncio
 async def test_prepared_journal_with_committed_db_event_recovers_on_retry(
     controller, tmp_path, monkeypatch: pytest.MonkeyPatch
 ):

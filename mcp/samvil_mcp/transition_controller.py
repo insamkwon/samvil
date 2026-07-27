@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
+import os
 import re
+import secrets
 import uuid
 from pathlib import Path
 from typing import Any
@@ -425,15 +428,53 @@ class TransitionController:
             raise TransitionError(f"invalid JSON object: {path}")
         return parsed
 
-    @staticmethod
-    def _write_journal(root: Path, journal: dict[str, Any], phase: str) -> None:
+    def _journal_auth_key(self) -> bytes:
+        """Return one host-private key that survives loss of the SQLite file."""
+        db_path = Path(self.store.db_path).expanduser().resolve(strict=False)
+        key_path = db_path.parent / ".transition-journal.key"
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            descriptor = os.open(
+                key_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+        except FileExistsError:
+            descriptor = None
+        if descriptor is not None:
+            try:
+                key = secrets.token_bytes(32)
+                os.write(descriptor, key)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        try:
+            key = key_path.read_bytes()
+        except OSError as exc:
+            raise TransitionError("transition journal authentication key is unavailable") from exc
+        if len(key) < 32:
+            raise TransitionError("transition journal authentication key is invalid")
+        return key
+
+    def _journal_authentication(self, journal: dict[str, Any]) -> str:
+        payload = {key: value for key, value in journal.items() if key != "journal_authentication"}
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return hmac.new(self._journal_auth_key(), encoded, hashlib.sha256).hexdigest()
+
+    def _write_journal(self, root: Path, journal: dict[str, Any], phase: str) -> None:
         journal["phase"] = phase
+        journal["journal_authentication"] = self._journal_authentication(journal)
         atomic_write_text(
             TransitionController._journal_path(root),
             json.dumps(journal, indent=2, ensure_ascii=False),
         )
 
-    def matches_transition_retry(
+    async def matches_transition_retry(
         self,
         project_root: str,
         *,
@@ -443,20 +484,13 @@ class TransitionController:
         from_stage: str,
         expected_revision: int,
     ) -> bool:
-        """Return whether a durable journal already owns this exact retry."""
+        """Return whether trusted DB state proves this exact retry already committed."""
         root = Path(project_root).expanduser().resolve(strict=False)
         journal = self._read_json(self._journal_path(root))
-        return bool(
+        if not (
             journal
             and journal.get("phase")
-            in {
-                "PREPARED",
-                "DB_COMMITTED",
-                "EVENT_WRITTEN",
-                "CLAIM_WRITTEN",
-                "STATE_WRITTEN",
-                "MARKER_WRITTEN",
-            }
+            in {"PREPARED", "DB_COMMITTED", "EVENT_WRITTEN", "CLAIM_WRITTEN", "STATE_WRITTEN", "MARKER_WRITTEN"}
             and all(
                 journal.get(key) == expected
                 for key, expected in (
@@ -467,7 +501,10 @@ class TransitionController:
                     ("expected_revision", expected_revision),
                 )
             )
-        )
+        ):
+            return False
+        _journal, persisted_event = await self._authoritative_journal_context(root, journal)
+        return persisted_event is not None
 
     @staticmethod
     def _json_hash(value: dict[str, Any]) -> str:
@@ -508,8 +545,12 @@ class TransitionController:
                 "transition_id must be a bounded non-sensitive identifier"
             )
 
-    @staticmethod
-    def _validate_journal_integrity(journal: dict[str, Any]) -> None:
+    def _validate_journal_integrity(
+        self,
+        journal: dict[str, Any],
+        *,
+        require_authentication: bool = True,
+    ) -> None:
         try:
             transition_id = str(journal["transition_id"])
             from_stage = str(journal["from_stage"])
@@ -541,6 +582,8 @@ class TransitionController:
             ("target_marker", "target_marker_hash"),
             ("session_snapshot", "session_snapshot_hash"),
             ("claim_snapshot", "claim_snapshot_hash"),
+            ("runtime_receipt_snapshot", "runtime_receipt_snapshot_hash"),
+            ("gate_receipt_snapshot", "gate_receipt_snapshot_hash"),
         ):
             if payload_key not in journal and hash_key not in journal:
                 continue
@@ -551,6 +594,15 @@ class TransitionController:
                 != TransitionController._json_hash(payload)
             ):
                 raise TransitionError("transition journal integrity check failed")
+        if require_authentication:
+            supplied_authentication = str(
+                journal.get("journal_authentication") or ""
+            )
+            if not supplied_authentication or not hmac.compare_digest(
+                supplied_authentication,
+                self._journal_authentication(journal),
+            ):
+                raise TransitionError("transition journal authentication failed")
 
     async def _reconstruct_lost_db_context(
         self,
@@ -579,6 +631,8 @@ class TransitionController:
         target_marker = dict(journal["target_marker"])
         session_snapshot = dict(journal["session_snapshot"])
         claim_snapshot = dict(journal["claim_snapshot"])
+        runtime_receipt_snapshot = journal.get("runtime_receipt_snapshot")
+        gate_receipt_snapshot = journal.get("gate_receipt_snapshot")
         run_id = str(journal["run_id"])
         from_stage = str(journal["from_stage"])
         expected_revision = int(journal["expected_revision"])
@@ -615,6 +669,25 @@ class TransitionController:
             or int(target_marker.get("revision", -1)) != expected_revision + 1
         ):
             raise TransitionError("lost DB recovery evidence is inconsistent")
+        if runtime_receipt_snapshot is not None and (
+            not isinstance(runtime_receipt_snapshot, dict)
+            or str(runtime_receipt_snapshot.get("session_id") or "") != run_id
+            or str(runtime_receipt_snapshot.get("stage") or "")
+            != from_stage.removeprefix("samvil-")
+        ):
+            raise TransitionError("lost DB runtime receipt is inconsistent")
+        expected_gate = {
+            ("samvil-build", "samvil-qa"): "build_to_qa",
+            ("samvil-qa", "samvil-evolve"): "qa_to_evolve",
+            ("samvil-qa", "samvil-retro"): "any_to_retro",
+            ("samvil-qa", "samvil-deploy"): "qa_to_deploy",
+        }.get((from_stage, str(journal["to_stage"])), "")
+        if gate_receipt_snapshot is not None and (
+            not isinstance(gate_receipt_snapshot, dict)
+            or str(gate_receipt_snapshot.get("session_id") or "") != run_id
+            or str(gate_receipt_snapshot.get("gate") or "") != expected_gate
+        ):
+            raise TransitionError("lost DB gate receipt is inconsistent")
 
         await self.store.reconstruct_committed_transition(
             project_root=str(root),
@@ -629,6 +702,16 @@ class TransitionController:
             active_skill=(
                 "" if journal["to_stage"] == "complete" else str(journal["to_stage"])
             ),
+            runtime_receipt=(
+                dict(runtime_receipt_snapshot)
+                if isinstance(runtime_receipt_snapshot, dict)
+                else None
+            ),
+            gate_receipt=(
+                dict(gate_receipt_snapshot)
+                if isinstance(gate_receipt_snapshot, dict)
+                else None
+            ),
         )
 
     async def _authoritative_journal_context(
@@ -636,12 +719,16 @@ class TransitionController:
         root: Path,
         journal: dict[str, Any],
     ) -> tuple[dict[str, Any], Any | None]:
-        self._validate_journal_integrity(journal)
         run_id = str(journal["run_id"])
         from_stage = str(journal["from_stage"])
         target_state = str(journal["target_state"])
         event_id = str(journal["event_id"])
         session = await self.store.get_session(run_id)
+        persisted_event = await self.store.get_event_by_id(event_id)
+        self._validate_journal_integrity(
+            journal,
+            require_authentication=persisted_event is None,
+        )
         if session is None:
             await self._reconstruct_lost_db_context(root, journal)
             session = await self.store.get_session(run_id)
@@ -1042,6 +1129,21 @@ class TransitionController:
             "created_at": session.created_at,
         }
         claim_snapshot = dict(claim)
+        runtime_stage = from_stage.removeprefix("samvil-")
+        runtime_receipt_snapshot = await self.store.get_runtime_receipt(
+            run_id, runtime_stage
+        )
+        gate_name = {
+            ("samvil-build", "samvil-qa"): "build_to_qa",
+            ("samvil-qa", "samvil-evolve"): "qa_to_evolve",
+            ("samvil-qa", "samvil-retro"): "any_to_retro",
+            ("samvil-qa", "samvil-deploy"): "qa_to_deploy",
+        }.get((from_stage, to_stage), "")
+        gate_receipt_snapshot = (
+            await self.store.get_gate_receipt(run_id, gate_name)
+            if gate_name
+            else None
+        )
         journal = {
             "transition_id": transition_id,
             "run_id": run_id,
@@ -1069,6 +1171,16 @@ class TransitionController:
             "claim_snapshot_hash": self._json_hash(claim_snapshot),
             "phase": "PREPARED",
         }
+        if runtime_receipt_snapshot is not None:
+            journal["runtime_receipt_snapshot"] = runtime_receipt_snapshot
+            journal["runtime_receipt_snapshot_hash"] = self._json_hash(
+                runtime_receipt_snapshot
+            )
+        if gate_receipt_snapshot is not None:
+            journal["gate_receipt_snapshot"] = gate_receipt_snapshot
+            journal["gate_receipt_snapshot_hash"] = self._json_hash(
+                gate_receipt_snapshot
+            )
         self._write_journal(root, journal, "PREPARED")
 
         transition = await self.store.save_event_and_update_stage(

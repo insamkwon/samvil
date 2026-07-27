@@ -1302,7 +1302,7 @@ async def commit_stage_transition(
         controller = TransitionController(await get_store())
         recovery_retry = bool(
             transition_id
-            and controller.matches_transition_retry(
+            and await controller.matches_transition_retry(
                 project_root,
                 transition_id=transition_id,
                 run_id=run_id,
