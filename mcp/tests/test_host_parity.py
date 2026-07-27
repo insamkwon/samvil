@@ -79,6 +79,12 @@ def test_codex_stage_commands_complete_trusted_stage_before_marker(
     command = (
         REPO_ROOT / "references" / "codex-commands" / command_name
     ).read_text(encoding="utf-8")
+    if stage == "build":
+        assert "run_stage_verification" in command
+        assert "native run driver" in command
+        assert "complete_stage(" not in command
+        assert "write_chain_marker(" not in command
+        return
     complete_call = f'complete_stage(session_id=<sid>, stage="{stage}", verdict="pass"'
 
     assert complete_call in command

@@ -17,6 +17,7 @@ import asyncio
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +76,7 @@ from .scaffold_targets import (
     evaluate_scaffold_target as _evaluate_scaffold_target,
 )
 from .ssot_io import atomic_write_text
+from .runtime_layout import RuntimeLayoutError, safe_child_directory
 from .event_sanitizer import (
     sanitize_event_data,
     sanitize_event_label,
@@ -194,6 +196,7 @@ from .chain_markers import (
     advance_chain as _advance_chain,
     clear_chain_marker as _clear_chain_marker,
     get_pipeline_status as _get_pipeline_status,
+    inspect_chain_marker,
     read_chain_marker as _read_chain_marker,
     write_chain_marker as _write_chain_marker,
 )
@@ -1397,18 +1400,9 @@ async def commit_stage_transition(
             receipt = controller._read_json(
                 root / ".samvil" / "gate-receipts" / "build_to_qa.json"
             )
-            gate_events = await controller.store.get_events(run_id)
-            db_receipt = next(
-                (
-                    event.data
-                    for event in gate_events
-                    if event.event_type == EventType.DECISION
-                    and event.stage == Stage.BUILD
-                    and event.data.get("kind") == "gate_receipt"
-                    and event.data.get("gate") == "build_to_qa"
-                ),
-                {},
-            )
+            db_receipt = await controller.store.get_gate_receipt(
+                run_id, "build_to_qa"
+            ) or {}
             if (
                 receipt.get("verdict") != "pass"
                 or receipt.get("authority_path") != ".samvil/build.log"
@@ -1420,7 +1414,7 @@ async def commit_stage_transition(
                     {
                         "status": "blocked",
                         "stage": stage,
-                        "reason": "persisted mechanical build_to_qa PASS receipt is required",
+                        "reason": "trusted gate receipt for build_to_qa is required",
                     },
                     ensure_ascii=False,
                 )
@@ -1439,18 +1433,9 @@ async def commit_stage_transition(
             qa_path = Path(project_root).expanduser().resolve(strict=False) / ".samvil" / "qa-results.json"
             receipt = controller._read_json(receipt_path) if gate_for_route else {}
             qa_hash = hashlib.sha256(qa_path.read_bytes()).hexdigest() if qa_path.is_file() else ""
-            gate_events = await controller.store.get_events(run_id)
-            db_receipt = next(
-                (
-                    event.data
-                    for event in gate_events
-                    if event.event_type == EventType.DECISION
-                    and event.stage == Stage.QA
-                    and event.data.get("kind") == "gate_receipt"
-                    and event.data.get("gate") == gate_for_route
-                ),
-                {},
-            )
+            db_receipt = await controller.store.get_gate_receipt(
+                run_id, gate_for_route
+            ) or {}
             if (
                 not gate_for_route
                 or receipt.get("gate") != gate_for_route
@@ -1463,7 +1448,7 @@ async def commit_stage_transition(
                     {
                         "status": "blocked",
                         "stage": stage,
-                        "reason": f"persisted {gate_for_route or 'QA route'} PASS receipt is required",
+                        "reason": f"trusted gate receipt for {gate_for_route or 'QA route'} is required",
                     },
                     ensure_ascii=False,
                 )
@@ -3848,13 +3833,17 @@ def _config_path_for(project_root: str) -> str | None:
 
 
 def _mechanical_gate_evidence(
-    project_root: str, gate_name: str
+    project_root: str,
+    gate_name: str,
+    trusted_receipt: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Return mechanical metrics, required thresholds, and source evidence."""
     from .stage_evidence import collect_stage_evidence as _collect
 
     if gate_name == "build_to_qa":
-        evidence = _collect(project_root, "build")
+        evidence = _collect(
+            project_root, "build", trusted_receipt=trusted_receipt
+        )
         return (
             {
                 "build_ok": bool(
@@ -3866,10 +3855,16 @@ def _mechanical_gate_evidence(
             evidence,
         )
     if gate_name == "qa_to_deploy":
-        evidence = _collect(project_root, "qa")
+        evidence = _collect(
+            project_root, "qa", trusted_receipt=trusted_receipt
+        )
         npm_test = evidence["qa"]["npm_test"]
         decided = npm_test["passed"] + npm_test["failed"]
-        pass_rate = npm_test["passed"] / decided if decided else 0.0
+        pass_rate = (
+            npm_test["passed"] / decided
+            if decided
+            else (1.0 if evidence["qa"]["runtime_verified"] else 0.0)
+        )
         runtime_verified = bool(
             evidence["qa"]["runtime_verified"] and npm_test["exit_code"] is not None
         )
@@ -3918,6 +3913,106 @@ def _mechanical_gate_evidence(
     )
 
 
+async def _active_session_for_project(store: EventStore, root: Path):
+    inspection = inspect_chain_marker(str(root))
+    if inspection.classification == "valid":
+        run_id = str(inspection.marker.get("run_id") or "")
+        session = await store.get_session(run_id)
+        if (
+            session is not None
+            and Path(session.project_root).expanduser().resolve(strict=False) == root
+        ):
+            return session
+    return await store.find_session_by_root(str(root))
+
+
+def _run_verification_command(
+    root: Path,
+    command: list[str],
+    timeout_seconds: float,
+) -> tuple[int, str]:
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        output = f"{completed.stdout}{completed.stderr}"
+        exit_code = completed.returncode
+    except subprocess.TimeoutExpired as exc:
+        output = f"{exc.stdout or ''}{exc.stderr or ''}\nverification timed out\n"
+        exit_code = 124
+    return exit_code, output[-2_000_000:]
+
+
+@mcp.tool()
+async def run_stage_verification(
+    project_root: str,
+    run_id: str,
+    stage: str,
+    command_json: str,
+    timeout_seconds: float = 300,
+) -> str:
+    """Execute one Build/QA command and persist a run-bound runtime receipt."""
+    try:
+        root = Path(project_root).expanduser().resolve(strict=False)
+        normalized = stage if stage.startswith("samvil-") else f"samvil-{stage}"
+        if normalized not in {"samvil-build", "samvil-qa"}:
+            raise ValueError("stage must be samvil-build or samvil-qa")
+        command = json.loads(command_json or "[]")
+        if (
+            not isinstance(command, list)
+            or not command
+            or any(not isinstance(item, str) or not item or "\x00" in item for item in command)
+        ):
+            raise ValueError("command_json must encode a non-empty argv string array")
+        timeout = min(max(float(timeout_seconds), 1.0), 900.0)
+        try:
+            samvil_root = safe_child_directory(root, ".samvil", label=".samvil")
+            receipt_root = safe_child_directory(
+                root, ".samvil/runtime-receipts", label="runtime receipts"
+            )
+        except RuntimeLayoutError as exc:
+            raise ValueError(str(exc)) from exc
+        store = await get_store()
+        session = await store.get_session(run_id)
+        if (
+            session is None
+            or Path(session.project_root).expanduser().resolve(strict=False) != root
+            or session.current_stage.value != normalized.removeprefix("samvil-")
+        ):
+            raise ValueError("run_id does not own the requested project stage")
+        exit_code, output = await asyncio.to_thread(
+            _run_verification_command, root, command, timeout
+        )
+        log_name = "build.log" if normalized == "samvil-build" else "qa.log"
+        log_path = samvil_root / log_name
+        atomic_write_text(log_path, f"{output}\nSAMVIL_EXIT:{exit_code}\n")
+        receipt = {
+            "kind": "runtime_receipt",
+            "stage": normalized,
+            "status": "passed" if exit_code == 0 else "failed",
+            "trusted_by": "samvil_mcp_subprocess",
+            "command": command,
+            "exit_code": exit_code,
+            "authority_path": f".samvil/{log_name}",
+            "authority_sha256": hashlib.sha256(log_path.read_bytes()).hexdigest(),
+        }
+        receipt = await store.save_runtime_receipt(run_id, normalized, receipt)
+        atomic_write_text(
+            receipt_root / f"{normalized.removeprefix('samvil-')}.json",
+            json.dumps(receipt, indent=2, ensure_ascii=False),
+        )
+        _log_mcp_health("ok" if exit_code == 0 else "fail", "run_stage_verification")
+        return json.dumps(receipt, ensure_ascii=False)
+    except Exception as exc:
+        _log_mcp_health("fail", "run_stage_verification", str(exc))
+        return json.dumps({"status": "blocked", "error": str(exc)}, ensure_ascii=False)
+
+
 @mcp.tool()
 async def gate_check(
     gate_name: str,
@@ -3955,12 +4050,27 @@ async def gate_check(
         mechanical_metrics: dict[str, Any] = {}
         metric_mismatches: list[dict[str, Any]] = []
         stage_evidence: dict[str, Any] = {}
+        root = Path(project_root).expanduser().resolve(strict=False)
+        store = await get_store()
+        session = await _active_session_for_project(store, root)
+        runtime_stage = {
+            "build_to_qa": "samvil-build",
+            "qa_to_deploy": "samvil-qa",
+        }.get(gate_name, "")
+        trusted_runtime_receipt = (
+            await store.get_runtime_receipt(session.id, runtime_stage)
+            if session is not None and runtime_stage
+            else None
+        )
         if evidence_mode:
             if evidence_mode != "mechanical":
                 raise ValueError("evidence_mode must be empty or 'mechanical'")
             mechanical_metrics, mechanical_thresholds, stage_evidence = (
                 await asyncio.to_thread(
-                    _mechanical_gate_evidence, project_root, gate_name
+                    _mechanical_gate_evidence,
+                    project_root,
+                    gate_name,
+                    trusted_runtime_receipt,
                 )
             )
             for key, mechanical in mechanical_metrics.items():
@@ -4007,7 +4117,6 @@ async def gate_check(
                     "gate_check.metric_mismatch",
                     json.dumps(metric_mismatches, ensure_ascii=False),
                 )
-        root = Path(project_root).expanduser().resolve(strict=False)
         qa_path = root / ".samvil" / "qa-results.json"
         authority_paths = {
             "build_to_qa": root / ".samvil" / "build.log",
@@ -4033,18 +4142,18 @@ async def gate_check(
             "result_sha256": hashlib.sha256(
                 json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")
             ).hexdigest(),
+            "trusted_by": "samvil_mcp_gate_check",
         }
-        receipt_path = root / ".samvil" / "gate-receipts" / f"{gate_name}.json"
-        atomic_write_text(receipt_path, json.dumps(receipt, indent=2, ensure_ascii=False))
-        store = await get_store()
-        session = await store.find_session_by_root(str(root))
-        if session is not None:
-            await store.save_event(
-                session.id,
-                EventType.DECISION,
-                session.current_stage,
-                receipt,
+        try:
+            receipt_root = safe_child_directory(
+                root, ".samvil/gate-receipts", label="gate receipts"
             )
+        except RuntimeLayoutError as exc:
+            raise ValueError(str(exc)) from exc
+        receipt_path = receipt_root / f"{gate_name}.json"
+        if session is not None:
+            receipt = await store.save_gate_receipt(session.id, gate_name, receipt)
+        atomic_write_text(receipt_path, json.dumps(receipt, indent=2, ensure_ascii=False))
         _log_mcp_health("ok", "gate_check")
         return json.dumps(result)
     except Exception as e:
@@ -6268,7 +6377,21 @@ async def collect_stage_evidence(project_root: str, stage: str) -> str:
     try:
         from .stage_evidence import collect_stage_evidence as _collect
 
-        result = await asyncio.to_thread(_collect, project_root, stage)
+        root = Path(project_root).expanduser().resolve(strict=False)
+        store = await get_store()
+        session = await _active_session_for_project(store, root)
+        normalized = stage if stage.startswith("samvil-") else f"samvil-{stage}"
+        trusted_receipt = (
+            await store.get_runtime_receipt(session.id, normalized)
+            if session is not None and normalized in {"samvil-build", "samvil-qa"}
+            else None
+        )
+        result = await asyncio.to_thread(
+            _collect,
+            project_root,
+            normalized.removeprefix("samvil-"),
+            trusted_receipt=trusted_receipt,
+        )
         _log_mcp_health("ok", "collect_stage_evidence")
         return json.dumps(result)
     except Exception as e:

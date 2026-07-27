@@ -96,6 +96,29 @@ CREATE TABLE IF NOT EXISTS transition_receipts (
 
 CREATE INDEX IF NOT EXISTS idx_transition_receipts_session
 ON transition_receipts(session_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS runtime_receipts (
+    session_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, stage),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS gate_receipts (
+    session_id TEXT NOT NULL,
+    gate TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, gate),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gate_receipts_session
+ON gate_receipts(session_id, updated_at);
 """
 
 # In-place migrations for already-initialized DBs. Initialization first
@@ -663,6 +686,76 @@ class EventStore:
             )
             await db.commit()
         return receipt
+
+    async def save_runtime_receipt(
+        self,
+        session_id: str,
+        stage: str,
+        receipt: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        payload = {**receipt, "session_id": session_id, "stage": stage}
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await db.execute(
+                """INSERT INTO runtime_receipts
+                (session_id, stage, receipt_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, stage) DO UPDATE SET
+                    receipt_json = excluded.receipt_json,
+                    updated_at = excluded.updated_at""",
+                (session_id, stage, json.dumps(payload, ensure_ascii=False), now, now),
+            )
+            await db.commit()
+        return payload
+
+    async def get_runtime_receipt(
+        self,
+        session_id: str,
+        stage: str,
+    ) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT receipt_json FROM runtime_receipts WHERE session_id = ? AND stage = ?",
+                (session_id, stage),
+            )
+            row = await cursor.fetchone()
+        return json.loads(str(row[0])) if row is not None else None
+
+    async def save_gate_receipt(
+        self,
+        session_id: str,
+        gate: str,
+        receipt: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        payload = {**receipt, "session_id": session_id, "gate": gate}
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await db.execute(
+                """INSERT INTO gate_receipts
+                (session_id, gate, receipt_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, gate) DO UPDATE SET
+                    receipt_json = excluded.receipt_json,
+                    updated_at = excluded.updated_at""",
+                (session_id, gate, json.dumps(payload, ensure_ascii=False), now, now),
+            )
+            await db.commit()
+        return payload
+
+    async def get_gate_receipt(
+        self,
+        session_id: str,
+        gate: str,
+    ) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT receipt_json FROM gate_receipts WHERE session_id = ? AND gate = ?",
+                (session_id, gate),
+            )
+            row = await cursor.fetchone()
+        return json.loads(str(row[0])) if row is not None else None
 
     async def mark_stage_claim_completed(
         self,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -345,7 +346,100 @@ def test_build_transition_requires_mechanical_gate_receipt(
 
     assert gate["verdict"] == "block"
     assert result["status"] == "blocked"
-    assert "mechanical build_to_qa" in result["reason"]
+    assert "trusted gate receipt for build_to_qa" in result["reason"]
+
+
+def test_build_transition_uses_run_bound_trusted_receipts_after_event_growth(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import EventType, Stage
+
+    project = tmp_path / "run-bound-build"
+    (project / ".samvil").mkdir(parents=True)
+    store = EventStore(str(tmp_path / "run-bound.db"))
+    _run(store.initialize())
+    active = _run(store.create_session("active-display", "minimal", str(project)))
+    _run(store.update_session_stage(active.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), active.id, "samvil-build", 0)))
+    _run(store.create_session("newer-display", "minimal", str(project)))
+
+    runner = getattr(server, "run_stage_verification", None)
+    assert callable(runner), "trusted runtime verification tool is required"
+    runtime = json.loads(_run(runner(
+        str(project),
+        active.id,
+        "samvil-build",
+        json.dumps([sys.executable, "-c", "print('verified build')"]),
+    )))
+    evidence = json.loads(_run(server.collect_stage_evidence(str(project), "build")))
+    gate = json.loads(_run(gate_check(
+        "build_to_qa", "minimal", '{"implementation_rate":1.0}', str(project)
+    )))
+    for index in range(51):
+        _run(store.save_event(
+            active.id,
+            EventType.DECISION,
+            Stage.BUILD,
+            {"kind": "unrelated", "index": index},
+        ))
+    result = json.loads(_run(commit_stage_transition(
+        str(project), active.id, "samvil-build", 0, claim["claim_id"], "PASS",
+        '{"artifact":".samvil/build.log:1"}', "", "run-bound-build-transition",
+    )))
+
+    assert runtime["status"] == "passed"
+    assert runtime["trusted_by"] == "samvil_mcp_subprocess"
+    assert evidence["build"]["runtime_verified"] is True
+    assert gate["verdict"] == "pass"
+    assert _run(store.get_gate_receipt(active.id, "build_to_qa"))["verdict"] == "pass"
+    assert _run(store.get_gate_receipt(active.id, "build_to_qa"))["session_id"] == active.id
+    assert result["status"] == "committed"
+
+
+def test_untrusted_decision_event_cannot_authorize_build_transition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "untrusted-gate-event"
+    (project / ".samvil" / "gate-receipts").mkdir(parents=True)
+    build_log = project / ".samvil" / "build.log"
+    build_log.write_text("compiled\nSAMVIL_EXIT:0\n", encoding="utf-8")
+    build_hash = hashlib.sha256(build_log.read_bytes()).hexdigest()
+    store = EventStore(str(tmp_path / "untrusted-gate.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("display", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-build", 0)))
+    receipt = {
+        "kind": "gate_receipt",
+        "gate": "build_to_qa",
+        "verdict": "pass",
+        "authority_path": ".samvil/build.log",
+        "authority_sha256": build_hash,
+    }
+    (project / ".samvil" / "gate-receipts" / "build_to_qa.json").write_text(
+        json.dumps(receipt), encoding="utf-8"
+    )
+    _run(server.save_event(
+        session.id,
+        "decision",
+        "build",
+        json.dumps(receipt),
+    ))
+
+    result = json.loads(_run(commit_stage_transition(
+        str(project), session.id, "samvil-build", 0, claim["claim_id"], "PASS",
+        '{"artifact":".samvil/build.log:1"}', "", "untrusted-gate-transition",
+    )))
+
+    assert result["status"] == "blocked"
+    assert "trusted gate receipt" in result["reason"]
 
 
 def test_qa_to_evolve_gate_ignores_conflicting_reported_pass(tmp_path: Path) -> None:

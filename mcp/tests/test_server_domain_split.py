@@ -26,7 +26,7 @@ def test_benchmark_tools_are_extracted_without_registry_drift() -> None:
         "benchmark_load_targets",
     }
     assert expected <= tool_names
-    assert len(tool_names) == 206
+    assert len(tool_names) == 207
     assert "async def benchmark_" not in server_source
     assert "def register_benchmark_tools" in benchmark_source
     assert benchmark_source.count("@mcp.tool()") == 4
