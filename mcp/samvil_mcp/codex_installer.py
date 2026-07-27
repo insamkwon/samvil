@@ -442,9 +442,29 @@ def _codex_marketplace_wrapper(root: Path, canonical_root: Path) -> tuple[Path, 
         ):
             raise InstallBlocked(f"ambiguous Codex marketplace wrapper: {wrapper}")
         return wrapper, False
-    manifest.parent.mkdir(parents=True, exist_ok=False)
-    atomic_write_text(manifest, expected)
-    plugin_link.symlink_to(canonical_root, target_is_directory=True)
+    marketplaces_root.mkdir(parents=True, exist_ok=True)
+    temporary_wrapper = Path(
+        tempfile.mkdtemp(prefix=".samvil-codex.", dir=marketplaces_root)
+    )
+    try:
+        temporary_manifest = (
+            temporary_wrapper / ".claude-plugin" / "marketplace.json"
+        )
+        temporary_plugin_link = temporary_wrapper / "samvil"
+        temporary_manifest.parent.mkdir(parents=True, exist_ok=False)
+        atomic_write_text(temporary_manifest, expected)
+        temporary_plugin_link.symlink_to(
+            canonical_root,
+            target_is_directory=True,
+        )
+        if wrapper.exists():
+            raise InstallBlocked(
+                f"Codex marketplace wrapper appeared during install: {wrapper}"
+            )
+        temporary_wrapper.replace(wrapper)
+    except BaseException:
+        shutil.rmtree(temporary_wrapper, ignore_errors=True)
+        raise
     return wrapper, True
 
 

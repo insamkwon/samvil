@@ -394,6 +394,54 @@ def test_isolated_executor_blocks_ambiguous_codex_wrapper_before_commands(tmp_pa
     assert (wrapper / "user-file.txt").read_text(encoding="utf-8") == "keep\n"
 
 
+def test_isolated_executor_cleans_partial_wrapper_when_symlink_creation_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    wrapper = codex_home / "marketplaces" / "samvil-codex"
+    repo.mkdir()
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+    original_symlink_to = Path.symlink_to
+    failed = False
+
+    def fail_first_plugin_link(
+        path: Path,
+        target: Path,
+        target_is_directory: bool = False,
+    ) -> None:
+        nonlocal failed
+        if path.name == "samvil" and not failed:
+            failed = True
+            raise OSError("injected symlink failure")
+        original_symlink_to(
+            path,
+            target,
+            target_is_directory=target_is_directory,
+        )
+
+    monkeypatch.setattr(Path, "symlink_to", fail_first_plugin_link)
+
+    with pytest.raises(OSError, match="injected symlink failure"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: None,
+        )
+
+    assert not wrapper.exists()
+    assert list((codex_home / "marketplaces").iterdir()) == []
+
+    receipt = execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+    )
+
+    assert receipt.canonical_root == repo.resolve()
+    assert (wrapper / "samvil").resolve() == repo.resolve()
+
+
 def test_isolated_executor_blocks_marketplaces_parent_symlink(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     codex_home = tmp_path / "codex-home" / ".codex"
