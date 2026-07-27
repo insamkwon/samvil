@@ -922,20 +922,16 @@ class TransitionController:
         if from_stage == "samvil-qa":
             qa = self._read_json(root / ".samvil" / "qa-results.json")
             if not qa:
-                return await self.store.save_transition_receipt(
-                    transition_id,
-                    run_id,
-                    {
-                        "transition_id": transition_id,
-                        "status": "blocked",
-                        "stage": "samvil-qa",
-                        "reason": "missing QA evidence",
-                        "claim_id": claim_id,
-                        "from_stage": from_stage,
-                        "to_stage": to_stage,
-                        "marker_revision": expected_revision,
-                    },
-                )
+                return {
+                    "transition_id": transition_id,
+                    "status": "blocked",
+                    "stage": "samvil-qa",
+                    "reason": "missing QA evidence",
+                    "claim_id": claim_id,
+                    "from_stage": from_stage,
+                    "to_stage": to_stage,
+                    "marker_revision": expected_revision,
+                }
 
         event_payload = sanitize_event_data(dict(data or {}))
         event_payload.update(

@@ -866,8 +866,23 @@ async def test_qa_commit_without_evidence_stays_blocked(controller, tmp_path):
     session = await controller.store.create_session("qa-blocked-app", "standard", str(project))
     await controller.store.update_session_stage(session.id, Stage.QA)
     claim = await controller.store.create_stage_claim(session.id, "samvil-qa", 0)
+    transition_id = "qa-blocked-retry"
     receipt = await controller.commit_stage_transition(
         str(project), session.id, claim["claim_id"], "samvil-qa", "samvil-deploy", 0,
+        transition_id=transition_id,
     )
     assert receipt["status"] == "blocked"
     assert await controller.store.get_events(session.id) == []
+
+    (project / ".samvil").mkdir(exist_ok=True)
+    (project / ".samvil" / "qa-results.json").write_text(
+        '{"synthesis":{"verdict":"PASS"}}\n',
+        encoding="utf-8",
+    )
+    committed = await controller.commit_stage_transition(
+        str(project), session.id, claim["claim_id"], "samvil-qa", "samvil-deploy", 0,
+        transition_id=transition_id,
+    )
+
+    assert committed["status"] == "committed"
+    assert committed["transition_id"] == transition_id
