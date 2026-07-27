@@ -776,17 +776,23 @@ def _append_project_event_rows(
     index_path = path.with_suffix(path.suffix + ".index")
     path.parent.mkdir(parents=True, exist_ok=True)
     with _file_locked(path):
-        _validate_existing_event_log(path)
+        trusted_line_count = _trusted_event_line_count(path, index_path)
+        if trusted_line_count is None:
+            _validate_existing_event_log(path)
         current_size: int | None = None
         try:
             with path.open("a+", encoding="utf-8") as handle:
                 handle.seek(0, os.SEEK_END)
                 current_size = handle.tell()
                 needs_separator = _event_file_needs_separator(path)
-                line_count = _indexed_event_line_count(
-                    handle,
-                    index_path,
-                    current_size=current_size,
+                line_count = (
+                    trusted_line_count
+                    if trusted_line_count is not None
+                    else _indexed_event_line_count(
+                        handle,
+                        index_path,
+                        current_size=current_size,
+                    )
                 )
                 if needs_separator:
                     handle.write("\n")
@@ -812,7 +818,7 @@ def _append_project_event_rows(
         try:
             atomic_write_text(
                 index_path,
-                json.dumps({"size": new_size, "line_count": final_line_count}),
+                json.dumps(_event_index_payload(path, final_line_count)),
             )
         except OSError as exc:
             _log_mcp_health("warn", "save_event.events_index", str(exc))
@@ -834,6 +840,43 @@ def _event_file_needs_separator(path: Path) -> bool:
 def _scan_event_line_count(handle: Any) -> int:
     handle.seek(0)
     return sum(1 for _ in handle)
+
+
+def _event_index_payload(path: Path, line_count: int) -> dict[str, int]:
+    stat = path.stat()
+    return {
+        "size": int(stat.st_size),
+        "line_count": int(line_count),
+        "mtime_ns": int(stat.st_mtime_ns),
+        "ctime_ns": int(stat.st_ctime_ns),
+        "device": int(stat.st_dev),
+        "inode": int(stat.st_ino),
+    }
+
+
+def _trusted_event_line_count(path: Path, index_path: Path) -> int | None:
+    """Trust an index only while the exact indexed file identity is unchanged."""
+    if not path.exists():
+        return 0
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        stat = path.stat()
+        fingerprint = {
+            "size": int(stat.st_size),
+            "mtime_ns": int(stat.st_mtime_ns),
+            "ctime_ns": int(stat.st_ctime_ns),
+            "device": int(stat.st_dev),
+            "inode": int(stat.st_ino),
+        }
+        if (
+            isinstance(index, dict)
+            and int(index.get("line_count", -1)) >= 0
+            and all(int(index.get(key, -1)) == value for key, value in fingerprint.items())
+        ):
+            return int(index["line_count"])
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return None
 
 
 def _indexed_event_line_count(

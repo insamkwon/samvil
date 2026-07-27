@@ -301,7 +301,15 @@ def test_materialize_qa_synthesis_updates_shared_canonical_event_index(tmp_path)
         (tmp_path / ".samvil" / "events.jsonl.index").read_text(encoding="utf-8")
     )
     assert result["events_appended"] == 2
-    assert index == {"size": events_path.stat().st_size, "line_count": 3}
+    stat = events_path.stat()
+    assert index == {
+        "size": stat.st_size,
+        "line_count": 3,
+        "mtime_ns": stat.st_mtime_ns,
+        "ctime_ns": stat.st_ctime_ns,
+        "device": stat.st_dev,
+        "inode": stat.st_ino,
+    }
 
 
 def test_materialize_qa_synthesis_rolls_back_partial_event_batch_for_safe_retry(

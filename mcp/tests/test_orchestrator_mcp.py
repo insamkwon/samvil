@@ -2103,7 +2103,11 @@ def test_save_event_uses_valid_line_index_without_rescanning_jsonl(
     def unexpected_scan(_handle):
         raise AssertionError("valid line index must avoid a full JSONL scan")
 
+    def unexpected_validation(_path):
+        raise AssertionError("valid fingerprinted index must avoid full validation")
+
     monkeypatch.setattr(srv, "_scan_event_line_count", unexpected_scan)
+    monkeypatch.setattr(srv, "_validate_existing_event_log", unexpected_validation)
     second = srv._append_project_event(
         project_root,
         timestamp="2026-07-25T00:00:01Z",
