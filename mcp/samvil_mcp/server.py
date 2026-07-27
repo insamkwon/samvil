@@ -20,9 +20,11 @@ import json
 import os
 import select
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections import deque
@@ -4044,6 +4046,11 @@ def _run_verification_command(
     exit_observer: tuple[str, Any] | None = None
     release_read = -1
     release_write = -1
+    sentinel_file: Any | None = None
+    sentinel_path: Path | None = None
+    lsof_path = shutil.which("lsof")
+    if not lsof_path:
+        raise RuntimeError("trusted verification process containment requires lsof")
 
     def append_output(chunk: bytes) -> None:
         nonlocal output_size
@@ -4078,6 +4085,13 @@ def _run_verification_command(
         launch_command = command
         popen_options: dict[str, Any] = {}
         if os.name == "posix":
+            sentinel_file = tempfile.NamedTemporaryFile(
+                mode="w+b",
+                dir=root,
+                prefix=".samvil-verification-",
+                delete=False,
+            )
+            sentinel_path = Path(sentinel_file.name)
             release_read, release_write = os.pipe()
             launcher = (
                 "import os,sys; "
@@ -4091,7 +4105,7 @@ def _run_verification_command(
                 str(release_read),
                 *command,
             ]
-            popen_options["pass_fds"] = (release_read,)
+            popen_options["pass_fds"] = (release_read, sentinel_file.fileno())
         verification_env = {
             key: value
             for key, value in os.environ.items()
@@ -4169,6 +4183,13 @@ def _run_verification_command(
         tracker_stop.set()
         if tracker is not None:
             tracker.join(timeout=1)
+        if sentinel_path is not None:
+            for pid in _sentinel_holder_pids(lsof_path, sentinel_path):
+                if pid in {os.getpid(), process.pid}:
+                    continue
+                identity = _process_identity(pid)
+                if identity is not None:
+                    tracked_descendants[pid] = identity
         _refresh_tracked_descendants(
             process.pid, leader_identity, tracked_descendants
         )
@@ -4199,18 +4220,29 @@ def _run_verification_command(
                     os.close(fd)
                 except OSError:
                     pass
-        if process is not None and process.returncode is None:
+        if process is not None and sentinel_path is not None:
+            for pid in _sentinel_holder_pids(lsof_path, sentinel_path):
+                if pid in {os.getpid(), process.pid}:
+                    continue
+                identity = _process_identity(pid)
+                if identity is not None:
+                    tracked_descendants[pid] = identity
             _terminate_verification_processes(
                 process,
                 _live_tracked_pids(tracked_descendants),
                 leader_identity,
-                leader_unreaped=True,
+                leader_unreaped=process.returncode is None,
             )
+        if process is not None and process.returncode is None:
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+        if sentinel_file is not None:
+            sentinel_file.close()
+        if sentinel_path is not None:
+            sentinel_path.unlink(missing_ok=True)
 
     output = b"".join(chunks).decode("utf-8", errors="replace")
     if timed_out:
@@ -4219,6 +4251,30 @@ def _run_verification_command(
     if len(encoded_output) > max_output_bytes:
         output = encoded_output[-max_output_bytes:].decode("utf-8", errors="ignore")
     return exit_code, output
+
+
+def _sentinel_holder_pids(lsof_path: str, sentinel_path: Path) -> set[int]:
+    """Return only PIDs holding the inherited verification sentinel file."""
+    process = subprocess.Popen(
+        [lsof_path, "-t", "--", str(sentinel_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")},
+    )
+    try:
+        output, _ = process.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        raise RuntimeError("verification sentinel inspection timed out")
+    holders: set[int] = set()
+    for value in output.split():
+        try:
+            holders.add(int(value))
+        except ValueError:
+            continue
+    return holders
 
 
 def _mechanical_verification_command(
