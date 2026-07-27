@@ -210,9 +210,34 @@ class TransitionController:
                 "execution_policy": "stop",
                 "stop_reason": str(exc),
             }
+        try:
+            project_state = self._read_json(self._state_path(root))
+        except (OSError, json.JSONDecodeError, TransitionError, ValueError) as exc:
+            return {
+                "run_id": "",
+                "host_name": host_name,
+                "stage": "",
+                "status": "blocked",
+                "marker_revision": 0,
+                "instruction_path": "",
+                "execution_policy": "stop",
+                "stop_reason": str(exc),
+            }
+        state_run_id = str(project_state.get("session_id") or "")
         session = None
         if inspection.classification == "valid":
             marker_run_id = str(inspection.marker.get("run_id") or "")
+            if state_run_id and state_run_id != marker_run_id:
+                return {
+                    "run_id": marker_run_id,
+                    "host_name": host_name,
+                    "stage": "",
+                    "status": "blocked",
+                    "marker_revision": 0,
+                    "instruction_path": "",
+                    "execution_policy": "stop",
+                    "stop_reason": "marker run conflicts with project state session",
+                }
             marker_session = await self.store.get_session(marker_run_id)
             if marker_session is None or Path(marker_session.project_root).expanduser().resolve(strict=False) != root:
                 return {
@@ -226,7 +251,26 @@ class TransitionController:
                     "stop_reason": "marker run does not own project root",
                 }
             session = marker_session
-        if session is None:
+        elif state_run_id:
+            state_session = await self.store.get_session(state_run_id)
+            if state_session is not None:
+                state_root = Path(state_session.project_root).expanduser().resolve(
+                    strict=False
+                )
+                if state_session.project_root and state_root != root:
+                    return {
+                        "run_id": state_run_id,
+                        "host_name": host_name,
+                        "stage": "",
+                        "status": "blocked",
+                        "marker_revision": 0,
+                        "instruction_path": "",
+                        "execution_policy": "stop",
+                        "stop_reason": "project state run does not own project root",
+                    }
+                if state_session.project_root:
+                    session = state_session
+        if session is None and not state_run_id:
             session = await self._session_for_project(str(root))
         if session is None:
             legacy_state_exists = any(

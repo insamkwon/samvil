@@ -194,6 +194,33 @@ async def test_envelope_preserves_in_progress_marker_owner(controller, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_envelope_uses_project_state_session_before_latest_same_root_session(
+    controller, tmp_path
+):
+    project = tmp_path / "state-owned-session"
+    project.mkdir()
+    first = await controller.store.create_session(
+        "first-display", "standard", str(project)
+    )
+    await controller.store.update_session_stage(first.id, Stage.DESIGN)
+    second = await controller.store.create_session(
+        "second-display", "standard", str(project)
+    )
+    (project / "project.state.json").write_text(
+        json.dumps(
+            {"session_id": first.id, "current_stage": "design"}
+        ),
+        encoding="utf-8",
+    )
+
+    envelope = await controller.get_stage_envelope(str(project), "codex_cli")
+
+    assert envelope["run_id"] == first.id
+    assert envelope["run_id"] != second.id
+    assert envelope["stage"] == "samvil-design"
+
+
+@pytest.mark.asyncio
 async def test_begin_stage_uses_revision_cas_and_duplicate_claim_is_idempotent(controller, tmp_path):
     project = tmp_path / "claim-app"
     project.mkdir()
