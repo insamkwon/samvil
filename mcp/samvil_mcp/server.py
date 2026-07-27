@@ -4063,6 +4063,7 @@ def _run_verification_command(
     sentinel_file: Any | None = None
     sentinel_path: Path | None = None
     lsof_path = shutil.which("lsof")
+    sentinel_inspection_error: Exception | None = None
 
     def append_output(chunk: bytes) -> None:
         nonlocal output_size
@@ -4092,6 +4093,23 @@ def _run_verification_command(
                 break
             append_output(chunk)
         return reached_eof
+
+    def track_sentinel_holders() -> None:
+        nonlocal sentinel_inspection_error
+        if sentinel_path is None or process is None:
+            return
+        try:
+            holders = _sentinel_holder_pids(lsof_path, sentinel_path)
+        except Exception as exc:
+            if sentinel_inspection_error is None:
+                sentinel_inspection_error = exc
+            return
+        for pid in holders:
+            if pid in {os.getpid(), process.pid}:
+                continue
+            identity = _process_identity(pid)
+            if identity is not None:
+                tracked_descendants[pid] = identity
 
     try:
         launch_command = command
@@ -4195,13 +4213,7 @@ def _run_verification_command(
         tracker_stop.set()
         if tracker is not None:
             tracker.join(timeout=1)
-        if sentinel_path is not None:
-            for pid in _sentinel_holder_pids(lsof_path, sentinel_path):
-                if pid in {os.getpid(), process.pid}:
-                    continue
-                identity = _process_identity(pid)
-                if identity is not None:
-                    tracked_descendants[pid] = identity
+        track_sentinel_holders()
         _refresh_tracked_descendants(
             process.pid, leader_identity, tracked_descendants
         )
@@ -4232,29 +4244,29 @@ def _run_verification_command(
                     os.close(fd)
                 except OSError:
                     pass
-        if process is not None and sentinel_path is not None:
-            for pid in _sentinel_holder_pids(lsof_path, sentinel_path):
-                if pid in {os.getpid(), process.pid}:
-                    continue
-                identity = _process_identity(pid)
-                if identity is not None:
-                    tracked_descendants[pid] = identity
-            _terminate_verification_processes(
-                process,
-                _live_tracked_pids(tracked_descendants),
-                leader_identity,
-                leader_unreaped=process.returncode is None,
-            )
-        if process is not None and process.returncode is None:
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-        if sentinel_file is not None:
-            sentinel_file.close()
-        if sentinel_path is not None:
-            sentinel_path.unlink(missing_ok=True)
+        try:
+            if process is not None:
+                track_sentinel_holders()
+                _terminate_verification_processes(
+                    process,
+                    _live_tracked_pids(tracked_descendants),
+                    leader_identity,
+                    leader_unreaped=process.returncode is None,
+                )
+                if process.returncode is None:
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+        finally:
+            if sentinel_file is not None:
+                sentinel_file.close()
+            if sentinel_path is not None:
+                sentinel_path.unlink(missing_ok=True)
+
+    if sentinel_inspection_error is not None:
+        raise RuntimeError("verification sentinel inspection failed") from sentinel_inspection_error
 
     output = b"".join(chunks).decode("utf-8", errors="replace")
     if timed_out:
@@ -4308,7 +4320,7 @@ def _sentinel_holder_pids(
         env={"PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")},
     )
     try:
-        output, _ = process.communicate(timeout=2)
+        output, _ = process.communicate(timeout=5)
     except subprocess.TimeoutExpired:
         process.kill()
         process.communicate()

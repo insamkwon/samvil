@@ -367,6 +367,39 @@ def test_verification_sentinel_falls_back_to_proc_without_lsof(
     ) == {123}
 
 
+@pytest.mark.skipif(os.name != "posix", reason="process cleanup is POSIX-only")
+def test_verification_sentinel_inspection_failure_still_cleans_everything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+
+    pid_path = tmp_path / "verification.pid"
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import os,pathlib,time; "
+            f"pathlib.Path({str(pid_path)!r}).write_text(str(os.getpid())); "
+            "time.sleep(30)"
+        ),
+    ]
+    monkeypatch.setattr(
+        server,
+        "_sentinel_holder_pids",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("injected sentinel inspection failure")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="sentinel inspection"):
+        server._run_verification_command(tmp_path, command, 0.2)
+
+    pid = int(pid_path.read_text(encoding="utf-8"))
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+    assert list(tmp_path.glob(".samvil-verification-*")) == []
+
+
 @pytest.mark.skipif(os.name != "posix", reason="process-group semantics are POSIX-only")
 def test_verification_does_not_wait_for_stdout_inheriting_child(tmp_path: Path) -> None:
     import samvil_mcp.server as server
