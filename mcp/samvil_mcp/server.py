@@ -4447,6 +4447,9 @@ def _descendant_pids(parent_pid: int) -> set[int]:
 
 
 _DARWIN_LIBPROC: Any | None = None
+_VERIFICATION_TRACK_INITIAL_INTERVAL_SECONDS = 0.001
+_VERIFICATION_TRACK_INITIAL_WINDOW_SECONDS = 0.1
+_VERIFICATION_TRACK_INTERVAL_SECONDS = 0.02
 
 
 class _DarwinProcBSDInfo(ctypes.Structure):
@@ -4573,6 +4576,41 @@ def _process_identity(pid: int) -> str | None:
     return f"{pid}:{started_at}" if started_at else None
 
 
+def _process_parent_pid(pid: int) -> int | None:
+    """Return the current parent PID on supported verification hosts."""
+    if sys.platform == "darwin":
+        try:
+            _direct_child_pids(pid)
+            if _DARWIN_LIBPROC is None:
+                return None
+            info = _DarwinProcBSDInfo()
+            size = ctypes.sizeof(info)
+            result = _DARWIN_LIBPROC.proc_pidinfo(
+                pid, 3, 0, ctypes.byref(info), size
+            )
+            return int(info.pbi_ppid) if result == size else None
+        except (AttributeError, OSError):
+            return None
+    if sys.platform.startswith("linux"):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+            fields = stat.rsplit(")", 1)[1].split()
+            return int(fields[1])
+        except (IndexError, OSError, ValueError):
+            return None
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "ppid="],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        return int(result.stdout.strip()) if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
 def _live_tracked_pids(tracked: dict[int, str]) -> set[int]:
     """Filter tracked PIDs by their original process identity."""
     return {
@@ -4594,6 +4632,11 @@ def _refresh_tracked_descendants(
     roots = set(tracked)
     if _process_identity(parent_pid) == parent_identity:
         roots.add(parent_pid)
+    roots = {
+        pid
+        for pid in roots
+        if _process_parent_pid(pid) not in roots
+    }
     discovered: set[int] = set()
     for root_pid in roots:
         discovered.update(_descendant_pids(root_pid))
@@ -4611,15 +4654,18 @@ def _track_verification_descendants(
     tracked: dict[int, str],
 ) -> None:
     """Continuously retain descendants even when they detach and get reparented."""
-    interval = (
-        0.001
-        if sys.platform == "darwin" or sys.platform.startswith("linux")
-        else 0.02
+    high_frequency_until = (
+        time.monotonic() + _VERIFICATION_TRACK_INITIAL_WINDOW_SECONDS
     )
     _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
     ready.set()
     while not stopped.is_set():
         _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
+        interval = (
+            _VERIFICATION_TRACK_INITIAL_INTERVAL_SECONDS
+            if time.monotonic() < high_frequency_until
+            else _VERIFICATION_TRACK_INTERVAL_SECONDS
+        )
         stopped.wait(interval)
 
 

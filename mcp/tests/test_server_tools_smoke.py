@@ -400,6 +400,35 @@ def test_verification_sentinel_inspection_failure_still_cleans_everything(
     assert list(tmp_path.glob(".samvil-verification-*")) == []
 
 
+def test_verification_descendant_refresh_scans_only_minimal_live_roots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import samvil_mcp.server as server
+
+    identities = {10: "10:a", 11: "11:a", 12: "12:a", 13: "13:a"}
+    parents = {10: 1, 11: 10, 12: 11, 13: 12}
+    scanned: list[int] = []
+    tracked = {11: identities[11], 12: identities[12]}
+    monkeypatch.setattr(server, "_process_identity", identities.get)
+    monkeypatch.setattr(server, "_process_parent_pid", parents.get)
+
+    def descendants(pid: int) -> set[int]:
+        scanned.append(pid)
+        return {11, 12, 13} if pid == 10 else set()
+
+    monkeypatch.setattr(server, "_descendant_pids", descendants)
+
+    server._refresh_tracked_descendants(10, identities[10], tracked)
+
+    assert scanned == [10]
+    assert tracked == {
+        11: identities[11],
+        12: identities[12],
+        13: identities[13],
+    }
+    assert server._VERIFICATION_TRACK_INTERVAL_SECONDS >= 0.02
+
+
 @pytest.mark.skipif(os.name != "posix", reason="process-group semantics are POSIX-only")
 def test_verification_does_not_wait_for_stdout_inheriting_child(tmp_path: Path) -> None:
     import samvil_mcp.server as server
