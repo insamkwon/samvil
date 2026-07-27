@@ -347,6 +347,26 @@ int main(int argc, char **argv) {
                 pass
 
 
+def test_verification_sentinel_falls_back_to_proc_without_lsof(
+    tmp_path: Path,
+) -> None:
+    import samvil_mcp.server as server
+
+    sentinel = tmp_path / "sentinel"
+    sentinel.touch()
+    proc_root = tmp_path / "proc"
+    fd_root = proc_root / "123" / "fd"
+    fd_root.mkdir(parents=True)
+    (fd_root / "9").symlink_to(sentinel)
+    (proc_root / "not-a-pid").mkdir()
+
+    assert server._sentinel_holder_pids(
+        None,
+        sentinel,
+        proc_root=proc_root,
+    ) == {123}
+
+
 @pytest.mark.skipif(os.name != "posix", reason="process-group semantics are POSIX-only")
 def test_verification_does_not_wait_for_stdout_inheriting_child(tmp_path: Path) -> None:
     import samvil_mcp.server as server

@@ -4063,8 +4063,6 @@ def _run_verification_command(
     sentinel_file: Any | None = None
     sentinel_path: Path | None = None
     lsof_path = shutil.which("lsof")
-    if not lsof_path:
-        raise RuntimeError("trusted verification process containment requires lsof")
 
     def append_output(chunk: bytes) -> None:
         nonlocal output_size
@@ -4267,8 +4265,41 @@ def _run_verification_command(
     return exit_code, output
 
 
-def _sentinel_holder_pids(lsof_path: str, sentinel_path: Path) -> set[int]:
+def _sentinel_holder_pids(
+    lsof_path: str | None,
+    sentinel_path: Path,
+    *,
+    proc_root: Path = Path("/proc"),
+) -> set[int]:
     """Return only PIDs holding the inherited verification sentinel file."""
+    if lsof_path is None:
+        try:
+            sentinel_stat = sentinel_path.stat()
+            process_dirs = tuple(proc_root.iterdir())
+        except OSError as exc:
+            raise RuntimeError(
+                "verification sentinel inspection requires lsof or /proc"
+            ) from exc
+        holders: set[int] = set()
+        for process_dir in process_dirs:
+            if not process_dir.name.isdigit():
+                continue
+            try:
+                descriptors = tuple((process_dir / "fd").iterdir())
+            except OSError:
+                continue
+            for descriptor in descriptors:
+                try:
+                    descriptor_stat = descriptor.stat()
+                except OSError:
+                    continue
+                if (
+                    descriptor_stat.st_dev == sentinel_stat.st_dev
+                    and descriptor_stat.st_ino == sentinel_stat.st_ino
+                ):
+                    holders.add(int(process_dir.name))
+                    break
+        return holders
     process = subprocess.Popen(
         [lsof_path, "-t", "--", str(sentinel_path)],
         stdout=subprocess.PIPE,
