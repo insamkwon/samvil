@@ -15,6 +15,7 @@ from .chain_markers import _build_chain_marker
 from .claim_ledger import _locked
 from .models import Event, EventType, Session, SeedVersion, Stage, StageTransition
 from .ssot_io import atomic_write_text_unlocked
+from .stage_catalog import get_stage_spec
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -23,6 +24,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     project_root TEXT DEFAULT '',
     seed_version INTEGER DEFAULT 1,
     current_stage TEXT DEFAULT 'interview',
+    active_skill TEXT DEFAULT '',
     stage_transition_id TEXT DEFAULT '',
     samvil_tier TEXT DEFAULT 'standard',
     created_at TEXT NOT NULL,
@@ -141,6 +143,9 @@ PROJECT_ROOT_MIGRATION = (
 STAGE_TRANSITION_ID_MIGRATION = (
     "ALTER TABLE sessions ADD COLUMN stage_transition_id TEXT DEFAULT ''"
 )
+ACTIVE_SKILL_MIGRATION = (
+    "ALTER TABLE sessions ADD COLUMN active_skill TEXT DEFAULT ''"
+)
 TRUSTED_TRANSITION_MIGRATION = (
     "ALTER TABLE events ADD COLUMN trusted_transition INTEGER NOT NULL DEFAULT 0"
 )
@@ -172,6 +177,8 @@ def _migration_plan(
         plan.append(PROJECT_ROOT_MIGRATION)
     if "stage_transition_id" not in sessions_columns:
         plan.append(STAGE_TRANSITION_ID_MIGRATION)
+    if "active_skill" not in sessions_columns:
+        plan.append(ACTIVE_SKILL_MIGRATION)
     return plan
 
 
@@ -329,7 +336,8 @@ class EventStore:
                     )
                     await db.execute(
                         """UPDATE sessions
-                        SET current_stage = 'interview', stage_transition_id = ''
+                        SET current_stage = 'interview', active_skill = '',
+                            stage_transition_id = ''
                         WHERE current_stage != 'interview' AND project_root != ''"""
                     )
                 index_cursor = await db.execute(
@@ -440,7 +448,7 @@ class EventStore:
                     await db.execute(
                         """UPDATE sessions
                         SET project_root = ?, current_stage = 'interview',
-                            stage_transition_id = '', updated_at = ?
+                            active_skill = '', stage_transition_id = '', updated_at = ?
                         WHERE id = ? AND project_root = ''""",
                         (normalized_root, _now(), session_id),
                     )
@@ -467,7 +475,15 @@ class EventStore:
         project_name: str,
         samvil_tier: str = "standard",
         project_root: str = "",
+        initial_skill: str = "samvil-interview",
     ) -> Session:
+        spec = get_stage_spec(initial_skill)
+        if spec.state_stage is None and initial_skill not in {
+            "samvil-pm-interview",
+            "samvil-analyze",
+        }:
+            raise ValueError(f"unsupported initial_skill: {initial_skill}")
+        initial_stage = Stage(spec.state_stage or Stage.INTERVIEW.value)
         normalized_root = (
             str(Path(project_root).expanduser().resolve()) if project_root else ""
         )
@@ -475,6 +491,8 @@ class EventStore:
             id=_uuid(),
             project_name=project_name,
             project_root=normalized_root,
+            current_stage=initial_stage,
+            active_skill=initial_skill,
             samvil_tier=samvil_tier,
             created_at=_now(),
             updated_at=_now(),
@@ -482,8 +500,8 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("BEGIN")
             await db.execute(
-                "INSERT INTO sessions (id, project_name, project_root, seed_version, current_stage, samvil_tier, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (session.id, session.project_name, session.project_root, session.seed_version, session.current_stage, session.samvil_tier, session.created_at, session.updated_at),
+                "INSERT INTO sessions (id, project_name, project_root, seed_version, current_stage, active_skill, samvil_tier, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (session.id, session.project_name, session.project_root, session.seed_version, session.current_stage, session.active_skill, session.samvil_tier, session.created_at, session.updated_at),
             )
             await db.commit()
         return session
@@ -785,6 +803,7 @@ class EventStore:
                 project_root=row["project_root"],
                 seed_version=row["seed_version"],
                 current_stage=Stage(row["current_stage"]),
+                active_skill=row["active_skill"],
                 samvil_tier=row["samvil_tier"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
@@ -819,6 +838,7 @@ class EventStore:
                 project_root=row["project_root"],
                 seed_version=row["seed_version"],
                 current_stage=Stage(row["current_stage"]),
+                active_skill=row["active_skill"],
                 samvil_tier=row["samvil_tier"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
@@ -842,6 +862,7 @@ class EventStore:
             project_root=row["project_root"],
             seed_version=row["seed_version"],
             current_stage=Stage(row["current_stage"]),
+            active_skill=row["active_skill"],
             samvil_tier=row["samvil_tier"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -861,6 +882,7 @@ class EventStore:
                     project_root=r["project_root"],
                     seed_version=r["seed_version"],
                     current_stage=Stage(r["current_stage"]),
+                    active_skill=r["active_skill"],
                     samvil_tier=r["samvil_tier"],
                     created_at=r["created_at"],
                     updated_at=r["updated_at"],
@@ -872,7 +894,7 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("BEGIN")
             await db.execute(
-                "UPDATE sessions SET current_stage = ?, stage_transition_id = '', updated_at = ? WHERE id = ?",
+                "UPDATE sessions SET current_stage = ?, active_skill = '', stage_transition_id = '', updated_at = ? WHERE id = ?",
                 (stage.value, _now(), session_id),
             )
             await db.commit()
@@ -923,6 +945,7 @@ class EventStore:
         expected_stage: Stage | None = None,
         event_id: str | None = None,
         transition_id: str | None = None,
+        active_skill: str = "",
     ) -> StageTransition:
         """Persist an event and its session-stage transition atomically."""
         async with aiosqlite.connect(self.db_path) as db:
@@ -937,14 +960,15 @@ class EventStore:
                     timestamp=_now(),
                 )
                 session_cursor = await db.execute(
-                    "SELECT current_stage, stage_transition_id FROM sessions WHERE id = ?",
+                    "SELECT current_stage, active_skill, stage_transition_id FROM sessions WHERE id = ?",
                     (session_id,),
                 )
                 session_row = await session_cursor.fetchone()
                 if session_row is None:
                     raise ValueError(f"session {session_id} not found")
                 previous_stage = Stage(str(session_row[0]))
-                previous_transition_id = str(session_row[1] or "")
+                previous_active_skill = str(session_row[1] or "")
+                previous_transition_id = str(session_row[2] or "")
                 if expected_stage is not None and previous_stage != expected_stage:
                     raise ValueError(
                         "stage transition conflict: "
@@ -976,8 +1000,14 @@ class EventStore:
                     ),
                 )
                 cursor = await db.execute(
-                    "UPDATE sessions SET current_stage = ?, stage_transition_id = ?, updated_at = ? WHERE id = ?",
-                    (stage.value, transition_id or event.id, event.timestamp, session_id),
+                    "UPDATE sessions SET current_stage = ?, active_skill = ?, stage_transition_id = ?, updated_at = ? WHERE id = ?",
+                    (
+                        stage.value,
+                        active_skill,
+                        transition_id or event.id,
+                        event.timestamp,
+                        session_id,
+                    ),
                 )
                 if cursor.rowcount != 1:
                     raise ValueError(f"session {session_id} not found")
@@ -988,6 +1018,7 @@ class EventStore:
         return StageTransition(
             event=event,
             previous_stage=previous_stage,
+            previous_active_skill=previous_active_skill,
             previous_transition_id=previous_transition_id,
         )
 
@@ -1051,7 +1082,7 @@ class EventStore:
                 )
                 event_row = await event_cursor.fetchone()
                 session_cursor = await db.execute(
-                    "SELECT current_stage, stage_transition_id FROM sessions WHERE id = ?",
+                    "SELECT current_stage, active_skill, stage_transition_id FROM sessions WHERE id = ?",
                     (event.session_id,),
                 )
                 session_row = await session_cursor.fetchone()
@@ -1059,7 +1090,7 @@ class EventStore:
                     await db.rollback()
                     return False
                 current_stage = str(session_row[0])
-                current_transition_id = str(session_row[1] or "")
+                current_transition_id = str(session_row[2] or "")
                 if (
                     current_stage != event.stage.value
                     or current_transition_id != event.id
@@ -1079,10 +1110,11 @@ class EventStore:
                 )
                 restored = await db.execute(
                     """UPDATE sessions
-                    SET current_stage = ?, stage_transition_id = ?, updated_at = ?
+                    SET current_stage = ?, active_skill = ?, stage_transition_id = ?, updated_at = ?
                     WHERE id = ? AND current_stage = ? AND stage_transition_id = ?""",
                     (
                         transition.previous_stage.value,
+                        transition.previous_active_skill,
                         transition.previous_transition_id,
                         _now(),
                         event.session_id,

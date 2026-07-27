@@ -291,12 +291,14 @@ def test_pm_and_codex_seed_paths_keep_council_opt_in_only() -> None:
     assert "interview-summary.md" in pm
     assert skill_interview in pm and skill_seed in pm
     assert pm.index("gate_check") < pm.index(skill_interview) < pm.index(skill_seed)
-    for command in (pm_codex, pm_gemini):
-        assert "interview-summary.md" in command
-        assert host_interview in command and host_seed in command
-        assert command.index("gate_check") < command.index(host_interview)
-        assert command.index(host_interview) < command.index(host_seed)
-        assert command.index(host_seed) < command.index("write_chain_marker")
+    assert "interview-summary.md" in pm_gemini
+    assert host_interview in pm_gemini and host_seed in pm_gemini
+    assert pm_gemini.index("gate_check") < pm_gemini.index(host_interview)
+    assert pm_gemini.index(host_interview) < pm_gemini.index(host_seed)
+    assert "interview-summary.md" in pm_codex
+    assert pm_codex.index("gate_check") < pm_codex.index("native run driver")
+    assert "complete_stage(" not in pm_codex
+    assert "write_chain_marker(" not in pm_codex
 
 
 def test_codex_orchestrator_initializes_the_selected_stage() -> None:

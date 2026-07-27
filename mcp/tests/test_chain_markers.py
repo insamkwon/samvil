@@ -82,6 +82,33 @@ class TestDriverMarkerV11:
                 next_skill="samvil-qa",
             )
 
+    @pytest.mark.parametrize("host_name", ["claude_code", "gemini_cli", "generic"])
+    def test_any_host_preserves_driver_owned_marker(self, project_root, host_name):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=4,
+            status="ready",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="samvil-qa",
+            reason="build completed",
+        )
+        write_driver_marker(project_root, marker)
+
+        assert write_chain_marker(
+            project_root,
+            host_name,
+            "samvil-build",
+            next_skill="samvil-qa",
+        ) == marker
+        with pytest.raises(ValueError, match="host driver owns transition"):
+            write_chain_marker(
+                project_root,
+                host_name,
+                "samvil-qa",
+                next_skill="samvil-retro",
+            )
+
     @pytest.mark.parametrize("revision", [True, False, -1, "3"])
     def test_v11_rejects_invalid_revision(self, revision):
         with pytest.raises(ValueError):

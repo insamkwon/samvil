@@ -38,6 +38,28 @@ def _isolated_server(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(srv, "_store", None)
 
 
+def test_create_session_tool_preserves_native_entry_skill(
+    tmp_path, monkeypatch
+) -> None:
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "pm-entry"
+    project_root.mkdir()
+
+    created = json.loads(
+        _run(
+            create_session(
+                "pm-entry",
+                "standard",
+                project_root=str(project_root),
+                initial_skill="samvil-pm-interview",
+            )
+        )
+    )
+
+    assert created["initial_skill"] == "samvil-pm-interview"
+    assert created["current_stage"] == "interview"
+
+
 def test_read_chain_marker_recovers_rootless_legacy_session_before_read(
     tmp_path,
     monkeypatch,

@@ -29,7 +29,7 @@ Codex-native transition tools: `mcp__samvil_mcp__get_stage_envelope`,
    `samvil-analyze.md`. PM-mode prompts route to `samvil-pm-interview`;
    default greenfield prompts route to `samvil-interview`.
 7. **Fresh start only** — run MCP tool
-   `create_session(project_name="<resolved project slug>", samvil_tier="<chosen>", project_root="${PWD}")`.
+   `create_session(project_name="<resolved project slug>", samvil_tier="<chosen>", project_root="${PWD}", initial_skill="<chain.next_skill>")`.
    A missing/error `session_id` halts the chain. Initialize `project.state.json`
    with `{"session_id":"<returned session_id>","current_stage":"<chain.state_stage>","completed_stages":[],"samvil_tier":"<chosen>"}`.
 8. Run MCP tool `write_chain_marker(project_root="${PWD}",

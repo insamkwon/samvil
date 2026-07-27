@@ -118,6 +118,23 @@ class TransitionController:
         return await self.store.find_session_by_root(str(root))
 
     @staticmethod
+    def _session_skill(session: Any) -> str:
+        if session.current_stage == Stage.COMPLETE:
+            return "complete"
+        active_skill = str(getattr(session, "active_skill", "") or "")
+        if not active_skill:
+            return skill_for_state_stage(session.current_stage.value)
+        spec = get_stage_spec(active_skill)
+        if spec.state_stage is not None and spec.state_stage != session.current_stage.value:
+            raise TransitionError("active skill does not match current session stage")
+        if spec.state_stage is None and active_skill not in {
+            "samvil-pm-interview",
+            "samvil-analyze",
+        }:
+            raise TransitionError("unsupported active session skill")
+        return active_skill
+
+    @staticmethod
     def _instruction_path(stage: str) -> str:
         relative = get_stage_spec(stage).instruction
         try:
@@ -212,6 +229,24 @@ class TransitionController:
         if session is None:
             session = await self._session_for_project(str(root))
         if session is None:
+            legacy_state_exists = any(
+                candidate.is_file()
+                for candidate in (
+                    root / "project.state.json",
+                    root / ".samvil" / "state.json",
+                )
+            )
+            if legacy_state_exists or inspection.classification != "missing":
+                return {
+                    "run_id": "",
+                    "host_name": host_name,
+                    "stage": "",
+                    "status": "blocked",
+                    "marker_revision": 0,
+                    "instruction_path": "",
+                    "execution_policy": "migrate",
+                    "stop_reason": "legacy project requires explicit session migration",
+                }
             return {
                 "run_id": "",
                 "host_name": host_name,
@@ -223,11 +258,25 @@ class TransitionController:
                 "stop_reason": "",
             }
 
+        try:
+            session_skill = self._session_skill(session)
+        except (TransitionError, ValueError) as exc:
+            return {
+                "run_id": session.id,
+                "host_name": host_name,
+                "stage": "",
+                "status": "blocked",
+                "marker_revision": 0,
+                "instruction_path": "",
+                "execution_policy": "stop",
+                "stop_reason": str(exc),
+            }
+
         if inspection.classification in {"corrupt", "unsupported"}:
             return {
                 "run_id": session.id,
                 "host_name": host_name,
-                "stage": skill_for_state_stage(session.current_stage.value),
+                "stage": session_skill,
                 "status": "blocked",
                 "marker_revision": 0,
                 "instruction_path": "",
@@ -245,7 +294,7 @@ class TransitionController:
                 "execution_policy": "stop",
                 "stop_reason": "pipeline complete",
             }
-        stage = skill_for_state_stage(session.current_stage.value)
+        stage = session_skill
         spec = get_stage_spec(stage)
         status = "waiting_user" if spec.requires_user_checkpoint else "ready"
         if inspection.classification == "valid" and inspection.marker.get("status") == "in_progress":
@@ -276,7 +325,7 @@ class TransitionController:
         if session is None or Path(session.project_root).expanduser().resolve(strict=False) != root:
             raise TransitionError("run_id does not own project root")
         spec = get_stage_spec(stage)
-        if stage != skill_for_state_stage(session.current_stage.value):
+        if stage != self._session_skill(session):
             raise TransitionError("stage does not match current session stage")
         if spec.requires_user_checkpoint:
             raise TransitionError("stage requires user checkpoint")
@@ -529,7 +578,10 @@ class TransitionController:
 
         state = self._read_json(self._state_path(root))
         completed = list(state.get("completed_stages") or [])
-        from_state = state_stage_for(from_stage)
+        try:
+            from_state = state_stage_for(from_stage)
+        except ValueError:
+            from_state = from_stage.removeprefix("samvil-")
         if from_state not in completed:
             completed.append(from_state)
         state.update(
@@ -689,7 +741,7 @@ class TransitionController:
         )
         if not terminal_completion and not validate_stage_transition(from_stage, to_stage):
             raise TransitionError(f"invalid stage transition: {from_stage} -> {to_stage}")
-        if state_stage_for(from_stage) != session.current_stage.value:
+        if self._session_skill(session) != from_stage:
             raise TransitionError("from_stage does not match current session stage")
         claim = await self.store.get_stage_claim(run_id, from_stage, expected_revision)
         if claim is None or claim["claim_id"] != claim_id:
@@ -756,9 +808,10 @@ class TransitionController:
             EventType(event_type),
             Stage(target_state),
             event_payload,
-            expected_stage=Stage(state_stage_for(from_stage)),
+            expected_stage=session.current_stage,
             event_id=event_id,
             transition_id=transition_id,
+            active_skill="" if terminal_completion else to_stage,
         )
         journal["event_timestamp"] = transition.event.timestamp
         self._write_journal(root, journal, "DB_COMMITTED")

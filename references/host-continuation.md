@@ -15,13 +15,14 @@ those classifications separate.
 {
   "schema_version": "1.1",
   "chain_via": "host_driver",
-  "host": "codex_cli",
+  "host_name": "codex_cli",
   "run_id": "run-123",
   "revision": 7,
   "status": "ready",
   "from_stage": "samvil-build",
   "next_skill": "samvil-qa",
-  "reason": "build completed"
+  "reason": "build completed",
+  "written_at": "2026-07-27T00:00:00+00:00"
 }
 ```
 
@@ -59,7 +60,10 @@ marker, but cannot mint a second transition.
 ## Native Codex behavior
 
 1. Read `get_stage_envelope`.
-2. For `fresh`, run the orchestrator and create a session before beginning a stage.
+2. For `fresh`, run the orchestrator and create a session with
+   `initial_skill=<chain.next_skill>` before beginning a stage. If existing
+   file state yields `execution_policy="migrate"`, stop and migrate it
+   explicitly instead of creating a replacement run.
 3. Begin only the returned run/stage/revision claim.
 4. Execute the exact absolute catalog instruction path.
 5. Reread the envelope; compatibility instructions may already have advanced it.

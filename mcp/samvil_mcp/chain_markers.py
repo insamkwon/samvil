@@ -58,7 +58,7 @@ def write_chain_marker(
     Returns the marker dict that was written.
     """
     inspection = inspect_chain_marker(project_root)
-    if inspection.classification == "valid" and host_name == "codex_cli":
+    if inspection.classification == "valid":
         existing = dict(inspection.marker or {})
         if (
             existing.get("status") in {"ready", "terminal"}

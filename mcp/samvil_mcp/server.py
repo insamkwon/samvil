@@ -366,8 +366,9 @@ async def create_session(
     samvil_tier: str = "standard",
     agent_tier: str | None = None,  # glossary-allow: deprecated alias, removed in v3.3
     project_root: str = "",
+    initial_skill: str = "samvil-interview",
 ) -> str:
-    """Create a new SAMVIL session for a project. Returns session ID.
+    """Create a SAMVIL session with an explicit native entry skill.
 
     v3.2: the legacy parameter was renamed to ``samvil_tier`` in the
     glossary sweep. The old parameter name is still accepted for one
@@ -397,13 +398,18 @@ async def create_session(
                 normalized_root = str(inferred_root.resolve())
         store = await get_store()
         session = await store.create_session(
-            project_name, samvil_tier, project_root=normalized_root
+            project_name,
+            samvil_tier,
+            project_root=normalized_root,
+            initial_skill=initial_skill,
         )
         return json.dumps({
             "session_id": session.id,
             "project_name": project_name,
             "project_root": session.project_root,
             "tier": samvil_tier,
+            "initial_skill": session.active_skill,
+            "current_stage": session.current_stage.value,
         })
     except Exception as e:
         _log_mcp_health("fail", "create_session", str(e))
@@ -422,6 +428,7 @@ async def get_session(session_id: str) -> str:
         "project_name": session.project_name,
         "project_root": session.project_root,
         "current_stage": session.current_stage,
+        "active_skill": session.active_skill,
         "seed_version": session.seed_version,
         "samvil_tier": session.samvil_tier,
         "created_at": session.created_at,

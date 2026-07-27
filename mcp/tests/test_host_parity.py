@@ -59,6 +59,7 @@ def test_fresh_codex_boot_creates_and_persists_session_before_chaining() -> None
 
     assert "create_session(" in command
     assert 'project_root="${PWD}"' in command
+    assert 'initial_skill="<chain.next_skill>"' in command
     assert '"session_id":"<returned session_id>"' in command
     assert command.index("create_session(") < command.index("write_chain_marker(")
 

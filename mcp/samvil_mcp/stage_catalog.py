@@ -59,7 +59,6 @@ _STAGE_SPECS: tuple[StageSpec, ...] = (
         "references/codex-commands/samvil-analyze.md",
         ("samvil-interview", "samvil-seed", "samvil-design", "samvil-qa"),
         dynamic_next=True,
-        requires_user_checkpoint=True,
     ),
     StageSpec("samvil-doctor", None, "references/codex-commands/samvil-doctor.md", (), terminal=True),
     StageSpec("samvil-update", None, "references/codex-commands/samvil-update.md", (), terminal=True),
@@ -68,7 +67,13 @@ _STAGE_SPECS: tuple[StageSpec, ...] = (
 
 _AUXILIARY_SPECS: tuple[StageSpec, ...] = (
     StageSpec("samvil", None, "references/codex-commands/samvil.md", ("samvil-interview",)),
-    StageSpec("samvil-pm-interview", None, "references/codex-commands/samvil-pm-interview.md", ("samvil-design",)),
+    StageSpec(
+        "samvil-pm-interview",
+        None,
+        "references/codex-commands/samvil-pm-interview.md",
+        ("samvil-design", "samvil-council"),
+        dynamic_next=True,
+    ),
 )
 
 _BY_SKILL = {spec.skill_name: spec for spec in (*_STAGE_SPECS, *_AUXILIARY_SPECS)}

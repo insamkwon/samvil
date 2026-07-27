@@ -39,6 +39,24 @@ async def test_create_and_get_session(store: EventStore):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "initial_skill", ["samvil-pm-interview", "samvil-analyze"]
+)
+async def test_session_preserves_auxiliary_entry_skill(
+    store: EventStore, initial_skill: str
+):
+    session = await store.create_session(
+        "routed-app", "standard", initial_skill=initial_skill
+    )
+
+    assert session.current_stage == Stage.INTERVIEW
+    assert session.active_skill == initial_skill
+    fetched = await store.get_session(session.id)
+    assert fetched is not None
+    assert fetched.active_skill == initial_skill
+
+
+@pytest.mark.asyncio
 async def test_sessions_have_project_root_lookup_index(store: EventStore):
     async with aiosqlite.connect(store.db_path) as db:
         cursor = await db.execute("PRAGMA index_list(sessions)")
@@ -119,6 +137,7 @@ async def test_initialize_adds_project_root_to_existing_sessions_table(tmp_path)
         columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
     assert "project_root" in columns
     assert "stage_transition_id" in columns
+    assert "active_skill" in columns
 
 
 def test_migration_plan_only_contains_missing_schema_changes() -> None:
@@ -131,6 +150,7 @@ def test_migration_plan_only_contains_missing_schema_changes() -> None:
         "ALTER TABLE events ADD COLUMN trusted_transition INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''",
         "ALTER TABLE sessions ADD COLUMN stage_transition_id TEXT DEFAULT ''",
+        "ALTER TABLE sessions ADD COLUMN active_skill TEXT DEFAULT ''",
     ]
 
     legacy = _migration_plan(
@@ -143,6 +163,7 @@ def test_migration_plan_only_contains_missing_schema_changes() -> None:
         "ALTER TABLE sessions RENAME COLUMN agent_tier TO samvil_tier",  # glossary-allow: expected migration
         "ALTER TABLE sessions ADD COLUMN project_root TEXT DEFAULT ''",
         "ALTER TABLE sessions ADD COLUMN stage_transition_id TEXT DEFAULT ''",
+        "ALTER TABLE sessions ADD COLUMN active_skill TEXT DEFAULT ''",
     ]
 
 

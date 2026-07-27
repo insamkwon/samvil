@@ -79,6 +79,7 @@ class Event:
 class StageTransition:
     event: Event
     previous_stage: Stage
+    previous_active_skill: str = ""
     previous_transition_id: str = ""
 
 
@@ -89,6 +90,7 @@ class Session:
     project_root: str = ""
     seed_version: int = 1
     current_stage: Stage = Stage.INTERVIEW
+    active_skill: str = ""
     samvil_tier: str = "standard"
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

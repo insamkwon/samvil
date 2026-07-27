@@ -41,6 +41,73 @@ async def test_envelope_is_read_only_and_reports_fresh_then_ready(controller, tm
 
 
 @pytest.mark.asyncio
+async def test_envelope_blocks_file_only_legacy_project_until_migration(
+    controller, tmp_path
+):
+    project = tmp_path / "file-only-legacy"
+    project.mkdir()
+    (project / "project.state.json").write_text(
+        '{"session_id":"missing-db-run","current_stage":"build"}',
+        encoding="utf-8",
+    )
+
+    envelope = await controller.get_stage_envelope(str(project), "codex_cli")
+
+    assert envelope["status"] == "blocked"
+    assert envelope["execution_policy"] == "migrate"
+    assert "migration" in envelope["stop_reason"]
+
+
+@pytest.mark.asyncio
+async def test_pm_entry_skill_survives_session_creation_and_transitions(
+    controller, tmp_path
+):
+    project = tmp_path / "pm-entry"
+    project.mkdir()
+    session = await controller.store.create_session(
+        "pm-entry",
+        "standard",
+        str(project),
+        initial_skill="samvil-pm-interview",
+    )
+
+    envelope = await controller.get_stage_envelope(str(project), "codex_cli")
+    assert envelope["stage"] == "samvil-pm-interview"
+    claim = await controller.begin_stage(
+        str(project), session.id, "samvil-pm-interview", 0
+    )
+    receipt = await controller.commit_stage_transition(
+        str(project), session.id, claim["claim_id"],
+        "samvil-pm-interview", "samvil-design", 0,
+        transition_id="pm-entry-to-design",
+    )
+    design = await controller.get_stage_envelope(str(project), "codex_cli")
+
+    assert receipt["status"] == "committed"
+    assert design["stage"] == "samvil-design"
+
+
+@pytest.mark.asyncio
+async def test_brownfield_entry_skill_is_not_replaced_by_interview(
+    controller, tmp_path
+):
+    project = tmp_path / "brownfield-entry"
+    project.mkdir()
+    session = await controller.store.create_session(
+        "brownfield-entry",
+        "standard",
+        str(project),
+        initial_skill="samvil-analyze",
+    )
+
+    envelope = await controller.get_stage_envelope(str(project), "codex_cli")
+
+    assert envelope["run_id"] == session.id
+    assert envelope["stage"] == "samvil-analyze"
+    assert envelope["status"] == "ready"
+
+
+@pytest.mark.asyncio
 async def test_instruction_path_uses_plugin_working_directory_for_installed_package(
     controller, tmp_path, monkeypatch: pytest.MonkeyPatch
 ):
