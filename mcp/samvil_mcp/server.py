@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import select
+import secrets
 import shlex
 import shutil
 import signal
@@ -4064,6 +4065,12 @@ def _run_verification_command(
     sentinel_path: Path | None = None
     lsof_path = shutil.which("lsof")
     sentinel_inspection_error: Exception | None = None
+    verification_token = secrets.token_hex(24)
+    baseline_process_identities = {
+        identity
+        for pid in _all_process_pids()
+        if (identity := _process_identity(pid)) is not None
+    }
 
     def append_output(chunk: bytes) -> None:
         nonlocal output_size
@@ -4105,6 +4112,19 @@ def _run_verification_command(
                 sentinel_inspection_error = exc
             return
         for pid in holders:
+            if pid in {os.getpid(), process.pid}:
+                continue
+            identity = _process_identity(pid)
+            if identity is not None:
+                tracked_descendants[pid] = identity
+
+    def track_token_holders() -> None:
+        if process is None:
+            return
+        for pid in _verification_token_holder_pids(
+            verification_token,
+            baseline_process_identities,
+        ):
             if pid in {os.getpid(), process.pid}:
                 continue
             identity = _process_identity(pid)
@@ -4156,7 +4176,13 @@ def _run_verification_command(
                 "WINDIR",
             }
         }
-        verification_env.update({"PWD": str(root), "CI": "1"})
+        verification_env.update(
+            {
+                "PWD": str(root),
+                "CI": "1",
+                "SAMVIL_VERIFICATION_TOKEN": verification_token,
+            }
+        )
         process = subprocess.Popen(
             launch_command,
             cwd=root,
@@ -4214,6 +4240,7 @@ def _run_verification_command(
         if tracker is not None:
             tracker.join(timeout=1)
         track_sentinel_holders()
+        track_token_holders()
         _refresh_tracked_descendants(
             process.pid, leader_identity, tracked_descendants
         )
@@ -4247,6 +4274,7 @@ def _run_verification_command(
         try:
             if process is not None:
                 track_sentinel_holders()
+                track_token_holders()
                 _terminate_verification_processes(
                     process,
                     _live_tracked_pids(tracked_descendants),
@@ -4447,7 +4475,9 @@ def _descendant_pids(parent_pid: int) -> set[int]:
 
 
 _DARWIN_LIBPROC: Any | None = None
-_VERIFICATION_TRACK_INTERVAL_SECONDS = 0.001
+_VERIFICATION_TRACK_INITIAL_INTERVAL_SECONDS = 0.001
+_VERIFICATION_TRACK_INITIAL_WINDOW_SECONDS = 0.1
+_VERIFICATION_TRACK_INTERVAL_SECONDS = 0.02
 
 
 class _DarwinProcBSDInfo(ctypes.Structure):
@@ -4609,6 +4639,136 @@ def _process_parent_pid(pid: int) -> int | None:
         return None
 
 
+def _all_process_pids() -> set[int]:
+    """List process IDs without exposing command arguments or environments."""
+    global _DARWIN_LIBPROC
+    if sys.platform == "darwin":
+        try:
+            _direct_child_pids(os.getpid())
+            if _DARWIN_LIBPROC is None:
+                return set()
+            _DARWIN_LIBPROC.proc_listallpids.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_int,
+            ]
+            _DARWIN_LIBPROC.proc_listallpids.restype = ctypes.c_int
+            capacity = 4096
+            while capacity <= 65536:
+                buffer = (ctypes.c_int * capacity)()
+                count = _DARWIN_LIBPROC.proc_listallpids(
+                    buffer,
+                    ctypes.sizeof(buffer),
+                )
+                if count < 0:
+                    return set()
+                if count < capacity:
+                    return {int(buffer[index]) for index in range(count)}
+                capacity *= 2
+        except (AttributeError, OSError):
+            return set()
+        return set()
+    if sys.platform.startswith("linux"):
+        try:
+            return {
+                int(path.name)
+                for path in Path("/proc").iterdir()
+                if path.name.isdigit()
+            }
+        except OSError:
+            return set()
+    return set()
+
+
+def _darwin_process_environment(pid: int) -> tuple[bytes, ...]:
+    """Read one same-user process environment through KERN_PROCARGS2."""
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        sysctl = libc.sysctl
+        sysctl.argtypes = [
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_uint,
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+        ]
+        sysctl.restype = ctypes.c_int
+        mib = (ctypes.c_int * 3)(1, 49, pid)
+        size = ctypes.c_size_t()
+        if sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0 or size.value < 4:
+            return ()
+        buffer = ctypes.create_string_buffer(size.value)
+        if sysctl(
+            mib,
+            3,
+            ctypes.byref(buffer),
+            ctypes.byref(size),
+            None,
+            0,
+        ) != 0:
+            return ()
+        raw = buffer.raw[: size.value]
+        argument_count = int.from_bytes(
+            raw[:4],
+            byteorder=sys.byteorder,
+            signed=True,
+        )
+        if argument_count < 0:
+            return ()
+        offset = 4
+
+        def skip_string(position: int) -> int:
+            end = raw.find(b"\0", position)
+            return len(raw) if end < 0 else end + 1
+
+        offset = skip_string(offset)
+        while offset < len(raw) and raw[offset] == 0:
+            offset += 1
+        for _ in range(argument_count):
+            offset = skip_string(offset)
+        values: list[bytes] = []
+        while offset < len(raw):
+            end = raw.find(b"\0", offset)
+            if end < 0:
+                break
+            value = raw[offset:end]
+            offset = end + 1
+            if not value:
+                break
+            values.append(value)
+        return tuple(values)
+    except (AttributeError, OSError, OverflowError, ValueError):
+        return ()
+
+
+def _process_has_verification_token(pid: int, token: str) -> bool:
+    expected = f"SAMVIL_VERIFICATION_TOKEN={token}".encode()
+    if sys.platform == "darwin":
+        return expected in _darwin_process_environment(pid)
+    if sys.platform.startswith("linux"):
+        try:
+            environment = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+        except OSError:
+            return False
+        return expected in environment
+    return False
+
+
+def _verification_token_holder_pids(
+    token: str,
+    baseline_identities: set[str],
+) -> set[int]:
+    """Find newly started descendants that retained the per-run token."""
+    holders: set[int] = set()
+    for pid in _all_process_pids():
+        identity = _process_identity(pid)
+        if identity is None or identity in baseline_identities:
+            continue
+        if _process_has_verification_token(pid, token):
+            holders.add(pid)
+    return holders
+
+
 def _live_tracked_pids(tracked: dict[int, str]) -> set[int]:
     """Filter tracked PIDs by their original process identity."""
     return {
@@ -4652,11 +4812,19 @@ def _track_verification_descendants(
     tracked: dict[int, str],
 ) -> None:
     """Continuously retain descendants even when they detach and get reparented."""
+    high_frequency_until = (
+        time.monotonic() + _VERIFICATION_TRACK_INITIAL_WINDOW_SECONDS
+    )
     _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
     ready.set()
     while not stopped.is_set():
         _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
-        stopped.wait(_VERIFICATION_TRACK_INTERVAL_SECONDS)
+        interval = (
+            _VERIFICATION_TRACK_INITIAL_INTERVAL_SECONDS
+            if time.monotonic() < high_frequency_until
+            else _VERIFICATION_TRACK_INTERVAL_SECONDS
+        )
+        stopped.wait(interval)
 
 
 def _terminate_verification_processes(

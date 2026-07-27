@@ -372,17 +372,11 @@ int main(int argc, char **argv) {
     for (int fd = 3; fd < 1024; fd++) close(fd);
     pid_t child = fork();
     if (child < 0) return 2;
-    if (child > 0) {
-        usleep(5000);
-        return 0;
-    }
+    if (child > 0) return 0;
     if (setsid() < 0) _exit(3);
     pid_t grandchild = fork();
     if (grandchild < 0) _exit(4);
-    if (grandchild > 0) {
-        usleep(5000);
-        _exit(0);
-    }
+    if (grandchild > 0) _exit(0);
     int fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd >= 0) {
         dprintf(fd, "%d", getpid());
@@ -503,7 +497,7 @@ def test_verification_descendant_refresh_scans_only_minimal_live_roots(
         12: identities[12],
         13: identities[13],
     }
-    assert server._VERIFICATION_TRACK_INTERVAL_SECONDS == 0.001
+    assert server._VERIFICATION_TRACK_INTERVAL_SECONDS >= 0.02
 
 
 @pytest.mark.skipif(os.name != "posix", reason="process-group semantics are POSIX-only")
