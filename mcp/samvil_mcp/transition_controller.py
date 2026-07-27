@@ -434,6 +434,17 @@ class TransitionController:
         )
 
     @staticmethod
+    def _json_hash(value: dict[str, Any]) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
     def _event_evidence(root: Path, event_id: str) -> str:
         path = root / ".samvil" / "events.jsonl"
         if not path.is_file():
@@ -487,6 +498,102 @@ class TransitionController:
             or event_payload.get("to_stage") != to_stage
         ):
             raise TransitionError("transition journal integrity check failed")
+        for payload_key, hash_key in (
+            ("source_project_state", "source_project_state_hash"),
+            ("target_project_state", "target_project_state_hash"),
+            ("source_marker", "source_marker_hash"),
+            ("target_marker", "target_marker_hash"),
+            ("session_snapshot", "session_snapshot_hash"),
+            ("claim_snapshot", "claim_snapshot_hash"),
+        ):
+            if payload_key not in journal and hash_key not in journal:
+                continue
+            payload = journal.get(payload_key)
+            if (
+                not isinstance(payload, dict)
+                or journal.get(hash_key)
+                != TransitionController._json_hash(payload)
+            ):
+                raise TransitionError("transition journal integrity check failed")
+
+    async def _reconstruct_lost_db_context(
+        self,
+        root: Path,
+        journal: dict[str, Any],
+    ) -> None:
+        """Recreate one transition only when journal and both file SSOTs agree."""
+        if journal.get("phase") == "PREPARED":
+            raise TransitionError("PREPARED journal cannot prove a committed DB transition")
+        required_objects = (
+            "source_project_state",
+            "target_project_state",
+            "source_marker",
+            "target_marker",
+            "session_snapshot",
+            "claim_snapshot",
+        )
+        if any(not isinstance(journal.get(key), dict) for key in required_objects):
+            raise TransitionError("lost DB recovery evidence is incomplete")
+        if not str(journal.get("event_timestamp") or ""):
+            raise TransitionError("lost DB recovery event timestamp is missing")
+
+        source_state = dict(journal["source_project_state"])
+        target_state = dict(journal["target_project_state"])
+        source_marker = dict(journal["source_marker"])
+        target_marker = dict(journal["target_marker"])
+        session_snapshot = dict(journal["session_snapshot"])
+        claim_snapshot = dict(journal["claim_snapshot"])
+        run_id = str(journal["run_id"])
+        from_stage = str(journal["from_stage"])
+        expected_revision = int(journal["expected_revision"])
+
+        current_state = self._read_json(self._state_path(root))
+        current_marker = self._read_json(root / ".samvil" / "next-skill.json")
+        if self._json_hash(current_state) not in {
+            self._json_hash(source_state),
+            self._json_hash(target_state),
+        }:
+            raise TransitionError("lost DB recovery project state is ambiguous")
+        if self._json_hash(current_marker) not in {
+            self._json_hash(source_marker),
+            self._json_hash(target_marker),
+        }:
+            raise TransitionError("lost DB recovery marker is ambiguous")
+        if (
+            str(source_state.get("session_id") or "") != run_id
+            or str(session_snapshot.get("id") or "") != run_id
+            or str(session_snapshot.get("project_root") or "") != str(root)
+            or str(claim_snapshot.get("session_id") or "") != run_id
+            or str(claim_snapshot.get("stage") or "") != from_stage
+            or int(claim_snapshot.get("marker_revision", -1)) != expected_revision
+            or str(claim_snapshot.get("claim_id") or "") != str(journal["claim_id"])
+            or str(source_marker.get("run_id") or "") != run_id
+            or str(source_marker.get("from_stage") or "") != from_stage
+            or str(source_marker.get("status") or "") != "in_progress"
+            or int(source_marker.get("revision", -1)) != expected_revision
+            or str(target_state.get("stage_transition_id") or "")
+            != str(journal["transition_id"])
+            or str(target_state.get("current_stage") or "")
+            != str(journal["target_state"])
+            or str(target_marker.get("run_id") or "") != run_id
+            or int(target_marker.get("revision", -1)) != expected_revision + 1
+        ):
+            raise TransitionError("lost DB recovery evidence is inconsistent")
+
+        await self.store.reconstruct_committed_transition(
+            project_root=str(root),
+            session_snapshot=session_snapshot,
+            claim_snapshot=claim_snapshot,
+            event_id=str(journal["event_id"]),
+            event_type=str(journal["event_type"]),
+            event_stage=str(journal["target_state"]),
+            event_data=dict(journal["event_payload"]),
+            event_timestamp=str(journal["event_timestamp"]),
+            transition_id=str(journal["transition_id"]),
+            active_skill=(
+                "" if journal["to_stage"] == "complete" else str(journal["to_stage"])
+            ),
+        )
 
     async def _authoritative_journal_context(
         self,
@@ -499,10 +606,10 @@ class TransitionController:
         target_state = str(journal["target_state"])
         event_id = str(journal["event_id"])
         session = await self.store.get_session(run_id)
-        if (
-            session is None
-            or Path(session.project_root).expanduser().resolve(strict=False) != root
-        ):
+        if session is None:
+            await self._reconstruct_lost_db_context(root, journal)
+            session = await self.store.get_session(run_id)
+        if session is None or Path(session.project_root).expanduser().resolve(strict=False) != root:
             raise TransitionError("transition journal run does not own project root")
 
         persisted_event = await self.store.get_event_by_id(event_id)
@@ -620,22 +727,33 @@ class TransitionController:
         )
         self._write_journal(root, journal, "CLAIM_WRITTEN")
 
-        state = self._read_json(self._state_path(root))
-        completed = list(state.get("completed_stages") or [])
-        try:
-            from_state = state_stage_for(from_stage)
-        except ValueError:
-            from_state = from_stage.removeprefix("samvil-")
-        if from_state not in completed:
-            completed.append(from_state)
-        state.update(
-            {
-                "current_stage": target_state,
-                "completed_stages": completed,
-                "stage_transition_id": transition_id,
-                "transition_revision": expected_revision + 1,
+        target_project_state = journal.get("target_project_state")
+        if isinstance(target_project_state, dict):
+            current_state = self._read_json(self._state_path(root))
+            allowed_state_hashes = {
+                str(journal.get("source_project_state_hash") or ""),
+                str(journal.get("target_project_state_hash") or ""),
             }
-        )
+            if self._json_hash(current_state) not in allowed_state_hashes:
+                raise TransitionError("project state changed during transition recovery")
+            state = dict(target_project_state)
+        else:
+            state = self._read_json(self._state_path(root))
+            completed = list(state.get("completed_stages") or [])
+            try:
+                from_state = state_stage_for(from_stage)
+            except ValueError:
+                from_state = from_stage.removeprefix("samvil-")
+            if from_state not in completed:
+                completed.append(from_state)
+            state.update(
+                {
+                    "current_stage": target_state,
+                    "completed_stages": completed,
+                    "stage_transition_id": transition_id,
+                    "transition_revision": expected_revision + 1,
+                }
+            )
         atomic_write_text(
             self._state_path(root),
             json.dumps(state, indent=2, ensure_ascii=False),
@@ -643,15 +761,17 @@ class TransitionController:
         self._write_journal(root, journal, "STATE_WRITTEN")
 
         terminal = to_stage == "complete"
-        marker = build_driver_marker(
-            run_id=run_id,
-            revision=expected_revision + 1,
-            status="terminal" if terminal else "ready",
-            host_name=host_name,
-            from_stage=from_stage,
-            next_skill="" if terminal else to_stage,
-            reason=f"{from_stage} completed",
-        )
+        marker = journal.get("target_marker")
+        if not isinstance(marker, dict):
+            marker = build_driver_marker(
+                run_id=run_id,
+                revision=expected_revision + 1,
+                status="terminal" if terminal else "ready",
+                host_name=host_name,
+                from_stage=from_stage,
+                next_skill="" if terminal else to_stage,
+                reason=f"{from_stage} completed",
+            )
         write_driver_marker(str(root), marker)
         self._write_journal(root, journal, "MARKER_WRITTEN")
 
@@ -830,6 +950,46 @@ class TransitionController:
         )
         event_id = f"event-{transition_id}"
         target_state = "complete" if terminal_completion else state_stage_for(to_stage)
+        source_project_state = self._read_json(self._state_path(root))
+        source_state_run_id = str(source_project_state.get("session_id") or "")
+        if source_state_run_id and source_state_run_id != run_id:
+            raise TransitionError("project state session does not match transition run")
+        target_project_state = dict(source_project_state) or {"session_id": run_id}
+        target_project_state.setdefault("session_id", run_id)
+        completed = list(target_project_state.get("completed_stages") or [])
+        try:
+            completed_stage = state_stage_for(from_stage)
+        except ValueError:
+            completed_stage = from_stage.removeprefix("samvil-")
+        if completed_stage not in completed:
+            completed.append(completed_stage)
+        target_project_state.update(
+            {
+                "current_stage": target_state,
+                "completed_stages": completed,
+                "stage_transition_id": transition_id,
+                "transition_revision": expected_revision + 1,
+            }
+        )
+        source_marker = self._read_json(root / ".samvil" / "next-skill.json")
+        target_marker = build_driver_marker(
+            run_id=run_id,
+            revision=expected_revision + 1,
+            status="terminal" if to_stage == "complete" else "ready",
+            host_name=host_name,
+            from_stage=from_stage,
+            next_skill="" if to_stage == "complete" else to_stage,
+            reason=f"{from_stage} completed",
+        )
+        session_snapshot = {
+            "id": session.id,
+            "project_name": session.project_name,
+            "project_root": str(root),
+            "seed_version": session.seed_version,
+            "samvil_tier": session.samvil_tier,
+            "created_at": session.created_at,
+        }
+        claim_snapshot = dict(claim)
         journal = {
             "transition_id": transition_id,
             "run_id": run_id,
@@ -843,6 +1003,18 @@ class TransitionController:
             "event_payload": event_payload,
             "host_name": host_name,
             "event_payload_hash": hashlib.sha256(json.dumps(event_payload, sort_keys=True).encode()).hexdigest(),
+            "source_project_state": source_project_state,
+            "source_project_state_hash": self._json_hash(source_project_state),
+            "target_project_state": target_project_state,
+            "target_project_state_hash": self._json_hash(target_project_state),
+            "source_marker": source_marker,
+            "source_marker_hash": self._json_hash(source_marker),
+            "target_marker": target_marker,
+            "target_marker_hash": self._json_hash(target_marker),
+            "session_snapshot": session_snapshot,
+            "session_snapshot_hash": self._json_hash(session_snapshot),
+            "claim_snapshot": claim_snapshot,
+            "claim_snapshot_hash": self._json_hash(claim_snapshot),
             "phase": "PREPARED",
         }
         self._write_journal(root, journal, "PREPARED")

@@ -351,6 +351,101 @@ async def test_db_committed_journal_replays_remaining_materialization(
 
 
 @pytest.mark.asyncio
+async def test_db_committed_journal_reconstructs_only_its_transition_after_db_loss(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    import samvil_mcp.server as server
+
+    db_path = tmp_path / "lost.db"
+    project = tmp_path / "db-loss-recovery"
+    project.mkdir()
+    store = EventStore(str(db_path))
+    await store.initialize()
+    controller = TransitionController(store)
+    session = await store.create_session(
+        "display-name", "standard", str(project)
+    )
+    (project / "project.state.json").write_text(
+        json.dumps(
+            {
+                "session_id": session.id,
+                "project_name": "display-name",
+                "samvil_tier": "standard",
+                "current_stage": "interview",
+                "completed_stages": [],
+                "unrelated": "keep",
+            }
+        ),
+        encoding="utf-8",
+    )
+    claim = await controller.begin_stage(
+        str(project), session.id, "samvil-interview", 0
+    )
+    original_append = server._append_project_event
+    monkeypatch.setattr(
+        server,
+        "_append_project_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("stop after DB")),
+    )
+    with pytest.raises(OSError, match="stop after DB"):
+        await controller.commit_stage_transition(
+            str(project),
+            session.id,
+            claim["claim_id"],
+            "samvil-interview",
+            "samvil-seed",
+            0,
+            data={"evidence": {"artifact": "interview-summary.md:1"}},
+            transition_id="db-loss-transition",
+        )
+    journal = json.loads(
+        (project / ".samvil" / "transition-journal.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert journal["phase"] == "DB_COMMITTED"
+
+    for suffix in ("", "-wal", "-shm"):
+        Path(f"{db_path}{suffix}").unlink(missing_ok=True)
+    recovered_store = EventStore(str(db_path))
+    await recovered_store.initialize()
+    recovered_controller = TransitionController(recovered_store)
+    monkeypatch.setattr(server, "_append_project_event", original_append)
+
+    envelope = await recovered_controller.get_stage_envelope(
+        str(project), "codex_cli"
+    )
+    receipt = await recovered_controller.commit_stage_transition(
+        str(project),
+        envelope["run_id"],
+        envelope["claim_id"],
+        envelope["stage"],
+        envelope["requested_next_skill"],
+        envelope["marker_revision"],
+        data=envelope["evidence"],
+        transition_id=envelope["transition_id"],
+    )
+
+    recovered_session = await recovered_store.get_session(session.id)
+    recovered_event = await recovered_store.get_event_by_id(
+        "event-db-loss-transition"
+    )
+    recovered_claim = await recovered_store.get_stage_claim(
+        session.id, "samvil-interview", 0
+    )
+    state = json.loads((project / "project.state.json").read_text(encoding="utf-8"))
+
+    assert envelope["recovery_mode"] == "retry_commit"
+    assert receipt["status"] == "committed"
+    assert recovered_session.current_stage == Stage.SEED
+    assert recovered_event.data["transition_id"] == "db-loss-transition"
+    assert recovered_claim["status"] == "completed"
+    assert state["current_stage"] == "seed"
+    assert state["unrelated"] == "keep"
+    assert not (project / ".samvil" / "transition-journal.json").exists()
+
+
+@pytest.mark.asyncio
 async def test_prepared_journal_with_committed_db_event_recovers_on_retry(
     controller, tmp_path, monkeypatch: pytest.MonkeyPatch
 ):

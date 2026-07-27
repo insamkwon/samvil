@@ -1055,6 +1055,105 @@ class EventStore:
             previous_transition_id=previous_transition_id,
         )
 
+    async def reconstruct_committed_transition(
+        self,
+        *,
+        project_root: str,
+        session_snapshot: dict[str, Any],
+        claim_snapshot: dict[str, Any],
+        event_id: str,
+        event_type: str,
+        event_stage: str,
+        event_data: dict[str, Any],
+        event_timestamp: str,
+        transition_id: str,
+        active_skill: str,
+    ) -> None:
+        """Recreate only one journal-proven committed transition after DB loss."""
+        session_id = str(session_snapshot["id"])
+        claim_id = str(claim_snapshot["claim_id"])
+        normalized_root = str(Path(project_root).expanduser().resolve(strict=False))
+        if str(session_snapshot.get("project_root") or "") != normalized_root:
+            raise ValueError("reconstructed session root does not match journal")
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                conflicts = (
+                    ("sessions", "id = ? OR project_root = ?", (session_id, normalized_root)),
+                    ("events", "id = ?", (event_id,)),
+                    ("stage_claims", "claim_id = ?", (claim_id,)),
+                    ("transition_receipts", "transition_id = ?", (transition_id,)),
+                )
+                for table, predicate, parameters in conflicts:
+                    cursor = await db.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE {predicate}", parameters
+                    )
+                    if int((await cursor.fetchone())[0]) != 0:
+                        raise ValueError("lost DB recovery conflicts with persisted rows")
+                await db.execute(
+                    """INSERT INTO sessions
+                    (id, project_name, project_root, seed_version, current_stage,
+                     active_skill, stage_transition_id, samvil_tier, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        session_id,
+                        str(session_snapshot["project_name"]),
+                        normalized_root,
+                        int(session_snapshot["seed_version"]),
+                        event_stage,
+                        active_skill,
+                        transition_id,
+                        str(session_snapshot["samvil_tier"]),
+                        str(session_snapshot["created_at"]),
+                        event_timestamp,
+                    ),
+                )
+                encoded_data = json.dumps(event_data)
+                await db.execute(
+                    """INSERT INTO events
+                    (id, session_id, event_type, stage, data, trusted_transition, timestamp)
+                    VALUES (?, ?, ?, ?, ?, 1, ?)""",
+                    (
+                        event_id,
+                        session_id,
+                        event_type,
+                        event_stage,
+                        encoded_data,
+                        event_timestamp,
+                    ),
+                )
+                await db.execute(
+                    """INSERT INTO pending_project_events
+                    (event_id, session_id, event_type, stage, data, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        event_id,
+                        session_id,
+                        event_type,
+                        event_stage,
+                        encoded_data,
+                        event_timestamp,
+                    ),
+                )
+                await db.execute(
+                    """INSERT INTO stage_claims
+                    (session_id, stage, marker_revision, claim_id, status,
+                     created_at, updated_at, completed_transition_id)
+                    VALUES (?, ?, ?, ?, 'in_progress', ?, ?, '')""",
+                    (
+                        session_id,
+                        str(claim_snapshot["stage"]),
+                        int(claim_snapshot["marker_revision"]),
+                        claim_id,
+                        str(claim_snapshot["created_at"]),
+                        str(claim_snapshot["updated_at"]),
+                    ),
+                )
+                await db.commit()
+            except BaseException:
+                await asyncio.shield(db.rollback())
+                raise
+
     async def get_pending_project_events(self, session_id: str) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
