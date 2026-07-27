@@ -386,6 +386,40 @@ def test_isolated_executor_restores_personal_skills_when_activation_mutates_them
     assert not (codex_home / "marketplaces" / "samvil-codex").exists()
 
 
+def test_isolated_executor_quarantines_personal_skill_added_during_failure(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    existing = codex_home / "skills" / "existing" / "SKILL.md"
+    added = codex_home / "skills" / "added-during-install" / "SKILL.md"
+    repo.mkdir()
+    existing.parent.mkdir(parents=True)
+    existing.write_text("---\nname: existing\n---\nkeep\n", encoding="utf-8")
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    def mutating_runner(_command, _env):
+        added.parent.mkdir(parents=True, exist_ok=True)
+        added.write_text("---\nname: added\n---\nkeep\n", encoding="utf-8")
+
+    with pytest.raises(InstallBlocked, match="personal Codex skill inventory"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=mutating_runner,
+        )
+
+    assert existing.is_file()
+    assert not added.exists()
+    quarantined = list(
+        (codex_home / "backups").glob(
+            "unexpected-personal-skills-*/added-during-install/SKILL.md"
+        )
+    )
+    assert len(quarantined) == 1
+    assert quarantined[0].read_text(encoding="utf-8").endswith("keep\n")
+
+
 def test_isolated_executor_blocks_config_symlink_without_overwriting_target(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     codex_home = tmp_path / "codex-home" / ".codex"
@@ -394,6 +428,9 @@ def test_isolated_executor_blocks_config_symlink_without_overwriting_target(tmp_
     codex_home.mkdir(parents=True)
     original = '[marketplaces.other]\nsource = "/other"\n'
     target.write_text(original, encoding="utf-8")
+    personal = codex_home / "skills" / "personal" / "SKILL.md"
+    personal.parent.mkdir(parents=True)
+    personal.write_text("---\nname: personal\n---\nkeep\n", encoding="utf-8")
     config = codex_home / "config.toml"
     config.symlink_to(target)
     plan = CodexInstallPlan(
@@ -410,6 +447,31 @@ def test_isolated_executor_blocks_config_symlink_without_overwriting_target(tmp_
 
     assert target.read_text(encoding="utf-8") == original
     assert config.is_symlink() is True
+    assert list((codex_home / "backups").glob(".personal-skills.*")) == []
+
+
+def test_isolated_executor_blocks_skills_parent_symlink_without_touching_target(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    outside = tmp_path / "outside-skills"
+    external_skill = outside / "personal" / "SKILL.md"
+    repo.mkdir()
+    codex_home.mkdir(parents=True)
+    external_skill.parent.mkdir(parents=True)
+    external_skill.write_text("---\nname: personal\n---\nkeep\n", encoding="utf-8")
+    (codex_home / "skills").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(InstallBlocked, match="skills path escapes isolated profile"):
+        execute_isolated_install(
+            CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: None,
+        )
+
+    assert external_skill.read_text(encoding="utf-8").endswith("keep\n")
+    assert sorted(path.name for path in outside.iterdir()) == ["personal"]
 
 
 def test_isolated_executor_blocks_ambiguous_codex_wrapper_before_commands(tmp_path: Path) -> None:
@@ -460,7 +522,7 @@ def test_isolated_executor_cleans_partial_wrapper_when_symlink_creation_fails(
 
     monkeypatch.setattr(Path, "symlink_to", fail_first_plugin_link)
 
-    with pytest.raises(OSError, match="injected symlink failure"):
+    with pytest.raises(InstallBlocked, match="injected symlink failure"):
         execute_isolated_install(
             plan,
             codex_home=codex_home,

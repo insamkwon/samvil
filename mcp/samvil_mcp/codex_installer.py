@@ -493,7 +493,22 @@ def execute_isolated_install(
         raise InstallBlocked(
             f"backups path escapes isolated profile: {root / 'backups'}"
         ) from exc
-    personal_root = root / "skills"
+    try:
+        personal_root = safe_child_directory(root, "skills", label="skills")
+    except RuntimeLayoutError as exc:
+        raise InstallBlocked(
+            f"skills path escapes isolated profile: {root / 'skills'}"
+        ) from exc
+    config = root / "config.toml"
+    if config.is_symlink():
+        raise InstallBlocked(f"Codex config symlink is not safe to mutate: {config}")
+    config_existed = config.exists()
+    legacy_samvil_root = _configured_marketplace_root(config, "samvil")
+    current_samvil_root = _configured_marketplace_root(config, "samvil-codex")
+    wrapper_path = root / "marketplaces" / "samvil-codex"
+    if wrapper_path.exists():
+        _codex_marketplace_wrapper(root, plan.canonical_root)
+
     before = inventory_personal_skills(personal_root)
     migrated_paths = set()
     for action in plan.actions:
@@ -504,56 +519,36 @@ def execute_isolated_install(
     protected_before = tuple(entry for entry in before if entry.path not in migrated_paths)
     backup_paths: list[Path] = []
     commands: list[tuple[str, ...]] = []
-    backups_root.mkdir(parents=True, exist_ok=True)
     personal_snapshot_root: Path | None = None
-    if protected_before:
-        personal_snapshot_root = Path(
-            tempfile.mkdtemp(prefix=".personal-skills.", dir=backups_root)
-        )
-        for entry in protected_before:
-            shutil.copytree(
-                entry.path,
-                personal_snapshot_root / entry.path.name,
-                symlinks=True,
-            )
-    config = root / "config.toml"
-    if config.is_symlink():
-        raise InstallBlocked(f"Codex config symlink is not safe to mutate: {config}")
-    config_existed = config.exists()
-    legacy_samvil_root = _configured_marketplace_root(config, "samvil")
-    current_samvil_root = _configured_marketplace_root(config, "samvil-codex")
-    wrapper_path = root / "marketplaces" / "samvil-codex"
-    if wrapper_path.exists():
-        _codex_marketplace_wrapper(root, plan.canonical_root)
     config_backup: Path | None = None
-    if config_existed:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        backup = backups_root / f"config-{stamp}.toml"
-        _atomic_copy(config, backup)
-        backup_paths.append(backup)
-        config_backup = backup
-    wrapper, wrapper_created = _codex_marketplace_wrapper(root, plan.canonical_root)
+    wrapper = wrapper_path
+    wrapper_created = False
     remove_legacy_marketplace = ("codex", "plugin", "marketplace", "remove", "samvil")
     remove_marketplace = ("codex", "plugin", "marketplace", "remove", "samvil-codex")
-    add_marketplace = ("codex", "plugin", "marketplace", "add", str(wrapper))
-    add_plugin = ("codex", "plugin", "add", "samvil@samvil-codex")
     command_env = {"CODEX_HOME": str(root), "HOME": str(root.parent)}
-    planned_commands = []
-    if legacy_samvil_root is not None:
-        planned_commands.append(remove_legacy_marketplace)
-    if current_samvil_root is not None and current_samvil_root != wrapper:
-        planned_commands.append(remove_marketplace)
-    if current_samvil_root != wrapper:
-        planned_commands.append(add_marketplace)
-    planned_commands.append(add_plugin)
     moved_paths: list[tuple[Path, Path]] = []
+    personal_snapshot_ready = False
+    unexpected_quarantine: Path | None = None
 
     def protected_inventory() -> tuple[SkillInventoryEntry, ...]:
         current = inventory_personal_skills(personal_root)
         return tuple(entry for entry in current if entry.path not in migrated_paths)
 
     def restore_personal_skills() -> None:
-        if personal_snapshot_root is None:
+        nonlocal unexpected_quarantine
+        protected_paths = {entry.path for entry in protected_before}
+        unexpected = tuple(
+            entry
+            for entry in protected_inventory()
+            if entry.path not in protected_paths
+        )
+        if unexpected:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            unexpected_quarantine = backups_root / f"unexpected-personal-skills-{stamp}"
+            unexpected_quarantine.mkdir(parents=True, exist_ok=False)
+            for entry in unexpected:
+                entry.path.replace(unexpected_quarantine / entry.path.name)
+        if not personal_snapshot_ready or personal_snapshot_root is None:
             return
         for entry in protected_before:
             snapshot = personal_snapshot_root / entry.path.name
@@ -578,6 +573,44 @@ def execute_isolated_install(
         restore_personal_skills()
 
     try:
+        backups_root.mkdir(parents=True, exist_ok=True)
+        if protected_before:
+            personal_snapshot_root = Path(
+                tempfile.mkdtemp(prefix=".personal-skills.", dir=backups_root)
+            )
+            for entry in protected_before:
+                shutil.copytree(
+                    entry.path,
+                    personal_snapshot_root / entry.path.name,
+                    symlinks=True,
+                )
+            personal_snapshot_ready = True
+        if config_existed:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            backup = backups_root / f"config-{stamp}.toml"
+            _atomic_copy(config, backup)
+            backup_paths.append(backup)
+            config_backup = backup
+        wrapper, wrapper_created = _codex_marketplace_wrapper(
+            root, plan.canonical_root
+        )
+        add_marketplace = (
+            "codex",
+            "plugin",
+            "marketplace",
+            "add",
+            str(wrapper),
+        )
+        add_plugin = ("codex", "plugin", "add", "samvil@samvil-codex")
+        planned_commands = []
+        if legacy_samvil_root is not None:
+            planned_commands.append(remove_legacy_marketplace)
+        if current_samvil_root is not None and current_samvil_root != wrapper:
+            planned_commands.append(remove_marketplace)
+        if current_samvil_root != wrapper:
+            planned_commands.append(add_marketplace)
+        planned_commands.append(add_plugin)
+
         for command in planned_commands:
             command_runner(command, command_env)
             commands.append(command)
@@ -606,6 +639,11 @@ def execute_isolated_install(
     except BaseException as exc:
         rollback_install()
         if isinstance(exc, InstallBlocked):
+            if unexpected_quarantine is not None:
+                raise InstallBlocked(
+                    f"{exc}; unexpected personal skills preserved at "
+                    f"{unexpected_quarantine}"
+                ) from exc
             raise
         if isinstance(exc, Exception):
             raise InstallBlocked(
