@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -47,6 +50,65 @@ from samvil_mcp.event_store import EventStore
 
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro) if False else asyncio.run(coro)
+
+
+def test_verification_command_does_not_use_unbounded_capture_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+
+    monkeypatch.setattr(
+        server.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unbounded capture_output is forbidden")
+        ),
+    )
+
+    exit_code, output = server._run_verification_command(
+        tmp_path,
+        [sys.executable, "-c", "print('bounded output')"],
+        5,
+    )
+
+    assert exit_code == 0
+    assert "bounded output" in output
+    assert len(output.encode("utf-8")) <= 2_000_000
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process-group semantics are POSIX-only")
+def test_verification_timeout_kills_spawned_process_group(tmp_path: Path) -> None:
+    import samvil_mcp.server as server
+
+    pid_path = tmp_path / "grandchild.pid"
+    script = (
+        "import pathlib, subprocess, sys, time; "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+        f"pathlib.Path({str(pid_path)!r}).write_text(str(child.pid)); "
+        "time.sleep(30)"
+    )
+    grandchild_pid = 0
+    try:
+        exit_code, output = server._run_verification_command(
+            tmp_path, [sys.executable, "-c", script], 1
+        )
+        assert exit_code == 124
+        assert "verification timed out" in output
+        grandchild_pid = int(pid_path.read_text(encoding="utf-8"))
+        for _ in range(20):
+            try:
+                os.kill(grandchild_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("verification grandchild survived timeout")
+    finally:
+        if grandchild_pid:
+            try:
+                os.kill(grandchild_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_codex_transition_tools_are_thin_and_fail_closed(tmp_path: Path) -> None:
@@ -396,6 +458,80 @@ def test_build_transition_uses_run_bound_trusted_receipts_after_event_growth(
     assert _run(store.get_gate_receipt(active.id, "build_to_qa"))["verdict"] == "pass"
     assert _run(store.get_gate_receipt(active.id, "build_to_qa"))["session_id"] == active.id
     assert result["status"] == "committed"
+
+
+def test_prior_build_receipts_cannot_authorize_a_new_marker_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.chain_markers import build_driver_marker, write_driver_marker
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "build-reentry"
+    (project / ".samvil").mkdir(parents=True)
+    store = EventStore(str(tmp_path / "build-reentry.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("build-reentry", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    first_claim = json.loads(
+        _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    )
+    runtime = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project),
+                session.id,
+                "samvil-build",
+                json.dumps([sys.executable, "-c", "print('same build artifact')"]),
+            )
+        )
+    )
+    gate = json.loads(
+        _run(
+            gate_check(
+                "build_to_qa",
+                "minimal",
+                '{"implementation_rate":1.0}',
+                str(project),
+            )
+        )
+    )
+    _run(store.mark_stage_claim_completed(first_claim["claim_id"], "old-transition"))
+    second_claim = _run(store.create_stage_claim(session.id, "samvil-build", 2))
+    write_driver_marker(
+        str(project),
+        build_driver_marker(
+            run_id=session.id,
+            revision=2,
+            status="in_progress",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="",
+            reason="build re-entered",
+        ),
+    )
+
+    result = json.loads(
+        _run(
+            commit_stage_transition(
+                str(project),
+                session.id,
+                "samvil-build",
+                2,
+                second_claim["claim_id"],
+                "PASS",
+                '{"artifact":".samvil/build.log:1"}',
+                "",
+                "build-reentry-transition",
+            )
+        )
+    )
+
+    assert runtime["status"] == "passed"
+    assert gate["verdict"] == "pass"
+    assert result["status"] == "blocked"
+    assert "trusted gate receipt" in result["reason"]
 
 
 def test_untrusted_decision_event_cannot_authorize_build_transition(

@@ -17,7 +17,10 @@ import asyncio
 import hashlib
 import json
 import os
+import signal
 import subprocess
+import threading
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -1385,8 +1388,12 @@ async def commit_stage_transition(
                 receipt.get("verdict") != "pass"
                 or receipt.get("authority_path") != ".samvil/build.log"
                 or receipt.get("authority_sha256") != build_hash
+                or receipt.get("marker_revision") != expected_revision
+                or receipt.get("claim_id") != claim_id
                 or db_receipt.get("verdict") != "pass"
                 or db_receipt.get("authority_sha256") != build_hash
+                or db_receipt.get("marker_revision") != expected_revision
+                or db_receipt.get("claim_id") != claim_id
             ):
                 return json.dumps(
                     {
@@ -1419,8 +1426,12 @@ async def commit_stage_transition(
                 or receipt.get("gate") != gate_for_route
                 or receipt.get("verdict") != "pass"
                 or receipt.get("qa_results_sha256") != qa_hash
+                or receipt.get("marker_revision") != expected_revision
+                or receipt.get("claim_id") != claim_id
                 or db_receipt.get("verdict") != "pass"
                 or db_receipt.get("qa_results_sha256") != qa_hash
+                or db_receipt.get("marker_revision") != expected_revision
+                or db_receipt.get("claim_id") != claim_id
             ):
                 return json.dumps(
                     {
@@ -3854,6 +3865,9 @@ def _mechanical_gate_evidence(
         )
     if gate_name == "qa_to_evolve":
         root = Path(project_root).expanduser().resolve(strict=False)
+        evidence = _collect(
+            project_root, "qa", trusted_receipt=trusted_receipt
+        )
         qa_path = root / ".samvil" / "qa-results.json"
         qa = json.loads(qa_path.read_text(encoding="utf-8")) if qa_path.is_file() else {}
         synthesis = qa.get("synthesis") if isinstance(qa, dict) else {}
@@ -3875,9 +3889,14 @@ def _mechanical_gate_evidence(
             {
                 "three_pass_pass": three_pass_pass,
                 "zero_stubs": unimplemented_count == 0,
+                "runtime_verified": evidence["qa"]["runtime_verified"],
             },
-            {},
-            {"qa_results": str(qa_path), "synthesis": synthesis},
+            {"runtime_verified": True},
+            {
+                **evidence,
+                "qa_results": str(qa_path),
+                "synthesis": synthesis,
+            },
         )
     raise ValueError(
         f"evidence_mode='mechanical' is unsupported for gate {gate_name!r}"
@@ -3897,26 +3916,116 @@ async def _active_session_for_project(store: EventStore, root: Path):
     return await store.find_session_by_root(str(root))
 
 
+async def _active_claim_context(
+    store: EventStore,
+    root: Path,
+    session: Any,
+    *,
+    expected_stage: str = "",
+) -> tuple[int, dict[str, Any]] | None:
+    inspection = inspect_chain_marker(str(root))
+    if inspection.classification != "valid":
+        return None
+    marker = inspection.marker or {}
+    marker_stage = str(marker.get("from_stage") or "")
+    if (
+        marker.get("run_id") != session.id
+        or marker.get("status") != "in_progress"
+        or (expected_stage and marker_stage != expected_stage)
+    ):
+        return None
+    revision = int(marker["revision"])
+    claim = await store.get_stage_claim(session.id, marker_stage, revision)
+    if claim is None or claim.get("status") != "in_progress":
+        return None
+    return revision, claim
+
+
+def _receipt_matches_claim(
+    receipt: dict[str, Any] | None,
+    context: tuple[int, dict[str, Any]] | None,
+) -> bool:
+    if not isinstance(receipt, dict) or context is None:
+        return False
+    revision, claim = context
+    return (
+        receipt.get("marker_revision") == revision
+        and receipt.get("claim_id") == claim.get("claim_id")
+    )
+
+
 def _run_verification_command(
     root: Path,
     command: list[str],
     timeout_seconds: float,
 ) -> tuple[int, str]:
+    max_output_bytes = 2_000_000
+    chunks: deque[bytes] = deque()
+    output_size = 0
+    output_lock = threading.Lock()
+
+    def drain_output(stream: Any) -> None:
+        nonlocal output_size
+        try:
+            while True:
+                chunk = stream.read(65_536)
+                if not chunk:
+                    return
+                with output_lock:
+                    chunks.append(chunk)
+                    output_size += len(chunk)
+                    while output_size > max_output_bytes and chunks:
+                        overflow = output_size - max_output_bytes
+                        first = chunks[0]
+                        if overflow >= len(first):
+                            output_size -= len(chunks.popleft())
+                        else:
+                            chunks[0] = first[overflow:]
+                            output_size -= overflow
+        except (OSError, ValueError):
+            return
+
+    process = subprocess.Popen(
+        command,
+        cwd=root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=os.name == "posix",
+    )
+    if process.stdout is None:
+        process.kill()
+        raise RuntimeError("verification output pipe is unavailable")
+    reader = threading.Thread(
+        target=drain_output,
+        args=(process.stdout,),
+        name="samvil-verification-output",
+        daemon=True,
+    )
+    reader.start()
+    timed_out = False
     try:
-        completed = subprocess.run(
-            command,
-            cwd=root,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
-        output = f"{completed.stdout}{completed.stderr}"
-        exit_code = completed.returncode
-    except subprocess.TimeoutExpired as exc:
-        output = f"{exc.stdout or ''}{exc.stderr or ''}\nverification timed out\n"
+        exit_code = process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        timed_out = True
         exit_code = 124
-    return exit_code, output[-2_000_000:]
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            process.kill()
+        process.wait()
+    finally:
+        reader.join(timeout=5)
+        if reader.is_alive():
+            process.stdout.close()
+            reader.join(timeout=1)
+    with output_lock:
+        output = b"".join(chunks).decode("utf-8", errors="replace")
+    if timed_out:
+        output = f"{output}\nverification timed out\n"
+    return exit_code, output
 
 
 @mcp.tool()
@@ -3956,6 +4065,12 @@ async def run_stage_verification(
             or session.current_stage.value != normalized.removeprefix("samvil-")
         ):
             raise ValueError("run_id does not own the requested project stage")
+        claim_context = await _active_claim_context(
+            store, root, session, expected_stage=normalized
+        )
+        if claim_context is None:
+            raise ValueError("runtime verification requires the active stage claim")
+        marker_revision, claim = claim_context
         exit_code, output = await asyncio.to_thread(
             _run_verification_command, root, command, timeout
         )
@@ -3971,6 +4086,8 @@ async def run_stage_verification(
             "exit_code": exit_code,
             "authority_path": f".samvil/{log_name}",
             "authority_sha256": hashlib.sha256(log_path.read_bytes()).hexdigest(),
+            "marker_revision": marker_revision,
+            "claim_id": claim["claim_id"],
         }
         receipt = await store.save_runtime_receipt(run_id, normalized, receipt)
         atomic_write_text(
@@ -4024,8 +4141,14 @@ async def gate_check(
         root = Path(project_root).expanduser().resolve(strict=False)
         store = await get_store()
         session = await _active_session_for_project(store, root)
+        claim_context = (
+            await _active_claim_context(store, root, session)
+            if session is not None
+            else None
+        )
         runtime_stage = {
             "build_to_qa": "samvil-build",
+            "qa_to_evolve": "samvil-qa",
             "qa_to_deploy": "samvil-qa",
         }.get(gate_name, "")
         trusted_runtime_receipt = (
@@ -4033,6 +4156,8 @@ async def gate_check(
             if session is not None and runtime_stage
             else None
         )
+        if not _receipt_matches_claim(trusted_runtime_receipt, claim_context):
+            trusted_runtime_receipt = None
         if evidence_mode:
             if evidence_mode != "mechanical":
                 raise ValueError("evidence_mode must be empty or 'mechanical'")
@@ -4114,6 +4239,12 @@ async def gate_check(
                 json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")
             ).hexdigest(),
             "trusted_by": "samvil_mcp_gate_check",
+            "marker_revision": claim_context[0] if claim_context is not None else -1,
+            "claim_id": (
+                str(claim_context[1]["claim_id"])
+                if claim_context is not None
+                else ""
+            ),
         }
         try:
             receipt_root = safe_child_directory(
@@ -6357,6 +6488,15 @@ async def collect_stage_evidence(project_root: str, stage: str) -> str:
             if session is not None and normalized in {"samvil-build", "samvil-qa"}
             else None
         )
+        claim_context = (
+            await _active_claim_context(
+                store, root, session, expected_stage=normalized
+            )
+            if session is not None
+            else None
+        )
+        if not _receipt_matches_claim(trusted_receipt, claim_context):
+            trusted_receipt = None
         result = await asyncio.to_thread(
             _collect,
             project_root,
