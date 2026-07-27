@@ -311,8 +311,10 @@ int main(int argc, char **argv) {
         dprintf(fd, "%d", getpid());
         close(fd);
     }
-    sleep(30);
-    return 0;
+    char *const sleep_argv[] = {"sleep", "30", NULL};
+    char *const empty_env[] = {NULL};
+    execve("/bin/sleep", sleep_argv, empty_env);
+    return 5;
 }
 """,
         encoding="utf-8",
@@ -348,7 +350,7 @@ int main(int argc, char **argv) {
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="native macOS containment fixture")
-def test_verification_tracker_catches_delayed_fd_closing_double_fork(
+def test_verification_coalition_catches_delayed_env_clearing_double_fork(
     tmp_path: Path,
 ) -> None:
     import samvil_mcp.server as server
@@ -382,8 +384,10 @@ int main(int argc, char **argv) {
         dprintf(fd, "%d", getpid());
         close(fd);
     }
-    sleep(30);
-    return 0;
+    char *const sleep_argv[] = {"sleep", "30", NULL};
+    char *const empty_env[] = {NULL};
+    execve("/bin/sleep", sleep_argv, empty_env);
+    return 5;
 }
 """,
         encoding="utf-8",
@@ -409,7 +413,44 @@ int main(int argc, char **argv) {
                 break
             time.sleep(0.05)
         else:
-            pytest.fail("delayed fd-closing grandchild survived verification")
+            pytest.fail(
+                "delayed fd-closing, env-clearing grandchild survived verification"
+            )
+    finally:
+        if grandchild_pid:
+            try:
+                os.kill(grandchild_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="Linux subreaper containment fixture",
+)
+def test_verification_subreaper_catches_env_clearing_double_fork(
+    tmp_path: Path,
+) -> None:
+    import samvil_mcp.server as server
+
+    pid_path = tmp_path / "linux-double-fork.pid"
+    script = (
+        "import os,pathlib,sys,time; time.sleep(0.2); os.closerange(3,1024); "
+        "child=os.fork(); os._exit(0) if child else None; os.setsid(); "
+        "grandchild=os.fork(); os._exit(0) if grandchild else None; "
+        f"pathlib.Path({str(pid_path)!r}).write_text(str(os.getpid())); "
+        "os.execve('/bin/sleep',['sleep','30'],{})"
+    )
+    grandchild_pid = 0
+    try:
+        exit_code, _ = server._run_verification_command(
+            tmp_path, [sys.executable, "-c", script], 2
+        )
+
+        assert exit_code == 0
+        grandchild_pid = int(pid_path.read_text(encoding="ascii"))
+        with pytest.raises(ProcessLookupError):
+            os.kill(grandchild_pid, 0)
     finally:
         if grandchild_pid:
             try:
@@ -438,7 +479,10 @@ def test_verification_sentinel_falls_back_to_proc_without_lsof(
     ) == {123}
 
 
-@pytest.mark.skipif(os.name != "posix", reason="process cleanup is POSIX-only")
+@pytest.mark.skipif(
+    os.name != "posix" or sys.platform == "darwin",
+    reason="sentinel fallback is used outside macOS coalition containment",
+)
 def test_verification_sentinel_inspection_failure_still_cleans_everything(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -4039,6 +4039,244 @@ def _receipt_matches_claim(
     )
 
 
+class _DarwinProcCoalitionInfo(ctypes.Structure):
+    _fields_ = [
+        ("coalition_id", ctypes.c_uint64 * 2),
+        ("reserved", ctypes.c_uint64 * 3),
+    ]
+
+
+def _verification_environment(root: Path, token: str) -> dict[str, str]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        in {
+            "PATH",
+            "HOME",
+            "TMPDIR",
+            "TMP",
+            "TEMP",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "TZ",
+            "SYSTEMROOT",
+            "COMSPEC",
+            "PATHEXT",
+            "WINDIR",
+        }
+    }
+    environment.update(
+        {
+            "PWD": str(root),
+            "CI": "1",
+            "SAMVIL_VERIFICATION_TOKEN": token,
+        }
+    )
+    return environment
+
+
+def _darwin_process_coalition_ids(pid: int) -> tuple[int, int] | None:
+    global _DARWIN_LIBPROC
+    try:
+        _direct_child_pids(pid)
+        if _DARWIN_LIBPROC is None:
+            return None
+        info = _DarwinProcCoalitionInfo()
+        size = ctypes.sizeof(info)
+        result = _DARWIN_LIBPROC.proc_pidinfo(
+            pid, 20, 0, ctypes.byref(info), size
+        )
+        if result != size:
+            return None
+        identifiers = tuple(int(value) for value in info.coalition_id)
+        if not all(identifiers):
+            return None
+        return identifiers
+    except (AttributeError, OSError):
+        return None
+
+
+def _darwin_coalition_member_pids(
+    coalition_ids: tuple[int, int],
+) -> set[int]:
+    return {
+        pid
+        for pid in _all_process_pids()
+        if _darwin_process_coalition_ids(pid) == coalition_ids
+    }
+
+
+def _terminate_darwin_verification_coalition(
+    coalition_ids: tuple[int, int],
+) -> None:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        members = _darwin_coalition_member_pids(coalition_ids) - {os.getpid()}
+        if not members:
+            return
+        for pid in members:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (PermissionError, ProcessLookupError):
+                pass
+        time.sleep(0.01)
+    survivors = _darwin_coalition_member_pids(coalition_ids) - {os.getpid()}
+    if survivors:
+        raise RuntimeError("verification coalition cleanup did not converge")
+
+
+def _run_quiet_process(command: list[str], timeout: float) -> int:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        return process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        raise RuntimeError("verification control command timed out")
+
+
+def _run_darwin_verification_command(
+    root: Path,
+    command: list[str],
+    timeout_seconds: float,
+) -> tuple[int, str]:
+    launchctl = shutil.which("launchctl")
+    if launchctl is None:
+        raise RuntimeError("trusted macOS verification requires launchctl")
+    maximum = 2_000_000
+    token = secrets.token_hex(24)
+    environment = _verification_environment(root, token)
+    runtime_root = Path(
+        tempfile.mkdtemp(prefix=".samvil-verification-", dir=root)
+    )
+    ready_path = runtime_root / "ready"
+    release_path = runtime_root / "release"
+    result_path = runtime_root / "result"
+    output_path = runtime_root / "output"
+    supervisor_log = runtime_root / "supervisor.log"
+    label = f"com.samvil.verification.{os.getpid()}.{secrets.token_hex(8)}"
+    supervisor = Path(__file__).with_name("verification_supervisor.py")
+    submitted = False
+    coalition_ids: tuple[int, int] | None = None
+    chunks: deque[bytes] = deque()
+    output_size = 0
+    offset = 0
+
+    def append_output(chunk: bytes) -> None:
+        nonlocal output_size
+        chunks.append(chunk)
+        output_size += len(chunk)
+        while output_size > maximum and chunks:
+            overflow = output_size - maximum
+            first = chunks[0]
+            if overflow >= len(first):
+                output_size -= len(chunks.popleft())
+            else:
+                chunks[0] = first[overflow:]
+                output_size -= overflow
+
+    def drain_output() -> None:
+        nonlocal offset
+        try:
+            with output_path.open("rb") as stream:
+                stream.seek(offset)
+                while chunk := stream.read(65_536):
+                    offset += len(chunk)
+                    append_output(chunk)
+        except FileNotFoundError:
+            pass
+
+    try:
+        arguments = [
+            sys.executable,
+            str(supervisor),
+            "darwin",
+            str(root),
+            str(ready_path),
+            str(release_path),
+            str(result_path),
+            str(output_path),
+            str(timeout_seconds),
+            json.dumps(environment, separators=(",", ":")),
+            json.dumps(command, separators=(",", ":")),
+        ]
+        submission_code = _run_quiet_process(
+            [
+                launchctl,
+                "submit",
+                "-l",
+                label,
+                "-o",
+                str(supervisor_log),
+                "-e",
+                str(supervisor_log),
+                "--",
+                *arguments,
+            ],
+            5,
+        )
+        if submission_code != 0:
+            raise RuntimeError(
+                "cannot create isolated macOS verification coalition"
+            )
+        submitted = True
+        ready_deadline = time.monotonic() + 2
+        while not ready_path.exists() and time.monotonic() < ready_deadline:
+            time.sleep(0.005)
+        if not ready_path.exists():
+            raise RuntimeError("verification coalition supervisor did not become ready")
+        supervisor_pid = int(ready_path.read_text(encoding="ascii"))
+        coalition_ids = _darwin_process_coalition_ids(supervisor_pid)
+        parent_coalition = _darwin_process_coalition_ids(os.getpid())
+        if coalition_ids is None or coalition_ids == parent_coalition:
+            raise RuntimeError("verification coalition identity is unavailable")
+        release_path.touch()
+        deadline = time.monotonic() + timeout_seconds + 3
+        while not result_path.exists():
+            drain_output()
+            if time.monotonic() >= deadline:
+                raise RuntimeError("verification coalition supervisor timed out")
+            time.sleep(0.01)
+        exit_code = int(result_path.read_text(encoding="ascii"))
+        drain_output()
+    finally:
+        cleanup_error: Exception | None = None
+        if submitted:
+            try:
+                removal_code = _run_quiet_process(
+                    [launchctl, "remove", label], 5
+                )
+            except RuntimeError as exc:
+                cleanup_error = exc
+                removal_code = -1
+            if removal_code != 0 and cleanup_error is None:
+                cleanup_error = RuntimeError(
+                    "cannot remove isolated macOS verification job"
+                )
+        try:
+            if coalition_ids is not None:
+                _terminate_darwin_verification_coalition(coalition_ids)
+        except RuntimeError as exc:
+            cleanup_error = cleanup_error or exc
+        finally:
+            drain_output()
+            shutil.rmtree(runtime_root, ignore_errors=True)
+        if cleanup_error is not None:
+            raise cleanup_error
+
+    output = b"".join(chunks).decode("utf-8", errors="replace")
+    encoded = output.encode("utf-8")
+    if len(encoded) > maximum:
+        output = encoded[-maximum:].decode("utf-8", errors="ignore")
+    return exit_code, output
+
+
 def _run_verification_command(
     root: Path,
     command: list[str],
@@ -4047,6 +4285,22 @@ def _run_verification_command(
     if os.name != "posix":
         raise RuntimeError(
             "trusted verification process containment requires a POSIX host"
+        )
+    if sys.platform == "darwin":
+        return _run_darwin_verification_command(root, command, timeout_seconds)
+    if sys.platform.startswith("linux"):
+        supervisor = Path(__file__).with_name("verification_supervisor.py")
+        command = [
+            sys.executable,
+            str(supervisor),
+            "linux",
+            str(timeout_seconds),
+            json.dumps(command, separators=(",", ":")),
+        ]
+        timeout_seconds += 3
+    else:
+        raise RuntimeError(
+            "trusted verification process containment requires macOS or Linux"
         )
     max_output_bytes = 2_000_000
     chunks: deque[bytes] = deque()
@@ -4156,33 +4410,7 @@ def _run_verification_command(
                 *command,
             ]
             popen_options["pass_fds"] = (release_read, sentinel_file.fileno())
-        verification_env = {
-            key: value
-            for key, value in os.environ.items()
-            if key
-            in {
-                "PATH",
-                "HOME",
-                "TMPDIR",
-                "TMP",
-                "TEMP",
-                "LANG",
-                "LC_ALL",
-                "LC_CTYPE",
-                "TZ",
-                "SYSTEMROOT",
-                "COMSPEC",
-                "PATHEXT",
-                "WINDIR",
-            }
-        }
-        verification_env.update(
-            {
-                "PWD": str(root),
-                "CI": "1",
-                "SAMVIL_VERIFICATION_TOKEN": verification_token,
-            }
-        )
+        verification_env = _verification_environment(root, verification_token)
         process = subprocess.Popen(
             launch_command,
             cwd=root,
@@ -4475,8 +4703,6 @@ def _descendant_pids(parent_pid: int) -> set[int]:
 
 
 _DARWIN_LIBPROC: Any | None = None
-_VERIFICATION_TRACK_INITIAL_INTERVAL_SECONDS = 0.001
-_VERIFICATION_TRACK_INITIAL_WINDOW_SECONDS = 0.1
 _VERIFICATION_TRACK_INTERVAL_SECONDS = 0.02
 
 
@@ -4812,19 +5038,11 @@ def _track_verification_descendants(
     tracked: dict[int, str],
 ) -> None:
     """Continuously retain descendants even when they detach and get reparented."""
-    high_frequency_until = (
-        time.monotonic() + _VERIFICATION_TRACK_INITIAL_WINDOW_SECONDS
-    )
     _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
     ready.set()
     while not stopped.is_set():
         _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
-        interval = (
-            _VERIFICATION_TRACK_INITIAL_INTERVAL_SECONDS
-            if time.monotonic() < high_frequency_until
-            else _VERIFICATION_TRACK_INTERVAL_SECONDS
-        )
-        stopped.wait(interval)
+        stopped.wait(_VERIFICATION_TRACK_INTERVAL_SECONDS)
 
 
 def _terminate_verification_processes(
