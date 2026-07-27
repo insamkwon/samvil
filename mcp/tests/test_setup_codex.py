@@ -348,6 +348,44 @@ def test_isolated_executor_restores_config_when_plugin_add_fails(tmp_path: Path)
     assert not (codex_home / "marketplaces" / "samvil-codex").exists()
 
 
+def test_isolated_executor_restores_personal_skills_when_activation_mutates_them(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    skill = codex_home / "skills" / "personal-review"
+    helper = skill / "scripts" / "helper.py"
+    repo.mkdir()
+    helper.parent.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: personal-review\n---\nkeep\n",
+        encoding="utf-8",
+    )
+    helper.write_text("print('keep')\n", encoding="utf-8")
+    config = codex_home / "config.toml"
+    original_config = '[marketplaces.other]\nsource = "/other"\n'
+    config.write_text(original_config, encoding="utf-8")
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    def mutating_runner(_command, _env):
+        helper.unlink(missing_ok=True)
+        config.write_text(
+            '[marketplaces.samvil-codex]\nsource = "/partial"\n',
+            encoding="utf-8",
+        )
+
+    with pytest.raises(InstallBlocked, match="personal Codex skill inventory"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=mutating_runner,
+        )
+
+    assert helper.read_text(encoding="utf-8") == "print('keep')\n"
+    assert config.read_text(encoding="utf-8") == original_config
+    assert not (codex_home / "marketplaces" / "samvil-codex").exists()
+
+
 def test_isolated_executor_blocks_config_symlink_without_overwriting_target(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     codex_home = tmp_path / "codex-home" / ".codex"

@@ -504,6 +504,18 @@ def execute_isolated_install(
     protected_before = tuple(entry for entry in before if entry.path not in migrated_paths)
     backup_paths: list[Path] = []
     commands: list[tuple[str, ...]] = []
+    backups_root.mkdir(parents=True, exist_ok=True)
+    personal_snapshot_root: Path | None = None
+    if protected_before:
+        personal_snapshot_root = Path(
+            tempfile.mkdtemp(prefix=".personal-skills.", dir=backups_root)
+        )
+        for entry in protected_before:
+            shutil.copytree(
+                entry.path,
+                personal_snapshot_root / entry.path.name,
+                symlinks=True,
+            )
     config = root / "config.toml"
     if config.is_symlink():
         raise InstallBlocked(f"Codex config symlink is not safe to mutate: {config}")
@@ -534,34 +546,76 @@ def execute_isolated_install(
     if current_samvil_root != wrapper:
         planned_commands.append(add_marketplace)
     planned_commands.append(add_plugin)
-    try:
-        for command in planned_commands:
-            command_runner(command, command_env)
-            commands.append(command)
-    except Exception as exc:
+    moved_paths: list[tuple[Path, Path]] = []
+
+    def protected_inventory() -> tuple[SkillInventoryEntry, ...]:
+        current = inventory_personal_skills(personal_root)
+        return tuple(entry for entry in current if entry.path not in migrated_paths)
+
+    def restore_personal_skills() -> None:
+        if personal_snapshot_root is None:
+            return
+        for entry in protected_before:
+            snapshot = personal_snapshot_root / entry.path.name
+            destination = entry.path
+            if destination.is_symlink() or destination.is_file():
+                destination.unlink(missing_ok=True)
+            elif destination.exists():
+                shutil.rmtree(destination)
+            shutil.copytree(snapshot, destination, symlinks=True)
+
+    def rollback_install() -> None:
+        for backup, source in reversed(moved_paths):
+            if backup.exists() and not source.exists():
+                source.parent.mkdir(parents=True, exist_ok=True)
+                backup.replace(source)
         if config_backup is not None:
             _atomic_copy(config_backup, config)
         elif not config_existed:
             config.unlink(missing_ok=True)
         if wrapper_created:
-            shutil.rmtree(wrapper)
-        raise InstallBlocked(f"Codex activation failed; config restored: {exc}") from exc
+            shutil.rmtree(wrapper, ignore_errors=True)
+        restore_personal_skills()
 
-    if migrate:
-        for action in plan.actions:
-            if action.kind != "migrate_generated":
-                continue
-            source = action.path
-            label = source.parent.name if source.name == "SKILL.md" else source.name
-            backup = backups_root / f"{label}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            source.replace(backup)
-            backup_paths.append(backup)
+    try:
+        for command in planned_commands:
+            command_runner(command, command_env)
+            commands.append(command)
+            if not compare_skill_inventories(protected_before, protected_inventory()):
+                raise InstallBlocked(
+                    "personal Codex skill inventory changed during isolated install"
+                )
 
-    after = inventory_personal_skills(personal_root)
-    protected_after = tuple(entry for entry in after if entry.path not in migrated_paths)
-    if not compare_skill_inventories(protected_before, protected_after):
-        raise InstallBlocked("personal Codex skill inventory changed during isolated install")
+        if migrate:
+            for action in plan.actions:
+                if action.kind != "migrate_generated":
+                    continue
+                source = action.path
+                label = source.parent.name if source.name == "SKILL.md" else source.name
+                backup = backups_root / f"{label}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                source.replace(backup)
+                moved_paths.append((backup, source))
+                backup_paths.append(backup)
+
+        protected_after = protected_inventory()
+        if not compare_skill_inventories(protected_before, protected_after):
+            raise InstallBlocked(
+                "personal Codex skill inventory changed during isolated install"
+            )
+    except BaseException as exc:
+        rollback_install()
+        if isinstance(exc, InstallBlocked):
+            raise
+        if isinstance(exc, Exception):
+            raise InstallBlocked(
+                f"Codex activation failed; config restored: {exc}"
+            ) from exc
+        raise
+    finally:
+        if personal_snapshot_root is not None:
+            shutil.rmtree(personal_snapshot_root, ignore_errors=True)
+
     return InstallReceipt(
         mode="migrate" if migrate else "install",
         canonical_root=plan.canonical_root,
