@@ -3975,7 +3975,7 @@ def _mechanical_gate_evidence(
                 "zero_stubs": unimplemented_count == 0,
                 "runtime_verified": evidence["qa"]["runtime_verified"],
             },
-            {"runtime_verified": True},
+            {},
             {
                 **evidence,
                 "qa_results": str(qa_path),

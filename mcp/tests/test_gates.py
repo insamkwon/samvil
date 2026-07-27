@@ -606,3 +606,40 @@ def test_qa_to_deploy_zero_decided_tests_never_count_as_full_pass(
 
     assert metrics["test_pass_rate"] == 0.0
     assert metrics["runtime_verified"] is False
+
+
+def test_qa_to_evolve_uses_file_synthesis_without_driver_runtime_receipt(
+    tmp_path: Path,
+) -> None:
+    from samvil_mcp.server import gate_check as gate_check_tool
+
+    samvil = tmp_path / ".samvil"
+    samvil.mkdir()
+    (samvil / "qa-results.json").write_text(
+        json.dumps(
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass1": {"status": "PASS"},
+                    "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                    "pass3": {"verdict": "PASS"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = json.loads(
+        asyncio.run(
+            gate_check_tool(
+                gate_name="qa_to_evolve",
+                samvil_tier="minimal",
+                metrics_json="{}",
+                project_root=str(tmp_path),
+            )
+        )
+    )
+
+    assert result["verdict"] == "pass"
+    assert result["mechanical_metrics"]["three_pass_pass"] is True
+    assert result["mechanical_metrics"]["runtime_verified"] is False
