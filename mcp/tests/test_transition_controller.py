@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import json
@@ -567,6 +568,102 @@ async def test_transition_id_cannot_replay_another_projects_receipt(controller, 
             0,
             transition_id="shared-transition-id",
         )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_transition_ids_do_not_leave_a_blocking_journal(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    project = tmp_path / "concurrent-transitions"
+    project.mkdir()
+    session = await controller.store.create_session(
+        "concurrent-transitions", "standard", str(project)
+    )
+    claim = await controller.begin_stage(
+        str(project), session.id, "samvil-interview", 0
+    )
+    original_save = controller.store.save_event_and_update_stage
+    active_writers = 0
+    max_active_writers = 0
+
+    async def observe_writer_overlap(*args, **kwargs):
+        nonlocal active_writers, max_active_writers
+        active_writers += 1
+        max_active_writers = max(max_active_writers, active_writers)
+        try:
+            await asyncio.sleep(0.05)
+            return await original_save(*args, **kwargs)
+        finally:
+            active_writers -= 1
+
+    monkeypatch.setattr(
+        controller.store, "save_event_and_update_stage", observe_writer_overlap
+    )
+    results = await asyncio.gather(
+        controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="concurrent-one",
+        ),
+        controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="concurrent-two",
+        ),
+        return_exceptions=True,
+    )
+
+    assert max_active_writers == 1
+    assert sum(isinstance(result, dict) for result in results) == 1
+    assert sum(isinstance(result, Exception) for result in results) == 1
+    assert not (project / ".samvil" / "transition-journal.json").exists()
+    envelope = await controller.get_stage_envelope(str(project), "codex_cli")
+    assert envelope["status"] == "ready"
+    assert envelope["stage"] == "samvil-seed"
+
+
+def test_event_evidence_streams_jsonl_without_read_text(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    project = tmp_path / "streamed-event-evidence"
+    events = project / ".samvil" / "events.jsonl"
+    events.parent.mkdir(parents=True)
+    events.write_text(
+        '{"event_id":"first"}\n{"event_id":"wanted"}\n',
+        encoding="utf-8",
+    )
+    original_read_text = Path.read_text
+
+    def reject_event_read_text(path: Path, *args, **kwargs):
+        if path == events:
+            raise AssertionError("events.jsonl must be streamed")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", reject_event_read_text)
+
+    assert controller._event_evidence(project, "wanted") == ".samvil/events.jsonl:2"
+
+
+@pytest.mark.asyncio
+async def test_transition_id_rejects_sensitive_token_shape(controller, tmp_path):
+    project = tmp_path / "sensitive-transition-id"
+    project.mkdir()
+    session = await controller.store.create_session(
+        "sensitive-transition-id", "standard", str(project)
+    )
+    claim = await controller.begin_stage(
+        str(project), session.id, "samvil-interview", 0
+    )
+
+    with pytest.raises(TransitionError, match="transition_id"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="github_pat_" + "A" * 32,
+        )
+
+    assert await controller.store.get_events(session.id) == []
+    assert not (project / ".samvil" / "transition-journal.json").exists()
 
 
 @pytest.mark.asyncio

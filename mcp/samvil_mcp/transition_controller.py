@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -30,6 +32,10 @@ from .stage_catalog import (
     state_stage_for,
     validate_stage_transition,
 )
+from .transition_lock import stage_transition_lock
+
+
+_SAFE_TRANSITION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 class TransitionError(RuntimeError):
@@ -339,14 +345,28 @@ class TransitionController:
         path = root / ".samvil" / "events.jsonl"
         if not path.is_file():
             return ""
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            try:
-                row = json.loads(line)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if isinstance(row, dict) and row.get("event_id") == event_id:
-                return f".samvil/events.jsonl:{line_number}"
+        try:
+            with path.open(encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, 1):
+                    try:
+                        row = json.loads(line)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if isinstance(row, dict) and row.get("event_id") == event_id:
+                        return f".samvil/events.jsonl:{line_number}"
+        except OSError:
+            return ""
         return ""
+
+    @staticmethod
+    def _validate_transition_id(transition_id: str) -> None:
+        if (
+            not _SAFE_TRANSITION_ID.fullmatch(transition_id)
+            or sanitize_event_data(transition_id) != transition_id
+        ):
+            raise TransitionError(
+                "transition_id must be a bounded non-sensitive identifier"
+            )
 
     @staticmethod
     def _validate_journal_integrity(journal: dict[str, Any]) -> None:
@@ -470,15 +490,15 @@ class TransitionController:
         expected_revision = int(journal["expected_revision"])
         host_name = str(journal["host_name"])
 
-        evidence = self._event_evidence(root, event_id)
+        evidence = await asyncio.to_thread(self._event_evidence, root, event_id)
         if not evidence:
-            exists = await __import__("asyncio").to_thread(
+            exists = await asyncio.to_thread(
                 _canonical_project_event_exists,
                 root,
                 event_id,
             )
             if not exists:
-                evidence = await __import__("asyncio").to_thread(
+                evidence = await asyncio.to_thread(
                     _append_project_event,
                     root,
                     timestamp=timestamp,
@@ -489,7 +509,9 @@ class TransitionController:
                     event_id=event_id,
                 )
             else:
-                evidence = self._event_evidence(root, event_id)
+                evidence = await asyncio.to_thread(
+                    self._event_evidence, root, event_id
+                )
         if not evidence:
             raise TransitionError("canonical transition event evidence is missing")
         journal["event_evidence"] = evidence
@@ -571,9 +593,38 @@ class TransitionController:
         host_name: str = "codex_cli",
     ) -> dict[str, Any]:
         """Materialize one trusted transition in a fixed, recoverable order."""
+        resolved_transition_id = transition_id or f"transition-{uuid.uuid4().hex}"
+        self._validate_transition_id(resolved_transition_id)
+        async with stage_transition_lock(self.store, run_id):
+            return await self._commit_stage_transition_locked(
+                project_root,
+                run_id,
+                claim_id,
+                from_stage,
+                to_stage,
+                expected_revision,
+                event_type=event_type,
+                data=data,
+                transition_id=resolved_transition_id,
+                host_name=host_name,
+            )
+
+    async def _commit_stage_transition_locked(
+        self,
+        project_root: str,
+        run_id: str,
+        claim_id: str,
+        from_stage: str,
+        to_stage: str,
+        expected_revision: int,
+        *,
+        event_type: str,
+        data: dict[str, Any] | None,
+        transition_id: str,
+        host_name: str,
+    ) -> dict[str, Any]:
         root = Path(project_root).expanduser().resolve(strict=False)
         self._validate_project_layout(root)
-        transition_id = transition_id or f"transition-{uuid.uuid4().hex}"
         session = await self.store.get_session(run_id)
         if session is None or Path(session.project_root).expanduser().resolve(strict=False) != root:
             raise TransitionError("run_id does not own project root")
