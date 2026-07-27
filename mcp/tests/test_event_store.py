@@ -401,6 +401,56 @@ async def test_rootless_legacy_migration_waits_for_project_attach_before_rewind(
 
 
 @pytest.mark.asyncio
+async def test_rootless_recovery_restores_files_when_task_is_cancelled(
+    tmp_path, monkeypatch
+) -> None:
+    db_path = tmp_path / "cancelled-rootless.db"
+    project_root = tmp_path / "legacy-project"
+    (project_root / ".samvil").mkdir(parents=True)
+    state_path = project_root / "project.state.json"
+    marker_path = project_root / ".samvil" / "next-skill.json"
+    original_state = json.dumps(
+        {
+            "session_id": "session",
+            "current_stage": "build",
+            "completed_stages": ["interview", "seed", "design", "scaffold"],
+        }
+    )
+    original_marker = json.dumps(
+        {
+            "next_skill": "samvil-build",
+            "from_stage": "samvil-scaffold",
+            "host_name": "codex_cli",
+        }
+    )
+    state_path.write_text(original_state, encoding="utf-8")
+    marker_path.write_text(original_marker, encoding="utf-8")
+    _create_rootless_legacy_trust_db(db_path)
+    store = EventStore(str(db_path))
+    await store.initialize()
+    original_execute = aiosqlite.Connection.execute
+
+    async def cancel_database_update(connection, sql, *args, **kwargs):
+        if "UPDATE sessions" in sql and "project_root = ?" in sql:
+            raise asyncio.CancelledError()
+        return await original_execute(connection, sql, *args, **kwargs)
+
+    monkeypatch.setattr(aiosqlite.Connection, "execute", cancel_database_update)
+
+    with pytest.raises(asyncio.CancelledError):
+        await store.recover_legacy_session_project_root(
+            "session", str(project_root)
+        )
+
+    persisted = await store.get_session("session")
+    assert persisted is not None
+    assert persisted.project_root == ""
+    assert persisted.current_stage == Stage.BUILD
+    assert state_path.read_text(encoding="utf-8") == original_state
+    assert marker_path.read_text(encoding="utf-8") == original_marker
+
+
+@pytest.mark.asyncio
 async def test_rootless_attach_revalidates_a_stale_chain_marker(tmp_path) -> None:
     db_path = tmp_path / "rootless-legacy.db"
     project_root = tmp_path / "legacy-project"

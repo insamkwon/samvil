@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from contextlib import ExitStack
@@ -350,8 +351,8 @@ class EventStore:
                 await db.execute(TRUSTED_TRANSITION_INDEX)
                 await db.execute(PROJECT_ROOT_UPDATED_INDEX)
                 await db.commit()
-            except Exception:
-                await db.rollback()
+            except BaseException:
+                await asyncio.shield(db.rollback())
                 try:
                     if legacy_recovery_backups:
                         _restore_legacy_recovery_files(legacy_recovery_backups)
@@ -460,8 +461,8 @@ class EventStore:
                     )
                 await db.commit()
                 return needs_revalidation
-            except Exception:
-                await db.rollback()
+            except BaseException:
+                await asyncio.shield(db.rollback())
                 if backups:
                     _restore_legacy_recovery_files(backups)
                 raise

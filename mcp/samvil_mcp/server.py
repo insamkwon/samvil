@@ -284,8 +284,10 @@ async def get_store() -> EventStore:
     global _store
     if _store is None:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _store = EventStore(str(DB_PATH))
-        await _store.initialize()
+        candidate = EventStore(str(DB_PATH))
+        await candidate.initialize()
+        if _store is None:
+            _store = candidate
     return _store
 
 

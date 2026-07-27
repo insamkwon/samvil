@@ -81,6 +81,34 @@ def _write_passing_build_seed(project: Path) -> None:
     )
 
 
+def test_get_store_does_not_cache_an_instance_whose_initialize_was_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+
+    original_initialize = EventStore.initialize
+    calls = 0
+
+    async def cancel_once(store):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise asyncio.CancelledError()
+        await original_initialize(store)
+
+    monkeypatch.setattr(server, "_store", None)
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "store.db")
+    monkeypatch.setattr(EventStore, "initialize", cancel_once)
+
+    with pytest.raises(asyncio.CancelledError):
+        _run(server.get_store())
+
+    assert server._store is None
+    recovered = _run(server.get_store())
+    assert recovered is server._store
+    assert calls == 2
+
+
 def test_verification_command_does_not_use_unbounded_capture_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
