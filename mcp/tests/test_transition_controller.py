@@ -319,6 +319,16 @@ async def test_db_committed_journal_replays_remaining_materialization(
     project = tmp_path / "journal-replay"
     project.mkdir()
     session = await controller.store.create_session("journal-replay", "standard", str(project))
+    (project / "project.state.json").write_text(
+        json.dumps(
+            {
+                "session_id": session.id,
+                "current_stage": "interview",
+                "completed_stages": [],
+            }
+        ),
+        encoding="utf-8",
+    )
     claim = await controller.begin_stage(str(project), session.id, "samvil-interview", 0)
     original_append = server._append_project_event
     attempts = 0
@@ -338,6 +348,13 @@ async def test_db_committed_journal_replays_remaining_materialization(
             transition_id="journal-replay-transition",
         )
 
+    state = json.loads((project / "project.state.json").read_text(encoding="utf-8"))
+    state["last_heartbeat"] = "2026-07-27T12:00:00Z"
+    (project / "project.state.json").write_text(
+        json.dumps(state),
+        encoding="utf-8",
+    )
+
     recovered = await controller.commit_stage_transition(
         str(project), session.id, claim["claim_id"],
         "samvil-interview", "samvil-seed", 0,
@@ -345,6 +362,10 @@ async def test_db_committed_journal_replays_remaining_materialization(
     )
 
     assert recovered["status"] == "committed"
+    recovered_state = json.loads(
+        (project / "project.state.json").read_text(encoding="utf-8")
+    )
+    assert recovered_state["last_heartbeat"] == "2026-07-27T12:00:00Z"
     assert len((project / ".samvil" / "events.jsonl").read_text().splitlines()) == 1
     assert await controller.store.get_pending_project_events(session.id) == []
     assert not (project / ".samvil" / "transition-journal.json").exists()

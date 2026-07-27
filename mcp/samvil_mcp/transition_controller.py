@@ -766,13 +766,33 @@ class TransitionController:
         target_project_state = journal.get("target_project_state")
         if isinstance(target_project_state, dict):
             current_state = self._read_json(self._state_path(root))
-            allowed_state_hashes = {
-                str(journal.get("source_project_state_hash") or ""),
-                str(journal.get("target_project_state_hash") or ""),
-            }
-            if self._json_hash(current_state) not in allowed_state_hashes:
+            source_project_state = journal.get("source_project_state")
+            if not isinstance(source_project_state, dict):
+                raise TransitionError("transition journal source state is missing")
+            transition_keys = (
+                "session_id",
+                "current_stage",
+                "completed_stages",
+                "stage_transition_id",
+                "transition_revision",
+            )
+
+            def transition_projection(value: dict[str, Any]) -> dict[str, Any]:
+                return {key: value.get(key) for key in transition_keys}
+
+            current_projection = transition_projection(current_state)
+            allowed_projections = (
+                transition_projection(source_project_state),
+                transition_projection(target_project_state),
+            )
+            if current_projection not in allowed_projections:
                 raise TransitionError("project state changed during transition recovery")
-            state = dict(target_project_state)
+            state = dict(current_state)
+            for key in transition_keys:
+                if key in target_project_state:
+                    state[key] = target_project_state[key]
+                else:
+                    state.pop(key, None)
         else:
             state = self._read_json(self._state_path(root))
             completed = list(state.get("completed_stages") or [])
