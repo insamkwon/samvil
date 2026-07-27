@@ -152,6 +152,24 @@ def test_verification_command_does_not_use_unbounded_capture_output(
     assert len(output.encode("utf-8")) <= 2_000_000
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS coalition protocol")
+def test_verification_command_cannot_forge_supervisor_result(tmp_path: Path) -> None:
+    import samvil_mcp.server as server
+
+    script = (
+        "import pathlib,sys,tempfile; "
+        "[(root/'result').write_text('0') for root in "
+        "pathlib.Path(tempfile.gettempdir()).glob('samvil-verification-*')]; "
+        "sys.exit(7)"
+    )
+
+    exit_code, _ = server._run_verification_command(
+        tmp_path, [sys.executable, "-c", script], 5
+    )
+
+    assert exit_code == 7
+
+
 def test_verification_command_fails_closed_without_process_containment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -194,6 +212,30 @@ def test_verification_tracker_prunes_reused_pid_before_following_children(
     server._refresh_tracked_descendants(100, "leader", tracked)
 
     assert tracked == {}
+
+
+def test_linux_supervisor_does_not_kill_reused_leader_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import samvil_mcp.verification_supervisor as supervisor
+
+    class ReapedProcess:
+        pid = 4321
+
+        @staticmethod
+        def poll() -> int:
+            return 0
+
+    monkeypatch.setattr(supervisor, "_linux_descendants", lambda _pid: set())
+    monkeypatch.setattr(supervisor, "_reap_children", lambda: None)
+    monkeypatch.setattr(supervisor.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        supervisor.os,
+        "killpg",
+        lambda *_args: pytest.fail("reused process group must not be killed"),
+    )
+
+    supervisor._cleanup_linux_children(ReapedProcess())
 
 
 @pytest.mark.skipif(os.name != "posix", reason="process-group semantics are POSIX-only")

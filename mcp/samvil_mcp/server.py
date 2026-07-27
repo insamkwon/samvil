@@ -4152,45 +4152,56 @@ def _run_darwin_verification_command(
     maximum = 2_000_000
     token = secrets.token_hex(24)
     environment = _verification_environment(root, token)
-    runtime_root = Path(
-        tempfile.mkdtemp(prefix=".samvil-verification-", dir=root)
-    )
-    ready_path = runtime_root / "ready"
+    runtime_root = Path(tempfile.mkdtemp(prefix="samvil-verification-"))
+    status_path = runtime_root / "status.fifo"
     release_path = runtime_root / "release"
-    result_path = runtime_root / "result"
-    output_path = runtime_root / "output"
     supervisor_log = runtime_root / "supervisor.log"
+    os.mkfifo(status_path, 0o600)
+    os.mkfifo(release_path, 0o600)
     label = f"com.samvil.verification.{os.getpid()}.{secrets.token_hex(8)}"
     supervisor = Path(__file__).with_name("verification_supervisor.py")
     submitted = False
     coalition_ids: tuple[int, int] | None = None
-    chunks: deque[bytes] = deque()
-    output_size = 0
-    offset = 0
+    status_fd = os.open(status_path, os.O_RDONLY | os.O_NONBLOCK)
+    release_fd = -1
+    protocol_buffer = bytearray()
 
-    def append_output(chunk: bytes) -> None:
-        nonlocal output_size
-        chunks.append(chunk)
-        output_size += len(chunk)
-        while output_size > maximum and chunks:
-            overflow = output_size - maximum
-            first = chunks[0]
-            if overflow >= len(first):
-                output_size -= len(chunks.popleft())
-            else:
-                chunks[0] = first[overflow:]
-                output_size -= overflow
+    def read_protocol_bytes(size: int, deadline: float) -> bytes:
+        while len(protocol_buffer) < size:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("verification coalition protocol timed out")
+            readable, _, _ = select.select([status_fd], [], [], 0.02)
+            if not readable:
+                continue
+            try:
+                chunk = os.read(status_fd, max(65_536, size - len(protocol_buffer)))
+            except BlockingIOError:
+                continue
+            if chunk:
+                protocol_buffer.extend(chunk)
+        result = bytes(protocol_buffer[:size])
+        del protocol_buffer[:size]
+        return result
 
-    def drain_output() -> None:
-        nonlocal offset
-        try:
-            with output_path.open("rb") as stream:
-                stream.seek(offset)
-                while chunk := stream.read(65_536):
-                    offset += len(chunk)
-                    append_output(chunk)
-        except FileNotFoundError:
-            pass
+    def read_protocol_line(deadline: float) -> bytes:
+        while b"\n" not in protocol_buffer:
+            if len(protocol_buffer) > 4096:
+                raise RuntimeError("verification coalition protocol header is invalid")
+            if time.monotonic() >= deadline:
+                raise RuntimeError("verification coalition protocol timed out")
+            readable, _, _ = select.select([status_fd], [], [], 0.02)
+            if not readable:
+                continue
+            try:
+                chunk = os.read(status_fd, 65_536)
+            except BlockingIOError:
+                continue
+            if chunk:
+                protocol_buffer.extend(chunk)
+        line, _, remainder = protocol_buffer.partition(b"\n")
+        protocol_buffer.clear()
+        protocol_buffer.extend(remainder)
+        return bytes(line)
 
     try:
         arguments = [
@@ -4198,10 +4209,7 @@ def _run_darwin_verification_command(
             str(supervisor),
             "darwin",
             str(root),
-            str(ready_path),
             str(release_path),
-            str(result_path),
-            str(output_path),
             str(timeout_seconds),
             json.dumps(environment, separators=(",", ":")),
             json.dumps(command, separators=(",", ":")),
@@ -4213,7 +4221,7 @@ def _run_darwin_verification_command(
                 "-l",
                 label,
                 "-o",
-                str(supervisor_log),
+                str(status_path),
                 "-e",
                 str(supervisor_log),
                 "--",
@@ -4227,24 +4235,42 @@ def _run_darwin_verification_command(
             )
         submitted = True
         ready_deadline = time.monotonic() + 2
-        while not ready_path.exists() and time.monotonic() < ready_deadline:
-            time.sleep(0.005)
-        if not ready_path.exists():
+        ready = json.loads(read_protocol_line(ready_deadline))
+        if ready.get("type") != "ready" or not isinstance(ready.get("pid"), int):
             raise RuntimeError("verification coalition supervisor did not become ready")
-        supervisor_pid = int(ready_path.read_text(encoding="ascii"))
+        supervisor_pid = int(ready["pid"])
         coalition_ids = _darwin_process_coalition_ids(supervisor_pid)
         parent_coalition = _darwin_process_coalition_ids(os.getpid())
         if coalition_ids is None or coalition_ids == parent_coalition:
             raise RuntimeError("verification coalition identity is unavailable")
-        release_path.touch()
+        release_deadline = time.monotonic() + 2
+        while release_fd < 0:
+            try:
+                release_fd = os.open(release_path, os.O_WRONLY | os.O_NONBLOCK)
+            except OSError:
+                if time.monotonic() >= release_deadline:
+                    raise RuntimeError(
+                        "verification coalition release channel is unavailable"
+                    )
+                time.sleep(0.005)
+        status_path.unlink()
+        release_path.unlink()
+        os.write(release_fd, b"1")
+        os.close(release_fd)
+        release_fd = -1
         deadline = time.monotonic() + timeout_seconds + 3
-        while not result_path.exists():
-            drain_output()
-            if time.monotonic() >= deadline:
-                raise RuntimeError("verification coalition supervisor timed out")
-            time.sleep(0.01)
-        exit_code = int(result_path.read_text(encoding="ascii"))
-        drain_output()
+        result = json.loads(read_protocol_line(deadline))
+        if (
+            result.get("type") != "result"
+            or not isinstance(result.get("exit_code"), int)
+            or not isinstance(result.get("output_bytes"), int)
+        ):
+            raise RuntimeError("verification coalition result is invalid")
+        output_bytes = int(result["output_bytes"])
+        if output_bytes < 0 or output_bytes > maximum:
+            raise RuntimeError("verification coalition output length is invalid")
+        exit_code = int(result["exit_code"])
+        output_payload = read_protocol_bytes(output_bytes, deadline)
     finally:
         cleanup_error: Exception | None = None
         if submitted:
@@ -4265,12 +4291,19 @@ def _run_darwin_verification_command(
         except RuntimeError as exc:
             cleanup_error = cleanup_error or exc
         finally:
-            drain_output()
+            for fd in (release_fd, status_fd):
+                if fd >= 0:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            status_path.unlink(missing_ok=True)
+            release_path.unlink(missing_ok=True)
             shutil.rmtree(runtime_root, ignore_errors=True)
         if cleanup_error is not None:
             raise cleanup_error
 
-    output = b"".join(chunks).decode("utf-8", errors="replace")
+    output = output_payload.decode("utf-8", errors="replace")
     encoded = output.encode("utf-8")
     if len(encoded) > maximum:
         output = encoded[-maximum:].decode("utf-8", errors="ignore")

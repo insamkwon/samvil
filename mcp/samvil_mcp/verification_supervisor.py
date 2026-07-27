@@ -57,10 +57,21 @@ def _reap_children() -> None:
 
 
 def _cleanup_linux_children(process: subprocess.Popen[bytes]) -> None:
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except (PermissionError, ProcessLookupError):
-        pass
+    leader_is_live = process.poll() is None
+    group_is_owned = leader_is_live
+    if not group_is_owned:
+        for pid in _linux_descendants(os.getpid()):
+            try:
+                if os.getpgid(pid) == process.pid:
+                    group_is_owned = True
+                    break
+            except (PermissionError, ProcessLookupError):
+                continue
+    if group_is_owned:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (PermissionError, ProcessLookupError):
+            pass
     if process.poll() is None:
         try:
             process.wait(timeout=1)
@@ -121,22 +132,21 @@ def _run_linux(timeout_seconds: float, command: list[str]) -> int:
 
 def _run_darwin(
     root: Path,
-    ready_path: Path,
     release_path: Path,
-    result_path: Path,
-    output_path: Path,
     timeout_seconds: float,
     environment: dict[str, str],
     command: list[str],
 ) -> int:
-    ready_temporary = ready_path.with_suffix(".tmp")
-    ready_temporary.write_text(str(os.getpid()), encoding="ascii")
-    ready_temporary.replace(ready_path)
-    release_deadline = time.monotonic() + 5
-    while not release_path.exists():
-        if time.monotonic() >= release_deadline:
+    os.write(
+        1,
+        (
+            json.dumps({"type": "ready", "pid": os.getpid()}, separators=(",", ":"))
+            + "\n"
+        ).encode(),
+    )
+    with release_path.open("rb", buffering=0) as release:
+        if release.read(1) != b"1":
             return 125
-        time.sleep(0.005)
     maximum = 2_000_000
     chunks: deque[bytes] = deque()
     output_size = 0
@@ -199,10 +209,25 @@ def _run_darwin(
     exit_code = 124 if timed_out else int(process.returncode or 0)
     if timed_out:
         append_output(b"\nverification timed out\n")
-    output_path.write_bytes(b"".join(chunks))
-    temporary = result_path.with_suffix(".tmp")
-    temporary.write_text(str(exit_code), encoding="ascii")
-    temporary.replace(result_path)
+    payload = b"".join(chunks)
+    os.write(
+        1,
+        (
+            json.dumps(
+                {
+                    "type": "result",
+                    "exit_code": exit_code,
+                    "output_bytes": len(payload),
+                },
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode(),
+    )
+    view = memoryview(payload)
+    while view:
+        written = os.write(1, view)
+        view = view[written:]
     return 0
 
 
@@ -214,12 +239,9 @@ def main() -> int:
         return _run_darwin(
             Path(sys.argv[2]),
             Path(sys.argv[3]),
-            Path(sys.argv[4]),
-            Path(sys.argv[5]),
-            Path(sys.argv[6]),
-            float(sys.argv[7]),
-            json.loads(sys.argv[8]),
-            json.loads(sys.argv[9]),
+            float(sys.argv[4]),
+            json.loads(sys.argv[5]),
+            json.loads(sys.argv[6]),
         )
     raise RuntimeError(f"unsupported verification supervisor mode: {mode}")
 
