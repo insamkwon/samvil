@@ -37,21 +37,12 @@ _setup_codex_native() {
   esac
   echo ""
   echo "Codex native plugin activation (${installer_mode})..."
-  PYTHONPATH="$MCP_DIR" python3 -m samvil_mcp.codex_installer \
+  "$PYTHON_BIN" -P -m samvil_mcp.codex_installer \
     "$installer_mode" \
     --repo-root "$SAMVIL_ROOT" \
     --codex-home "$codex_profile_root" \
     --json
 }
-
-if [[ "$HOST" == "codex" ]]; then
-  _setup_codex_native "$MODE"
-  exit 0
-fi
-
-if [[ "$HOST" == "all" ]]; then
-  _setup_codex_native "$MODE"
-fi
 
 # ── Step 1. uv ──────────────────────────────────────────────────────────────
 echo ""
@@ -96,6 +87,15 @@ from samvil_mcp.regression_suite import snapshot_generation
   echo "      ✓ 핵심 도구 임포트 PASS"
 else
   echo "      ⚠️  임포트 실패 — 설치 후 'samvil-doctor'로 진단하세요"
+fi
+
+if [[ "$HOST" == "codex" ]]; then
+  _setup_codex_native "$MODE"
+  exit 0
+fi
+
+if [[ "$HOST" == "all" ]]; then
+  _setup_codex_native "$MODE"
 fi
 
 # ── Step 4. AGENTS.md 전역 설치 ────────────────────────────────────────────

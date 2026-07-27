@@ -560,7 +560,8 @@ def test_setup_shell_routes_codex_to_native_installer_without_legacy_global_writ
     repo = Path(__file__).resolve().parents[2]
     script = (repo / "scripts" / "setup-codex.sh").read_text(encoding="utf-8")
 
-    assert "python3 -m samvil_mcp.codex_installer" in script
+    assert '"$PYTHON_BIN" -P -m samvil_mcp.codex_installer' in script
+    assert script.index("[1/5] Python") < script.index('if [[ "$HOST" == "codex" ]]')
     assert '_install_agents "$HOME/.codex"' not in script
     assert "[mcp_servers.samvil-mcp]" not in script
 
