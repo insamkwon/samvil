@@ -270,7 +270,13 @@ def validate_activation_readiness(repo_root: Path) -> dict[str, Any]:
     if manifest_data.get("skills") != "./codex/skills/" or manifest_data.get("mcpServers") != "./.codex-mcp.json":
         blockers.append("Codex manifest does not use relative public surfaces")
     server = (launcher_data.get("mcpServers") or {}).get("samvil-mcp")
-    if not isinstance(server, dict) or server.get("args") != ["--from", "./mcp", "samvil-mcp"]:
+    launcher_script = root / "scripts" / "start-codex-mcp.sh"
+    if (
+        not isinstance(server, dict)
+        or server.get("command") != "bash"
+        or server.get("args") != ["./scripts/start-codex-mcp.sh"]
+        or not launcher_script.is_file()
+    ):
         blockers.append("Codex MCP launcher is not the relative package launcher")
     return {"ready": not blockers, "blockers": blockers, "public_skills": public_skills, "manifest": str(manifest), "launcher": str(launcher)}
 

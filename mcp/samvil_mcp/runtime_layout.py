@@ -16,14 +16,18 @@ def discover_repository_root(
     package_file: str | Path,
     working_directory: str | Path | None = None,
 ) -> Path:
-    """Find the installed plugin root by proving a required repository file exists."""
+    """Find the installed plugin root from process-owned installation evidence.
+
+    ``working_directory`` remains in the signature for compatibility, but it is
+    deliberately not trusted. A project can reproduce SAMVIL's public manifest
+    and instruction layout, while only the launcher environment or package
+    ancestry is owned by the running MCP installation.
+    """
     required = Path(required_relative_path)
     candidates: list[Path] = []
     configured = os.environ.get("SAMVIL_PLUGIN_ROOT", "").strip()
     if configured:
         candidates.append(Path(configured).expanduser())
-    cwd = Path(working_directory or Path.cwd()).expanduser()
-    candidates.extend((cwd, *cwd.parents))
     package = Path(package_file).expanduser().resolve(strict=False)
     candidates.extend(package.parents)
 

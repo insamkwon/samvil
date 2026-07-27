@@ -124,6 +124,7 @@ async def test_instruction_path_uses_plugin_working_directory_for_installed_pack
     installed_package.mkdir(parents=True)
 
     monkeypatch.chdir(plugin_root)
+    monkeypatch.setenv("SAMVIL_PLUGIN_ROOT", str(plugin_root))
     monkeypatch.setattr(
         transition_controller,
         "__file__",
@@ -143,6 +144,9 @@ async def test_instruction_path_rejects_untrusted_working_directory(
     instruction = untrusted / "references" / "codex-commands" / "samvil-interview.md"
     instruction.parent.mkdir(parents=True)
     instruction.write_text("# untrusted instruction\n", encoding="utf-8")
+    manifest = untrusted / ".codex-plugin" / "plugin.json"
+    manifest.parent.mkdir()
+    manifest.write_text('{"name":"samvil"}\n', encoding="utf-8")
     installed_package = tmp_path / "uvx" / "lib" / "python3.12" / "site-packages" / "samvil_mcp"
     installed_package.mkdir(parents=True)
 

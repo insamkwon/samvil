@@ -9,6 +9,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 CODEX_MANIFEST = REPO / ".codex-plugin" / "plugin.json"
 CODEX_MCP = REPO / ".codex-mcp.json"
+CODEX_MCP_LAUNCHER = REPO / "scripts" / "start-codex-mcp.sh"
 CODEX_SKILLS = REPO / "codex" / "skills"
 
 
@@ -39,8 +40,11 @@ def test_codex_mcp_launcher_is_plugin_relative() -> None:
     server = launcher["mcpServers"]["samvil-mcp"]
 
     assert server["cwd"] == "."
-    assert server["command"] == "uvx"
-    assert server["args"] == ["--from", "./mcp", "samvil-mcp"]
+    assert server["command"] == "bash"
+    assert server["args"] == ["./scripts/start-codex-mcp.sh"]
+    script = CODEX_MCP_LAUNCHER.read_text(encoding="utf-8")
+    assert 'export SAMVIL_PLUGIN_ROOT="$PLUGIN_ROOT"' in script
+    assert 'exec uvx --from "$PLUGIN_ROOT/mcp" samvil-mcp' in script
     serialized = CODEX_MCP.read_text(encoding="utf-8")
     assert "/Users/" not in serialized
     assert "/home/" not in serialized
