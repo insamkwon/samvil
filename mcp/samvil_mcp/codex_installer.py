@@ -206,7 +206,19 @@ def _unsafe_personal_skill_links(skills_root: Path) -> tuple[Path, ...]:
         return ()
     unsafe: list[Path] = []
     for skill_root in sorted(root.iterdir()):
-        if skill_root.is_symlink() or (skill_root / "SKILL.md").is_symlink():
+        contains_symlink = skill_root.is_symlink()
+        if skill_root.is_dir() and not contains_symlink:
+            for current_root, directory_names, file_names in os.walk(
+                skill_root, followlinks=False
+            ):
+                current = Path(current_root)
+                if any(
+                    (current / name).is_symlink()
+                    for name in (*directory_names, *file_names)
+                ):
+                    contains_symlink = True
+                    break
+        if contains_symlink:
             unsafe.append(skill_root)
     return tuple(unsafe)
 

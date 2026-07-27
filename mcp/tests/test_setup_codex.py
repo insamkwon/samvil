@@ -490,6 +490,39 @@ def test_isolated_executor_rollback_does_not_follow_nested_skill_symlink(
     assert personal_dir.is_symlink() is False
 
 
+def test_isolated_executor_blocks_symlink_inside_personal_skill_tree(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    personal_dir = codex_home / "skills" / "personal"
+    personal = personal_dir / "SKILL.md"
+    outside = tmp_path / "outside-user-data.txt"
+    helper = personal_dir / "helper.txt"
+    repo.mkdir()
+    personal_dir.mkdir(parents=True)
+    personal.write_text("---\nname: personal\n---\nkeep\n", encoding="utf-8")
+    outside.write_text("before\n", encoding="utf-8")
+    helper.symlink_to(outside)
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+    runner_called = False
+
+    def mutating_runner(_command, _env):
+        nonlocal runner_called
+        runner_called = True
+        helper.write_text("after\n", encoding="utf-8")
+
+    with pytest.raises(InstallBlocked, match="unsafe personal skill symlink"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=mutating_runner,
+        )
+
+    assert runner_called is False
+    assert outside.read_text(encoding="utf-8") == "before\n"
+
+
 def test_isolated_executor_preserves_snapshot_when_restore_copy_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
