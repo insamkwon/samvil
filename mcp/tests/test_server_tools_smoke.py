@@ -347,6 +347,83 @@ int main(int argc, char **argv) {
                 pass
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="native macOS containment fixture")
+def test_verification_tracker_catches_delayed_fd_closing_double_fork(
+    tmp_path: Path,
+) -> None:
+    import samvil_mcp.server as server
+
+    compiler = shutil.which("cc")
+    if not compiler:
+        pytest.skip("C compiler is unavailable")
+    source = tmp_path / "delayed-fd-close-detach.c"
+    binary = tmp_path / "delayed-fd-close-detach"
+    pid_path = tmp_path / "delayed-fd-close-detach.pid"
+    source.write_text(
+        """
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+int main(int argc, char **argv) {
+    usleep(200000);
+    for (int fd = 3; fd < 1024; fd++) close(fd);
+    pid_t child = fork();
+    if (child < 0) return 2;
+    if (child > 0) {
+        usleep(5000);
+        return 0;
+    }
+    if (setsid() < 0) _exit(3);
+    pid_t grandchild = fork();
+    if (grandchild < 0) _exit(4);
+    if (grandchild > 0) {
+        usleep(5000);
+        _exit(0);
+    }
+    int fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd >= 0) {
+        dprintf(fd, "%d", getpid());
+        close(fd);
+    }
+    sleep(30);
+    return 0;
+}
+""",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [compiler, str(source), "-o", str(binary)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    grandchild_pid = 0
+    try:
+        exit_code, _ = server._run_verification_command(
+            tmp_path, [str(binary), str(pid_path)], 2
+        )
+
+        assert exit_code == 0
+        grandchild_pid = int(pid_path.read_text(encoding="utf-8"))
+        for _ in range(40):
+            try:
+                os.kill(grandchild_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("delayed fd-closing grandchild survived verification")
+    finally:
+        if grandchild_pid:
+            try:
+                os.kill(grandchild_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
 def test_verification_sentinel_falls_back_to_proc_without_lsof(
     tmp_path: Path,
 ) -> None:
@@ -426,7 +503,7 @@ def test_verification_descendant_refresh_scans_only_minimal_live_roots(
         12: identities[12],
         13: identities[13],
     }
-    assert server._VERIFICATION_TRACK_INTERVAL_SECONDS >= 0.02
+    assert server._VERIFICATION_TRACK_INTERVAL_SECONDS == 0.001
 
 
 @pytest.mark.skipif(os.name != "posix", reason="process-group semantics are POSIX-only")

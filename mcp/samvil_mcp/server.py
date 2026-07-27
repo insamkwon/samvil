@@ -4447,9 +4447,7 @@ def _descendant_pids(parent_pid: int) -> set[int]:
 
 
 _DARWIN_LIBPROC: Any | None = None
-_VERIFICATION_TRACK_INITIAL_INTERVAL_SECONDS = 0.001
-_VERIFICATION_TRACK_INITIAL_WINDOW_SECONDS = 0.1
-_VERIFICATION_TRACK_INTERVAL_SECONDS = 0.02
+_VERIFICATION_TRACK_INTERVAL_SECONDS = 0.001
 
 
 class _DarwinProcBSDInfo(ctypes.Structure):
@@ -4654,19 +4652,11 @@ def _track_verification_descendants(
     tracked: dict[int, str],
 ) -> None:
     """Continuously retain descendants even when they detach and get reparented."""
-    high_frequency_until = (
-        time.monotonic() + _VERIFICATION_TRACK_INITIAL_WINDOW_SECONDS
-    )
     _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
     ready.set()
     while not stopped.is_set():
         _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
-        interval = (
-            _VERIFICATION_TRACK_INITIAL_INTERVAL_SECONDS
-            if time.monotonic() < high_frequency_until
-            else _VERIFICATION_TRACK_INTERVAL_SECONDS
-        )
-        stopped.wait(interval)
+        stopped.wait(_VERIFICATION_TRACK_INTERVAL_SECONDS)
 
 
 def _terminate_verification_processes(
