@@ -86,6 +86,7 @@ from .scaffold_targets import (
 from .ssot_io import atomic_write_text
 from .runtime_layout import RuntimeLayoutError, safe_child_directory
 from .event_sanitizer import (
+    redact_sensitive_text,
     sanitize_event_data,
     sanitize_event_label,
     sanitize_stage_label,
@@ -4034,9 +4035,31 @@ def _run_verification_command(
                 *command,
             ]
             popen_options["pass_fds"] = (release_read,)
+        verification_env = {
+            key: value
+            for key, value in os.environ.items()
+            if key
+            in {
+                "PATH",
+                "HOME",
+                "TMPDIR",
+                "TMP",
+                "TEMP",
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "TZ",
+                "SYSTEMROOT",
+                "COMSPEC",
+                "PATHEXT",
+                "WINDIR",
+            }
+        }
+        verification_env.update({"PWD": str(root), "CI": "1"})
         process = subprocess.Popen(
             launch_command,
             cwd=root,
+            env=verification_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             start_new_session=os.name == "posix",
@@ -4507,6 +4530,7 @@ async def run_stage_verification(
         exit_code, output = await asyncio.to_thread(
             _run_verification_command, root, command, timeout
         )
+        output = redact_sensitive_text(output)
         log_name = "build.log" if normalized == "samvil-build" else "qa.log"
         log_path = samvil_root / log_name
         atomic_write_text(log_path, f"{output}\nSAMVIL_EXIT:{exit_code}\n")

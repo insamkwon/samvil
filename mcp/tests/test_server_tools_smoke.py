@@ -808,6 +808,50 @@ def test_build_gate_uses_seed_implementation_rate_not_reported_metric(
     ]
 
 
+def test_runtime_verification_drops_host_secrets_and_redacts_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "runtime-secret-boundary"
+    secret = "sk-" + "live-" + "abcdefghijkl"
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import os; "
+            "print(os.environ.get('SAMVIL_PRIVATE_TOKEN', 'HOST_SECRET_MISSING')); "
+            "print('sk-' + 'live-' + 'abcdefghijkl')"
+        ),
+    ]
+    _write_mechanical_command(project, "build", command)
+    _write_passing_build_seed(project)
+    monkeypatch.setenv("SAMVIL_PRIVATE_TOKEN", secret)
+    store = EventStore(str(tmp_path / "runtime-secret-boundary.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("runtime-secret-boundary", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+
+    runtime = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+    )
+    log_text = (project / ".samvil" / "build.log").read_text(encoding="utf-8")
+    persisted = _run(store.get_runtime_receipt(session.id, "samvil-build"))
+    combined = json.dumps({"runtime": runtime, "persisted": persisted}) + log_text
+
+    assert runtime["status"] == "passed"
+    assert "HOST_SECRET_MISSING" in log_text
+    assert "[REDACTED_TOKEN]" in log_text
+    assert secret not in combined
+
+
 def test_prior_build_receipts_cannot_authorize_a_new_marker_revision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

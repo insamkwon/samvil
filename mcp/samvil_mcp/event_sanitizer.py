@@ -50,7 +50,8 @@ _MAX_DEPTH = 8
 _SAFE_EVENT_LABEL = re.compile(r"^[a-z][a-z0-9_:-]{0,63}$")
 
 
-def _redact_string(value: str) -> str:
+def redact_sensitive_text(value: str) -> str:
+    """Redact credentials from bounded runtime text without truncating it."""
     redacted = _EMAIL.sub("[REDACTED_EMAIL]", value)
     redacted = _AUTHORIZATION_HEADER.sub(_redact_header_match, redacted)
     redacted = _BEARER.sub("[REDACTED_TOKEN]", redacted)
@@ -58,6 +59,11 @@ def _redact_string(value: str) -> str:
     redacted = _CREDENTIAL.sub(_redact_credential_match, redacted)
     redacted = _COOKIE_HEADER.sub(_redact_header_match, redacted)
     redacted = _TOKEN_LITERAL.sub("[REDACTED_TOKEN]", redacted)
+    return redacted
+
+
+def _redact_string(value: str) -> str:
+    redacted = redact_sensitive_text(value)
     if len(redacted) > _MAX_STRING_LENGTH:
         return redacted[:_MAX_STRING_LENGTH] + "...[TRUNCATED]"
     return redacted
