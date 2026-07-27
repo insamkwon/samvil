@@ -503,6 +503,13 @@ class TransitionController:
             )
         ):
             return False
+        if (
+            journal.get("phase") == "PREPARED"
+            and not journal.get("journal_authentication")
+            and await self.store.get_event_by_id(str(journal.get("event_id") or ""))
+            is None
+        ):
+            return False
         _journal, persisted_event = await self._authoritative_journal_context(root, journal)
         return persisted_event is not None
 
@@ -594,15 +601,17 @@ class TransitionController:
                 != TransitionController._json_hash(payload)
             ):
                 raise TransitionError("transition journal integrity check failed")
-        if require_authentication:
-            supplied_authentication = str(
-                journal.get("journal_authentication") or ""
-            )
-            if not supplied_authentication or not hmac.compare_digest(
+        supplied_authentication = str(
+            journal.get("journal_authentication") or ""
+        )
+        if supplied_authentication:
+            if not hmac.compare_digest(
                 supplied_authentication,
                 self._journal_authentication(journal),
             ):
                 raise TransitionError("transition journal authentication failed")
+        elif require_authentication:
+            raise TransitionError("transition journal authentication failed")
 
     async def _reconstruct_lost_db_context(
         self,
@@ -673,7 +682,7 @@ class TransitionController:
             not isinstance(runtime_receipt_snapshot, dict)
             or str(runtime_receipt_snapshot.get("session_id") or "") != run_id
             or str(runtime_receipt_snapshot.get("stage") or "")
-            != from_stage.removeprefix("samvil-")
+            != from_stage
         ):
             raise TransitionError("lost DB runtime receipt is inconsistent")
         expected_gate = {
@@ -725,6 +734,7 @@ class TransitionController:
         event_id = str(journal["event_id"])
         session = await self.store.get_session(run_id)
         persisted_event = await self.store.get_event_by_id(event_id)
+        legacy_unsigned = not journal.get("journal_authentication")
         self._validate_journal_integrity(
             journal,
             require_authentication=persisted_event is None,
@@ -761,6 +771,52 @@ class TransitionController:
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 raise TransitionError("persisted transition metadata is incomplete") from exc
+            if legacy_unsigned:
+                current_state = self._read_json(self._state_path(root))
+                completed = list(current_state.get("completed_stages") or [])
+                try:
+                    completed_stage = state_stage_for(from_stage)
+                except ValueError:
+                    completed_stage = from_stage.removeprefix("samvil-")
+                if completed_stage not in completed:
+                    completed.append(completed_stage)
+                target_project_state = dict(current_state)
+                target_project_state.setdefault("session_id", run_id)
+                target_project_state.update(
+                    {
+                        "current_stage": target_state,
+                        "completed_stages": completed,
+                        "stage_transition_id": str(journal["transition_id"]),
+                        "transition_revision": int(journal["expected_revision"]) + 1,
+                    }
+                )
+                source_marker = self._read_json(
+                    root / ".samvil" / "next-skill.json"
+                )
+                target_marker = build_driver_marker(
+                    run_id=run_id,
+                    revision=int(journal["expected_revision"]) + 1,
+                    status="terminal" if journal["to_stage"] == "complete" else "ready",
+                    host_name=str(journal["host_name"]),
+                    from_stage=from_stage,
+                    next_skill=(
+                        "" if journal["to_stage"] == "complete" else str(journal["to_stage"])
+                    ),
+                    reason=f"{from_stage} completed",
+                )
+                journal.update(
+                    {
+                        "source_project_state": current_state,
+                        "source_project_state_hash": self._json_hash(current_state),
+                        "target_project_state": target_project_state,
+                        "target_project_state_hash": self._json_hash(target_project_state),
+                        "source_marker": source_marker,
+                        "source_marker_hash": self._json_hash(source_marker),
+                        "target_marker": target_marker,
+                        "target_marker_hash": self._json_hash(target_marker),
+                    }
+                )
+                self._write_journal(root, journal, str(journal["phase"]))
         else:
             inspection = inspect_chain_marker(str(root))
             if (
@@ -1013,6 +1069,28 @@ class TransitionController:
 
         journal = self._read_json(self._journal_path(root))
         if journal:
+            if (
+                journal.get("phase") == "PREPARED"
+                and not journal.get("journal_authentication")
+                and all(
+                    journal.get(key) == expected
+                    for key, expected in (
+                        ("transition_id", transition_id),
+                        ("run_id", run_id),
+                        ("claim_id", claim_id),
+                        ("from_stage", from_stage),
+                        ("to_stage", to_stage),
+                        ("expected_revision", expected_revision),
+                    )
+                )
+                and await self.store.get_event_by_id(
+                    str(journal.get("event_id") or "")
+                )
+                is None
+            ):
+                self._journal_path(root).unlink(missing_ok=True)
+                journal = {}
+        if journal:
             journal, persisted_event = await self._authoritative_journal_context(root, journal)
             if journal.get("transition_id") != transition_id:
                 raise TransitionError("another transition journal is in progress")
@@ -1129,7 +1207,7 @@ class TransitionController:
             "created_at": session.created_at,
         }
         claim_snapshot = dict(claim)
-        runtime_stage = from_stage.removeprefix("samvil-")
+        runtime_stage = from_stage
         runtime_receipt_snapshot = await self.store.get_runtime_receipt(
             run_id, runtime_stage
         )

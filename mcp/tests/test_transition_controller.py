@@ -368,6 +368,52 @@ async def test_db_committed_journal_replays_remaining_materialization(
     assert recovered_state["last_heartbeat"] == "2026-07-27T12:00:00Z"
     assert len((project / ".samvil" / "events.jsonl").read_text().splitlines()) == 1
     assert await controller.store.get_pending_project_events(session.id) == []
+
+
+@pytest.mark.asyncio
+async def test_unsigned_prepared_journal_restarts_same_transition_safely(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    project = tmp_path / "unsigned-prepared-retry"
+    project.mkdir()
+    session = await controller.store.create_session(
+        "unsigned-prepared-retry", "standard", str(project)
+    )
+    claim = await controller.begin_stage(
+        str(project), session.id, "samvil-interview", 0
+    )
+    original_save = controller.store.save_event_and_update_stage
+
+    async def fail_before_db(*_args, **_kwargs):
+        raise OSError("stop before DB")
+
+    monkeypatch.setattr(
+        controller.store, "save_event_and_update_stage", fail_before_db
+    )
+    with pytest.raises(OSError, match="stop before DB"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            data={"evidence": {"artifact": "interview-summary.md:1"}},
+            transition_id="unsigned-prepared-retry-transition",
+        )
+    journal_path = project / ".samvil" / "transition-journal.json"
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal.pop("journal_authentication")
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    monkeypatch.setattr(
+        controller.store, "save_event_and_update_stage", original_save
+    )
+
+    receipt = await controller.commit_stage_transition(
+        str(project), session.id, claim["claim_id"],
+        "samvil-interview", "samvil-seed", 0,
+        data={"evidence": {"artifact": "interview-summary.md:1"}},
+        transition_id="unsigned-prepared-retry-transition",
+    )
+
+    assert receipt["status"] == "committed"
+    assert not journal_path.exists()
     assert not (project / ".samvil" / "transition-journal.json").exists()
 
 
@@ -543,7 +589,9 @@ async def test_db_loss_recovery_restores_signed_build_receipts(
     )
     claim = await controller.begin_stage(str(project), session.id, "samvil-build", 0)
     runtime_receipt = await store.save_runtime_receipt(
-        session.id, "build", {"claim_id": claim["claim_id"], "verdict": "pass"}
+        session.id,
+        "samvil-build",
+        {"claim_id": claim["claim_id"], "verdict": "pass"},
     )
     gate_receipt = await store.save_gate_receipt(
         session.id,
@@ -571,7 +619,9 @@ async def test_db_loss_recovery_restores_signed_build_receipts(
     )
 
     assert envelope["recovery_mode"] == "retry_commit"
-    assert await recovered_store.get_runtime_receipt(session.id, "build") == runtime_receipt
+    assert await recovered_store.get_runtime_receipt(
+        session.id, "samvil-build"
+    ) == runtime_receipt
     assert await recovered_store.get_gate_receipt(session.id, "build_to_qa") == gate_receipt
 
 
@@ -699,6 +749,7 @@ async def test_db_committed_recovery_uses_persisted_event_not_rehashed_journal(
 
     journal_path = project / ".samvil" / "transition-journal.json"
     journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal.pop("journal_authentication")
     journal["event_payload"]["evidence"] = {"artifact": "forged.txt:1"}
     journal["event_type"] = "qa_pass"
     journal["event_payload_hash"] = hashlib.sha256(
@@ -744,6 +795,7 @@ async def test_db_committed_recovery_restores_claim_revision_and_host_from_event
 
     journal_path = project / ".samvil" / "transition-journal.json"
     journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal.pop("journal_authentication")
     journal.update({
         "claim_id": "forged-claim-id",
         "expected_revision": 41,
@@ -767,6 +819,51 @@ async def test_db_committed_recovery_restores_claim_revision_and_host_from_event
     assert receipt["claim_id"] == claim["claim_id"]
     assert receipt["marker_revision"] == 1
     assert recovered_claim["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_signed_db_committed_journal_rejects_target_state_tampering(
+    controller, tmp_path, monkeypatch
+):
+    import samvil_mcp.server as server
+
+    project = tmp_path / "signed-target-tamper"
+    project.mkdir()
+    session = await controller.store.create_session(
+        "signed-target-tamper", "standard", str(project)
+    )
+    claim = await controller.begin_stage(
+        str(project), session.id, "samvil-interview", 0
+    )
+    monkeypatch.setattr(
+        server,
+        "_append_project_event",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("stop")),
+    )
+    with pytest.raises(OSError, match="stop"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="signed-target-tamper-transition",
+        )
+    journal_path = project / ".samvil" / "transition-journal.json"
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal["target_project_state"]["current_stage"] = "deploy"
+    journal["target_project_state_hash"] = controller._json_hash(
+        journal["target_project_state"]
+    )
+    journal["target_marker"]["next_skill"] = "samvil-deploy"
+    journal["target_marker_hash"] = controller._json_hash(
+        journal["target_marker"]
+    )
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+
+    with pytest.raises(TransitionError, match="authentication"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-interview", "samvil-seed", 0,
+            transition_id="signed-target-tamper-transition",
+        )
 
 
 @pytest.mark.asyncio
