@@ -181,16 +181,34 @@ def inventory_personal_skills(skills_root: Path) -> tuple[SkillInventoryEntry, .
     if not root.is_dir():
         return ()
     entries: list[SkillInventoryEntry] = []
-    for skill_file in sorted(root.glob("*/SKILL.md")):
-        if skill_file.is_file():
+    for skill_root in sorted(root.iterdir()):
+        skill_file = skill_root / "SKILL.md"
+        if (
+            not skill_root.is_symlink()
+            and skill_root.is_dir()
+            and not skill_file.is_symlink()
+            and skill_file.is_file()
+        ):
             entries.append(
                 SkillInventoryEntry(
-                    path=skill_file.parent.resolve(),
+                    path=skill_root,
                     name=_frontmatter_name(skill_file),
-                    content_hash=_skill_tree_hash(skill_file.parent),
+                    content_hash=_skill_tree_hash(skill_root),
                 )
             )
     return tuple(entries)
+
+
+def _unsafe_personal_skill_links(skills_root: Path) -> tuple[Path, ...]:
+    """Return lexical skill entries that could escape the isolated root."""
+    root = Path(skills_root)
+    if not root.is_dir() or root.is_symlink():
+        return ()
+    unsafe: list[Path] = []
+    for skill_root in sorted(root.iterdir()):
+        if skill_root.is_symlink() or (skill_root / "SKILL.md").is_symlink():
+            unsafe.append(skill_root)
+    return tuple(unsafe)
 
 
 def compare_skill_inventories(
@@ -499,6 +517,8 @@ def execute_isolated_install(
         raise InstallBlocked(
             f"skills path escapes isolated profile: {root / 'skills'}"
         ) from exc
+    if _unsafe_personal_skill_links(personal_root):
+        raise InstallBlocked("unsafe personal skill symlink blocks isolated install")
     config = root / "config.toml"
     if config.is_symlink():
         raise InstallBlocked(f"Codex config symlink is not safe to mutate: {config}")
@@ -538,6 +558,8 @@ def execute_isolated_install(
             raise InstallBlocked(
                 f"skills path escapes isolated profile: {personal_root}"
             ) from exc
+        if _unsafe_personal_skill_links(personal_root):
+            raise InstallBlocked("unsafe personal skill symlink detected")
         current = inventory_personal_skills(personal_root)
         return tuple(entry for entry in current if entry.path not in migrated_paths)
 
@@ -563,6 +585,8 @@ def execute_isolated_install(
                     f"skills path escapes isolated profile: {personal_root}"
                 ) from exc
             personal_root.mkdir(parents=True, exist_ok=True)
+        for unsafe in _unsafe_personal_skill_links(personal_root):
+            unsafe.replace(quarantine_root() / unsafe.name)
         protected_paths = {entry.path for entry in protected_before}
         unexpected = tuple(
             entry
