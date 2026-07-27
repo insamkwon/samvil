@@ -9,7 +9,7 @@ Ensure build passes (`npm run build` succeeds).
 
 1. Run MCP tool `read_chain_marker(project_root="${PWD}")`.
 2. Read `project.seed.json` for AC tree and acceptance criteria.
-3. **Pass 1 — Mechanical**: Resolve the project test command with `resolve_mechanical_command(project_root=".", field="test", fallback="npm test")`, convert it to an argv JSON array without shell operators, and call `run_stage_verification(project_root=".", run_id=<run_id>, stage="samvil-qa", command_json=<argv JSON>)`. A non-`passed` result halts. Run any additional build, lint, and typecheck checks and record them separately.
+3. **Pass 1 — Mechanical**: Call `run_stage_verification(project_root=".", run_id=<run_id>, stage="samvil-qa", command_json="")`. The MCP resolves the exact test command from `.samvil/mechanical.toml`; callers cannot substitute another argv. A non-`passed` result halts. Run any additional build, lint, and typecheck checks and record them separately.
 4. **Pass 2 — Semantic**: For each AC leaf, verify implementation matches description.
    Use `grep`/`Read` to find file:line evidence. No evidence = FAIL.
 5. **Pass 3 — Quality**: Check responsive design, accessibility basics, code structure.

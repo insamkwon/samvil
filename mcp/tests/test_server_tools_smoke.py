@@ -53,6 +53,34 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro) if False else asyncio.run(coro)
 
 
+def _write_mechanical_command(project: Path, field: str, argv: list[str]) -> None:
+    samvil_root = project / ".samvil"
+    samvil_root.mkdir(parents=True, exist_ok=True)
+    command = shlex.join(argv)
+    (samvil_root / "mechanical.toml").write_text(
+        f"{field} = {json.dumps(command)}\n",
+        encoding="utf-8",
+    )
+
+
+def _write_passing_build_seed(project: Path) -> None:
+    (project / "project.seed.json").write_text(
+        json.dumps(
+            {
+                "features": [
+                    {
+                        "name": "verified feature",
+                        "acceptance_criteria": [
+                            {"id": "AC-1", "status": "pass"}
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_verification_command_does_not_use_unbounded_capture_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -601,7 +629,9 @@ def test_build_transition_uses_run_bound_trusted_receipts_after_event_growth(
     from samvil_mcp.models import EventType, Stage
 
     project = tmp_path / "run-bound-build"
-    (project / ".samvil").mkdir(parents=True)
+    command = [sys.executable, "-c", "print('verified build')"]
+    _write_mechanical_command(project, "build", command)
+    _write_passing_build_seed(project)
     store = EventStore(str(tmp_path / "run-bound.db"))
     _run(store.initialize())
     active = _run(store.create_session("active-display", "minimal", str(project)))
@@ -616,7 +646,7 @@ def test_build_transition_uses_run_bound_trusted_receipts_after_event_growth(
         str(project),
         active.id,
         "samvil-build",
-        json.dumps([sys.executable, "-c", "print('verified build')"]),
+        json.dumps(command),
     )))
     evidence = json.loads(_run(server.collect_stage_evidence(str(project), "build")))
     gate = json.loads(_run(gate_check(
@@ -653,6 +683,9 @@ def test_runtime_receipt_projection_failure_does_not_leave_trusted_db_pass(
     receipt_root = project / ".samvil" / "runtime-receipts"
     receipt_root.mkdir(parents=True)
     (receipt_root / "build.json").mkdir()
+    command = [sys.executable, "-c", "print('verified build')"]
+    _write_mechanical_command(project, "build", command)
+    _write_passing_build_seed(project)
     store = EventStore(str(tmp_path / "runtime-receipt-projection-failure.db"))
     _run(store.initialize())
     session = _run(store.create_session("projection-failure", "minimal", str(project)))
@@ -666,7 +699,7 @@ def test_runtime_receipt_projection_failure_does_not_leave_trusted_db_pass(
                 str(project),
                 session.id,
                 "samvil-build",
-                json.dumps([sys.executable, "-c", "print('verified build')"]),
+                json.dumps(command),
             )
         )
     )
@@ -686,6 +719,95 @@ def test_runtime_receipt_projection_failure_does_not_leave_trusted_db_pass(
     assert gate["verdict"] == "block"
 
 
+def test_runtime_verification_rejects_command_outside_mechanical_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "command-contract"
+    expected = [sys.executable, "-c", "print('contract build')"]
+    _write_mechanical_command(project, "build", expected)
+    _write_passing_build_seed(project)
+    store = EventStore(str(tmp_path / "command-contract.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("command-contract", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+
+    runtime = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project),
+                session.id,
+                "samvil-build",
+                json.dumps(["/usr/bin/true"]),
+            )
+        )
+    )
+
+    assert runtime["status"] == "blocked"
+    assert "mechanical contract" in runtime["error"]
+    assert not (project / ".samvil" / "build.log").exists()
+
+
+def test_build_gate_uses_seed_implementation_rate_not_reported_metric(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "mechanical-build-rate"
+    command = [sys.executable, "-c", "print('real build ran')"]
+    _write_mechanical_command(project, "build", command)
+    (project / "project.seed.json").write_text(
+        json.dumps(
+            {
+                "features": [
+                    {
+                        "name": "unfinished feature",
+                        "acceptance_criteria": [
+                            {"id": "AC-1", "status": "pending"}
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = EventStore(str(tmp_path / "mechanical-build-rate.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("mechanical-build-rate", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    runtime = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+    )
+    gate = json.loads(
+        _run(
+            gate_check(
+                "build_to_qa",
+                "minimal",
+                '{"implementation_rate":1.0}',
+                str(project),
+            )
+        )
+    )
+
+    assert runtime["status"] == "passed"
+    assert gate["verdict"] == "block"
+    assert gate["mechanical_metrics"]["implementation_rate"] == 0.0
+    assert gate["metric_mismatches"] == [
+        {"metric": "implementation_rate", "reported": 1.0, "mechanical": 0.0}
+    ]
+
+
 def test_prior_build_receipts_cannot_authorize_a_new_marker_revision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -694,7 +816,9 @@ def test_prior_build_receipts_cannot_authorize_a_new_marker_revision(
     from samvil_mcp.models import Stage
 
     project = tmp_path / "build-reentry"
-    (project / ".samvil").mkdir(parents=True)
+    command = [sys.executable, "-c", "print('same build artifact')"]
+    _write_mechanical_command(project, "build", command)
+    _write_passing_build_seed(project)
     store = EventStore(str(tmp_path / "build-reentry.db"))
     _run(store.initialize())
     session = _run(store.create_session("build-reentry", "minimal", str(project)))
@@ -709,7 +833,7 @@ def test_prior_build_receipts_cannot_authorize_a_new_marker_revision(
                 str(project),
                 session.id,
                 "samvil-build",
-                json.dumps([sys.executable, "-c", "print('same build artifact')"]),
+                json.dumps(command),
             )
         )
     )

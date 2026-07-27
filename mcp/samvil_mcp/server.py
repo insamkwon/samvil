@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import select
+import shlex
 import signal
 import subprocess
 import sys
@@ -3830,15 +3831,20 @@ def _mechanical_gate_evidence(
         evidence = _collect(
             project_root, "build", trusted_receipt=trusted_receipt
         )
+        phase_z = _finalize_build_phase_z(project_root)
+        implementation_rate = float(
+            (phase_z.get("metrics") or {}).get("implementation_rate", 0.0)
+        )
         return (
             {
                 "build_ok": bool(
                     evidence["build"]["runtime_verified"]
                     and evidence["build"]["exit_code"] == 0
-                )
+                ),
+                "implementation_rate": implementation_rate,
             },
             {"build_ok": True},
-            evidence,
+            {**evidence, "build_phase_z": phase_z},
         )
     if gate_name == "qa_to_deploy":
         evidence = _collect(
@@ -4133,6 +4139,35 @@ def _run_verification_command(
     if len(encoded_output) > max_output_bytes:
         output = encoded_output[-max_output_bytes:].decode("utf-8", errors="ignore")
     return exit_code, output
+
+
+def _mechanical_verification_command(
+    root: Path,
+    stage: str,
+) -> tuple[list[str], dict[str, str]]:
+    """Resolve a stage command from the project-owned mechanical SSOT."""
+    from .mechanical_toml import read_mechanical_toml
+
+    field = {"samvil-build": "build", "samvil-qa": "test"}[stage]
+    contract = read_mechanical_toml(root)
+    if not contract.get("ok"):
+        raise ValueError("mechanical contract is unreadable")
+    if not contract.get("exists"):
+        raise ValueError("mechanical contract is required for trusted verification")
+    command_text = str((contract.get("commands") or {}).get(field) or "").strip()
+    if not command_text:
+        raise ValueError(f"mechanical contract has no {field} command")
+    try:
+        argv = shlex.split(command_text)
+    except ValueError as exc:
+        raise ValueError(f"mechanical contract command cannot be parsed: {exc}") from exc
+    if not argv or any(not item or "\x00" in item for item in argv):
+        raise ValueError("mechanical contract command is invalid")
+    return argv, {
+        "field": field,
+        "source": ".samvil/mechanical.toml",
+        "sha256": hashlib.sha256(command_text.encode("utf-8")).hexdigest(),
+    }
 
 
 def _open_process_exit_observer(pid: int) -> tuple[str, Any]:
@@ -4434,22 +4469,19 @@ async def run_stage_verification(
     project_root: str,
     run_id: str,
     stage: str,
-    command_json: str,
+    command_json: str = "",
     timeout_seconds: float = 300,
 ) -> str:
-    """Execute one Build/QA command and persist a run-bound runtime receipt."""
+    """Execute the Build/QA command bound to the mechanical project SSOT."""
     try:
         root = Path(project_root).expanduser().resolve(strict=False)
         normalized = stage if stage.startswith("samvil-") else f"samvil-{stage}"
         if normalized not in {"samvil-build", "samvil-qa"}:
             raise ValueError("stage must be samvil-build or samvil-qa")
-        command = json.loads(command_json or "[]")
-        if (
-            not isinstance(command, list)
-            or not command
-            or any(not isinstance(item, str) or not item or "\x00" in item for item in command)
-        ):
-            raise ValueError("command_json must encode a non-empty argv string array")
+        command, command_profile = _mechanical_verification_command(root, normalized)
+        requested_command = json.loads(command_json or "[]")
+        if requested_command and requested_command != command:
+            raise ValueError("requested command does not match mechanical contract")
         timeout = min(max(float(timeout_seconds), 1.0), 900.0)
         try:
             samvil_root = safe_child_directory(root, ".samvil", label=".samvil")
@@ -4483,7 +4515,7 @@ async def run_stage_verification(
             "stage": normalized,
             "status": "passed" if exit_code == 0 else "failed",
             "trusted_by": "samvil_mcp_subprocess",
-            "command": command,
+            "command_profile": command_profile,
             "exit_code": exit_code,
             "authority_path": f".samvil/{log_name}",
             "authority_sha256": hashlib.sha256(log_path.read_bytes()).hexdigest(),

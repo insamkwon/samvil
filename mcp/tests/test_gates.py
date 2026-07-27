@@ -427,10 +427,14 @@ def test_mcp_build_gate_overwrites_reported_build_ok(tmp_path: Path, monkeypatch
     assert result["verdict"] == "block"
     assert result["metrics"]["build_ok"] is False
     assert result["reported_metrics"]["build_ok"] is True
-    assert result["mechanical_metrics"] == {"build_ok": False}
+    assert result["mechanical_metrics"] == {
+        "build_ok": False,
+        "implementation_rate": 0.0,
+    }
     assert result["allow_warn_ignored"] is True
     assert result["metric_mismatches"] == [
-        {"metric": "build_ok", "reported": True, "mechanical": False}
+        {"metric": "build_ok", "reported": True, "mechanical": False},
+        {"metric": "implementation_rate", "reported": 1.0, "mechanical": 0.0},
     ]
     assert "build_ok" in result["failed_checks"]
     assert any(item[:2] == ("warn", "gate_check.metric_mismatch") for item in health)
@@ -459,7 +463,10 @@ def test_mcp_build_gate_rejects_model_writable_success_log(tmp_path: Path) -> No
 
     assert result["verdict"] == "block"
     assert result["metrics"]["build_ok"] is False
-    assert result["mechanical_metrics"] == {"build_ok": False}
+    assert result["mechanical_metrics"] == {
+        "build_ok": False,
+        "implementation_rate": 0.0,
+    }
     assert result["stage_evidence"]["build"]["artifact_build_passed"] is True
     assert result["stage_evidence"]["build"]["runtime_verified"] is False
     assert "build_ok" in result["failed_checks"]

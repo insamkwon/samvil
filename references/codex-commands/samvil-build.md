@@ -15,7 +15,7 @@ Ensure `project.seed.json` exists and scaffold is complete.
    - Write production code (no stubs, no mocks).
    - Each PASS must have file:line evidence.
 5. After each leaf, run MCP tool `update_leaf_status(ac_tree_json=<tree>, leaf_id=<id>, status="pass", evidence_json=[...])`.
-6. Resolve the project build command with `resolve_mechanical_command(project_root=".", field="build", fallback="npm run build")`, convert it to an argv JSON array without shell operators, and call `run_stage_verification(project_root=".", run_id=<run_id>, stage="samvil-build", command_json=<argv JSON>)`. A non-`passed` result halts. This MCP subprocess receipt is the only trusted runtime authority.
+6. Call `run_stage_verification(project_root=".", run_id=<run_id>, stage="samvil-build", command_json="")`. The MCP resolves the exact build command from `.samvil/mechanical.toml`; callers cannot substitute another argv. A non-`passed` result halts. This MCP subprocess receipt is the only trusted runtime authority.
 7. Run MCP tool `collect_stage_evidence(project_root=".", stage="build")` and keep the returned trusted artifact evidence for Phase Z diagnostics.
 8. Run MCP tool `finalize_build_phase_z(project_path="${PWD}", rate_budget_stats_json=<stats JSON or "">, failed_features_json=<JSON array or "[]">, retries=<total retries>)`.
 9. From the Phase Z result, post each `ac_verdict_claims[]` entry with `claim_post(**entry)` and verify `stage_claim_id` with `claim_verify(claim_id=<id>, verified_by="agent:user")` when present.
