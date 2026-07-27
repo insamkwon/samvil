@@ -574,3 +574,35 @@ def test_mcp_qa_gate_rejects_model_writable_runtime_evidence(tmp_path: Path) -> 
     assert result["metrics"]["runtime_verified"] is False
     assert result["metrics"]["verification_mode"] == "static"
     assert result["stage_evidence"]["qa"]["artifact_runtime_passed"] is True
+
+
+def test_qa_to_deploy_zero_decided_tests_never_count_as_full_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.stage_evidence as stage_evidence
+    from samvil_mcp.server import _mechanical_gate_evidence
+
+    monkeypatch.setattr(
+        stage_evidence,
+        "collect_stage_evidence",
+        lambda *_args, **_kwargs: {
+            "qa": {
+                "runtime_verified": True,
+                "npm_test": {
+                    "ran": False,
+                    "passed": 0,
+                    "failed": 0,
+                    "exit_code": 0,
+                },
+            }
+        },
+    )
+
+    metrics, _thresholds, _evidence = _mechanical_gate_evidence(
+        str(tmp_path),
+        "qa_to_deploy",
+        trusted_receipt={"status": "passed"},
+    )
+
+    assert metrics["test_pass_rate"] == 0.0
+    assert metrics["runtime_verified"] is False

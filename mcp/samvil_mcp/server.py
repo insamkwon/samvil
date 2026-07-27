@@ -3912,13 +3912,12 @@ def _mechanical_gate_evidence(
         )
         npm_test = evidence["qa"]["npm_test"]
         decided = npm_test["passed"] + npm_test["failed"]
-        pass_rate = (
-            npm_test["passed"] / decided
-            if decided
-            else (1.0 if evidence["qa"]["runtime_verified"] else 0.0)
-        )
+        tests_ran = bool(npm_test["ran"] and decided > 0)
+        pass_rate = npm_test["passed"] / decided if tests_ran else 0.0
         runtime_verified = bool(
-            evidence["qa"]["runtime_verified"] and npm_test["exit_code"] is not None
+            evidence["qa"]["runtime_verified"]
+            and tests_ran
+            and npm_test["exit_code"] is not None
         )
         return (
             {
