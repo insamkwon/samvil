@@ -135,6 +135,33 @@ def _frontmatter_name(path: Path) -> str:
     return match.group(1).strip() if match else path.parent.name
 
 
+def _skill_tree_hash(skill_root: Path) -> str:
+    """Hash every owned path without following symlinks outside the skill."""
+    digest = hashlib.sha256()
+    for path in sorted(
+        skill_root.rglob("*"),
+        key=lambda item: item.relative_to(skill_root).as_posix(),
+    ):
+        relative = path.relative_to(skill_root).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(8, "big"))
+        digest.update(relative)
+        if path.is_symlink():
+            digest.update(b"L")
+            target = os.readlink(path).encode("utf-8")
+            digest.update(len(target).to_bytes(8, "big"))
+            digest.update(target)
+        elif path.is_dir():
+            digest.update(b"D")
+        elif path.is_file():
+            digest.update(b"F")
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        else:
+            digest.update(b"S")
+    return digest.hexdigest()
+
+
 @dataclass(frozen=True)
 class SkillInventoryEntry:
     path: Path
@@ -160,7 +187,7 @@ def inventory_personal_skills(skills_root: Path) -> tuple[SkillInventoryEntry, .
                 SkillInventoryEntry(
                     path=skill_file.parent.resolve(),
                     name=_frontmatter_name(skill_file),
-                    content_hash=_sha256(skill_file),
+                    content_hash=_skill_tree_hash(skill_file.parent),
                 )
             )
     return tuple(entries)

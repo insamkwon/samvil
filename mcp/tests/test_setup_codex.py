@@ -151,6 +151,24 @@ def test_personal_skill_inventory_compare_detects_name_or_hash_drift(tmp_path: P
     assert compare_skill_inventories(before, after) is False
 
 
+def test_personal_skill_inventory_detects_support_file_loss(tmp_path: Path) -> None:
+    skills = tmp_path / "skills"
+    skill = skills / "custom-review"
+    helper = skill / "scripts" / "helper.py"
+    helper.parent.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: custom-review\n---\nReview with helper.\n",
+        encoding="utf-8",
+    )
+    helper.write_text("print('helper')\n", encoding="utf-8")
+    before = inventory_personal_skills(skills)
+
+    helper.unlink()
+    after = inventory_personal_skills(skills)
+
+    assert compare_skill_inventories(before, after) is False
+
+
 def test_legacy_skill_classification_requires_byte_identity(tmp_path: Path) -> None:
     canonical = tmp_path / "canonical" / "run" / "SKILL.md"
     legacy = tmp_path / "legacy" / "samvil-run" / "SKILL.md"
