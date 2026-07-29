@@ -231,6 +231,180 @@ Task -1 cannot trust code that Task -1 is itself creating. Its first RED/GREEN,
 full-gate, review and commit operations therefore run through a minimal
 bootstrap boundary fixed by this already-reviewed plan commit.
 
+### Scope correction — macOS Seatbelt must be applied exactly once
+
+This is a scope correction to the Task -2 execution topology, not a reduction
+of security requirements or product scope. Confirmed macOS behavior makes the
+previous nested-sandbox design structurally impossible:
+
+```bash
+/usr/bin/sandbox-exec -p '(version 1)(allow default)' \
+  /usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/true
+```
+
+The command fails with `sandbox_apply: Operation not permitted` and exit 71.
+The outer profile already allows default behavior, so adding broader Seatbelt
+profile rules cannot make a process apply a second sandbox. A previous run
+without the outer sandbox produced 22/22 focused GREEN, but that run is
+explicitly rejected as Task -2 evidence because it did not execute inside the
+required bootstrap boundary.
+
+Task -2 therefore applies one outer sandbox around all uncommitted Task -1
+test, verifier and launcher code. `run-isolated.py` retains its normal/default
+contract: when invoked outside the bootstrap it directly invokes
+`/usr/bin/sandbox-exec` itself. Only the Task -2 bootstrap may request a
+`verified inherited sandbox` mode, in which the launcher reuses the already
+active outer sandbox instead of attempting a nested Seatbelt application.
+
+Inherited mode is fail-closed and is never authorized by an environment
+variable or command-line flag alone. Before running any untrusted command, the
+launcher must independently require and verify all of the following:
+
+- a fresh invocation nonce is present;
+- the expanded outer profile file exists and its SHA-256 equals the expected
+  profile digest;
+- an independently generated outer-bootstrap receipt pins that same profile
+  digest and invocation identity;
+- actual probes prove that real-home read and write are denied;
+- an actual network socket probe is denied;
+- an invocation-temp write probe and exact-root read probe both succeed.
+
+A forged inherited-mode request outside a sandbox, missing nonce or profile,
+missing or mismatched digest/receipt, or weakened denial must return a typed
+blocker. Candidate output and candidate-generated receipts remain untrusted;
+only the outer trusted controller may issue PASS. Bootstrap variables and
+context may be propagated only among trusted Task -1 test, verifier and
+launcher processes, and must be stripped from the candidate command
+environment.
+
+### Task -2 TCB completion — invocation-owned tool facade
+
+The first plan-only full gate proved that the prior bootstrap executable
+closure was incomplete. Completing that closure is part of the Task -2 trusted
+computing base; it does not expand production behavior, product scope, or the
+sandbox's authority.
+
+- Before creating the facade, use `git grep` against tracked gate-reachable
+  files to enumerate every supported `mktemp` argument shape. At this plan
+  correction, the complete tracked allowlist is
+  `scripts/dogfood-smoke.sh:60`:
+  `mktemp -d -t samvil-dogfood-smoke-XXXXXX`.
+- Create a bootstrap-owned, digest-pinned `tools/facade/bin/mktemp` facade. It
+  accepts only the enumerated shape, rewrites it to an explicit template below
+  the invocation-owned `TMPDIR`, and then invokes the pinned `/usr/bin/mktemp`.
+  Unknown flags, prefixes, missing arguments, extra arguments, or newly tracked
+  shapes fail closed. Focused probes must prove the allowed shape writes only
+  below invocation `TMPDIR` and every unknown shape is rejected.
+- Do not execute the `/usr/bin/git` xcrun shim. Copy the exact
+  regular `/Library/Developer/CommandLineTools/usr/bin/git`, `git-shell`, and
+  `scalar` binaries plus
+  `/Library/Developer/CommandLineTools/usr/libexec/git-core` under the exact
+  relative topology `<temp>/tools/usr/bin` and
+  `<temp>/tools/usr/libexec/git-core`, preserving git-core symlinks. Every
+  symlink must resolve inside `<temp>/tools/usr` and every target must exist;
+  missing or external targets block preflight. Set `GIT_EXEC_PATH` to the
+  copied git-core path, and hash the complete copied `tools/usr` tree, all
+  three regular bin targets, and the symlink inventory. Probe copied
+  `git --version`, `git --exec-path`, and `git rev-parse`. No read permission
+  for `/var/select/developer_dir` is allowed.
+- Copy the exact Codex bundled Node dependency tree from
+  `codex-primary-runtime/dependencies/node` into the invocation root. Reject
+  symlinks that resolve outside that copied tree, record tree and executable
+  digests, and place the copied `node/bin` before system paths. The current
+  bundle contains `node` and bundled `pnpm` bytes but no `npm` executable, so
+  create a bootstrap-owned, digest-pinned `node/bin/npm` compatibility facade
+  that accepts only the tracked gate's required `npm run <script>` and
+  `npm <script>` forms. The facade is executed directly by copied Node, parses
+  the fixture `package.json`, accepts only the exact tracked `build` and
+  `start` command bodies, and spawns copied Node without a shell or pnpm
+  self-spawn. Unknown arguments, script names or command bodies fail closed.
+  The preflight must prove
+  `shutil.which("npm")` resolves inside the invocation root before any dogfood
+  subprocess runs, so `/opt/homebrew` is never probed or allowed.
+- Pin the exact effective `PATH` order as `tools/facade/bin`,
+  `tools/usr/bin`, copied `node/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`.
+  The bootstrap receipt must bind the facade script digest, copied Git closure
+  digest, copied Node closure digest, every required executable identity, this
+  ordered path list, and the allowed/unknown-shape facade probe results.
+- Retain `(deny default)`, no writes below `/private/var/folders`, no reads of
+  `/opt/homebrew` or `/var/select`, and actual read/write denial probes for the
+  real `HOME` and `CODEX_HOME`. Network authority is selected only by the
+  trusted bootstrap according to the two fixed profile classes below.
+- The tracked archive has no `.git`, but the full gate exercises
+  `git rev-parse HEAD` and `git rev-parse --abbrev-ref HEAD`. After
+  materializing the exact staged tracked snapshot and before creating ignored
+  `mcp/.venv`, initialize an invocation-owned Git repository inside the temp
+  snapshot using only copied Git, temporary identity, isolated config, and an
+  invocation-owned empty hooks directory. Commit exactly the staged tracked
+  files, assert its tree equals the previously calculated staged snapshot
+  tree, assert `git remote` is empty, and bind the temporary commit, tree and
+  branch identities into the bootstrap receipt. Never recursively read the
+  source worktree while creating this metadata.
+
+### Task -2 network correction — two fixed profiles, one Seatbelt layer
+
+The plan's original statement that Phase 6 is "network-free" means it makes no
+external request. The pinned original
+`scripts/phase6-real-runtime-dogfood.py` nevertheless binds an ephemeral
+`127.0.0.1` TCP port, starts the generated app with `npm start`, and fetches
+that app over loopback. Running the unmodified original full gate under a
+profile that denies every socket therefore fails at `bind(("127.0.0.1", 0))`
+with `EPERM`. Skipping or rewriting that pinned runtime-real test would weaken
+the baseline and is forbidden.
+
+Task -2 keeps the single-sandbox topology but fixes two immutable policy
+classes. Each subprocess is enclosed by exactly one outer Seatbelt profile;
+profiles are never nested or switched inside a running sandbox:
+
+1. `release-control-network-zero` is used for every uncommitted Task -1
+   focused test, launcher/verifier test, candidate check and adversarial probe.
+   It contains `(deny network*)` and no network allow rule. The language
+   runtime may create an unbound AF_INET socket object, but loopback bind and
+   connect probes must fail with `EPERM`; no endpoint or packet authority is
+   granted.
+2. `pinned-full-gate-loopback-only` is used only for the exact staged snapshot
+   entry command `bash scripts/pre-commit-check.sh` and the pinned original
+   `mcp/tests` collection it invokes. It retains `(deny network*)` and adds
+   only `(allow network-inbound (local tcp "localhost:*"))` plus
+   `(allow network-outbound (remote tcp "localhost:*"))`. Broad rules such as
+   `(allow network*)`, `(allow network* (local ip))`, wildcard remote IPs,
+   UDP, Unix sockets, DNS/mDNS sockets and external TCP remain forbidden.
+
+The loopback-only profile is not a candidate-selectable mode. The trusted
+bootstrap must fail closed unless all of the following are true before
+Seatbelt invocation:
+
+- the requested profile class is derived by the trusted controller from a
+  fixed command manifest, not from an environment variable, CLI flag,
+  candidate receipt or candidate-controlled configuration;
+- the executable entrypoint, `scripts/pre-commit-check.sh`, Phase 6 script,
+  Phase 6 test and complete collected `mcp/tests` path/blob/mode inventory
+  match the staged snapshot identities recorded before the run;
+- the collected test/import manifest proves no `tools/release-control` module,
+  candidate verifier, candidate launcher or candidate authorization helper is
+  imported or executed under the loopback-only profile;
+- the profile digest, selected class, exact command manifest, entrypoint/test
+  digests and import manifest are bound into the outer bootstrap receipt.
+
+Profile acceptance is behavioral as well as textual. Before any gate:
+
+- `release-control-network-zero` must reject IPv4 loopback bind and connect
+  with `EPERM`;
+- `pinned-full-gate-loopback-only` must successfully bind an ephemeral
+  `127.0.0.1` TCP port and connect only to that invocation-owned listener;
+- the loopback-only profile must reject a TCP connect to the TEST-NET address
+  `192.0.2.1` with `EPERM` and must not resolve a hostname to perform the
+  probe;
+- both profiles must retain identical real-profile read/write denials,
+  invocation-root write authority, executable closure and sanitized
+  environment keys.
+
+Any command-manifest drift, newly collected test, unexpected import, external
+connect result other than `EPERM`, or attempt by Task -1/candidate bytes to
+select the loopback profile is a bootstrap blocker. Loopback permission is
+test infrastructure authority for the pinned baseline only; it is never part
+of the committed release-control launcher or quarantine candidate contract.
+
 The bootstrap trusted computing base is a digest-pinned executable/runtime
 closure, not the current repository venv. It includes absolute system tools
 used by the normal gate (`sandbox-exec`, `env`, `git`, `bash`, `sh`, `mktemp`,
@@ -263,14 +437,15 @@ root. The live ignored repository `.venv` is neither read nor executed.
   `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `GNUPGHOME`, `TMPDIR`, `XDG_*`, isolated
   Git global config, disabled credential helpers/askpass and disabled Git
   network protocols.
-- [ ] Invoke `/usr/bin/sandbox-exec` directly with an inline profile rendered
-  from this plan's fixed template: `(deny default)`, allow only required
+- [ ] Invoke `/usr/bin/sandbox-exec` directly with one inline profile rendered
+  from this plan's fixed profile class: `(deny default)`, allow only required
   process/mach/system-library reads, allow file reads for the exact pinned
   control worktree, hermetic temp runtime and archived temp snapshot,
   explicitly deny the source repository checkout and every other linked
   worktree, allow read/write only
-  for the exact Task -1 temporary root and explicitly reviewed control files,
-  and include no network allow rule.
+  for the exact Task -1 temporary root and explicitly reviewed control files.
+  The network-zero class includes no network allow rule; the pinned full-gate
+  class includes only the two exact loopback TCP rules above.
 - [ ] Copy the pinned Python/runtime/dependency and shell-tool closure into the
   invocation temp root before sandboxed execution. Verify there are no external
   symlink, editable-install, dynamic-library or import-path dependencies. An
@@ -297,19 +472,51 @@ root. The live ignored repository `.venv` is neither read nor executed.
 - [ ] Before Task -1 code exists, run bootstrap probes proving: system runtime
   and exact control inputs are readable; the temporary root is writable; a
   real-home sentinel and `$CODEX_HOME` candidate are unreadable/unwritable;
-  network socket creation fails; a surviving child is detected and killed.
+  the network-zero socket probe fails; the pinned-full-gate loopback probe
+  succeeds while its TEST-NET connect fails; and a surviving child is detected
+  and killed.
 - [ ] Record the expanded sandbox profile, its digest, environment-key list,
   executable digests, probe commands, denial log and result in a path-free
   bootstrap receipt.
-- [ ] Run every Task -1 RED/GREEN test, normal full pre-commit gate, staged-tree
-  review and `git commit` through this exact bootstrap boundary.
-- [ ] Before trusting the committed launcher, make it reproduce the bootstrap
-  probes and compare decisions/denials. Any weaker behavior blocks trust
-  promotion.
+- [ ] Add RED/GREEN acceptance cases proving: a forged inherited-mode request
+  outside a sandbox fails; nonce/profile/digest/receipt mismatch fails; the
+  correct outer sandbox succeeds; the candidate receives no bootstrap
+  context; Task -1 cannot select the loopback-only class; normal direct mode
+  still applies the network-zero sandbox; and direct/inherited network-zero
+  mode produce equivalent profile digests, denial decisions and environment
+  key sets.
+- [ ] Run every Task -1 focused test and staged-tree review inside one
+  `release-control-network-zero` outer sandbox invocation. Run the exact
+  staged full gate inside a separate
+  `pinned-full-gate-loopback-only` outer sandbox invocation only after the
+  trusted command/test/import manifests are verified. No process in either
+  path may call `sandbox-exec` a second time.
+- [ ] Before trust promotion, run the committed launcher in normal direct mode
+  outside the outer sandbox against the same probes. Compare the profile
+  digest, real-home/network denials, allowed exact-root/temp decisions and
+  environment key set with inherited-mode evidence. Any weaker or divergent
+  result blocks commit and trust promotion.
+- [ ] Do not broaden permissions to the real `HOME`/`CODEX_HOME`, writes below
+  `/private/var/folders`, external network in either mode, or any socket in the
+  release-control network-zero mode.
+- [ ] Run the exact staged snapshot's normal
+  `bash scripts/pre-commit-check.sh` with the copied Codex bundled Python 3.12,
+  digest-pinned local package artifact allowlist, `env -i`, invocation-owned
+  `HOME`/`CODEX_HOME`/`GNUPGHOME`/`TMPDIR`/`XDG_*`, the one outer sandbox,
+  real-profile denials, loopback-only/external-denial probes, trusted
+  command/test/import manifests and the fixed-log lock/absence protocol. Never
+  use the live `mcp/.venv` or external network.
+- [ ] Commit safety is part of Task -2. Because repository
+  `.githooks/post-commit` invokes `scripts/sync-cache.sh`, commit with
+  `git -c core.hooksPath=<invocation-owned-hooks> commit`. Install only an
+  invocation-owned pre-commit hook that re-runs and verifies the exact
+  hermetic full gate; install no post-commit hook. `--no-verify` is forbidden.
 
 No untrusted working-tree helper may wrap, replace, parameterize or interpret
-the bootstrap command/profile before the Task -1 control commit is created and
-pinned.
+the outer bootstrap command/profile before the Task -1 control commit is
+created and pinned. Verified inherited mode does not transfer PASS authority
+to Task -1 or candidate code; it only prevents the impossible second Seatbelt
+application while preserving the same denial boundary.
 
 ---
 
