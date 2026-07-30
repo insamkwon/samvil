@@ -122,6 +122,8 @@ outer verifier. Missing or stale original baseline evidence is a hard failure.
 | `release/quarantine/v4322-candidate-authorization.json.sig` | Create signed sidecar on design control branch | Detached authorization signature or typed local-only unsigned status |
 | `release/quarantine/v4322-original-receipt.json` | Generate on design control branch | Original commit/tree/version/file inventory and isolated baseline-gate digest; contains no local absolute path |
 | `release/quarantine/v4322-historical-surface-ledger.json` | Generate on design control branch | Every retrievable official artifact/class and union of historically discoverable skill/hook/setup/update/MCP/instruction paths; missing artifacts are explicit blockers |
+| `release/quarantine/v4322-passive-surface-manifest.json` | Create in the candidate and bind in external authorization | Canonical policy-classified passive-surface path/mode/blob manifest used as the explicit passive semantic role digest |
+| `tools/release-control/inherited_context.py` | Create and pin on design control branch before candidate work | Internal control-plane validator/probe module for the exact inherited-sandbox context and outer receipt protocol; not a candidate or public runtime API |
 | `tools/release-control/run-isolated.py` | Create and pin on design control branch before candidate work | Trusted `env -i`/sandbox/network-deny/child-supervision launcher |
 | `tools/release-control/verify-quarantine-candidate.py` | Create and pin on design control branch before candidate work | Independently verify authorization signature, control commit, candidate tree and every policy/manifest/passive/gate digest |
 | `tools/release-control/tests/test_release_control.py` | Create on design control branch | RED/GREEN tests for candidate bypass, forged GREEN output, sandbox escape, real-repository target and signature/digest failures |
@@ -132,10 +134,10 @@ historical row binds its discovered-surface-set digest, and the signed catalog
 binds the complete historical-surface-ledger digest. Candidate authorization
 is a separate sidecar and can never satisfy a distribution-row schema.
 
-The trusted verifier/launcher commit SHA, file digests and approved public-key
-identity are pinned before any candidate edit. Candidate-controlled code cannot
-replace or configure them. The separate candidate-tree authorization is keyed
-by tree SHA and content digests, so
+The trusted inherited-validator/verifier/launcher commit SHA, file digests and
+approved public-key identity are pinned before any candidate edit.
+Candidate-controlled code cannot replace or configure them. The separate
+candidate-tree authorization is keyed by tree SHA and content digests, so
 it can exist before a commit object. After the exact fuse commit exists, the
 final `quarantine_fuse` row binds its commit SHA and tree SHA. If an approved
 release signature cannot be produced locally, F0 may complete local code and
@@ -256,6 +258,244 @@ contract: when invoked outside the bootstrap it directly invokes
 `verified inherited sandbox` mode, in which the launcher reuses the already
 active outer sandbox instead of attempting a nested Seatbelt application.
 
+### Task -1 scope correction — split the inherited control protocol
+
+The staged launcher has no verified inherited-sandbox mode. Putting schema
+validation, trust-receipt validation, live `EPERM` probes, CLI mode selection,
+direct sandboxing, child supervision and receipt rendering into
+`run-isolated.py` would create an unreviewable control-plane monolith. Add the
+private internal module `tools/release-control/inherited_context.py` and split
+authority as follows:
+
+- `inherited_context.py` owns the exact v1 context and outer-receipt schemas,
+  canonical compact/sorted JSON serialization and SHA-256 hashing, strict
+  unknown/missing-field rejection, canonical path containment plus
+  regular-file/`nlink == 1` checks, protected-root digest binding, sanitized
+  environment-key binding, and independently executed inherited-mode boundary
+  probes. It must not invoke `sandbox-exec`, execute candidate code, import
+  candidate modules, or issue the final candidate PASS.
+- `run-isolated.py` owns CLI parsing, direct-mode `sandbox-exec`, child
+  supervision, environment construction/stripping and orchestration. In
+  inherited mode it calls the internal validator/probe module and must not
+  invoke nested `sandbox-exec`.
+- `verify-quarantine-candidate.py` remains the final outer verdict authority.
+  It calculates trust evidence independently and never trusts candidate output.
+
+This extra private module is a scope correction, not product expansion. It
+introduces no public behavior or runtime API, candidate authority, loopback
+permission, remote/user-profile access, or additional commit. All four Task -1
+files remain one control-plane commit. The launcher mode, never candidate CLI,
+environment or receipt bytes, selects one of two network-zero classes:
+`release-control-network-zero` for the trusted inherited control process and
+`release-candidate-network-zero` for a direct untrusted candidate process. The
+existing `pinned-full-gate-loopback-only` class remains full-gate-only.
+
+The launcher grammar is exact for both modes:
+
+```text
+<PINNED_PYTHON> <PINNED_CONTROL>/tools/release-control/run-isolated.py --root ABS_EXECUTION_ROOT --nonce HEX64 --timeout POSITIVE_SECONDS --receipt ABS_JSON --denial-log ABS_LOG [--inherited-sandbox-context ABS_JSON] -- ABS_COMMAND [ARG...]
+```
+
+- `<PINNED_PYTHON>` is the absolute copied Codex-owned Python 3.12 executable
+  selected by the Task -2 TCB. Its canonical path, blob identity and SHA-256 are
+  bound in the bootstrap receipt before Task -1 execution. There is no system
+  Python, user Python, `PATH` lookup or live-venv fallback. After resolving and
+  verifying this receipt-pinned executable, the remaining argv grammar shown
+  above is exact in both commands and tests.
+- `<PINNED_CONTROL>` is the absolute trusted-control snapshot selected by the
+  Task -2 TCB. Its control commit, tree, launcher path/blob/mode and every
+  imported control-module blob identity are bound in the bootstrap receipt.
+  Candidate bytes cannot provide, redirect or shadow this path.
+- Direct mode omits `--inherited-sandbox-context`; inherited mode requires it
+  exactly once in the shown position before `--`. Duplicate, reordered or
+  unknown launcher options, a missing command separator, a non-absolute
+  receipt, denial-log, context or command path, a nonce other than exactly 64
+  lowercase hexadecimal characters, or a non-finite/non-positive timeout fails
+  closed. In both modes, `--root` must already exist as a directory and the
+  supplied absolute spelling must exactly equal its resolved canonical path.
+  A symlink, `..`/`.` alias, non-canonical spelling, nonexistent path or
+  non-directory root is rejected before any file, probe or writable directory
+  is created. In inherited mode that canonical root must additionally exactly
+  equal context `execution_root`.
+- In inherited mode, CLI `--root` and `--nonce` must exactly match context
+  `execution_root` and `nonce`; CLI nonce must also exactly match
+  `SAMVIL_BOOTSTRAP_NONCE`. The required inherited-only environment variables
+  are `SAMVIL_BOOTSTRAP_NONCE` and `SAMVIL_BOOTSTRAP_CONTEXT_SHA256`; each value
+  is exactly 64 lowercase hexadecimal characters, and the latter must equal the
+  canonical context JSON SHA-256. The context is SSOT for profile, outer
+  receipt, protected roots/write paths and temp probe. Timeout remains trusted
+  caller input. Candidate bytes cannot supply, select or override any launcher
+  option, inherited environment binding or context field. Environment-only,
+  CLI-only, missing or mismatched inherited requests fail with distinct typed
+  blockers.
+- Direct mode accepts neither the inherited flag nor inherited bootstrap
+  environment authority; any `SAMVIL_BOOTSTRAP_*` input without the inherited
+  flag is an environment-only typed blocker. Its trusted-caller `TMPDIR` must
+  already exist as a canonical absolute directory outside `execution_root`.
+  After validating CLI/output paths, the launcher uses its fixed
+  `release-candidate-network-zero` profile, creates its direct invocation root
+  strictly below that `TMPDIR`, and applies `sandbox-exec` exactly once. That
+  direct profile permits the initial candidate `process-exec`, denies
+  `process-fork` and signal authority, and therefore denies `fork`, `vfork`,
+  `posix_spawn`, native-FFI fork and detached-child creation with `EPERM` at the
+  OS boundary. An `exec` replacement remains the same supervised PID under the
+  same Seatbelt policy. Inherited mode instead uses
+  `release-control-network-zero`, validates `TMPDIR` strictly inside the
+  context-bound invocation root and must not invoke `sandbox-exec`. After its
+  single trusted `Popen` and before executing the requested command, an
+  immutable no-shell exec wrapper lowers macOS `RLIMIT_NPROC` soft and hard
+  limits to `(1, 1)` and then `execve`s the exact command in the same PID. The
+  inherited command therefore cannot create a `fork`, native-FFI fork,
+  `posix_spawn` or detached `setsid` descendant; those attempts fail with
+  `EAGAIN`, and the hard limit cannot be raised again. A command that requires
+  subprocesses belongs in the outer trusted-control manifest, not inside the
+  inherited launcher child.
+- Before either mode executes its final command, the trusted wrapper lowers a
+  fixed resource manifest covering CPU time, regular-file size and open
+  descriptors. On macOS the TCB must first behaviorally probe whether a
+  meaningful hard address-space limit is enforceable: `RLIMIT_AS` aliases the
+  shared-region/RSS limit on supported hosts and may be impossible to lower
+  below the runtime's large mapped region. If so, the external controller uses
+  a fixed low RSS watchdog through the read-only kernel process API and records
+  that measured policy instead of claiming a nonexistent hard limit. Direct
+  mode also watches total non-followed bytes below its invocation root so many
+  individually bounded files cannot exhaust the host disk. `RLIMIT_FSIZE`
+  multiplied by usable `RLIMIT_NOFILE` must itself fit the aggregate disk
+  budget, bounding unlinked-but-open files that a directory scan cannot see.
+  Stdout/stderr are
+  controller-owned bounded captures and are never loaded with an unbounded
+  `.read()`. Limit signals, watchdog termination and bounded-capture overflow
+  produce a path-free `RESOURCE_LIMIT_EXCEEDED` blocker with the exact fixed
+  limit manifest; candidate output cannot downgrade it to PASS. All quota
+  checks run once more after child exit, so a fast exit cannot bypass them.
+- In both modes, `--receipt` and `--denial-log` targets must be distinct
+  absolute paths whose parents are already-existing canonical directories.
+  Both targets must be absent, strictly contained within the mode's validated
+  invocation-owned `TMPDIR`, and outside `execution_root`. Parent aliases or
+  symlinks, pre-existing targets of any type, non-directory/non-canonical
+  parents and escaping targets are rejected before any probe or writable
+  directory is created. After all path validation succeeds, each target is
+  created atomically and exclusively and verified as a regular file with
+  `nlink == 1` before use. If either output path is invalid, the typed blocker
+  is emitted only on stderr with a nonzero exit; the launcher performs no
+  unsafe fallback write. Later blockers may be written atomically to the
+  already validated receipt.
+- Before creating either output or running any probe, the receipt and
+  denial-log targets must also be pairwise distinct from `temp_probe_path` and
+  every `protected_write_paths` entry. In inherited mode these values come only
+  from the validated context; direct mode derives its equivalent trusted probe
+  paths before output creation. Any equality or canonical-path collision is a
+  typed blocker and creates no file, probe or writable directory.
+
+The inherited protocol is exact and private:
+- The context schema is exactly
+  `samvil.bootstrap.inherited-sandbox-context.v1`; the outer receipt schema is
+  exactly `samvil.bootstrap.outer-receipt.v1`; and the inherited profile class
+  is exactly `release-control-network-zero`. A context or outer receipt pinned
+  to `pinned-full-gate-loopback-only` is rejected as a typed class-selection
+  blocker before inherited probes or candidate execution. Candidate and Task
+  -1 bytes cannot select the loopback-only class.
+- The context contains exactly these fields: `schema`, `nonce`,
+  `profile_class`, `profile_path`, `profile_sha256`, `outer_receipt_path`,
+  `outer_receipt_sha256`, `invocation_root`, `execution_root`,
+  `protected_read_roots`, `protected_write_paths`, and `temp_probe_path`.
+  `protected_read_roots` has exact length two. `protected_write_paths` has
+  exact length two. Each write path must be absent and be an immediate child of
+  its positionally paired protected root: its canonical parent must exactly
+  equal that root and its final component must be one safe, non-empty basename
+  containing no separator or NUL and not equal to `.` or `..`.
+- Every path is absolute and canonical. The context file, profile file and
+  outer receipt are regular files with `nlink == 1`, contained within
+  `invocation_root`, and outside `execution_root`. The supplied execution root
+  must exactly match the launcher's independently known execution root.
+  `TMPDIR` itself must already exist as a canonical absolute directory, be
+  strictly contained within `invocation_root`, and be outside `execution_root`.
+  `temp_probe_path` must be strictly contained within that validated `TMPDIR`.
+  Missing, non-canonical, non-directory or escaping `TMPDIR` is rejected before
+  creating any probe or writable directory.
+- Each protected read root must already exist as a canonical absolute directory
+  and is validated as such without enumerating its contents. Canonicalization,
+  directory type and positional protected-write containment are established
+  before any denial probe. The outer trusted controller calls
+  `os.lstat(protected_write_path)` immediately before sandbox entry and requires
+  it to raise `OSError` with `errno == ENOENT` for each paired path.
+- The outer receipt contains exactly `schema`, `status`, `nonce`,
+  `profile_class`, `profile_sha256`, `protected_roots_sha256`, and
+  `environment_keys`. `status` is exactly `PASS`; every value must exactly
+  match independently calculated context/profile/protected-root/environment
+  evidence, and unknown or missing fields are rejected. The receipt is
+  path-free. Its `PASS` attests only to the outer bootstrap boundary and never
+  replaces the verifier's final candidate verdict.
+- `profile_sha256` is per-invocation evidence: it is the SHA-256 of that
+  invocation's exact expanded profile bytes and must match the profile file,
+  context and outer receipt for that invocation. Because canonical invocation
+  and execution roots differ, raw expanded `profile_sha256` equality is never a
+  direct-versus-inherited requirement.
+- Context, outer receipt, protected-root and environment-key digests use the
+  same canonical compact/sorted JSON bytes. `protected_roots_sha256` is the
+  SHA-256 of the canonical `protected_read_roots` array, and
+  `environment_keys` binds the exact sorted sanitized child-environment key
+  set. Before candidate execution,
+  `run-isolated.py` strips every key whose name begins
+  `SAMVIL_BOOTSTRAP_`, including the two required parent-only keys.
+- Direct-versus-inherited policy equivalence compares only: exact
+  `profile_class`; SHA-256 of the fixed trusted source-template bytes before
+  path substitution; a trusted sentinel-rendered normalized-policy digest; the
+  exact sanitized environment-key set; and behavioral allow/deny decisions.
+  Global substring replacement or searching expanded profile bytes is
+  forbidden. The trusted source template and its ordered slot manifest declare
+  every non-overlapping `invocation_root` and `execution_root` substitution
+  slot. The normal renderer fills those slots with the controller-known exact
+  canonical literals; the normalization renderer fills the same slots with the
+  fixed sentinels `<INVOCATION_ROOT>` and `<EXECUTION_ROOT>` and hashes those
+  rendered bytes. Nested roots are valid, including the normal case where
+  `execution_root` is below `invocation_root`, because neither literal is ever
+  found by substring search in expanded bytes. Rendering and normalization
+  fail closed if the trusted template/renderer exposes a missing, extra,
+  duplicated, reordered, overlapping or unexpected path-bearing slot or path
+  occurrence outside the declared manifest. Candidate bytes cannot provide or
+  alter the template, slot manifest, slot spans, sentinels or trusted literals.
+
+Inherited validation executes behavioral probes rather than accepting claims:
+
+- for each protected read root, the list probe is exactly
+  `os.listdir(root)`, and the open/read-authority probe is exactly
+  `os.open(root, os.O_RDONLY | os.O_DIRECTORY)` followed by `os.close(fd)` only
+  if the open unexpectedly succeeds. Each operation must raise `OSError` with
+  `errno == EPERM`; `EISDIR`, `ENOENT`, `EACCES`, any other errno and success
+  are failures;
+- the paired create-write probe is exactly
+  `os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)`. It must raise
+  `OSError` with `errno == EPERM`; `ENOENT`, `EACCES`, `EISDIR`, any other errno
+  and success are failures. If open unexpectedly succeeds, the probe closes the
+  descriptor immediately, returns a typed failure and never executes candidate
+  code;
+- writing, reading and deleting `temp_probe_path` succeeds;
+- reading the exact execution root succeeds;
+- AF_INET loopback bind and connect each fail with `EPERM`; creating an
+  unbound socket object may succeed and is not itself a failure.
+
+The loopback-only negative control is class-selection rejection, not execution
+under a broader profile: a context/receipt naming
+`pinned-full-gate-loopback-only` must be rejected before any inherited probe,
+Task -1 import or candidate execution. No Task -1 code is executed or imported
+under that profile. The probe module reports typed evidence to its trusted
+caller but cannot select a profile or issue a final PASS.
+
+Protected-write post-absence is outer evidence, not an inherited-probe claim.
+The probe may be unable to call `lstat` because the inherited sandbox correctly
+denies it. After the sandboxed launcher/probe exits, the outer trusted
+controller calls `os.lstat(path)` again and requires `ENOENT`. In inherited
+mode the Task -2 controller performs the pre-entry and post-exit checks around
+the one outer sandbox; in direct mode the committed trusted controller performs
+them around its one `sandbox-exec`. If an artifact exists, the controller
+captures its type/identity in the path-free failure evidence and returns a typed
+blocker; it must not silently remove the artifact before evidence capture. The
+pre-entry result is bound by the context/outer-bootstrap evidence, while the
+post-exit result belongs to the final outer controller/verifier run receipt;
+the pre-existing `samvil.bootstrap.outer-receipt.v1` cannot claim evidence from
+after its own creation.
+
 Inherited mode is fail-closed and is never authorized by an environment
 variable or command-line flag alone. Before running any untrusted command, the
 launcher must independently require and verify all of the following:
@@ -265,9 +505,12 @@ launcher must independently require and verify all of the following:
   profile digest;
 - an independently generated outer-bootstrap receipt pins that same profile
   digest and invocation identity;
-- actual probes prove that real-home read and write are denied;
-- an actual network socket probe is denied;
+- actual probes prove that protected-root list/read and paired protected-path
+  create-write operations are denied with `EPERM`;
+- actual AF_INET loopback bind and connect probes are denied with `EPERM`;
 - an invocation-temp write probe and exact-root read probe both succeed.
+- the outer trusted controller's post-exit `os.lstat` checks prove every paired
+  protected write path remains absent before it can issue the final verdict.
 
 A forged inherited-mode request outside a sandbox, missing nonce or profile,
 missing or mismatched digest/receipt, or weakened denial must return a typed
@@ -329,7 +572,7 @@ sandbox's authority.
 - Retain `(deny default)`, no writes below `/private/var/folders`, no reads of
   `/opt/homebrew` or `/var/select`, and actual read/write denial probes for the
   real `HOME` and `CODEX_HOME`. Network authority is selected only by the
-  trusted bootstrap according to the two fixed profile classes below.
+  trusted bootstrap according to the three fixed profile classes below.
 - The tracked archive has no `.git`, but the full gate exercises
   `git rev-parse HEAD` and `git rev-parse --abbrev-ref HEAD`. After
   materializing the exact staged tracked snapshot and before creating ignored
@@ -341,7 +584,7 @@ sandbox's authority.
   branch identities into the bootstrap receipt. Never recursively read the
   source worktree while creating this metadata.
 
-### Task -2 network correction — two fixed profiles, one Seatbelt layer
+### Task -2 network correction — three fixed profiles, one Seatbelt layer
 
 The plan's original statement that Phase 6 is "network-free" means it makes no
 external request. The pinned original
@@ -352,17 +595,38 @@ profile that denies every socket therefore fails at `bind(("127.0.0.1", 0))`
 with `EPERM`. Skipping or rewriting that pinned runtime-real test would weaken
 the baseline and is forbidden.
 
-Task -2 keeps the single-sandbox topology but fixes two immutable policy
-classes. Each subprocess is enclosed by exactly one outer Seatbelt profile;
-profiles are never nested or switched inside a running sandbox:
+Task -2 keeps the single-sandbox topology but fixes three immutable policy
+classes. Each subprocess is enclosed by exactly one Seatbelt profile; profiles
+are never nested or switched inside a running sandbox:
 
-1. `release-control-network-zero` is used for every uncommitted Task -1
-   focused test, launcher/verifier test, candidate check and adversarial probe.
-   It contains `(deny network*)` and no network allow rule. The language
-   runtime may create an unbound AF_INET socket object, but loopback bind and
-   connect probes must fail with `EPERM`; no endpoint or packet authority is
-   granted.
-2. `pinned-full-gate-loopback-only` is used only for the exact staged snapshot
+1. `release-control-network-zero` is used for uncommitted Task -1 pure/control
+   tests, inherited launcher probes and staged static review. It contains
+   `(deny network*)` and no network allow rule. The language runtime may create
+   an unbound AF_INET socket object, but loopback bind and connect probes must
+   fail with `EPERM`; no endpoint or packet authority is granted. It may retain
+   the process authority needed by the trusted controller to launch its test
+   process, so it is never the final boundary for an untrusted candidate.
+   Broad `mach-lookup`, POSIX shared-memory and unproven `sysctl-read` grants
+   are absent; otherwise a same-PID `exec` of `launchctl`/XPC could ask an
+   external daemon to create a process that does not inherit the caller's
+   Seatbelt or resource limit. Any indispensable Mach service must be an exact,
+   independently probed allowlist entry. Signal authority is limited to
+   `(target self)` and `(target children)` so the launcher can supervise its
+   one child but that child cannot signal its parent or any pre-existing
+   same-UID host process.
+2. `release-candidate-network-zero` is used only by normal direct launcher mode
+   for untrusted candidate checks. It has the same network, protected-root,
+   execution-root, invocation-root and sanitized-environment decisions as the
+   control class, but allows only the initial candidate `process-exec`, denies
+   `process-fork` and signal authority, and makes fork/spawn/detached-child
+   attempts fail with `EPERM`. The trusted external controller invokes exactly
+   one `sandbox-exec`; candidate bytes cannot select this class or the broader
+   control class. Its only device read exception is the exact literal
+   `/dev/null`; no `/dev` subpath or other device authority is granted. Pytest
+   receives an invocation-owned trusted config whose fixed bytes are embedded
+   in the pinned verifier, not a candidate-owned config and not `/dev/null` as
+   config discovery input.
+3. `pinned-full-gate-loopback-only` is used only for the exact staged snapshot
    entry command `bash scripts/pre-commit-check.sh` and the pinned original
    `mcp/tests` collection it invokes. It retains `(deny network*)` and adds
    only `(allow network-inbound (local tcp "localhost:*"))` plus
@@ -388,14 +652,31 @@ Seatbelt invocation:
 
 Profile acceptance is behavioral as well as textual. Before any gate:
 
-- `release-control-network-zero` must reject IPv4 loopback bind and connect
-  with `EPERM`;
+- both network-zero classes must reject IPv4 loopback bind and connect with
+  `EPERM`; `release-candidate-network-zero` must additionally reject exact
+  `fork`, native-FFI fork, `posix_spawn` and parent-signal probes with `EPERM`;
+- both network-zero classes must explicitly deny protected-root metadata and
+  existence queries before the global runtime metadata allowance: exact
+  `stat`/`lstat` return `EPERM`, while `access`/`exists` return only false and
+  reveal no size, type, mode or timestamp;
+- the control class's inherited wrapper must fix `RLIMIT_NPROC=(1,1)`, make
+  direct/native fork and `posix_spawn` fail with `EAGAIN`, deny
+  `launchctl`/XPC communication, and leave no external-controller post-check
+  process or invocation artifact;
+- after every direct candidate outcome, the trusted controller must remove the
+  candidate-writable invocation tree without following symlinks, repair
+  candidate-applied restrictive directory modes as needed, and verify the root
+  is absent. Cleanup never changes modes or contents of non-directory entries:
+  files, FIFOs, hardlinks and symlinks are unlinked only, so a same-filesystem
+  hardlink cannot mutate a signed snapshot or external owner inode.
+  Cleanup failure replaces any prior PASS, FAIL or resource result with the
+  typed `INVOCATION_CLEANUP_FAILED` blocker and exit code 2;
 - `pinned-full-gate-loopback-only` must successfully bind an ephemeral
   `127.0.0.1` TCP port and connect only to that invocation-owned listener;
 - the loopback-only profile must reject a TCP connect to the TEST-NET address
   `192.0.2.1` with `EPERM` and must not resolve a hostname to perform the
   probe;
-- both profiles must retain identical real-profile read/write denials,
+- all three profiles must retain the required real-profile read/write denials,
   invocation-root write authority, executable closure and sanitized
   environment keys.
 
@@ -472,33 +753,74 @@ root. The live ignored repository `.venv` is neither read nor executed.
 - [ ] Before Task -1 code exists, run bootstrap probes proving: system runtime
   and exact control inputs are readable; the temporary root is writable; a
   real-home sentinel and `$CODEX_HOME` candidate are unreadable/unwritable;
-  the network-zero socket probe fails; the pinned-full-gate loopback probe
-  succeeds while its TEST-NET connect fails; and a surviving child is detected
-  and killed.
+  the network-zero loopback bind/connect probes fail with `EPERM`; the
+  pinned-full-gate loopback probe succeeds while its TEST-NET connect fails;
+  an inherited trusted-control child-creation attempt is kernel-denied by the
+  pinned `RLIMIT_NPROC=(1,1)` wrapper before a descendant exists; and a direct
+  candidate child-creation attempt is Seatbelt-denied before a child exists.
 - [ ] Record the expanded sandbox profile, its digest, environment-key list,
   executable digests, probe commands, denial log and result in a path-free
   bootstrap receipt.
 - [ ] Add RED/GREEN acceptance cases proving: a forged inherited-mode request
   outside a sandbox fails; nonce/profile/digest/receipt mismatch fails; the
   correct outer sandbox succeeds; the candidate receives no bootstrap
-  context; Task -1 cannot select the loopback-only class; normal direct mode
-  still applies the network-zero sandbox; and direct/inherited network-zero
-  mode produce equivalent profile digests, denial decisions and environment
-  key sets.
-- [ ] Run every Task -1 focused test and staged-tree review inside one
-  `release-control-network-zero` outer sandbox invocation. Run the exact
-  staged full gate inside a separate
+  context; a context/receipt pinned to the loopback-only class is rejected
+  before probes, Task -1 import or candidate execution; normal direct mode
+  applies `release-candidate-network-zero`; inherited mode remains fixed to
+  `release-control-network-zero`; their shared network/file/environment
+  decisions and environment key sets agree; and the direct class alone has
+  immutable process-fork/signal denial. Compare class-specific trusted
+  source-template and sentinel-rendered normalized-policy digests without
+  requiring raw expanded `profile_sha256` equality. Also prove all
+  launcher commands/tests use the receipt-pinned `<PINNED_PYTHON>` with no
+  system/user/PATH/live-venv fallback; the exact remaining direct/inherited CLI
+  grammar; duplicate or
+  misplaced inherited flags, environment-only, CLI-only and environment/CLI
+  mismatch requests return their typed failures; unknown/missing schema fields
+  fail; aliased/symlinked/non-canonical parents and pre-existing regular,
+  directory, symlink or other non-regular receipt/denial-log targets fail;
+  invalid output paths emit only stderr/nonzero exit and no output file; valid
+  targets are exclusive regular `nlink == 1` files;
+  receipt/denial-log collisions with each other, `temp_probe_path` or either
+  protected write path fail before any file/probe/writable directory creation;
+  nonexistent, file, symlink, `..`/`.`-aliased or otherwise non-canonical roots
+  fail before writable action, and inherited CLI/context root mismatch fails;
+  missing, non-canonical, non-directory, invocation-root-escaping or
+  execution-root-contained `TMPDIR` fails before any probe or writable
+  directory is created; all `SAMVIL_BOOTSTRAP_*` keys are absent from the child
+  environment; and a nested-root case where `execution_root` is below
+  `invocation_root` produces different raw expanded profile hashes across two
+  invocations but the same trusted sentinel-rendered normalized-policy digest.
+- [ ] Run pure/control/inherited Task -1 tests and staged-tree review inside one
+  `release-control-network-zero` outer sandbox invocation whose trusted
+  manifest excludes every direct-mode real-profile test. Before the control
+  commit exists, do not execute the untrusted staged launcher outside that
+  boundary. Instead, have the pre-existing Task -2 external controller render
+  the independently pinned `release-candidate-network-zero` reference profile
+  and apply `sandbox-exec` exactly once to the staged adversarial probe corpus;
+  compare the staged launcher's pure rendered bytes/digests to that independent
+  reference inside the outer control test. Run the exact staged full gate
+  inside a third
   `pinned-full-gate-loopback-only` outer sandbox invocation only after the
-  trusted command/test/import manifests are verified. No process in either
-  path may call `sandbox-exec` a second time.
-- [ ] Before trust promotion, run the committed launcher in normal direct mode
-  outside the outer sandbox against the same probes. Compare the profile
-  digest, real-home/network denials, allowed exact-root/temp decisions and
-  environment key set with inherited-mode evidence. Any weaker or divergent
-  result blocks commit and trust promotion.
+  trusted command/test/import manifests are verified. That full-gate manifest
+  must prove no Task -1 module is imported or executed. No path may nest or
+  switch Seatbelt profiles.
+- [ ] Before trust promotion, compare the direct candidate and inherited
+  control evidence. Require distinct exact profile classes and class-specific
+  trusted source-template/normalized-policy digests; require their shared
+  real-home/network denials, allowed exact-root/temp decisions and environment
+  key set to agree; and require only the direct candidate class to prove OS
+  `process-fork`/spawn/signal denial. Retain each invocation's raw expanded
+  `profile_sha256` only as its own exact-byte receipt evidence; do not require
+  cross-invocation equality. After the one control commit is created, run the
+  exact committed launcher/verifier direct integration manifest outside any
+  existing Seatbelt so that it applies the candidate profile exactly once. Any
+  weaker or divergent result requires an amend and a complete review/gate
+  replay.
 - [ ] Do not broaden permissions to the real `HOME`/`CODEX_HOME`, writes below
-  `/private/var/folders`, external network in either mode, or any socket in the
-  release-control network-zero mode.
+  `/private/var/folders`, external network in either mode, or loopback
+  bind/connect and packet/endpoint authority in release-control network-zero
+  mode. Unbound socket object creation alone is not authority and may succeed.
 - [ ] Run the exact staged snapshot's normal
   `bash scripts/pre-commit-check.sh` with the copied Codex bundled Python 3.12,
   digest-pinned local package artifact allowlist, `env -i`, invocation-owned
@@ -528,27 +850,169 @@ commit.
 
 **Files:**
 
+- Create: `tools/release-control/inherited_context.py`
 - Create: `tools/release-control/run-isolated.py`
 - Create: `tools/release-control/verify-quarantine-candidate.py`
 - Create: `tools/release-control/tests/test_release_control.py`
 
-- [ ] Write RED tests for a candidate that prints forged PASS, replaces its own
-  verifier, supplies a candidate-local authorization, changes one authorized
-  digest, requests the real repository as a ref target, reads the real profile,
-  opens a network socket, spawns a surviving child, or omits an expected test.
-- [ ] Implement the trusted isolation launcher with sanitized environment,
-  macOS sandbox policy, hard network deny, child supervision and denial-log
-  capture. It must run from the pinned control checkout, never import candidate
-  Python modules, and treat candidate output as untrusted bytes.
-- [ ] Implement the outer verifier to calculate Git tree/path/mode/blob
-  identities itself, verify the external authorization and signature policy,
-  execute candidate checks only inside the trusted sandbox, and independently
-  calculate the final verdict.
-- [ ] Run focused tests RED then GREEN, staged-tree reviews and the normal full
-  pre-commit gate exclusively through the Task -2 bootstrap boundary.
+- [ ] **A — pure protocol RED/GREEN:** write failing table/property tests, then
+  implement `inherited_context.py` schema, canonical JSON/hash, exact-field,
+  path-containment, regular-file/`nlink`, protected-root digest and sanitized
+  environment-key validation. Cover env-only, CLI-only, mismatch, unknown and
+  missing fields, wrong lowercase-hex widths, path aliases/escapes, wrong
+  execution root, wrong cardinalities, missing/non-canonical/non-directory,
+  invocation-root-escaping or execution-root-contained `TMPDIR`, escaping
+  `temp_probe_path`, unsafe/non-immediate protected write basenames, output/probe
+  path collisions, and altered receipt/context/profile digests. Cover existing
+  canonical roots plus nonexistent, non-directory, symlink, `..`/`.` alias and
+  CLI/context root mismatch. Every invalid root, `TMPDIR` or collision case must
+  fail before creating any file, probe or writable directory.
+- [ ] **B — real boundary probe RED/GREEN:** under the Task -2
+  `release-control-network-zero` outer sandbox, prove each existing canonical
+  protected directory is validated without content enumeration, then prove
+  exact `os.listdir(root)` and
+  `os.open(root, os.O_RDONLY | os.O_DIRECTORY)` operations each raise `EPERM`.
+  Treat `EISDIR`, `ENOENT`, `EACCES`, other errno values or success as failure;
+  close the descriptor only if open unexpectedly succeeds. Separately prove
+  the outer controller sees `os.lstat(path) -> ENOENT` immediately before
+  sandbox entry; the inherited probe's exact
+  `os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)` returns `EPERM`;
+  `ENOENT`, `EACCES`, `EISDIR`, other errno values and success fail. On
+  unexpected success close immediately, return typed failure and execute no
+  candidate. After sandbox exit the outer controller must again see `lstat ->
+  ENOENT`; an artifact is reported with evidence and is not silently removed
+  first. The inherited probe never claims the post-check. Also prove temp
+  write/read/delete succeeds, exact execution-root read succeeds, and AF_INET
+  loopback bind/connect return `EPERM`. Unbound socket creation need not fail.
+  A loopback-only context/receipt is rejected before this probe phase; do not
+  execute or import Task -1 under `pinned-full-gate-loopback-only`.
+- [ ] **C — launcher RED/GREEN:** integrate exact
+  full direct/inherited grammar after the receipt-pinned `<PINNED_PYTHON>`,
+  including the inherited flag exactly once in its fixed position,
+  CLI/context/environment root and nonce bindings, and trusted-caller timeout
+  ownership. Reject system/user/PATH/live-venv interpreter fallback. In direct
+  mode validate the caller's
+  existing canonical absolute `TMPDIR` outside execution root before creating
+  the direct invocation root strictly below it; reject bootstrap variables
+  without the inherited flag. Validate absent receipt/denial-log targets and
+  their existing canonical, non-aliased, non-symlink parents before any write;
+  reject pre-existing regular, directory, symlink and other non-regular targets.
+  Reject output/output, output/temp-probe and output/protected-write canonical
+  collisions before creating any file or probe.
+  On invalid output use stderr/nonzero exit only, otherwise create both
+  exclusively and verify regular `nlink == 1`. Integrate direct-mode
+  `sandbox-exec`, inherited-mode
+  validator/probe calls without nested `sandbox-exec`, the inherited
+  `RLIMIT_NPROC=(1,1)` no-shell exec wrapper, child supervision,
+  denial-log capture, sanitized environment construction and complete
+  `SAMVIL_BOOTSTRAP_*` stripping. Prove direct mode is fixed to
+  `release-candidate-network-zero`, inherited mode is fixed to
+  `release-control-network-zero`, and their shared network/file/environment
+  decisions agree while the direct class carries the additional immutable
+  process-fork/signal denials. Compare each class's fixed trusted
+  source-template digest, trusted sentinel-rendered normalized-policy digest,
+  decisions and environment keys without comparing raw expanded
+  `profile_sha256`. Each normalized digest must be rendered from its trusted
+  ordered slot manifest with fixed sentinels, never produced by global
+  replacement/search of expanded bytes.
+  Reject missing, extra, duplicated, reordered, overlapping or unexpected
+  path-bearing slots/occurrences, and prove candidate bytes cannot define the
+  template, slot manifest/spans, sentinels or literals. Add a RED/GREEN case
+  where `execution_root` is nested below `invocation_root`: two invocations have
+  different raw expanded profile hashes but the same trusted sentinel-rendered
+  normalized-policy digest.
+  A loopback-only class remains rejected before probes or candidate execution.
+- [ ] **D — verifier integration/adversarial suite:** implement the outer
+  verifier's independent Git tree/path/mode/blob, authorization and signature
+  calculations and final verdict. RED/GREEN cases include forged PASS,
+  self-replaced verifier, candidate-local authorization, changed authorized
+  digest, Git replace refs, loose-object content substitution under an
+  authorized OID, real-repository ref target, protected-profile read, socket attempt,
+  direct and inherited detached-child creation attempts, and omitted expected
+  test. Candidate output and candidate
+  receipts remain untrusted bytes. The verifier must reject an inherited
+  candidate request: untrusted candidate execution is direct-only through the
+  fixed `release-candidate-network-zero` profile. Real-profile adversarial tests
+  must prove protected read, socket bind/connect, `fork`, native-FFI fork,
+  `posix_spawn` and parent signal all fail with `EPERM`. No candidate-side
+  Python audit hook, stderr marker or candidate-owned denial receipt is PASS
+  authority. A candidate may catch the returned `EPERM`; the trusted receipt
+  claims containment and exact OS boundary behavior, not absence of attempted
+  syscalls. A later attempt-free claim requires a separate external OS audit
+  channel that candidate code cannot close or mutate.
+  Candidate stdout, stderr and denial-log bytes are non-authoritative diagnostic
+  artifacts and their hashes are omitted from the promotable final verifier
+  receipt; pytest timing or candidate diagnostics therefore cannot break the
+  repeat-twice byte-identity contract. Only trusted command identity, exit
+  status, profile/boundary/resource evidence and independently calculated tree
+  bindings enter that receipt.
+  Before the first candidate Git plumbing call, require an isolated clone with
+  a canonical `.git` directory; reject `.git` files, worktree/common-directory
+  indirection, symlinks, hardlink ambiguity, special files, alternates,
+  shallow/graft/replace state and escaping topology. The trusted controller
+  descriptor-relatively snapshots the complete required `.git` closure into
+  its invocation-owned `TMPDIR` with no-follow, identity, depth, file-count and
+  total-byte bounds. It audits the copied config bytes, and every later Git
+  command uses only that immutable copied `--git-dir`; candidate `.git` is never
+  reopened. Every plumbing call fixes `GIT_NO_REPLACE_OBJECTS=1`, rejects
+  unsupported object formats and treats `ls-tree` object IDs only as claims.
+  The trusted controller bounded-reads every blob,
+  independently recomputes the exact Git object hash over
+  `blob <length>\0<bytes>`, requires equality with the inventory OID, and stores
+  one immutable verified-byte map. Snapshot materialization consumes only that
+  map; it must not call candidate Git or reopen candidate object bytes after
+  verification. Before the first snapshot directory or file write, it also
+  sums bytes per inventory path, not only per unique blob, and rejects a
+  duplicate-blob multi-path expansion above the fixed total materialization
+  limit. It reserves the trusted root marker and trusted pytest-config leaves
+  before any write using the same APFS-conservative NFD-plus-casefold alias
+  key, so ASCII-case, Unicode-normalization and casefold aliases cannot replace
+  signed candidate bytes during materialization.
+- The verifier's final receipt uses one exclusive held descriptor. It binds
+  descriptor and pathname device/inode/type/`nlink` identity before and after
+  each write and final `fsync`; rename/replacement is a typed blocker and a
+  forged replacement path can never be returned as PASS. Every bounded input
+  open uses `O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC`, validates the held descriptor,
+  and rejects regular-to-FIFO replacement without blocking. Authorization and
+  launch-receipt JSON use duplicate-key, depth, integer and Unicode bounds and
+  convert parser resource failures to path-free typed receipts. Authorization,
+  public-key and signature CLI inputs must retain their caller spelling through
+  validation and are rejected when symlinked, hardlinked, non-canonical or
+  replaced; resolving a symlink before the no-follow check is forbidden. JSON
+  schema versions require the exact integer type and value; booleans, floats
+  and strings that compare equal after language coercion are invalid. Both the
+  verifier CLI nonce and authorization nonce require exactly 64 lowercase
+  hexadecimal characters before signature, Git or candidate work; malformed
+  values are `INVALID_NONCE`, while two valid unequal values are
+  `NONCE_MISMATCH`.
+- [ ] Every writable `TemporaryDirectory` created by Task -1 control code or
+  tests—including `inherited_context.py`, `run-isolated.py`,
+  `verify-quarantine-candidate.py` and `test_release_control.py` as
+  applicable—uses the validated invocation-owned `TMPDIR` as its explicit
+  parent. This is not limited to test fixtures. Direct `/private/tmp` writes
+  are forbidden, and missing, non-canonical, non-directory,
+  invocation-root-escaping or execution-root-contained `TMPDIR` must be
+  rejected before creating any probe or writable directory.
+- [ ] **E — trust promotion:** run staged spec review and staged quality review,
+  then use three disjoint pre-commit command manifests because macOS rejects
+  nested `sandbox-exec`. Run pure/control/inherited focused tests inside one
+  `release-control-network-zero` outer sandbox with a manifest proving they do
+  not invoke direct mode. Separately, with no outer Seatbelt already applied,
+  have the pre-existing Task -2 external controller apply its independently
+  pinned `release-candidate-network-zero` reference profile exactly once to
+  every staged real-profile candidate/adversarial probe; do not execute the
+  uncommitted launcher or verifier outside the outer control boundary. Run the
+  exact staged full pre-commit gate in a third, separate
+  `pinned-full-gate-loopback-only` invocation whose manifest proves it imports
+  no Task -1 module. Bind all three manifests, profile digests, staged blob
+  identities and receipts before creating the one Task -1 control commit. Then
+  run the exact committed launcher/verifier direct integration manifest against
+  that immutable control tree; any failure requires amending that one commit
+  and repeating every review, manifest and gate from scratch. Resolve every
+  finding and do not add a second commit for the module split.
 - [ ] Commit these files on the design control branch and record the exact
-  control commit SHA, verifier/launcher/test digests and approved public-key
-  identity in the plan execution receipt.
+  control commit SHA, inherited-validator/verifier/launcher/test digests and
+  approved public-key identity in the plan execution receipt.
 - [ ] All later baseline, candidate, commit-hook and rehearsal subprocesses
   must be launched through that exact control commit. Drift or replacement is a
   blocker.
@@ -618,6 +1082,7 @@ depend on the mutable `origin/main` name after capture.
 **Files:**
 
 - Create: `release/quarantine/v4322-policy.json`
+- Create: `release/quarantine/v4322-passive-surface-manifest.json`
 - Create: `scripts/quarantine-fuse.py`
 - Create: `mcp/tests/test_quarantine_fuse.py`
 
@@ -648,12 +1113,60 @@ depend on the mutable `origin/main` name after capture.
 Focused command:
 
 ```bash
-<pinned-control>/run-isolated.py --snapshot <candidate-tree> -- \
-  <hermetic-runtime>/bin/python3 -m pytest mcp/tests/test_quarantine_fuse.py -q
+<PINNED_PYTHON> \
+  <PINNED_CONTROL>/tools/release-control/run-isolated.py \
+  --root <ABS_CANDIDATE_TREE> \
+  --nonce <HEX64> \
+  --timeout <POSITIVE_SECONDS> \
+  --receipt <ABS_TMPDIR>/task1-focused-receipt.json \
+  --denial-log <ABS_TMPDIR>/task1-focused-denial.log \
+  -- <PINNED_PYTHON> -I -m pytest \
+  -p no:cacheprovider --noconftest -c <TRUSTED_PYTEST_CONFIG> \
+  --rootdir=. --import-mode=importlib \
+  mcp/tests/test_quarantine_fuse.py -q
 ```
+
+Every placeholder above resolves before launch to an absolute, canonical,
+digest-pinned trusted path. `<TRUSTED_PYTEST_CONFIG>` is an exclusive regular
+file created inside the invocation-owned snapshot from fixed verifier-owned
+bytes, fsynced and identity-checked before launch; it is not part of candidate
+inventory or candidate semantic digests. This is normal direct mode: the exact committed
+launcher applies `release-candidate-network-zero` once and no outer Seatbelt is
+already active. The receipt and denial log are absent, pairwise-distinct
+children of the invocation-owned validated `<ABS_TMPDIR>` and are also distinct
+from the direct temp probe and both protected write paths.
 
 Expected RED: the original tree is correctly diagnosed as active and not a
 quarantine fuse.
+
+The authorization's direct candidate command manifest is fixed before Task 1
+implementation and contains exactly these argv tails after the absolute pinned
+Python executable:
+
+```text
+quarantine-tests: -I -m pytest -p no:cacheprovider --noconftest -c __SAMVIL_TRUSTED_PYTEST_CONFIG__ --rootdir=. --import-mode=importlib mcp/tests/test_quarantine_fuse.py -q
+quarantine-gate: -I scripts/quarantine-fuse.py verify --policy release/quarantine/v4322-policy.json
+```
+
+`verify` binds its read-only root to the launcher's canonical current working
+directory, performs no subprocess or temporary write, and is distinct from the
+renderer subcommand whose output root must be explicit. The subprocess-heavy
+`bash scripts/pre-commit-check.sh` is not a direct candidate command; it belongs
+only to the separately pinned `pinned-full-gate-loopback-only` manifest.
+The sentinel above is authorization data, never a filesystem path supplied by
+the candidate. The pinned verifier requires it exactly once and substitutes
+only the descriptor-validated trusted config path immediately before launch.
+
+The external authorization also binds these exact semantic roles to candidate
+inventory paths and SHA-256 values: `policy`, `plugin_manifest`,
+`marketplace_manifest`, `mcp_manifest`, `passive_surface_manifest`, `gate`,
+`validator` and `focused_test`. Their paths are respectively
+`release/quarantine/v4322-policy.json`, `.claude-plugin/plugin.json`,
+`.claude-plugin/marketplace.json`, `.mcp.json`,
+`release/quarantine/v4322-passive-surface-manifest.json`,
+`scripts/pre-commit-check.sh`, `scripts/quarantine-fuse.py` and
+`mcp/tests/test_quarantine_fuse.py`. Whole-tree identity cannot substitute for
+an omitted or misbound semantic role.
 
 ---
 
@@ -717,7 +1230,9 @@ quarantine fuse.
   `env -i`: explicit safe `PATH`, temporary `HOME`, `CODEX_HOME`,
   `CLAUDE_CONFIG_DIR`, `GNUPGHOME`, `TMPDIR`, `XDG_*`,
   `GIT_CONFIG_NOSYSTEM=1`, isolated `GIT_CONFIG_GLOBAL`, disabled credential
-  helpers/askpass and disabled Git network protocols.
+  helpers/askpass, disabled Git network protocols and fixed
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`. Pytest commands also disable the cache
+  provider so a read-only candidate root never attempts `.pytest_cache` writes.
 - [ ] Run all subprocesses under `/usr/bin/sandbox-exec` with a generated
   profile that permits only the exact isolated worktree/clone, system runtime
   libraries and temporary fixture roots, and denies reads/writes to every
