@@ -89,14 +89,21 @@ Therefore F0 has two independent full gates rather than pretending the normal
 production wiring suite remains meaningful after production wiring is
 intentionally removed:
 
-1. **Original-tree baseline gate:** an isolated exact-original clone runs the
-   unmodified `bash scripts/pre-commit-check.sh` and complete existing pytest
-   suite through the mandatory isolation wrapper described below.
-2. **Fuse-tree quarantine gate:** an isolated exact-candidate clone runs the
-   same entry command through that wrapper. Quarantine mode is accepted only
-   when an external candidate-tree authorization from the trusted control
-   branch matches the candidate tree/policy/manifest/gate digests; candidate
-   files cannot select the mode by themselves. The gate then runs
+1. **Original-tree baseline gate:** an isolated exact-original clone is driven
+   by the exact committed control-only
+   `tools/release-control/run-full-gate-isolated.py` described below. Its one
+   Seatbelt child is a digest-pinned trusted wrapper, not candidate shell
+   bytes. The wrapper runs fixed independent runtime/import/test probes and the
+   unmodified candidate subcommand `/bin/bash scripts/pre-commit-check.sh` with
+   disjoint non-authoritative stdout/stderr channels.
+2. **Fuse-tree quarantine gate:** an isolated exact-candidate snapshot runs the
+   same trusted wrapper/probe sequence and candidate subcommand through that
+   same committed runner before the final fuse
+   commit exists, then the committed runner repeats the full gate after commit
+   against that exact final commit and the same authorized tree. Quarantine
+   mode is accepted only when an external candidate-tree authorization from
+   the trusted control branch matches the candidate tree/policy/manifest/gate
+   digests; candidate files cannot select the mode by themselves. The gate then runs
    the complete quarantine contract suite: exact tree identity, passive
    surface inventory, no-write dynamic execution, no installable catalog,
    empty MCP/hook registration, workflow containment, Stage A single-ref
@@ -125,6 +132,7 @@ outer verifier. Missing or stale original baseline evidence is a hard failure.
 | `release/quarantine/v4322-passive-surface-manifest.json` | Create in the candidate and bind in external authorization | Canonical policy-classified passive-surface path/mode/blob manifest used as the explicit passive semantic role digest |
 | `tools/release-control/inherited_context.py` | Create and pin on design control branch before candidate work | Internal control-plane validator/probe module for the exact inherited-sandbox context and outer receipt protocol; not a candidate or public runtime API |
 | `tools/release-control/run-isolated.py` | Create and pin on design control branch before candidate work | Trusted `env -i`/sandbox/network-deny/child-supervision launcher |
+| `tools/release-control/run-full-gate-isolated.py` | Create and pin on design control branch before candidate work | Control-only deterministic original/candidate full-gate runner; embeds the canonical trusted-wrapper source bytes, materializes that non-tracked derived executable, verifies the exact control/tree/command/runtime/import manifests and applies the one fixed loopback-only profile |
 | `tools/release-control/verify-quarantine-candidate.py` | Create and pin on design control branch before candidate work | Independently verify authorization signature, control commit, candidate tree and every policy/manifest/passive/gate digest |
 | `tools/release-control/tests/test_release_control.py` | Create on design control branch | RED/GREEN tests for candidate bypass, forged GREEN output, sandbox escape, real-repository target and signature/digest failures |
 
@@ -134,8 +142,9 @@ historical row binds its discovered-surface-set digest, and the signed catalog
 binds the complete historical-surface-ledger digest. Candidate authorization
 is a separate sidecar and can never satisfy a distribution-row schema.
 
-The trusted inherited-validator/verifier/launcher commit SHA, file digests and
-approved public-key identity are pinned before any candidate edit.
+The trusted inherited-validator/verifier/launcher/full-gate-runner commit SHA,
+file digests and approved public-key identity are pinned before any candidate
+edit.
 Candidate-controlled code cannot replace or configure them. The separate
 candidate-tree authorization is keyed by tree SHA and content digests, so
 it can exist before a commit object. After the exact fuse commit exists, the
@@ -278,17 +287,31 @@ authority as follows:
   supervision, environment construction/stripping and orchestration. In
   inherited mode it calls the internal validator/probe module and must not
   invoke nested `sandbox-exec`.
+- `run-full-gate-isolated.py` owns only the exact original/candidate trusted
+  wrapper protocol. It validates the immutable external full-gate manifest and
+  control commit, materializes verified Git-object bytes, constructs the
+  hermetic runtime/facade and applies the one fixed
+  `pinned-full-gate-loopback-only` profile. Its one Seatbelt child is the
+  digest-pinned trusted wrapper, which runs fixed independent probes and only
+  the fixed candidate subcommand `/bin/bash scripts/pre-commit-check.sh`. It is not
+  a generic command launcher and is not imported or invoked by candidate bytes.
 - `verify-quarantine-candidate.py` remains the final outer verdict authority.
   It calculates trust evidence independently and never trusts candidate output.
 
-This extra private module is a scope correction, not product expansion. It
-introduces no public behavior or runtime API, candidate authority, loopback
-permission, remote/user-profile access, or additional commit. All four Task -1
-files remain one control-plane commit. The launcher mode, never candidate CLI,
-environment or receipt bytes, selects one of two network-zero classes:
+These private control files are a prerequisite scope correction, not product
+expansion. They introduce no public behavior or runtime API, candidate
+authority, remote/user-profile access, or additional control-plane
+implementation commit. All five Task -1 files remain one control-plane commit.
+The trusted wrapper is not a sixth tracked file: its canonical source bytes,
+mode, interpreter contract and source/content digests are constants inside
+`run-full-gate-isolated.py`, are covered by that file's control identity, and
+are materialized only below the invocation-owned temporary root.
+The generic launcher mode, never candidate CLI, environment or receipt bytes,
+selects one of two network-zero classes:
 `release-control-network-zero` for the trusted inherited control process and
 `release-candidate-network-zero` for a direct untrusted candidate process. The
-existing `pinned-full-gate-loopback-only` class remains full-gate-only.
+existing `pinned-full-gate-loopback-only` class remains full-gate-only and is
+selected internally only by the control-only full-gate runner.
 
 The launcher grammar is exact for both modes:
 
@@ -532,9 +555,14 @@ sandbox's authority.
   correction, the complete tracked allowlist is
   `scripts/dogfood-smoke.sh:60`:
   `mktemp -d -t samvil-dogfood-smoke-XXXXXX`.
-- Create a bootstrap-owned, digest-pinned `tools/facade/bin/mktemp` facade. It
-  accepts only the enumerated shape, rewrites it to an explicit template below
-  the invocation-owned `TMPDIR`, and then invokes the pinned `/usr/bin/mktemp`.
+- Create a bootstrap-owned, digest-pinned `tools/facade/bin/mktemp` Python
+  facade. It accepts only the enumerated shape, generates a bounded sequence of
+  candidate names below the invocation-owned `TMPDIR`, and calls
+  `os.mkdir(candidate, 0o700)` directly. Only `EEXIST` permits a bounded retry;
+  every other error fails closed, and only the successfully created path is
+  printed. There is no reservation file, unlink step or check-then-create gap.
+  It never execs
+  `/usr/bin/mktemp` or another helper.
   Unknown flags, prefixes, missing arguments, extra arguments, or newly tracked
   shapes fail closed. Focused probes must prove the allowed shape writes only
   below invocation `TMPDIR` and every unknown shape is rejected.
@@ -626,23 +654,167 @@ are never nested or switched inside a running sandbox:
    receives an invocation-owned trusted config whose fixed bytes are embedded
    in the pinned verifier, not a candidate-owned config and not `/dev/null` as
    config discovery input.
-3. `pinned-full-gate-loopback-only` is used only for the exact staged snapshot
-   entry command `bash scripts/pre-commit-check.sh` and the pinned original
-   `mcp/tests` collection it invokes. It retains `(deny network*)` and adds
+3. `pinned-full-gate-loopback-only` is used only for the exact trusted wrapper
+   command plus its fixed `/bin/bash scripts/pre-commit-check.sh` candidate
+   subcommand and pinned `mcp/tests` collection/probe sequence. It retains
+   `(deny network*)` and adds
    only `(allow network-inbound (local tcp "localhost:*"))` plus
    `(allow network-outbound (remote tcp "localhost:*"))`. Broad rules such as
    `(allow network*)`, `(allow network* (local ip))`, wildcard remote IPs,
-   UDP, Unix sockets, DNS/mDNS sockets and external TCP remain forbidden.
+   UDP, Unix sockets, DNS/mDNS sockets and external TCP remain forbidden. The
+   wildcard port is required because Phase 6 binds port `0`; macOS Seatbelt
+   grants the fixed IPv4 localhost TCP endpoint class and cannot prove that
+   only one invocation-owned ephemeral port is used. The trusted runner proves
+   only that fixed endpoint class plus the exact gate and denial probes below.
+
+The control-only full-gate runner CLI is target-kind-discriminated and exact,
+with no command separator, generic command tail, root argument or profile-class
+option. `original` and `candidate_precommit` use exactly:
+
+```text
+<PINNED_PYTHON> <PINNED_CONTROL>/tools/release-control/run-full-gate-isolated.py --manifest ABS_JSON --nonce HEX64 --timeout POSITIVE_SECONDS --receipt ABS_JSON --denial-log ABS_LOG
+```
+
+`candidate_postcommit` instead requires `--prior-receipt ABS_JSON` exactly once
+in the fixed position immediately after `--manifest ABS_JSON`:
+
+```text
+<PINNED_PYTHON> <PINNED_CONTROL>/tools/release-control/run-full-gate-isolated.py --manifest ABS_JSON --prior-receipt ABS_JSON --nonce HEX64 --timeout POSITIVE_SECONDS --receipt ABS_JSON --denial-log ABS_LOG
+```
+
+`original` and `candidate_precommit` reject `--prior-receipt`; a
+`candidate_postcommit` invocation missing it is rejected. Duplicate,
+reordered, unknown or missing options fail closed. The nonce, timeout and
+absent output targets follow the strict launcher rules above;
+receipt and denial-log parents must be existing canonical directories, and
+each created output must remain an exclusive regular `nlink == 1` file through
+final `fsync`. The manifest is a canonical regular `nlink == 1` external
+control artifact, outside the target tree and candidate-writable roots, whose
+caller spelling and descriptor identity remain stable before and after use.
+It uses exact schema `samvil.full-gate-manifest.v1`, rejects unknown or missing
+fields and binds exactly:
+
+- the nonce; exact amended control commit SHA/tree SHA; and the ordered
+  path/mode/blob and SHA-256 map for all five Task -1 control files;
+- a discriminated `target_kind` and exact tracked path/mode/blob inventory:
+  `original` binds the exact source commit SHA and tree SHA;
+  `candidate_precommit` binds the exact candidate tree SHA, expected parent
+  SHA and control authorization digest while requiring the final commit field
+  to be canonically and explicitly `null`; and `candidate_postcommit` binds
+  the exact final commit SHA, tree SHA and expected parent SHA and must match
+  the precommit tree and authorization digest. It additionally binds
+  `prior_receipt_sha256` and the expected precommit nonce, control commit/tree,
+  authorization digest and `expected_precommit_manifest_sha256`;
+- a digest-pinned verified Git object pack/closure containing exactly the
+  required commits, trees and blobs. It may carry a candidate tree and blobs
+  without a final candidate commit object for `candidate_precommit` and must
+  carry and verify the exact final commit for `candidate_postcommit`;
+- the exact trusted wrapper command vector, wrapper blob/digest, ordered probe
+  command vectors/digests, fixed candidate subcommand
+  `/bin/bash scripts/pre-commit-check.sh`, the entry script, Phase 6 script/test and
+  complete collected `mcp/tests` inventories;
+- the expected import allowlist and import-manifest digest, with every
+  `tools/release-control` import in the gate process forbidden;
+- copied Codex Python 3.12 runtime/dependency and reviewed non-platform
+  portable-tool archives, runner-derived trusted facade digests, and an ordered
+  canonical host-tool manifest. Apple platform/SSV tools execute only at their
+  verified absolute host paths; no
+  Apple system binary is raw-byte copied and executed;
+- the exact five `/tmp` log names, semantic counter schema/expected values and
+  deterministic receipt schema.
+
+Every manifest-referenced input artifact, including the Git object pack and
+runtime/dependency/portable-tool archives, must be an external canonical regular
+`nlink == 1` file with an exact digest and stable held-descriptor identity.
+The `candidate_postcommit` prior receipt follows the same external canonical
+regular `nlink == 1` and stable held-descriptor rules, has strict duplicate-key,
+depth, integer, Unicode and size bounds, and must match
+`prior_receipt_sha256`. Before any postcommit object materialization or target
+command, the runner independently requires its status/verdict to be `PASS` and
+its nonce, control commit/tree, candidate tree, authorization and manifest
+identities to match the postcommit manifest exactly. In particular,
+`expected_precommit_manifest_sha256` must equal the manifest SHA bound by the
+accepted prior receipt.
+Candidate bytes, environment variables and generic launcher CLI cannot
+provide, redirect or replace the manifest or any artifact. `profile_class` is
+not a manifest field:
+it is never accepted from CLI or environment input, and the runner derives
+`pinned-full-gate-loopback-only` internally only after the exact
+command/tree/test/import manifest matches. It then validates its own
+control commit/file digests, materializes tracked target bytes only from the
+verified Git objects into an invocation-owned temporary root, copies and
+verifies the pinned Python/tool closure, builds the internal `mcp/.venv`
+facade, creates temporary `HOME`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`,
+`GNUPGHOME`, `TMPDIR`, `XDG_*` and Git configuration before any repository or
+target command, and invokes exactly one fixed trusted wrapper under exactly one
+Seatbelt layer. That wrapper alone owns the authority channel. It executes the
+ordered fixed runtime/import/test probes and candidate subcommand as separate
+children whose stdout/stderr are redirected to non-authoritative held files;
+the candidate receives no authority path, descriptor or environment key.
+Before `sandbox-exec`, the outer runner creates one bounded `O_CLOEXEC` pipe
+and passes only its write endpoint plus an exact nonce to the wrapper. The
+runner retains the read endpoint, supervises the exact wrapper PID/start
+identity and treats the pipe as exclusive only because no other process may
+inherit or obtain its write endpoint; an anonymous pipe does not authenticate
+the writer of each frame. The wrapper receives that one endpoint only for its own initial exec,
+immediately restores non-inheritable/`CLOEXEC`, closes every duplicate, and
+writes canonical length-prefixed frames bounded by the manifest. Every probe
+or candidate child uses `close_fds=True`, an explicit empty `pass_fds`, and
+separate held stdout/stderr descriptors. The outer runner rejects malformed,
+duplicate, reordered, oversized, wrong-nonce or post-wrapper-exit frames, any
+wrapper PID/start drift, and any demonstrated authority-FD leak to a child.
+
+The materialized target snapshot, trusted wrapper, runtime, dependencies,
+facade and tool closure are read-only under the profile. Candidate and probe
+writes are limited to disjoint invocation-owned scratch roots plus the exact
+fixed-log protocol; target bytes cannot be chmodded, renamed, replaced or
+created. The runner validates every executable/test/import identity immediately
+before its phase and revalidates the complete tracked path/mode/blob inventory
+and all runtime/facade/tool identities after the candidate exits and before
+PASS. Independent probes execute only held/materialized verified bytes, never
+paths that candidate code can replace.
+
+The full-gate manifest also fixes CPU/wall/RSS/address-space, `RLIMIT_FSIZE`,
+`RLIMIT_NOFILE`, maximum observed descendant count, per-file and aggregate
+invocation-root bytes, candidate stdout/stderr bytes, authority frame count and
+per-frame/aggregate frame bytes. The runner concurrently drains bounded
+candidate stdout/stderr and the authority pipe so no child can deadlock the
+controller; exceeding any limit terminates the supervised tree, invalidates
+PASS and emits a typed resource blocker. Final cleanup performs an aggregate
+no-follow size/entry scan before removing the invocation root.
+
+The runner acquires the fixed exclusive `/tmp` full-gate lock, requires all
+five fixed log paths and both output paths to be absent, allows no other `/tmp`
+write, and moves each verified log into the invocation root before releasing
+the lock. Pre-existing logs/outputs, lock contention, missing or extra logs,
+move/identity mismatch, temp cleanup failure or invocation-root cleanup failure
+replaces every prior result with a typed blocker. A PASS requires the trusted
+runner to independently match the discriminated target identity, object
+closure, gate/runtime/test/import manifests, independently observed
+runtime/import/test evidence, candidate exit status and semantic counters;
+manifest text, candidate stdout/stderr, a forged `PASS` line or
+candidate-authored counters are never authority. The path-free receipt contains
+only semantic counters, typed promotion limitations and command/content/
+profile/import/identity/tree/runtime digests and must be byte-identical when the
+same manifest and nonce are retried. It records
+`LOOPBACK_PORT_OWNERSHIP_NOT_OS_ISOLATED` and
+`DETACHED_DESCENDANT_NOT_OS_ISOLATED`, with no attempt-free, exact-port-
+ownership or complete descendant-absence assertion. Both limitations block
+`STAGE_A_PROMOTION_READY`. A `candidate_postcommit` receipt additionally binds the
+exact final commit and the matching `candidate_precommit` tree and
+authorization digest plus the accepted prior receipt digest.
 
 The loopback-only profile is not a candidate-selectable mode. The trusted
 bootstrap must fail closed unless all of the following are true before
 Seatbelt invocation:
 
 - the requested profile class is derived by the trusted controller from a
-  fixed command manifest, not from an environment variable, CLI flag,
+  fixed trusted-wrapper/candidate-subcommand/probe manifest, not from an
+  environment variable, CLI flag,
   candidate receipt or candidate-controlled configuration;
-- the executable entrypoint, `scripts/pre-commit-check.sh`, Phase 6 script,
-  Phase 6 test and complete collected `mcp/tests` path/blob/mode inventory
+- the trusted wrapper, executable candidate entrypoint,
+  `scripts/pre-commit-check.sh`, Phase 6 script, Phase 6 test and complete
+  collected `mcp/tests` path/blob/mode inventory
   match the staged snapshot identities recorded before the run;
 - the collected test/import manifest proves no `tools/release-control` module,
   candidate verifier, candidate launcher or candidate authorization helper is
@@ -671,29 +843,191 @@ Profile acceptance is behavioral as well as textual. Before any gate:
   hardlink cannot mutate a signed snapshot or external owner inode.
   Cleanup failure replaces any prior PASS, FAIL or resource result with the
   typed `INVOCATION_CLEANUP_FAILED` blocker and exit code 2;
+- for the subprocess-capable full gate, the trusted wrapper and outer runner
+  maintain a baseline plus continuous `libproc` descendant inventory keyed by
+  PID and start identity, including detected `setsid` children. Any descendant
+  observed after nominal candidate/probe completion, or any cleanup required,
+  makes the local gate fail with `GATE_DESCENDANT_CLEANUP_REQUIRED`; detected
+  processes are terminated and absence is rechecked. This is detection and
+  fail-closed cleanup, not a kernel process namespace: macOS `kqueue`
+  `NOTE_FORK` does not expose the child PID and polling can miss a sufficiently
+  fast fork/reparent sequence. The receipt therefore always records
+  `DETACHED_DESCENDANT_NOT_OS_ISOLATED`, which permits only disposable local
+  Stage A transaction rehearsal but blocks public Stage A mutation and
+  `STAGE_A_PROMOTION_READY` until a supported host supplies a reviewed
+  VM/process namespace or equivalent OS boundary;
 - `pinned-full-gate-loopback-only` must successfully bind an ephemeral
-  `127.0.0.1` TCP port and connect only to that invocation-owned listener;
+  `127.0.0.1` TCP port and connect over the fixed IPv4 localhost TCP endpoint
+  class, but neither Seatbelt nor the receipt may claim exact-port ownership or
+  that no other localhost attempt occurred;
 - the loopback-only profile must reject a TCP connect to the TEST-NET address
   `192.0.2.1` with `EPERM` and must not resolve a hostname to perform the
   probe;
 - all three profiles must retain the required real-profile read/write denials,
-  invocation-root write authority, executable closure and sanitized
-  environment keys.
+  only their explicitly partitioned invocation-owned scratch/log write
+  authority, read-only executable/snapshot closure and sanitized environment
+  keys.
 
 Any command-manifest drift, newly collected test, unexpected import, external
 connect result other than `EPERM`, or attempt by Task -1/candidate bytes to
 select the loopback profile is a bootstrap blocker. Loopback permission is
-test infrastructure authority for the pinned baseline only; it is never part
-of the committed release-control launcher or quarantine candidate contract.
+test infrastructure authority for the pinned original and candidate full
+gates only; it exists only in the committed control-only full-gate runner and
+is never part of the generic release-control launcher, candidate runtime
+authority or quarantine candidate contract. Exact trusted-wrapper/candidate-
+subcommand/probe/tree/test/import/runtime manifests and external candidate
+authorization prevent arbitrary
+candidate command selection; they do not turn `localhost:*` into an
+invocation-owned port boundary. Record
+`LOOPBACK_PORT_OWNERSHIP_NOT_OS_ISOLATED` and
+`DETACHED_DESCENDANT_NOT_OS_ISOLATED` as typed promotion limitations.
 
-The bootstrap trusted computing base is a digest-pinned executable/runtime
-closure, not the current repository venv. It includes absolute system tools
-used by the normal gate (`sandbox-exec`, `env`, `git`, `bash`, `sh`, `mktemp`,
-`mkdir`, `chmod`, `grep`, `xargs`, `sed`, `tail`, `head`, `find`, `cat` and
-their required system libraries), plus a copied Codex-owned Python 3.12 runtime
-and copied dependency bytes. Paths, file identities, Mach-O/library closure and
-SHA-256 digests are recorded before use. No candidate or newly created Task -1
+The bootstrap trusted computing base is a digest-pinned two-class host/runtime
+closure, not the current repository venv:
+
+1. `copied_application_runtime` contains the Codex-owned Python 3.12, copied
+   dependency bytes, copied Codex Node tree plus npm compatibility facade,
+   runner-embedded trusted wrapper/mktemp/Python facade scripts and only
+   explicitly reviewed non-platform portable tools such as the already proven
+   copied CLT Git/git-core topology and exact CLT `lipo`/`otool` binaries. A Mach-O with non-zero Apple platform
+   identifier, an SSV `restricted` source, or `CS_PLATFORM_PATH` dependence is
+   forbidden in this archive and must never be copy-executed. Every allowed
+   portable tool must have platform identifier zero, a closed copied load/exec
+   topology and a successful bounded copied-path behavioral probe.
+2. `canonical_host_tools` contains the exact absolute Apple platform/SSV
+   executables required by the reviewed gate/probe closure.
+   These use a two-stage admission: first manifest-bound static identity,
+   signing and embedded-parser load-closure validation; then exactly one fixed
+   bounded behavior probe at the canonical path. Only a GREEN probe admits the
+   path for later gate execution. The minimum reviewed roles include
+   `sandbox-exec`, `codesign`, `env`, `bash`, `sh`, `mkdir`, `chmod`,
+   `grep`, `xargs`, `sed`, `tail`, `head`, `find`, `cat`, `true`, `false`,
+   `file`, `ps`, `echo` and `dirname`. The exact copied CLT Git/git-core plus
+   `lipo`/`otool` closure remains in class 1; `/usr/bin/git`, `/usr/bin/lipo`
+   and `/usr/bin/otool` xcode-select shims are never executed. Static
+   script/Python subprocess review
+   may add an executable only by adding an exact manifest row and review test;
+   an unlisted exec is denied by the Seatbelt `process-exec` allowlist.
+
+This classification is a scope correction backed by the macOS boundary:
+byte-identical temp copies of `/usr/bin/sandbox-exec` and `/usr/bin/env` both
+hung without output in uninterruptible `UE` state, while the copied non-platform
+Codex Python executed successfully. Every previously proposed `/bin` or
+`/usr/bin` utility inspected here carries Apple `Platform identifier=16` and
+the SSV `restricted` flag; the local XNU SDK separately defines
+`CS_PLATFORM_BINARY` and path-derived `CS_PLATFORM_PATH`. The circuit breaker
+therefore prohibits any further copied Apple-system-binary execution probe.
+
+The first staged Task -1 run cannot trust the parser that Task -1 is creating.
+Before any Task -1 bytes exist or execute, the pre-existing Task -2 external
+controller therefore materializes its own canonical
+`host-tool-identity-parser.v1` from controller-embedded source bytes outside the
+repository and candidate-readable roots. The Task -2 receipt binds that source
+SHA-256, materialized content/mode/interpreter identity, supported Mach-O/code-
+directory schema, per-file/aggregate/depth/load-command limits, exact input
+descriptor identities and canonical output digest. It never imports or executes
+Task -1. During staged validation, only this external parser is authority; the
+staged runner parser processes the same adversarial corpus and must produce
+byte-identical canonical results but cannot issue PASS. After the autosquashed
+five-file control commit exists, the committed runner parser blob/digest is
+re-pinned and may become authority only after another exact comparison against
+the external Task -2 parser. Any parser byte, limit, corpus or result mismatch
+blocks trust promotion.
+
+Paths, file identities, filesystem flags, Mach-O/library closure, code-signing
+results and SHA-256 digests are recorded before use. The copied Python must be a real
+Mach-O Python whose runtime-reported major/minor is exactly `3.12`;
+shell/trivial `exit 0` stubs are rejected. The invocation manifest binds the
+exact patch version, architecture, Mach-O slices, executable/content hashes,
+`otool` load commands and `@rpath` resolution of the selected runtime. Its
+non-system load closure must stay inside the copied runtime, while immutable
+system dylibs use an explicit allowlist. An incompatible copied runtime fails
+before Seatbelt with typed `UNSUPPORTED_HERMETIC_RUNTIME`; an incomplete,
+mutable, differently signed or unsupported canonical host toolchain fails with
+typed `UNSUPPORTED_CANONICAL_TOOLCHAIN`. No candidate or newly created Task -1
 Python module is imported by the bootstrap.
+
+Every `canonical_host_tools` row binds a fixed role, absolute path, root
+ownership, exact mode/link count/size/filesystem flags, read-only-filesystem
+status, device/inode identity, SHA-256, Mach-O
+slices/load closure, Apple anchor, signing identifier, platform identifier,
+designated requirement/CDHash, exact behavior probe and stable pre/post held-
+descriptor/path identity. Every row requires the canonical restricted read-only
+SSV path and non-zero Apple platform identifier. Exact link counts are manifest values rather than a
+global `nlink == 1` rule because Apple intentionally hardlinks some tools.
+
+PATH lookup never selects unbound authority. Retain the exact Task -2 order
+`tools/facade/bin`, `tools/usr/bin`, copied `node/bin`, `/usr/bin`, `/bin`,
+`/usr/sbin`, `/sbin`. The first three roots are read-only invocation-owned
+closures containing the trusted Python/mktemp wrappers, copied CLT Git/git-core
+plus `lipo`/`otool`, copied Node/pnpm and the exact npm compatibility facade;
+every facade execs only its manifest-bound invocation-root or canonical-host
+target. Seatbelt permits `process-exec` only for the trusted wrapper, every
+exact executable in those copied/facade closures and ordered canonical host-
+tool paths. A
+copied Apple binary, alternate spelling, `xcrun`/shim fallback, unlisted exec or
+identity drift is `UNSUPPORTED_CANONICAL_TOOLCHAIN` before target PASS.
+
+Code-signing evidence is produced only by canonical absolute
+`/usr/bin/codesign`, classified separately as
+`apple_platform_identity_verifier`. The runner itself bounded-reads and hashes
+that verifier before execution and the manifest fixes its root ownership, mode,
+exact link count, filesystem flags, Mach-O slices, SHA-256 and stable pre/post descriptor/path
+identity. It is invoked with exact argv only for `--verify --strict` plus the
+manifest-row Apple-anchor/identifier requirement and `-d --verbose=4`; PATH lookup,
+another spelling/tool, environment-selected requirements and copied fallback
+are forbidden. A strict bounded parser requires exit 0 and the exact expected
+identifier, format/slices, platform identifier, designated-requirement result
+and CDHash, rejects duplicate/missing/unknown security fields, and binds the
+verifier identity plus parsed result digest into the bootstrap/full-gate
+receipt. The verifier is not used to bootstrap its own identity: its exact
+manifest-bound bytes and canonical root-owned system path are the platform TCB.
+Its row enters distinct `PLATFORM_VERIFIER_PINNED` state from the external
+Task -2 parser's held bytes/path/SSV/code-directory evidence and never requires
+codesign to verify its own signing identity. Self display/verify output, if
+collected, is bounded non-authoritative diagnostic only. Successful exact
+verification of the first non-codesign canonical row is the verifier behavior
+probe; only then may it verify the remaining rows.
+Before `codesign`, `file`, `lipo` or `otool` is executed, the current authority
+parser—external Task -2 before the control commit, committed runner only after
+re-pinning—independently validates magic, slices,
+load-command bounds, platform identifier and CodeDirectory/CDHash inputs for
+their held bytes. This creates `STATIC_ADMITTED` evidence only. The external
+tool may then run exactly its bounded behavior/cross-check probe; only probe
+GREEN creates final `ACCEPTED_ROW` authority for later gate execution. No tool
+bootstraps itself or an earlier authority layer from its own stdout.
+
+For every ordered canonical host-tool row except the separately pinned
+`codesign` verifier row, the two codesign invocations and
+channels are exactly, with `<IDENTIFIER>` and `<ABS_TOOL>` taken only from that
+already schema-validated row:
+
+```text
+argv[0] /usr/bin/codesign
+argv[1] --verify
+argv[2] --strict
+argv[3] --verbose=2
+argv[4] -R=anchor apple and identifier "<IDENTIFIER>"
+argv[5] <ABS_TOOL>
+```
+
+The verify call requires exit `0`, empty stdout, and parses only bounded stderr
+for the three non-duplicated success statements `valid on disk`, `satisfies its
+Designated Requirement`, and `explicit requirement satisfied`, all naming the
+exact target where applicable. Then run exactly:
+
+```text
+argv[0] /usr/bin/codesign
+argv[1] -d
+argv[2] --verbose=4
+argv[3] -r-
+argv[4] <ABS_TOOL>
+```
+
+The display call requires exit `0`; bounded stdout contains exactly one
+canonical designated-requirement line, while bounded stderr alone supplies the
+strict metadata fields above. No shell, combined verify/display call, alternate
+option order, additional argument or channel substitution is accepted.
 
 The repository's ignored `mcp/.venv/bin/python` is never executed: its
 interpreter resolves outside the repository and its editable `.pth` points at a
@@ -701,9 +1035,13 @@ mutable worktree. Instead, copy the Codex workspace Python runtime and required
 site-package bytes into the invocation temp root, reject escaping symlinks,
 hardlinks, `.pth`, `sitecustomize`, `usercustomize` and external
 `direct_url.json`, then import `samvil_mcp` only from the exact archived Git
-snapshot. The outer probe requires `sys.executable`, every `sys.path` entry and
-every imported module path to stay within the hermetic runtime or exact temp
-snapshot, with user-site disabled.
+snapshot. Before any target import, the trusted wrapper pins its bootstrap and
+audit primitives and records the exact module inventory. The independent
+probes require `sys.executable`, `sys.prefix`, `sys.base_prefix`, every
+`sys.path` entry and every imported module path/hash to stay within the
+hermetic runtime or exact temp snapshot, with user-site disabled.
+Candidate-authored observation files, stdout, stderr and environment values
+never satisfy this contract.
 
 Because the unmodified original gate invokes the fixed relative path
 `mcp/.venv/bin/python`, the bootstrap creates an invocation-owned facade at
@@ -723,15 +1061,25 @@ root. The live ignored repository `.venv` is neither read nor executed.
   process/mach/system-library reads, allow file reads for the exact pinned
   control worktree, hermetic temp runtime and archived temp snapshot,
   explicitly deny the source repository checkout and every other linked
-  worktree, allow read/write only
-  for the exact Task -1 temporary root and explicitly reviewed control files.
+  worktree. The control class may allow read/write only for its exact Task -1
+  temporary root and explicitly reviewed control files; the full-gate class
+  further partitions that root into read-only snapshot/runtime/wrapper/tool
+  closures and exact writable scratch/log/output leaves.
   The network-zero class includes no network allow rule; the pinned full-gate
   class includes only the two exact loopback TCP rules above.
-- [ ] Copy the pinned Python/runtime/dependency and shell-tool closure into the
-  invocation temp root before sandboxed execution. Verify there are no external
-  symlink, editable-install, dynamic-library or import-path dependencies. An
+- [ ] Copy only the pinned Python/runtime/dependency and runner-derived facade
+  closure plus the separately reviewed non-platform portable-tool closure into
+  the invocation temp root before sandboxed execution. Reject any Apple
+  platform/SSV executable in those archives, plus every external
+  symlink, editable-install, dynamic-library or import-path dependency. An
   incomplete closure is a bootstrap blocker, not permission to read the live
   venv or user runtime during gates.
+  Execute every reviewed Apple platform shell/core/inspection tool only at its ordered
+  `canonical_host_tools` absolute path after exact metadata/hash/codesign/load/
+  behavior and pre/post identity validation. Bind `/usr/bin/codesign`
+  separately as the platform identity verifier, and include the complete
+  canonical-tool manifest, verifier identity and per-tool result digests in the
+  receipt. No copied Apple binary may be launched even as a diagnostic probe.
 - [ ] Materialize the temp-only `snapshot/mcp/.venv` facade from that copied
   closure before invoking the unmodified baseline gate. Verify all interpreter,
   configuration and package paths are internal to the invocation root, then
@@ -804,7 +1152,9 @@ root. The live ignored repository `.venv` is neither read nor executed.
   `pinned-full-gate-loopback-only` outer sandbox invocation only after the
   trusted command/test/import manifests are verified. That full-gate manifest
   must prove no Task -1 module is imported or executed. No path may nest or
-  switch Seatbelt profiles.
+  switch Seatbelt profiles. This pre-commit external-controller run is only
+  bootstrap evidence for the uncommitted runner; an ephemeral controller or
+  `/private/tmp` helper is never reusable Task 0 PASS authority.
 - [ ] Before trust promotion, compare the direct candidate and inherited
   control evidence. Require distinct exact profile classes and class-specific
   trusted source-template/normalized-policy digests; require their shared
@@ -813,21 +1163,24 @@ root. The live ignored repository `.venv` is neither read nor executed.
   `process-fork`/spawn/signal denial. Retain each invocation's raw expanded
   `profile_sha256` only as its own exact-byte receipt evidence; do not require
   cross-invocation equality. After the one control commit is created, run the
-  exact committed launcher/verifier direct integration manifest outside any
-  existing Seatbelt so that it applies the candidate profile exactly once. Any
-  weaker or divergent result requires an amend and a complete review/gate
-  replay.
+  exact committed launcher/verifier direct integration manifest and the exact
+  committed full-gate runner outside any existing Seatbelt so each applies its
+  own fixed profile exactly once. Any weaker or divergent result requires an
+  amend and a complete review/gate replay.
 - [ ] Do not broaden permissions to the real `HOME`/`CODEX_HOME`, writes below
   `/private/var/folders`, external network in either mode, or loopback
   bind/connect and packet/endpoint authority in release-control network-zero
   mode. Unbound socket object creation alone is not authority and may succeed.
-- [ ] Run the exact staged snapshot's normal
-  `bash scripts/pre-commit-check.sh` with the copied Codex bundled Python 3.12,
-  digest-pinned local package artifact allowlist, `env -i`, invocation-owned
-  `HOME`/`CODEX_HOME`/`GNUPGHOME`/`TMPDIR`/`XDG_*`, the one outer sandbox,
-  real-profile denials, loopback-only/external-denial probes, trusted
-  command/test/import manifests and the fixed-log lock/absence protocol. Never
-  use the live `mcp/.venv` or external network.
+- [ ] Run the exact staged snapshot through one digest-pinned trusted wrapper
+  inside one outer sandbox. The wrapper uses the copied Codex bundled Python
+  3.12, runs the fixed independent runtime/import/test probes, and then runs
+  the candidate subcommand `/bin/bash scripts/pre-commit-check.sh` with disjoint
+  non-authoritative stdout/stderr. Use the digest-pinned local package artifact
+  allowlist, `env -i`, invocation-owned
+  `HOME`/`CODEX_HOME`/`GNUPGHOME`/`TMPDIR`/`XDG_*`, real-profile denials,
+  loopback-only/external-denial probes, trusted wrapper/subcommand/probe/test/
+  import manifests and the fixed-log lock/absence protocol. Never use the live
+  `mcp/.venv` or external network.
 - [ ] Commit safety is part of Task -2. Because repository
   `.githooks/post-commit` invokes `scripts/sync-cache.sh`, commit with
   `git -c core.hooksPath=<invocation-owned-hooks> commit`. Install only an
@@ -852,6 +1205,7 @@ commit.
 
 - Create: `tools/release-control/inherited_context.py`
 - Create: `tools/release-control/run-isolated.py`
+- Create: `tools/release-control/run-full-gate-isolated.py`
 - Create: `tools/release-control/verify-quarantine-candidate.py`
 - Create: `tools/release-control/tests/test_release_control.py`
 
@@ -987,13 +1341,130 @@ commit.
   `NONCE_MISMATCH`.
 - [ ] Every writable `TemporaryDirectory` created by Task -1 control code or
   tests—including `inherited_context.py`, `run-isolated.py`,
-  `verify-quarantine-candidate.py` and `test_release_control.py` as
-  applicable—uses the validated invocation-owned `TMPDIR` as its explicit
-  parent. This is not limited to test fixtures. Direct `/private/tmp` writes
-  are forbidden, and missing, non-canonical, non-directory,
-  invocation-root-escaping or execution-root-contained `TMPDIR` must be
-  rejected before creating any probe or writable directory.
-- [ ] **E — trust promotion:** run staged spec review and staged quality review,
+  `run-full-gate-isolated.py`, `verify-quarantine-candidate.py` and
+  `test_release_control.py` as applicable—uses the validated invocation-owned
+  `TMPDIR` as its explicit parent. This is not limited to test fixtures.
+  Direct `/private/tmp` writes are forbidden, and missing, non-canonical,
+  non-directory, invocation-root-escaping or execution-root-contained `TMPDIR`
+  must be rejected before creating any probe or writable directory.
+- [ ] **E — control-only full-gate runner RED/GREEN:** implement the exact
+  no-command-tail CLI and `samvil.full-gate-manifest.v1` contract above. Add
+  table/property/adversarial cases proving candidate bytes, environment keys,
+  a generic launcher tail and any CLI/manifest `profile_class` selection are
+  rejected; a forged manifest, forged PASS, altered semantic counter or
+  candidate-authored receipt is rejected; and control commit/file, target
+  tree, gate, collected-test, import, Python/runtime, facade or tool-closure
+  drift fails before the target command. Exercise all three identity variants:
+  reject an original without its exact commit/tree; accept precommit tree/blob
+  closure with canonical `final_commit: null` and reject any fabricated final
+  commit requirement; reject a postcommit commit/parent/tree or authorization
+  that does not match the precommit receipt. Require `--prior-receipt` exactly
+  once in the fixed postcommit position and reject it for other target kinds.
+  Missing, mismatched, forged, non-PASS, replaced or descriptor-drifted prior
+  receipts, including wrong nonce/control commit/tree/authorization,
+  `expected_precommit_manifest_sha256` or receipt digest, fail before
+  materialization or command execution.
+  Before executing staged runner bytes, have the independently pinned Task -2
+  `host-tool-identity-parser.v1` process valid and adversarial Mach-O/code-
+  directory fixtures at every size/depth/load-command boundary. Bind its parser
+  bytes/limits/input identities/result digest in the bootstrap receipt, then
+  require the staged runner parser to produce byte-identical outputs while
+  remaining non-authoritative. Repeat after commit and permit runner authority
+  only when the committed parser blob/digest and exact corpus comparison match.
+  The one Seatbelt final argv is the exact copied Python plus digest-pinned
+  trusted wrapper; the manifest separately binds that wrapper command, every
+  ordered fixed probe command/digest and the candidate subcommand
+  `/bin/bash scripts/pre-commit-check.sh`. Candidate children receive no authority
+  path, descriptor or observation environment key. Bind the wrapper source and
+  materialized content digests, mode, interpreter, PID/start identity and
+  canonical bounded length-prefixed authority frames. Add adversarial child FD
+  enumeration, inherited-FD write/spoof, malformed/duplicate/reordered/
+  oversized/post-exit frame and candidate stdout imitation cases. Do not claim
+  per-frame writer authentication from the anonymous pipe; prove exclusive
+  write-endpoint delivery and zero child inheritance instead. Prove that candidate code
+  directly writing former observation strings/files cannot satisfy PASS. The
+  trusted wrapper redirects candidate stdout/stderr away from its held
+  authority channel and directly runs the fixed runtime identity, exact
+  verified-test inventory/pytest and server-import containment probes.
+  Independently require a real copied Mach-O Python with exact major/minor
+  `3.12` and manifest-bound patch version/architecture/slices/hashes, contained
+  `sys.executable`/prefix/base-prefix/sys.path/module paths and hashes, closed
+  dylib/rpath and site-package inventories, reviewed tool behavior and
+  pre/post runtime/facade identity. Reject shell/trivial exit-zero runtime or
+  tool stubs and emit `UNSUPPORTED_HERMETIC_RUNTIME` for an incompatible
+  runtime/host combination before Seatbelt.
+  Reject every copied Apple platform/SSV tool before materialization or
+  execution. Permit a copied portable tool only when platform identifier is
+  zero, its copied load/exec topology is closed and its bounded copied-path
+  behavioral probe is green; retain the existing exact CLT Git/git-core
+  topology tests and add exact copied CLT `lipo`/`otool` identity, topology and
+  behavior tests. Prove `/usr/bin/git`, `/usr/bin/lipo`, `/usr/bin/otool`,
+  `/usr/bin/mktemp`, `xcrun` and xcode-select shim fallback are unreachable.
+  Retain the Task -2 mktemp facade but require direct `os.mkdir(0o700)`, bounded
+  `EEXIST`-only retry, no reservation/unlink/check gap, and prove it executes no
+  helper. Retain the copied
+  Node/pnpm/npm-compatibility closure, exact PATH
+  order and facade allowlist probes. The Seatbelt literal exec allowlist must
+  contain every exact wrapper/facade, copied Python, copied Git/git-core,
+  copied CLT lipo/otool, copied Node/pnpm/npm facade and canonical platform tool
+  executable—and no directory wildcard or extra executable. For the complete
+  ordered `canonical_host_tools` closure, bind each
+  role/path/root ownership/mode/exact link count/size/filesystem flags/read-only
+  status/device-inode/hash/Mach-O slices/load closure/Apple signing requirement/
+  identifier/platform identifier/CDHash, behavior and pre/post identity. Prove
+  all rows remain restricted/read-only, every actual
+  exec is in the Seatbelt literal allowlist, and unknown/PATH/shim/xcrun/copied
+  fallback execution fails before target PASS.
+  Bind canonical `/usr/bin/codesign` as the separate manifest-pinned
+  `apple_platform_identity_verifier`; prove its root/mode/link/hash/slices and
+  pre/post identity are checked directly, its exact verify/display argv and
+  bounded strict output parser reject path/PATH/env substitution, malformed,
+  duplicate, missing or unexpected security fields, and its identity/result
+  digest enters the receipt. Never treat codesign output from an unpinned tool
+  as authority. Prove the codesign row reaches only
+  `PLATFORM_VERIFIER_PINNED` from external-parser bytes/path/SSV evidence and
+  never self-verifies; self output is diagnostic. Its first non-self exact
+  verification is the behavior probe. Apply the exact two-call verify/display
+  grammar and strict channel parser to every other canonical tool row, not only
+  `sandbox-exec`.
+  Make snapshot/wrapper/runtime/dependency/facade/tool roots read-only and give
+  probes/candidate disjoint bounded scratch roots. Add chmod/rename/replace/new-
+  file attempts against tracked tests, entrypoint, facade and probe bytes; each
+  must be denied, and complete target/runtime identity must be revalidated after
+  candidate exit before PASS. Add adversarial CPU/wall/RSS/address-space,
+  FSIZE/NOFILE, descendant-count, per-file/aggregate invocation bytes,
+  stdout/stderr and authority-frame count/size overflow cases. Each overflow
+  must be concurrently drained, terminate supervision, leave no PASS and return
+  the exact typed resource blocker.
+  Prove the postcommit receipt binds the accepted prior receipt digest. Prove
+  the runner materializes only
+  verified Git-object-pack bytes and never recursively reads the real
+  repository or any linked worktree, so untracked content—including the
+  literal user-owned `$CODEX_HOME/` entry—is excluded. Prove the fixed profile
+  permits the IPv4 `localhost:*` TCP endpoint class required by Phase 6 and
+  returns `EPERM` for TEST-NET/external TCP while DNS, UDP and Unix sockets and
+  real `HOME`/`CODEX_HOME` metadata/read/write remain denied. Assert that the
+  receipt contains no attempt-free, exact-port-ownership or complete detached-
+  descendant-absence claim and records
+  `LOOPBACK_PORT_OWNERSHIP_NOT_OS_ISOLATED` and
+  `DETACHED_DESCENDANT_NOT_OS_ISOLATED`. Prove pre-existing
+  receipt/denial-log/fixed-log paths, lock contention, missing/extra log,
+  log-move or identity failure and temp/invocation cleanup failure all fail
+  closed. Repeat the same manifest and nonce and require a byte-identical,
+  path-free receipt whose semantic counters and command/content/profile/import/
+  identity/tree/runtime digests are independently derived. The exact-original
+  fixture and synthetic/adversarial candidate-precommit and
+  candidate-postcommit fixtures must use this runner; candidate focused and
+  adversarial checks must remain on
+  `verify-quarantine-candidate.py` plus `run-isolated.py` under
+  `release-candidate-network-zero`, with every network-zero assertion unchanged.
+  Add full-gate lingering-child and `setsid`/double-fork adversarial cases.
+  Every detected descendant or nominal-completion cleanup requirement must
+  fail with `GATE_DESCENDANT_CLEANUP_REQUIRED`, terminate the detected PID/start
+  identities and prove their absence. The tests and receipt must preserve the
+  explicit macOS polling limitation and never claim complete detached-
+  descendant absence.
+- [ ] **F — trust promotion:** run staged spec review and staged quality review,
   then use three disjoint pre-commit command manifests because macOS rejects
   nested `sandbox-exec`. Run pure/control/inherited focused tests inside one
   `release-control-network-zero` outer sandbox with a manifest proving they do
@@ -1004,15 +1475,47 @@ commit.
   uncommitted launcher or verifier outside the outer control boundary. Run the
   exact staged full pre-commit gate in a third, separate
   `pinned-full-gate-loopback-only` invocation whose manifest proves it imports
-  no Task -1 module. Bind all three manifests, profile digests, staged blob
-  identities and receipts before creating the one Task -1 control commit. Then
-  run the exact committed launcher/verifier direct integration manifest against
-  that immutable control tree; any failure requires amending that one commit
-  and repeating every review, manifest and gate from scratch. Resolve every
-  finding and do not add a second commit for the module split.
-- [ ] Commit these files on the design control branch and record the exact
-  control commit SHA, inherited-validator/verifier/launcher/test digests and
-  approved public-key identity in the plan execution receipt.
+  no Task -1 module. This first staged run is controlled by the independently
+  pinned Task -2 bootstrap and validates the staged full-gate runner; it does
+  not make an ephemeral wrapper trusted. Bind all three manifests, profile
+  digests, staged blob identities and receipts before creating the one Task -1
+  control commit. Then run the exact committed launcher/verifier direct
+  integration manifest, the exact original-tree full gate and only
+  synthetic/adversarial candidate identity fixtures through the exact
+  committed `run-full-gate-isolated.py` against that immutable control tree.
+  Task -1 has no implementation candidate tree or authorization and therefore
+  must not require or claim a real `candidate_precommit` or
+  `candidate_postcommit` full-gate execution. The actual candidate-precommit
+  gate moves to Task 4 after the candidate tree and authorization exist; the
+  actual candidate-postcommit replay moves to Tasks 4-6 after the exact fuse
+  commit exists. Candidate bytes may neither invoke nor choose that runner as
+  PASS authority. These local original/synthetic experiments may be green, but
+  they must retain
+  `LOOPBACK_PORT_OWNERSHIP_NOT_OS_ISOLATED` and
+  `DETACHED_DESCENDANT_NOT_OS_ISOLATED` and cannot satisfy
+  `STAGE_A_PROMOTION_READY` until a supported-host verifier supplies a stronger
+  isolated network and process namespace, VM or equivalent reviewed OS
+  boundary.
+  Any failure requires amending that one commit and repeating every review,
+  manifest and gate from scratch.
+- [ ] Because this plan scope-correction commit is a descendant of existing
+  control commit `f6d50644a01c925b7910c494e2160bbac504dbd8`, amend history by
+  this exact local procedure. First implement and stage the runner/tests on the
+  current branch. Using invocation-owned hooks and the required full gate,
+  create one `git commit --fixup=f6d50644a01c925b7910c494e2160bbac504dbd8`
+  commit; `--no-verify` is forbidden. Before rewriting, bind the reviewed plan
+  file's Git blob ID and content SHA-256. Then autosquash-rebase from
+  `f6d50644a01c925b7910c494e2160bbac504dbd8^` so final history contains exactly
+  one amended five-file control commit followed by this plan scope-correction
+  commit. Do not force-push, push, fetch or mutate any remote.
+- [ ] The autosquash rewrites both the control commit SHA and descendant plan
+  commit SHA. After rewrite, require the plan file content and Git blob to be
+  byte-identical to the pre-rewrite bindings, then repeat plan spec review,
+  quality review, `git diff --check` and the full gate. Pin both new commit SHAs,
+  the plan blob/content SHA-256 and inherited-validator/verifier/generic-
+  launcher/full-gate-runner/test digests plus approved public-key identity in
+  the plan execution receipt. Any byte, blob, review, digest or gate mismatch
+  aborts the rewrite result and repeats the complete procedure.
 - [ ] All later baseline, candidate, commit-hook and rehearsal subprocesses
   must be launched through that exact control commit. Drift or replacement is a
   blocker.
@@ -1043,9 +1546,11 @@ report its own quarantine validation.
 - [ ] Prove the isolation wrapper itself RED/GREEN: a probe that attempts to
   read or write a sentinel under the real user profile must be denied, while
   exact repository/worktree and temporary fixture paths remain available.
-- [ ] Run the original `bash scripts/pre-commit-check.sh` only through the
-  verified isolation wrapper before any candidate surface edit and record its
-  exit status and semantic counters.
+- [ ] Run the original `/bin/bash scripts/pre-commit-check.sh` only through the exact
+  amended-control-commit `run-full-gate-isolated.py` before any candidate
+  surface edit and record its independently verified exit status and semantic
+  counters. A prior ephemeral Stage E controller or ad-hoc wrapper is stale,
+  untrusted evidence and cannot satisfy this step.
 - [ ] Store command names and content digests, not local absolute paths,
   usernames, environment values, or secrets.
 - [ ] Record the existing version policy explicitly: plugin, MCP `__init__`,
@@ -1151,8 +1656,13 @@ quarantine-gate: -I scripts/quarantine-fuse.py verify --policy release/quarantin
 `verify` binds its read-only root to the launcher's canonical current working
 directory, performs no subprocess or temporary write, and is distinct from the
 renderer subcommand whose output root must be explicit. The subprocess-heavy
-`bash scripts/pre-commit-check.sh` is not a direct candidate command; it belongs
-only to the separately pinned `pinned-full-gate-loopback-only` manifest.
+`/bin/bash scripts/pre-commit-check.sh` is not a direct candidate command; both the
+original-tree and candidate-tree full gates belong only to the separately
+pinned `samvil.full-gate-manifest.v1` consumed by the exact committed
+`run-full-gate-isolated.py`. Candidate focused/adversarial commands remain on
+`verify-quarantine-candidate.py` plus `run-isolated.py` under
+`release-candidate-network-zero`. Candidate bytes cannot invoke, configure,
+select or replace the full-gate runner as PASS authority.
 The sentinel above is authorization data, never a filesystem path supplied by
 the candidate. The pinned verifier requires it exactly once and substitutes
 only the descriptor-validated trusted config path immediately before launch.
@@ -1284,9 +1794,16 @@ Expected GREEN: all passive entry points are idempotent no-write operations.
   quality review against the externally authorized staged tree. Findings must
   be fixed in the worktree, followed by a new tree SHA, new authorization and
   both reviews again.
-- [ ] Run the externally authorized quarantine pre-commit gate, then create
-  the sole fuse implementation commit. Fixed parent, tree, message, author and
-  committer inputs must be recorded so the exact commit object is reviewable.
+- [ ] Run the externally authorized quarantine pre-commit full gate through a
+  `candidate_precommit` manifest whose final commit field is canonically
+  `null`, then create the sole fuse implementation commit. Fixed parent, tree,
+  message, author and committer inputs must be recorded so the exact commit
+  object is reviewable.
+- [ ] Immediately replay the full gate through a `candidate_postcommit`
+  manifest that binds the exact final commit and expected parent and proves its
+  tree and authorization digest equal the accepted precommit receipt, supplied
+  through the required fixed-position `--prior-receipt` option. A green
+  precommit tree without this exact post-commit replay is incomplete evidence.
 - [ ] Only after the exact fuse commit exists, create Stage R with Git plumbing
   so its parent is that exact fuse commit and its tree is the exact original
   tree. Do not update a ref while creating either commit object.
@@ -1365,9 +1882,12 @@ inputs to the separate `STAGE_A_PROMOTION_READY` decision.
 ## 13. Task 6 — Gates, commit, and reviews
 
 - [ ] Focused quarantine tests GREEN.
-- [ ] Quarantine-mode `bash scripts/pre-commit-check.sh` GREEN.
-- [ ] Both baseline and quarantine gate commands were executed only through
-  the verified isolation wrapper; bare invocation is forbidden.
+- [ ] Quarantine-mode `/bin/bash scripts/pre-commit-check.sh` GREEN for both the
+  authorized `candidate_precommit` tree and exact `candidate_postcommit`
+  commit replay.
+- [ ] Original, candidate-precommit and candidate-postcommit gate commands were
+  executed only through the verified isolation runner; bare invocation is
+  forbidden.
 - [ ] Before commit, `git diff --cached --check` is GREEN and staged files
   exactly equal the policy-derived F0 file set.
 - [ ] Before commit, staged-tree spec-compliance and code-quality reviews are
@@ -1441,6 +1961,22 @@ honest `F0_LOCAL_IMPLEMENTATION_GREEN`, but prohibit
   is incomplete or has a blocking result;
 - GitHub ruleset, App identity, public propagation or release-control evidence
   required by the parent design is missing.
+- `LOOPBACK_PORT_OWNERSHIP_NOT_OS_ISOLATED`: the macOS Seatbelt full-gate
+  profile permits the fixed IPv4 `localhost:*` TCP endpoint class but cannot
+  prove exact ephemeral-port ownership. Local original, candidate-precommit
+  and candidate-postcommit full-gate experiments may remain green, but
+  promotion stays blocked until a supported-host verifier supplies a stronger
+  isolated network namespace, VM or equivalent reviewed OS boundary.
+- `DETACHED_DESCENDANT_NOT_OS_ISOLATED`: the trusted wrapper detects, fails and
+  cleans every descendant identity it observes, but macOS Seatbelt plus
+  `libproc` polling cannot prove that a sufficiently fast fork/reparent was
+  never missed. Disposable local Stage A transaction rehearsal may remain
+  green, but public Stage A mutation and `STAGE_A_PROMOTION_READY` stay blocked
+  until a supported-host verifier supplies a reviewed process namespace, VM or
+  equivalent OS boundary.
+
+Both typed limitations must be removed by, or explicitly replaced with,
+reviewed stronger OS-boundary evidence before promotion-ready can be true.
 
 These conditions must produce a typed promotion blocker. They must not be used
 to fabricate signed evidence, claim Stage A readiness, or weaken local tests.
