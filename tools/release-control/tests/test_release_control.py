@@ -13857,6 +13857,20 @@ raise SystemExit(4)
 
 
 class LauncherContractC1Test(unittest.TestCase):
+    _LAUNCHER_FIXTURE_BOOTSTRAP = """
+from pathlib import Path
+import pwd
+import runpy
+import sys
+import types
+
+runner, protected_home, *launcher_args = sys.argv[1:]
+pwd.getpwuid = lambda _uid: types.SimpleNamespace(pw_dir=protected_home)
+sys.path.insert(0, str(Path(runner).parent))
+sys.argv = [runner, *launcher_args]
+runpy.run_path(runner, run_name="__main__")
+"""
+
     def setUp(self) -> None:
         raw_temp_parent = os.environ.get("TMPDIR")
         if not raw_temp_parent:
@@ -13866,10 +13880,17 @@ class LauncherContractC1Test(unittest.TestCase):
             prefix="samvil-launcher-c1-", dir=temp_parent
         )
         self.base = Path(self._temp.name).resolve(strict=True)
-        protected_home = self.base / "protected-home"
-        protected_codex = protected_home / ".codex"
-        protected_codex.mkdir(parents=True)
-        self.protected_roots = (protected_home, protected_codex)
+        self.protected_home = self.base / "protected-home"
+        self.protected_codex = self.protected_home / ".codex"
+        self.protected_codex.mkdir(parents=True)
+        self.protected_roots = (self.protected_home, self.protected_codex)
+        self._passwd_patch = mock.patch.object(
+            launcher.pwd,
+            "getpwuid",
+            return_value=mock.Mock(pw_dir=str(self.protected_home)),
+        )
+        self._passwd_patch.start()
+        self.addCleanup(self._passwd_patch.stop)
         self.root = self.base / "snapshot"
         self.root.mkdir()
         self.nonce = "c" * 64
@@ -13881,9 +13902,12 @@ class LauncherContractC1Test(unittest.TestCase):
         self.caller_tmpdir.mkdir()
         self.environment = {
             "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "HOME": str(self.protected_home),
+            "CODEX_HOME": str(self.protected_codex),
             "LANG": "C",
             "LC_ALL": "C",
             "TMPDIR": str(self.caller_tmpdir),
+            "PYTHONNOUSERSITE": "1",
         }
 
     def tearDown(self) -> None:
@@ -13902,7 +13926,16 @@ class LauncherContractC1Test(unittest.TestCase):
         environment: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [str(SYSTEM_PYTHON), str(RUNNER), *launcher_args],
+            [
+                str(SYSTEM_PYTHON),
+                "-I",
+                "-B",
+                "-c",
+                self._LAUNCHER_FIXTURE_BOOTSTRAP,
+                str(RUNNER),
+                str(self.protected_home),
+                *launcher_args,
+            ],
             cwd=self.base,
             env=environment or self.environment,
             text=True,
@@ -13924,6 +13957,39 @@ class LauncherContractC1Test(unittest.TestCase):
             "--denial-log",
             str(denial),
         ]
+
+    def test_protected_roots_are_passwd_derived_and_preflighted(self) -> None:
+        forged_home = self.base / "forged-environment-home"
+        with mock.patch.dict(
+            launcher.os.environ,
+            {"HOME": str(forged_home), "CODEX_HOME": str(forged_home / ".codex")},
+        ):
+            roots, writes = launcher._protected_roots_and_writes(self.nonce)
+
+        self.assertEqual(roots, self.protected_roots)
+        self.assertEqual(
+            writes,
+            tuple(
+                root / f".samvil-release-control-{self.nonce[:16]}"
+                for root in self.protected_roots
+            ),
+        )
+        self.assertTrue(all(not path.exists() for path in writes))
+
+        missing_codex_home = self.base / "missing-codex-home"
+        missing_codex_home.mkdir()
+        with mock.patch.object(
+            launcher.pwd,
+            "getpwuid",
+            return_value=mock.Mock(pw_dir=str(missing_codex_home)),
+        ), self.assertRaises(launcher.LaunchError) as missing:
+            launcher._protected_roots_and_writes(self.nonce)
+        self.assertEqual(missing.exception.status, "PROTECTED_ROOT_INVALID")
+
+        writes[0].write_text("occupied", encoding="utf-8")
+        with self.assertRaises(launcher.LaunchError) as occupied:
+            launcher._protected_roots_and_writes(self.nonce)
+        self.assertEqual(occupied.exception.status, "PROTECTED_WRITE_PREFLIGHT_FAILED")
 
     def test_exact_flag_order_duplicates_and_separator_fail_without_outputs(self) -> None:
         cases: list[tuple[str, list[str]]] = []
@@ -14767,12 +14833,18 @@ class LauncherPolicyC2Test(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "90"):
             namespace["emit"]({"status": "PASS"})
 
-    def test_macos_rusage_v2_ctypes_layout_matches_the_sdk_abi(self) -> None:
+    def test_macos_rusage_v2_ctypes_tail_and_size_are_portable(self) -> None:
         self.assertEqual(
             [name for name, _ in launcher._RUsageInfoV2._fields_][-2:],
             ["ri_diskio_bytesread", "ri_diskio_byteswritten"],
         )
         self.assertEqual(ctypes.sizeof(launcher._RUsageInfoV2), 160)
+
+    @unittest.skipUnless(
+        sys.platform == "darwin",
+        "DARWIN_LIBPROC_RUSAGE_V2_REQUIRED: live SDK ABI probe requires macOS",
+    )
+    def test_macos_rusage_v2_ctypes_layout_matches_the_sdk_abi(self) -> None:
         guard_size = 32
         buffer = (ctypes.c_ubyte * (160 + guard_size))()
         for index in range(160, len(buffer)):
