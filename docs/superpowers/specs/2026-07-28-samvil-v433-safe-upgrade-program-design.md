@@ -94,6 +94,29 @@ code-signature/trust policy를 실행 전에 검증한 뒤 호출한다. Uncheck
 지원 OS와 architecture 목록은 Release Core sub-spec의 승인된 release index에
 명시한다. 목록에 없는 host는 `BLOCKED_ENVIRONMENT`이며 mutation은 0이다.
 
+Release-control의 canonical PASS는 또 하나의 지원 환경 조건을 갖는다. Task -2가
+소유하고 candidate가 mount, remount, resize할 수 없는 invocation-exclusive
+kernel-enforced hard-quota filesystem을 제공하고, 그 경계의 class와 identity digest가
+manifest/receipt에 bind되어야 한다. 이 경계는 regular data만이 아니라
+preallocation, xattr, directory metadata, unlinked/mapped inode, sparse/clone 할당까지
+동일한 fixed capacity에 charge해야 한다. 증명을 제공하는 adapter가 없거나
+증거가 drift하면 `UNSUPPORTED_INVOCATION_STORAGE_QUOTA`로 실행 전에
+fail closed하고 program terminal은 `BLOCKED_ENVIRONMENT`, mutation은 0이다.
+`RLIMIT_FSIZE`, `RLIMIT_NOFILE`, path/FD/map inventory, `st_size`, `st_blocks`, RSS/AS
+측정은 defense-in-depth 또는 telemetry일 뿐 storage-boundary PASS authority가 아니다.
+
+Canonical execution은 detached descendant에도 atomic identity-bound signal handle을
+요구한다. Native birth identity는 Darwin `PROC_PIDTBSDINFO` 또는 Linux
+`/proc/<pid>/stat`로 재검증하지만, PID-only signal은 금지한다. Linux `pidfd`처럼
+identity-bound handle이 없는 현재 Darwin foundation은 quota authority가 나중에
+제공되더라도 temp 생성·materialization·execution 전에
+`DETACHED_PROCESS_SIGNAL_UNAVAILABLE` / `BLOCKED_ENVIRONMENT`로 차단한다.
+
+따라서 PR #14의 release-control 결과는 현재 기준으로 fail-closed control
+foundation이다. Portable test-double/Linux 결과는 schema와 orchestration contract를
+검증하지만 actual supported-host canonical end-to-end PASS나 release authorization으로
+승격되지 않는다.
+
 ---
 
 ## 4. SSOT hierarchy
@@ -164,8 +187,11 @@ release/v4-stable (non-default, canonical stable Release branch)
   source는 unsupported residual로 분리한다. 공식 설치와 전환은 mutable marketplace listing이
   아니라 attested Release asset/bootstrap으로만 한다.
 - v4.33 개발 기간에는 `release/v4-stable`의 latest approved v4.32.x tree에서 stable-only freeze한다.
-- Published bridge defect의 v4.32.x forward fix만 같은 release authorization과 full gate로
-  `release/v4-stable`을 전진시킬 수 있다. 그 fix는 integration에도 즉시 forward-merge한다.
+- Published bridge defect의 v4.32.x forward fix만 같은 release authorization과,
+  Task -2가 attested한 invocation-exclusive kernel-quota storage boundary 위의 canonical
+  full gate로 `release/v4-stable`을 전진시킬 수 있다. 그 경계가 없으면
+  forward fix도 `BLOCKED_ENVIRONMENT`에 머물며, 승인된 fix는 integration에도
+  즉시 forward-merge한다.
 - v4.33 RC는 integration commit으로 만들며 prerelease로만 게시한다.
 - stable 승인 전까지 integration의 code commit을 `release/v4-stable`에 cherry-pick하지 않는다.
 - final release PR은 승인된 RC core tree와 stable candidate core tree가 같은지 검증한다.

@@ -31,8 +31,57 @@ jobs:
         run: |
           python3 -m venv mcp/.venv
           mcp/.venv/bin/python -m pip install --upgrade pip wheel
-          mcp/.venv/bin/python -m pip install -e mcp
-          mcp/.venv/bin/python -m pip install pytest pytest-asyncio
+          mcp/.venv/bin/python -m pip install \
+            -e mcp \
+            pytest==9.1.1 \
+            pytest-asyncio==1.4.0 \
+            iniconfig==2.3.0 \
+            packaging==26.2 \
+            pluggy==1.6.0 \
+            pygments==2.20.0 \
+            typing-extensions==4.16.0
+
+      - name: Run portable release-control contract suite
+        run: |
+          set -euo pipefail
+          umask 077
+
+          invocation_root="$(mktemp -d "${RUNNER_TEMP}/samvil-release-control.XXXXXX")"
+          test_home="${invocation_root}/home"
+          test_codex_home="${invocation_root}/codex-home"
+          test_tmpdir="${invocation_root}/tmp"
+          test_xdg_cache="${invocation_root}/xdg/cache"
+          test_xdg_config="${invocation_root}/xdg/config"
+          test_xdg_data="${invocation_root}/xdg/data"
+          test_xdg_state="${invocation_root}/xdg/state"
+          test_gitconfig="${invocation_root}/gitconfig"
+
+          mkdir -p \
+            "${test_home}" \
+            "${test_codex_home}" \
+            "${test_tmpdir}" \
+            "${test_xdg_cache}" \
+            "${test_xdg_config}" \
+            "${test_xdg_data}" \
+            "${test_xdg_state}"
+          : > "${test_gitconfig}"
+
+          export HOME="${test_home}"
+          export CODEX_HOME="${test_codex_home}"
+          export TMPDIR="${test_tmpdir}"
+          export XDG_CACHE_HOME="${test_xdg_cache}"
+          export XDG_CONFIG_HOME="${test_xdg_config}"
+          export XDG_DATA_HOME="${test_xdg_data}"
+          export XDG_STATE_HOME="${test_xdg_state}"
+          export GIT_CONFIG_GLOBAL="${test_gitconfig}"
+          export GIT_CONFIG_NOSYSTEM=1
+          export GIT_TERMINAL_PROMPT=0
+          export PYTHONNOUSERSITE=1
+          export PYTHONDONTWRITEBYTECODE=1
+          export SAMVIL_PINNED_RUNTIME_SOURCE="${pythonLocation}"
+          export SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL=1
+
+          mcp/.venv/bin/python -B tools/release-control/tests/test_release_control.py
 
       - name: Install browser runtime
         run: npx --yes playwright@1.52.0 install --with-deps chromium

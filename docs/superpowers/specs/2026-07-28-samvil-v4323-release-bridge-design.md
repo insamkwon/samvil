@@ -106,6 +106,20 @@ Bridge가 보장하는 것은 다음이다.
 - v4.33 official bootstrap은 old updater 상태와 무관하게 version-independent entry를
   제공함
 
+Bridge의 release-control gate는 parent program의 storage-boundary admission을 그대로
+상속한다. Canonical PASS는 Task -2가 attested한 invocation-exclusive,
+kernel-enforced hard-quota filesystem 안에서만 가능하다. 그 증거가 없거나
+유효하지 않으면 `UNSUPPORTED_INVOCATION_STORAGE_QUOTA`로 실행 전에
+차단하고 workstream terminal은 `BLOCKED_ENVIRONMENT`이다. Logical byte/FD
+계수나 `RLIMIT_FSIZE × RLIMIT_NOFILE`는 이 경계를 대체하지 못한다. PR #14의
+portable 실행은 fail-closed control foundation과 orchestration contract 증거이며,
+actual-host full-gate PASS나 Stage A/bridge authorization이 아니다.
+또한 canonical execution은 atomic identity-bound detached-process signal handle을
+요구한다. Current Darwin foundation은 raw PID signal을 금지하므로 quota adapter가
+존재하더라도 실행 전에 `DETACHED_PROCESS_SIGNAL_UNAVAILABLE` /
+`BLOCKED_ENVIRONMENT`로 차단하며, Linux `pidfd` 또는 동등한 reviewed OS authority가
+있어야 다음 경계로 진행한다.
+
 실제 legacy update 순서는 current cache in-place `rsync`, 기존 venv editable refresh,
 cache rename, sibling deletion이다. Rename 전 절대경로를 담은 editable metadata와 MCP
 path는 rename 뒤 stale할 수 있고, 중단되면 hybrid cache가 남을 수 있다. 따라서 P0는
@@ -2771,7 +2785,10 @@ Bridge 완료 자체는 v4.33 native migration 완료가 아니다. v4.33 stable
 
 Bridge workstream은 다음이 모두 끝나야 완료다.
 
-1. quarantine fuse 1개와 bridge implementation units 8개가 각각 full gate를 통과함
+1. quarantine fuse 1개와 bridge implementation units 8개가 각각 Task -2-attested
+   invocation-exclusive kernel-quota filesystem 위의 canonical full gate를 통과함.
+   현재처럼 지원 adapter가 없으면 이 항목은 미완료이고 workstream은
+   `BLOCKED_ENVIRONMENT`이며, portable contract/orchestration GREEN으로 대체할 수 없음
 2. bridge PR의 세 independent review에 unresolved P1/P2가 없음
 3. PR candidate successful-discovery legacy no-write/defer proof, discovery-failure
    `LEGACY_RISK_OBSERVED`, stale catalog `STALE_CATALOG_RISK_OBSERVED`, historical source

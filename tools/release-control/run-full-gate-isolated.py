@@ -9,7 +9,9 @@ select a root, command, profile, or policy.
 from __future__ import annotations
 
 import base64
+import ctypes
 from dataclasses import dataclass, replace
+import errno
 import fcntl
 import hashlib
 import io
@@ -38,6 +40,7 @@ PROFILE_CLASS = "pinned-full-gate-loopback-only"
 COMMAND = ("bash", "scripts/pre-commit-check.sh")
 PROMOTION_LIMITATION = "LOOPBACK_PORT_OWNERSHIP_NOT_OS_ISOLATED"
 DETACHED_DESCENDANT_LIMITATION = "DETACHED_DESCENDANT_NOT_OS_ISOLATED"
+INVOCATION_STORAGE_QUOTA_BLOCKER = "UNSUPPORTED_INVOCATION_STORAGE_QUOTA"
 PROMOTION_LIMITATIONS = (
     PROMOTION_LIMITATION,
     DETACHED_DESCENDANT_LIMITATION,
@@ -83,9 +86,12 @@ DEFAULT_RESOURCE_LIMITS: dict[str, int] = {
     "wall_seconds": 1200,
     "rss_bytes": 2 * 1024 * 1024 * 1024,
     "address_space_bytes": 2 * 1024 * 1024 * 1024 * 1024,
-    "file_size_bytes": 64 * 1024 * 1024,
+    "file_size_bytes": 8 * 1024 * 1024,
     "nofile": 256,
     "descendants": 256,
+    "invocation_entries": 20_000,
+    "invocation_depth": 32,
+    "vm_regions": 65_536,
     "per_file_bytes": 64 * 1024 * 1024,
     "aggregate_bytes": 2 * 1024 * 1024 * 1024,
     "stdout_bytes": 4 * 1024 * 1024,
@@ -94,6 +100,26 @@ DEFAULT_RESOURCE_LIMITS: dict[str, int] = {
     "authority_frame_bytes": 256 * 1024,
     "authority_aggregate_bytes": 1024 * 1024,
 }
+MAX_RESOURCE_LIMITS: dict[str, int] = dict(DEFAULT_RESOURCE_LIMITS)
+LINUX_FDINFO_MAX_BYTES = 4 * 1024
+LINUX_FDINFO_RETRIES = 3
+LINUX_PROC_MAPS_MAX_BYTES = 16 * 1024 * 1024
+LINUX_PROC_MAP_LINE_MAX_BYTES = 16 * 1024
+LINUX_PROC_MAP_PATTERN = re.compile(
+    rb"^([0-9a-f]+)-([0-9a-f]+) ([r-][w-][x-][ps]) "
+    rb"([0-9a-f]+) ([0-9a-f]+):([0-9a-f]+) ([0-9]+)(?: +(.*))?$"
+)
+DARWIN_PROC_PIDREGIONPATHINFO = 8
+DARWIN_PROC_PIDTBSDINFO = 3
+DARWIN_MAXPATHLEN = 1024
+DARWIN_PROCESS_IDENTITY_PATTERN = re.compile(
+    r"darwin-proc-start:([1-9][0-9]*):([0-9]{1,6})\Z"
+)
+LINUX_PROCESS_IDENTITY_PATTERN = re.compile(
+    r"linux-proc-start:([1-9][0-9]*)\Z"
+)
+DETACHED_PROCESS_SIGNAL_UNAVAILABLE = "DETACHED_PROCESS_SIGNAL_UNAVAILABLE"
+PROCESS_IDENTITY_UNAVAILABLE_SENTINEL = "process-identity-unavailable"
 CONTROL_PATHS = (
     "tools/release-control/inherited_context.py",
     "tools/release-control/run-isolated.py",
@@ -142,6 +168,7 @@ RECEIPT_FIELDS = (
     "identity_sha256",
     "tree_sha256",
     "runtime_sha256",
+    "storage_quota_evidence_sha256",
     "semantic_counters",
     "promotion_limitations",
 )
@@ -479,8 +506,9 @@ def main():
 
     verify_inventory(contract)
     test_paths = [str(Path(path).relative_to("mcp")) for path in contract["test_paths"]]
-    code, stdout, _stderr = run_child("pytest", [str(python), "-I", "-B", "-m", "pytest", *test_paths,
-                                      "-p", "no:cacheprovider", "-q", "--tb=no"],
+    code, stdout, _stderr = run_child("pytest", [str(python), "-I", "-B", "-m", "pytest",
+                                      "-p", "pytest_asyncio.plugin", "-p", "no:cacheprovider",
+                                      *test_paths, "-q", "--tb=no"],
                                       snapshot / "mcp", environment, scratch, limits)
     pytest_bytes=stdout.read_bytes()
     import re
@@ -569,9 +597,11 @@ TRUSTED_PROBE_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "-B",
             "-m",
             "pytest",
-            "<VERIFIED_TEST_INVENTORY>",
+            "-p",
+            "pytest_asyncio.plugin",
             "-p",
             "no:cacheprovider",
+            "<VERIFIED_TEST_INVENTORY>",
             "-q",
             "--tb=no",
         ),
@@ -632,9 +662,12 @@ print(json.dumps({"modules":modules,"module_hashes":module_hashes,
 class FullGateError(ValueError):
     """A typed, path-free full-gate blocker."""
 
-    def __init__(self, status: str) -> None:
+    def __init__(
+        self, status: str, *, primary_status: str | None = None
+    ) -> None:
         super().__init__(status)
         self.status = status
+        self.primary_status = primary_status
 
 
 @dataclass(frozen=True)
@@ -844,12 +877,36 @@ class HeldOutput:
     def close(self) -> None:
         if self.closed:
             return
-        try:
-            os.close(self.descriptor)
-        except OSError:
-            self.closed = True
-            _raise("OUTPUT_CLOSE_FAILED")
-        self.closed = True
+        first_error: BaseException | None = None
+        expected_identity = (
+            self.identity.device,
+            self.identity.inode,
+            stat.S_IFMT(self.identity.mode),
+        )
+        for _attempt in range(2):
+            try:
+                os.close(self.descriptor)
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+                try:
+                    metadata = os.fstat(self.descriptor)
+                except OSError:
+                    self.closed = True
+                    break
+                current_identity = (
+                    int(metadata.st_dev),
+                    int(metadata.st_ino),
+                    stat.S_IFMT(metadata.st_mode),
+                )
+                if current_identity != expected_identity:
+                    self.closed = True
+                    break
+            else:
+                self.closed = True
+                break
+        if first_error is not None or not self.closed:
+            raise FullGateError("OUTPUT_CLOSE_FAILED") from first_error
 
 
 @dataclass
@@ -930,6 +987,241 @@ class GateOutcome:
 
 
 @dataclass(frozen=True)
+class OpenRegularFile:
+    device: int
+    inode: int
+    size: int
+    links: int
+    writable: bool
+
+
+@dataclass(frozen=True)
+class MappedRegularFile:
+    device: int
+    inode: int
+    size: int
+    links: int
+
+
+@dataclass
+class _OwnedDescriptor:
+    descriptor: int
+    identity: tuple[int, int, int] | None
+
+    @classmethod
+    def take(cls, descriptor: int) -> "_OwnedDescriptor":
+        if type(descriptor) is not int or descriptor < 0:
+            _raise("AUTHORITY_PIPE_INVALID")
+        try:
+            metadata = os.fstat(descriptor)
+            identity = (
+                int(metadata.st_dev),
+                int(metadata.st_ino),
+                stat.S_IFMT(metadata.st_mode),
+            )
+        except OSError:
+            # Unit failure-injection fixtures may use synthetic descriptor
+            # numbers. A real invalid descriptor is still rejected by Popen or
+            # the first operation, while production pipe descriptors retain an
+            # identity that prevents closing a reused number.
+            identity = None
+        return cls(descriptor=descriptor, identity=identity)
+
+    def fileno(self) -> int:
+        if self.descriptor < 0:
+            raise ValueError("descriptor is closed")
+        return self.descriptor
+
+    def release(self) -> int:
+        descriptor = self.fileno()
+        self.descriptor = -1
+        return descriptor
+
+    def close(self) -> None:
+        if self.descriptor < 0:
+            return
+        descriptor = self.descriptor
+        try:
+            os.close(descriptor)
+        except BaseException:
+            if self.identity is None:
+                self.descriptor = -1
+            else:
+                try:
+                    metadata = os.fstat(descriptor)
+                    current = (
+                        int(metadata.st_dev),
+                        int(metadata.st_ino),
+                        stat.S_IFMT(metadata.st_mode),
+                    )
+                except OSError:
+                    self.descriptor = -1
+                else:
+                    if current != self.identity:
+                        self.descriptor = -1
+            raise
+        self.descriptor = -1
+
+
+def _close_owned_descriptor_with_retry(
+    owner: _OwnedDescriptor,
+) -> BaseException | None:
+    first_error: BaseException | None = None
+    for _attempt in range(2):
+        if owner.descriptor < 0:
+            break
+        try:
+            owner.close()
+        except BaseException as exc:
+            if first_error is None:
+                first_error = exc
+    return first_error
+
+
+def _close_raw_descriptor_with_retry(descriptor: int) -> BaseException | None:
+    return _close_owned_descriptor_with_retry(_OwnedDescriptor.take(descriptor))
+
+
+def _close_iterator_with_retry(iterator: object) -> BaseException | None:
+    first_error: BaseException | None = None
+    for _attempt in range(2):
+        try:
+            iterator.close()  # type: ignore[attr-defined]
+        except BaseException as exc:
+            if first_error is None:
+                first_error = exc
+        else:
+            break
+    return first_error
+
+
+class _ProcFDInfo(ctypes.Structure):
+    _fields_ = [
+        ("proc_fd", ctypes.c_int32),
+        ("proc_fdtype", ctypes.c_uint32),
+    ]
+
+
+class _ProcBSDInfo(ctypes.Structure):
+    _fields_ = [
+        ("pbi_flags", ctypes.c_uint32),
+        ("pbi_status", ctypes.c_uint32),
+        ("pbi_xstatus", ctypes.c_uint32),
+        ("pbi_pid", ctypes.c_uint32),
+        ("pbi_ppid", ctypes.c_uint32),
+        ("pbi_uid", ctypes.c_uint32),
+        ("pbi_gid", ctypes.c_uint32),
+        ("pbi_ruid", ctypes.c_uint32),
+        ("pbi_rgid", ctypes.c_uint32),
+        ("pbi_svuid", ctypes.c_uint32),
+        ("pbi_svgid", ctypes.c_uint32),
+        ("rfu_1", ctypes.c_uint32),
+        ("pbi_comm", ctypes.c_char * 16),
+        ("pbi_name", ctypes.c_char * 32),
+        ("pbi_nfiles", ctypes.c_uint32),
+        ("pbi_pgid", ctypes.c_uint32),
+        ("pbi_pjobc", ctypes.c_uint32),
+        ("e_tdev", ctypes.c_uint32),
+        ("e_tpgid", ctypes.c_uint32),
+        ("pbi_nice", ctypes.c_int32),
+        ("pbi_start_tvsec", ctypes.c_uint64),
+        ("pbi_start_tvusec", ctypes.c_uint64),
+    ]
+
+
+class _ProcFileInfo(ctypes.Structure):
+    _fields_ = [
+        ("fi_openflags", ctypes.c_uint32),
+        ("fi_status", ctypes.c_uint32),
+        ("fi_offset", ctypes.c_int64),
+        ("fi_type", ctypes.c_int32),
+        ("fi_guardflags", ctypes.c_uint32),
+    ]
+
+
+class _VInfoStat(ctypes.Structure):
+    _fields_ = [
+        ("vst_dev", ctypes.c_uint32),
+        ("vst_mode", ctypes.c_uint16),
+        ("vst_nlink", ctypes.c_uint16),
+        ("vst_ino", ctypes.c_uint64),
+        ("vst_uid", ctypes.c_uint32),
+        ("vst_gid", ctypes.c_uint32),
+        ("vst_atime", ctypes.c_int64),
+        ("vst_atimensec", ctypes.c_int64),
+        ("vst_mtime", ctypes.c_int64),
+        ("vst_mtimensec", ctypes.c_int64),
+        ("vst_ctime", ctypes.c_int64),
+        ("vst_ctimensec", ctypes.c_int64),
+        ("vst_birthtime", ctypes.c_int64),
+        ("vst_birthtimensec", ctypes.c_int64),
+        ("vst_size", ctypes.c_int64),
+        ("vst_blocks", ctypes.c_int64),
+        ("vst_blksize", ctypes.c_int32),
+        ("vst_flags", ctypes.c_uint32),
+        ("vst_gen", ctypes.c_uint32),
+        ("vst_rdev", ctypes.c_uint32),
+        ("vst_qspare", ctypes.c_int64 * 2),
+    ]
+
+
+class _VnodeInfo(ctypes.Structure):
+    _fields_ = [
+        ("vi_stat", _VInfoStat),
+        ("vi_type", ctypes.c_int32),
+        ("vi_pad", ctypes.c_int32),
+        ("vi_fsid", ctypes.c_int32 * 2),
+    ]
+
+
+class _VnodeFDInfo(ctypes.Structure):
+    _fields_ = [
+        ("pfi", _ProcFileInfo),
+        ("pvi", _VnodeInfo),
+    ]
+
+
+class _ProcRegionInfo(ctypes.Structure):
+    _fields_ = [
+        ("pri_protection", ctypes.c_uint32),
+        ("pri_max_protection", ctypes.c_uint32),
+        ("pri_inheritance", ctypes.c_uint32),
+        ("pri_flags", ctypes.c_uint32),
+        ("pri_offset", ctypes.c_uint64),
+        ("pri_behavior", ctypes.c_uint32),
+        ("pri_user_wired_count", ctypes.c_uint32),
+        ("pri_user_tag", ctypes.c_uint32),
+        ("pri_pages_resident", ctypes.c_uint32),
+        ("pri_pages_shared_now_private", ctypes.c_uint32),
+        ("pri_pages_swapped_out", ctypes.c_uint32),
+        ("pri_pages_dirtied", ctypes.c_uint32),
+        ("pri_ref_count", ctypes.c_uint32),
+        ("pri_shadow_depth", ctypes.c_uint32),
+        ("pri_share_mode", ctypes.c_uint32),
+        ("pri_private_pages_resident", ctypes.c_uint32),
+        ("pri_shared_pages_resident", ctypes.c_uint32),
+        ("pri_obj_id", ctypes.c_uint32),
+        ("pri_depth", ctypes.c_uint32),
+        ("pri_address", ctypes.c_uint64),
+        ("pri_size", ctypes.c_uint64),
+    ]
+
+
+class _VnodeInfoPath(ctypes.Structure):
+    _fields_ = [
+        ("vip_vi", _VnodeInfo),
+        ("vip_path", ctypes.c_char * DARWIN_MAXPATHLEN),
+    ]
+
+
+class _ProcRegionWithPathInfo(ctypes.Structure):
+    _fields_ = [
+        ("prp_prinfo", _ProcRegionInfo),
+        ("prp_vip", _VnodeInfoPath),
+    ]
+
+
+@dataclass(frozen=True)
 class ReceiptDigests:
     command: str
     content: str
@@ -941,6 +1233,14 @@ class ReceiptDigests:
 
 
 @dataclass(frozen=True)
+class InvocationStorageQuotaAuthority:
+    schema: str
+    quota_bytes: int
+    filesystem_identity_sha256: str
+    evidence_sha256: str
+
+
+@dataclass(frozen=True)
 class ExecutionEvidence:
     digest: str
     import_manifest_sha256: str
@@ -949,8 +1249,8 @@ class ExecutionEvidence:
     mcp_tools: int
 
 
-def _raise(status: str) -> NoReturn:
-    raise FullGateError(status)
+def _raise(status: str, *, primary_status: str | None = None) -> NoReturn:
+    raise FullGateError(status, primary_status=primary_status)
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -974,14 +1274,32 @@ def _validated_resource_limits(value: Mapping[str, object]) -> dict[str, int]:
     if set(value) != set(DEFAULT_RESOURCE_LIMITS):
         _raise("RESOURCE_LIMIT_MANIFEST_INVALID")
     limits: dict[str, int] = {}
-    for key, default in DEFAULT_RESOURCE_LIMITS.items():
+    for key in DEFAULT_RESOURCE_LIMITS:
         raw = value[key]
-        if type(raw) is not int or raw <= 0 or raw > max(default * 1024, 2**47):
+        if type(raw) is not int or raw <= 0 or raw > MAX_RESOURCE_LIMITS[key]:
             _raise("RESOURCE_LIMIT_MANIFEST_INVALID")
         limits[key] = raw
     if limits["authority_frame_bytes"] > limits["authority_aggregate_bytes"]:
         _raise("RESOURCE_LIMIT_MANIFEST_INVALID")
+    if limits["file_size_bytes"] * limits["nofile"] > limits["aggregate_bytes"]:
+        _raise("RESOURCE_LIMIT_MANIFEST_INVALID")
+    if limits["invocation_depth"] > limits["invocation_entries"]:
+        _raise("RESOURCE_LIMIT_MANIFEST_INVALID")
     return limits
+
+
+def _bounded_wall_timeout(
+    timeout: float, limits: Mapping[str, object]
+) -> float:
+    bounded = _validated_resource_limits(limits)
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        _raise("FULL_GATE_USAGE")
+    return min(float(timeout), float(bounded["wall_seconds"]))
 
 
 def encode_authority_frame(
@@ -1072,17 +1390,29 @@ def decode_authority_frames(
 def create_cloexec_pipe() -> tuple[int, int]:
     try:
         read_fd, write_fd = os.pipe()
-        os.set_inheritable(read_fd, False)
-        os.set_inheritable(write_fd, False)
     except OSError:
         _raise("AUTHORITY_PIPE_CREATE_FAILED")
-    if os.get_inheritable(read_fd) or os.get_inheritable(write_fd):
-        try:
-            os.close(read_fd)
-            os.close(write_fd)
-        finally:
+    read_owner = _OwnedDescriptor.take(read_fd)
+    write_owner = _OwnedDescriptor.take(write_fd)
+    try:
+        os.set_inheritable(read_fd, False)
+        os.set_inheritable(write_fd, False)
+        if os.get_inheritable(read_fd) or os.get_inheritable(write_fd):
             _raise("AUTHORITY_PIPE_CREATE_FAILED")
-    return read_fd, write_fd
+    except BaseException as primary:
+        close_error: BaseException | None = None
+        for owner in (read_owner, write_owner):
+            owner_error = _close_owned_descriptor_with_retry(owner)
+            if close_error is None and owner_error is not None:
+                close_error = owner_error
+        primary_status = getattr(primary, "status", type(primary).__name__)
+        if close_error is not None:
+            primary_status = "AUTHORITY_PIPE_CLOSE_FAILED"
+        raise FullGateError(
+            "AUTHORITY_PIPE_CREATE_FAILED",
+            primary_status=primary_status,
+        ) from primary
+    return read_owner.release(), write_owner.release()
 
 
 def _walk_json_bounds(value: object, *, depth: int = 0) -> None:
@@ -1489,18 +1819,24 @@ def finalize_outputs(
         outputs.receipt.close()
         outputs.closed = True
         return
-    except FullGateError:
-        try:
-            _invalidate_output(outputs.receipt, failed)
-        except FullGateError:
-            pass
+    except BaseException as primary:
+        for _attempt in range(2):
+            try:
+                _invalidate_output(outputs.receipt, failed)
+            except BaseException:
+                continue
+            break
         for output in (outputs.denial_log, outputs.receipt):
             try:
                 output.close()
-            except FullGateError:
+            except BaseException:
                 pass
         outputs.closed = True
-        _raise("OUTPUT_FINALIZATION_FAILED")
+        primary_status = getattr(primary, "status", type(primary).__name__)
+        raise FullGateError(
+            "OUTPUT_FINALIZATION_FAILED",
+            primary_status=primary_status,
+        ) from primary
 
 
 def _core_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
@@ -1862,45 +2198,986 @@ def capture_readonly_tree_identity(root: Path) -> dict[str, object]:
     }
 
 
-def scan_invocation_usage(
-    root: Path, limits: Mapping[str, object]
-) -> dict[str, int]:
-    bounded = _validated_resource_limits(limits)
+def _scan_invocation_usage(
+    root: Path,
+    bounded: Mapping[str, int],
+    *,
+    allow_disappeared: bool = False,
+) -> tuple[dict[str, int], dict[tuple[int, int], int]]:
+    required_open_flags = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if any(not hasattr(os, name) for name in required_open_flags):
+        _raise("GATE_INVOCATION_ENTRY_INVALID")
+    directory_flags = (
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    )
     try:
         canonical = root.resolve(strict=True)
     except (OSError, RuntimeError):
         _raise("GATE_INVOCATION_ENTRY_INVALID")
     if canonical != root:
         _raise("GATE_INVOCATION_ENTRY_INVALID")
-    stack = [canonical]
-    entries = 0
-    total = 0
-    while stack:
-        directory = stack.pop()
+    try:
+        expected_root = os.stat(canonical, follow_symlinks=False)
+        root_fd = os.open(canonical, directory_flags)
+    except OSError:
+        _raise("GATE_INVOCATION_ENTRY_INVALID")
+    try:
+        opened_root = os.fstat(root_fd)
+    except OSError:
         try:
-            children = list(os.scandir(directory))
+            os.close(root_fd)
         except OSError:
-            _raise("GATE_INVOCATION_ENTRY_INVALID")
-        for child in children:
+            pass
+        _raise("GATE_INVOCATION_ENTRY_INVALID")
+    if (
+        not stat.S_ISDIR(expected_root.st_mode)
+        or not stat.S_ISDIR(opened_root.st_mode)
+        or (expected_root.st_dev, expected_root.st_ino)
+        != (opened_root.st_dev, opened_root.st_ino)
+    ):
+        try:
+            os.close(root_fd)
+        except OSError:
+            pass
+        _raise("GATE_INVOCATION_ENTRY_INVALID")
+    stack: list[tuple[int, object, int]] = []
+    entries = 0
+    observed_entries = 0
+    total = 0
+    identities: dict[tuple[int, int], int] = {}
+    try:
+        root_iterator = os.scandir(root_fd)
+    except OSError:
+        try:
+            os.close(root_fd)
+        except OSError:
+            pass
+        _raise("GATE_INVOCATION_ENTRY_INVALID")
+    stack.append((root_fd, root_iterator, 0))
+
+    def close_frame(frame: tuple[int, object, int]) -> bool:
+        directory_fd, iterator, _depth = frame
+        failed = _close_iterator_with_retry(iterator) is not None
+        if _close_raw_descriptor_with_retry(directory_fd) is not None:
+            failed = True
+        return failed
+
+    try:
+        while stack:
+            directory_fd, iterator, depth = stack[-1]
             try:
-                metadata = child.stat(follow_symlinks=False)
+                entry = next(iterator)  # type: ignore[arg-type]
+            except StopIteration:
+                frame = stack.pop()
+                if close_frame(frame):
+                    _raise("GATE_INVOCATION_ENTRY_INVALID")
+                continue
             except OSError:
                 _raise("GATE_INVOCATION_ENTRY_INVALID")
-            path = Path(child.path)
-            if stat.S_ISLNK(metadata.st_mode):
+            try:
+                name = entry.name
+                observed_entries += 1
+                if observed_entries > bounded["invocation_entries"]:
+                    _raise("GATE_INVOCATION_ENTRY_LIMIT_EXCEEDED")
+                entry_depth = depth + 1
+                if entry_depth > bounded["invocation_depth"]:
+                    _raise("GATE_INVOCATION_DEPTH_LIMIT_EXCEEDED")
+                if (
+                    type(name) is not str
+                    or not name
+                    or name in {".", ".."}
+                    or "/" in name
+                    or "\x00" in name
+                ):
+                    _raise("GATE_INVOCATION_ENTRY_INVALID")
+                try:
+                    metadata = os.stat(
+                        name,
+                        dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                except OSError as exc:
+                    if allow_disappeared and exc.errno in {
+                        errno.ENOENT,
+                        errno.ENOTDIR,
+                    }:
+                        continue
+                    _raise("GATE_INVOCATION_ENTRY_INVALID")
+                if stat.S_ISLNK(metadata.st_mode):
+                    _raise("GATE_INVOCATION_ENTRY_INVALID")
+                if not stat.S_ISDIR(metadata.st_mode) and not stat.S_ISREG(
+                    metadata.st_mode
+                ):
+                    _raise("GATE_INVOCATION_ENTRY_INVALID")
+                entries += 1
+                if stat.S_ISDIR(metadata.st_mode):
+                    child_fd: int | None = None
+                    child_iterator: object | None = None
+                    try:
+                        try:
+                            child_fd = os.open(
+                                name,
+                                directory_flags,
+                                dir_fd=directory_fd,
+                            )
+                        except OSError as exc:
+                            if allow_disappeared and exc.errno == errno.ENOENT:
+                                continue
+                            if allow_disappeared and exc.errno == errno.ENOTDIR:
+                                try:
+                                    replacement = os.stat(
+                                        name,
+                                        dir_fd=directory_fd,
+                                        follow_symlinks=False,
+                                    )
+                                except OSError as replacement_error:
+                                    if replacement_error.errno in {
+                                        errno.ENOENT,
+                                        errno.ENOTDIR,
+                                    }:
+                                        continue
+                                    _raise("GATE_INVOCATION_ENTRY_INVALID")
+                                if stat.S_ISLNK(replacement.st_mode):
+                                    _raise("GATE_INVOCATION_ENTRY_INVALID")
+                                if (
+                                    not stat.S_ISDIR(replacement.st_mode)
+                                    or (metadata.st_dev, metadata.st_ino)
+                                    != (replacement.st_dev, replacement.st_ino)
+                                ):
+                                    continue
+                            _raise("GATE_INVOCATION_ENTRY_INVALID")
+                        try:
+                            opened = os.fstat(child_fd)
+                        except OSError:
+                            _raise("GATE_INVOCATION_ENTRY_INVALID")
+                        if (
+                            not stat.S_ISDIR(opened.st_mode)
+                            or (metadata.st_dev, metadata.st_ino)
+                            != (opened.st_dev, opened.st_ino)
+                        ):
+                            if allow_disappeared:
+                                continue
+                            _raise("GATE_INVOCATION_ENTRY_INVALID")
+                        try:
+                            child_iterator = os.scandir(child_fd)
+                        except OSError:
+                            _raise("GATE_INVOCATION_ENTRY_INVALID")
+                        stack.append((child_fd, child_iterator, entry_depth))
+                        child_fd = None
+                        child_iterator = None
+                    finally:
+                        child_primary = sys.exc_info()[1]
+                        child_close_failed = False
+                        if child_iterator is not None:
+                            if _close_iterator_with_retry(child_iterator) is not None:
+                                child_close_failed = True
+                        if child_fd is not None:
+                            if _close_raw_descriptor_with_retry(child_fd) is not None:
+                                child_close_failed = True
+                        if child_close_failed:
+                            if child_primary is None:
+                                _raise("GATE_INVOCATION_ENTRY_INVALID")
+                            primary_status = getattr(
+                                child_primary,
+                                "status",
+                                type(child_primary).__name__,
+                            )
+                            raise FullGateError(
+                                "GATE_INVOCATION_ENTRY_INVALID",
+                                primary_status=primary_status,
+                            ) from child_primary
+                    continue
+                if metadata.st_nlink != 1:
+                    _raise("GATE_INVOCATION_ENTRY_INVALID")
+                identity = (int(metadata.st_dev), int(metadata.st_ino))
+                if identity in identities:
+                    _raise("GATE_INVOCATION_ENTRY_INVALID")
+                if metadata.st_size > bounded["per_file_bytes"]:
+                    _raise("GATE_PER_FILE_BYTES_EXCEEDED")
+                total += metadata.st_size
+                if total > bounded["aggregate_bytes"]:
+                    _raise("GATE_AGGREGATE_BYTES_EXCEEDED")
+                identities[identity] = metadata.st_size
+            except FullGateError:
+                raise
+            except (AttributeError, TypeError, ValueError, OverflowError):
                 _raise("GATE_INVOCATION_ENTRY_INVALID")
-            if stat.S_ISDIR(metadata.st_mode):
-                stack.append(path)
+    finally:
+        primary_exception = sys.exc_info()[1]
+        close_failed = False
+        while stack:
+            close_failed = close_frame(stack.pop()) or close_failed
+        if close_failed:
+            if primary_exception is None:
+                _raise("GATE_INVOCATION_ENTRY_INVALID")
+            primary_status = getattr(
+                primary_exception,
+                "status",
+                type(primary_exception).__name__,
+            )
+            raise FullGateError(
+                "GATE_INVOCATION_ENTRY_INVALID",
+                primary_status=primary_status,
+            ) from primary_exception
+    return {"entries": entries, "bytes": total}, identities
+
+
+def scan_invocation_usage(
+    root: Path, limits: Mapping[str, object]
+) -> dict[str, int]:
+    bounded = _validated_resource_limits(limits)
+    usage, _identities = _scan_invocation_usage(root, bounded)
+    return usage
+
+
+def scan_invocation_baseline(
+    invocation_root: Path,
+    writable_root: Path,
+    limits: Mapping[str, object],
+) -> dict[str, int]:
+    try:
+        invocation = invocation_root.resolve(strict=True)
+        writable = writable_root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        _raise("GATE_INVOCATION_ENTRY_INVALID")
+    if (
+        invocation != invocation_root
+        or writable != writable_root
+        or writable == invocation
+        or invocation not in writable.parents
+    ):
+        _raise("GATE_INVOCATION_ENTRY_INVALID")
+    whole = scan_invocation_usage(invocation, limits)
+    initial_writable = scan_invocation_usage(writable, limits)
+    baseline = {
+        "entries": whole["entries"] - initial_writable["entries"],
+        "bytes": whole["bytes"] - initial_writable["bytes"],
+    }
+    if baseline["entries"] < 0 or baseline["bytes"] < 0:
+        _raise("GATE_INVOCATION_ENTRY_INVALID")
+    return baseline
+
+
+def _darwin_file_flags_writable(flags: int) -> bool:
+    return type(flags) is int and flags >= 0 and bool(flags & 0x2)
+
+
+def _inspect_open_regular_files_macos(pid: int) -> tuple[OpenRegularFile, ...]:
+    try:
+        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        pidinfo = library.proc_pidinfo
+        pidinfo.argtypes = [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint64,
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        pidinfo.restype = ctypes.c_int
+        pidfdinfo = library.proc_pidfdinfo
+        pidfdinfo.argtypes = [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        pidfdinfo.restype = ctypes.c_int
+    except (AttributeError, OSError) as exc:
+        raise OSError(errno.ENOTSUP, "libproc unavailable") from exc
+
+    capacity = DEFAULT_RESOURCE_LIMITS["nofile"] + 16
+    file_descriptors: tuple[_ProcFDInfo, ...] | None = None
+    while capacity <= 16_384:
+        buffer = (_ProcFDInfo * capacity)()
+        ctypes.set_errno(0)
+        used = pidinfo(pid, 1, 0, ctypes.byref(buffer), ctypes.sizeof(buffer))
+        if used == 0:
+            error = ctypes.get_errno()
+            if error in {errno.ENOENT, errno.ESRCH}:
+                raise ProcessLookupError(error, "process exited", pid)
+            if error:
+                raise OSError(error, "proc_pidinfo", pid)
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                raise
+            except PermissionError as exc:
+                raise OSError(errno.EPERM, "proc_pidinfo", pid) from exc
+            return ()
+        if used < 0 or used % ctypes.sizeof(_ProcFDInfo) != 0:
+            raise OSError(errno.EIO, "proc_pidinfo invalid response", pid)
+        count = used // ctypes.sizeof(_ProcFDInfo)
+        if count < capacity:
+            file_descriptors = tuple(buffer[index] for index in range(count))
+            break
+        capacity *= 2
+    if file_descriptors is None:
+        raise OSError(errno.EOVERFLOW, "proc_pidinfo descriptor overflow", pid)
+
+    observed: list[OpenRegularFile] = []
+    for descriptor in file_descriptors:
+        if descriptor.proc_fdtype != 1:
+            continue
+        info = _VnodeFDInfo()
+        ctypes.set_errno(0)
+        used = pidfdinfo(
+            pid,
+            descriptor.proc_fd,
+            1,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        )
+        if used != ctypes.sizeof(info):
+            error = ctypes.get_errno()
+            if error in {errno.EBADF, errno.ENOENT}:
                 continue
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-                _raise("GATE_INVOCATION_ENTRY_INVALID")
-            entries += 1
-            if metadata.st_size > bounded["per_file_bytes"]:
+            if error == errno.ESRCH:
+                raise ProcessLookupError(error, "process exited", pid)
+            raise OSError(error or errno.EIO, "proc_pidfdinfo", pid)
+        metadata = info.pvi.vi_stat
+        if not stat.S_ISREG(metadata.vst_mode):
+            continue
+        observed.append(
+            OpenRegularFile(
+                device=int(metadata.vst_dev),
+                inode=int(metadata.vst_ino),
+                size=int(metadata.vst_size),
+                links=int(metadata.vst_nlink),
+                writable=_darwin_file_flags_writable(info.pfi.fi_openflags),
+            )
+        )
+    return tuple(observed)
+
+
+def _read_linux_fdinfo(path: Path) -> bytes:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, flags)
+        chunks: list[bytes] = []
+        remaining = LINUX_FDINFO_MAX_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if len(payload) > LINUX_FDINFO_MAX_BYTES:
+        raise OSError(errno.EOVERFLOW, "proc fdinfo too large", path)
+    return payload
+
+
+def _parse_linux_fdinfo(payload: bytes) -> tuple[int, int, int]:
+    if not isinstance(payload, bytes) or len(payload) > LINUX_FDINFO_MAX_BYTES:
+        raise OSError(errno.EIO, "proc fdinfo invalid")
+    patterns = {
+        b"flags": re.compile(rb"^[0-7]+$"),
+        b"mnt_id": re.compile(rb"^[0-9]+$"),
+        b"ino": re.compile(rb"^[0-9]+$"),
+    }
+    observed: dict[bytes, int] = {}
+    for line in payload.splitlines():
+        name, separator, raw_value = line.partition(b":")
+        if not separator or name not in patterns:
+            continue
+        value = raw_value.strip()
+        if name in observed or patterns[name].fullmatch(value) is None:
+            raise OSError(errno.EIO, "proc fdinfo field invalid")
+        observed[name] = int(value, 8 if name == b"flags" else 10)
+    if set(observed) != set(patterns):
+        raise OSError(errno.EIO, "proc fdinfo fields missing")
+    return observed[b"flags"], observed[b"mnt_id"], observed[b"ino"]
+
+
+def _inspect_linux_open_regular_file(
+    pid: int,
+    descriptor_name: str,
+    *,
+    read_fdinfo: object | None = None,
+    stat_descriptor: object | None = None,
+) -> OpenRegularFile | None:
+    if (
+        type(pid) is not int
+        or pid <= 0
+        or type(descriptor_name) is not str
+        or not descriptor_name.isdigit()
+    ):
+        raise OSError(errno.EINVAL, "invalid proc descriptor")
+    read_fn = _read_linux_fdinfo if read_fdinfo is None else read_fdinfo
+    stat_fn = (
+        (lambda path: os.stat(path, follow_symlinks=True))
+        if stat_descriptor is None
+        else stat_descriptor
+    )
+    if not callable(read_fn) or not callable(stat_fn):
+        raise OSError(errno.EINVAL, "invalid proc inspector")
+    process_root = Path(f"/proc/{pid}")
+    descriptor_path = process_root / "fd" / descriptor_name
+    fdinfo_path = process_root / "fdinfo" / descriptor_name
+    for _attempt in range(LINUX_FDINFO_RETRIES):
+        try:
+            before = _parse_linux_fdinfo(read_fn(fdinfo_path))
+            metadata = stat_fn(descriptor_path)
+            after = _parse_linux_fdinfo(read_fn(fdinfo_path))
+        except FileNotFoundError:
+            return None
+        if before != after or before[2] != int(metadata.st_ino):
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            return None
+        return OpenRegularFile(
+            device=int(metadata.st_dev),
+            inode=int(metadata.st_ino),
+            size=int(metadata.st_size),
+            links=int(metadata.st_nlink),
+            writable=(before[0] & os.O_ACCMODE) != os.O_RDONLY,
+        )
+    raise OSError(errno.EAGAIN, "proc descriptor identity changed", pid)
+
+
+def _inspect_open_regular_files_linux(pid: int) -> tuple[OpenRegularFile, ...]:
+    descriptor_root = Path(f"/proc/{pid}/fd")
+    try:
+        descriptors = list(os.scandir(descriptor_root))
+    except FileNotFoundError as exc:
+        raise ProcessLookupError(exc.errno, exc.strerror, pid) from exc
+    observed: list[OpenRegularFile] = []
+    for descriptor in descriptors:
+        if not descriptor.name.isdigit():
+            continue
+        record = _inspect_linux_open_regular_file(pid, descriptor.name)
+        if record is not None:
+            observed.append(record)
+    return tuple(observed)
+
+
+def _inspect_open_regular_files(pid: int) -> tuple[OpenRegularFile, ...]:
+    if type(pid) is not int or pid <= 0:
+        raise OSError(errno.EINVAL, "invalid process id")
+    if sys.platform == "darwin":
+        return _inspect_open_regular_files_macos(pid)
+    if sys.platform.startswith("linux"):
+        return _inspect_open_regular_files_linux(pid)
+    raise OSError(errno.ENOTSUP, "open-file process inventory unavailable")
+
+
+def _read_linux_proc_maps(path: Path) -> bytes:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path, flags)
+        chunks: list[bytes] = []
+        remaining = LINUX_PROC_MAPS_MAX_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if len(payload) > LINUX_PROC_MAPS_MAX_BYTES:
+        _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+    return payload
+
+
+def _inspect_unlinked_regular_mappings_linux(
+    pid: int,
+    max_regions: int,
+    *,
+    read_maps: object | None = None,
+    stat_mapping: object | None = None,
+) -> tuple[MappedRegularFile, ...]:
+    if (
+        type(pid) is not int
+        or pid <= 0
+        or type(max_regions) is not int
+        or max_regions <= 0
+    ):
+        _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+    read_fn = _read_linux_proc_maps if read_maps is None else read_maps
+    stat_fn = (
+        (lambda path: os.stat(path, follow_symlinks=True))
+        if stat_mapping is None
+        else stat_mapping
+    )
+    if not callable(read_fn) or not callable(stat_fn):
+        _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+    maps_path = Path(f"/proc/{pid}/maps")
+    try:
+        payload = read_fn(maps_path)
+    except FileNotFoundError as exc:
+        raise ProcessLookupError(exc.errno, exc.strerror, pid) from exc
+    except ProcessLookupError:
+        raise
+    except FullGateError:
+        raise
+    except (OSError, TypeError, ValueError, OverflowError):
+        _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+    if (
+        not isinstance(payload, bytes)
+        or len(payload) > LINUX_PROC_MAPS_MAX_BYTES
+        or b"\x00" in payload
+    ):
+        _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+    records: dict[tuple[int, int], MappedRegularFile] = {}
+    region_count = 0
+    for line in payload.splitlines():
+        region_count += 1
+        if region_count > max_regions:
+            _raise("GATE_VM_REGION_LIMIT_EXCEEDED")
+        if not line or len(line) > LINUX_PROC_MAP_LINE_MAX_BYTES:
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        match = LINUX_PROC_MAP_PATTERN.fullmatch(line)
+        if match is None:
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        try:
+            start = int(match.group(1), 16)
+            end = int(match.group(2), 16)
+            device_major = int(match.group(5), 16)
+            device_minor = int(match.group(6), 16)
+            inode = int(match.group(7), 10)
+        except (TypeError, ValueError, OverflowError):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        if start < 0 or end <= start:
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        raw_path = match.group(8)
+        if inode == 0 or raw_path is None or not raw_path.endswith(b" (deleted)"):
+            continue
+        mapping_path = Path(f"/proc/{pid}/map_files/{start:x}-{end:x}")
+        try:
+            metadata = stat_fn(mapping_path)
+        except FileNotFoundError:
+            continue
+        except ProcessLookupError:
+            raise
+        except (OSError, TypeError, ValueError, OverflowError):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        try:
+            observed_device = (os.major(metadata.st_dev), os.minor(metadata.st_dev))
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 0
+            or metadata.st_ino != inode
+            or observed_device != (device_major, device_minor)
+            or type(metadata.st_size) is not int
+            or metadata.st_size < 0
+        ):
+            if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 0:
+                continue
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        identity = (int(metadata.st_dev), int(metadata.st_ino))
+        prior = records.get(identity)
+        if prior is None or metadata.st_size > prior.size:
+            records[identity] = MappedRegularFile(
+                device=identity[0],
+                inode=identity[1],
+                size=int(metadata.st_size),
+                links=0,
+            )
+    return tuple(records[key] for key in sorted(records))
+
+
+def _inspect_unlinked_regular_mappings_macos(
+    pid: int,
+    max_regions: int,
+    *,
+    pidinfo_function: object | None = None,
+) -> tuple[MappedRegularFile, ...]:
+    if (
+        type(pid) is not int
+        or pid <= 0
+        or type(max_regions) is not int
+        or max_regions <= 0
+    ):
+        _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+    if pidinfo_function is None:
+        try:
+            library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+            pidinfo = library.proc_pidinfo
+            pidinfo.argtypes = [
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_uint64,
+                ctypes.c_void_p,
+                ctypes.c_int,
+            ]
+            pidinfo.restype = ctypes.c_int
+        except (AttributeError, OSError) as exc:
+            raise OSError(errno.ENOTSUP, "libproc unavailable") from exc
+    else:
+        pidinfo = pidinfo_function
+    if not callable(pidinfo):
+        _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+    address = 0
+    region_count = 0
+    records: dict[tuple[int, int], MappedRegularFile] = {}
+    while True:
+        info = _ProcRegionWithPathInfo()
+        ctypes.set_errno(0)
+        try:
+            used = pidinfo(
+                pid,
+                DARWIN_PROC_PIDREGIONPATHINFO,
+                address,
+                ctypes.byref(info),
+                ctypes.sizeof(info),
+            )
+        except ProcessLookupError:
+            raise
+        except (OSError, TypeError, ValueError, OverflowError):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        if used == 0:
+            error = ctypes.get_errno()
+            if error in {errno.ENOENT, errno.ESRCH}:
+                raise ProcessLookupError(error, "process exited", pid)
+            if error == errno.EINVAL and region_count > 0:
+                break
+            if error:
+                raise OSError(error, "proc_pidinfo", pid)
+            break
+        if used != ctypes.sizeof(info):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        region_count += 1
+        if region_count > max_regions:
+            _raise("GATE_VM_REGION_LIMIT_EXCEEDED")
+        region = info.prp_prinfo
+        try:
+            region_start = int(region.pri_address)
+            region_size = int(region.pri_size)
+            next_address = region_start + region_size
+        except (TypeError, ValueError, OverflowError):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        if (
+            region_size <= 0
+            or region_start < address
+            or next_address <= address
+            or next_address > 2**64 - 1
+        ):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        metadata = info.prp_vip.vip_vi.vi_stat
+        if stat.S_ISREG(metadata.vst_mode) and metadata.vst_nlink == 0:
+            if metadata.vst_ino <= 0 or metadata.vst_size < 0:
+                _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+            identity = (int(metadata.vst_dev), int(metadata.vst_ino))
+            prior = records.get(identity)
+            if prior is None or metadata.vst_size > prior.size:
+                records[identity] = MappedRegularFile(
+                    device=identity[0],
+                    inode=identity[1],
+                    size=int(metadata.vst_size),
+                    links=0,
+                )
+        address = next_address
+    return tuple(records[key] for key in sorted(records))
+
+
+def _inspect_unlinked_regular_mappings(
+    pid: int, max_regions: int
+) -> tuple[MappedRegularFile, ...]:
+    if sys.platform == "darwin":
+        return _inspect_unlinked_regular_mappings_macos(pid, max_regions)
+    if sys.platform.startswith("linux"):
+        return _inspect_unlinked_regular_mappings_linux(pid, max_regions)
+    raise OSError(errno.ENOTSUP, "mapped-file process inventory unavailable")
+
+
+def _inspect_identity_live_storage(
+    identities: Sequence[tuple[int, str]],
+    *,
+    inspect_open_files: object | None = None,
+    inspect_mapped_files: object | None = None,
+    max_regions: int = DEFAULT_RESOURCE_LIMITS["vm_regions"],
+    process_snapshot: object | None = None,
+) -> tuple[
+    dict[int, tuple[OpenRegularFile, ...]],
+    dict[int, tuple[MappedRegularFile, ...]],
+    dict[int, tuple[int, int, int, str]],
+]:
+    inspect_open_fn = (
+        _inspect_open_regular_files
+        if inspect_open_files is None
+        else inspect_open_files
+    )
+    inspect_mapped_fn = (
+        _inspect_unlinked_regular_mappings
+        if inspect_mapped_files is None
+        else inspect_mapped_files
+    )
+    snapshot_fn = _process_snapshot if process_snapshot is None else process_snapshot
+    if (
+        not callable(inspect_open_fn)
+        or not callable(inspect_mapped_fn)
+        or not callable(snapshot_fn)
+        or type(max_regions) is not int
+        or max_regions <= 0
+    ):
+        _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+    inspected_open: dict[int, tuple[OpenRegularFile, ...]] = {}
+    inspected_mapped: dict[int, tuple[MappedRegularFile, ...]] = {}
+    lookup_failed: dict[int, str] = {}
+    expected: dict[int, str] = {}
+    seen: set[int] = set()
+    if len(identities) > max_regions:
+        _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+    per_identity_max_regions = max_regions // max(1, len(identities))
+    for identity in identities:
+        if (
+            not isinstance(identity, tuple)
+            or len(identity) != 2
+            or type(identity[0]) is not int
+            or identity[0] <= 0
+            or type(identity[1]) is not str
+            or not identity[1]
+            or identity[0] in seen
+        ):
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        pid, start_identity = identity
+        seen.add(pid)
+        expected[pid] = start_identity
+        try:
+            open_records = inspect_open_fn(pid)
+        except ProcessLookupError:
+            lookup_failed[pid] = "GATE_OPEN_FILE_INVENTORY_FAILED"
+            continue
+        except FullGateError:
+            raise
+        except (OSError, ValueError, TypeError, OverflowError):
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        if not isinstance(open_records, (tuple, list)):
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        inspected_open[pid] = tuple(open_records)
+        try:
+            mapped_records = inspect_mapped_fn(pid, per_identity_max_regions)
+        except ProcessLookupError:
+            lookup_failed[pid] = "GATE_MAPPED_FILE_INVENTORY_FAILED"
+            inspected_open.pop(pid, None)
+            continue
+        except FullGateError:
+            raise
+        except (OSError, ValueError, TypeError, OverflowError):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        if not isinstance(mapped_records, (tuple, list)):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        inspected_mapped[pid] = tuple(mapped_records)
+    try:
+        refreshed = snapshot_fn()
+    except (FullGateError, OSError, ValueError, TypeError, OverflowError):
+        _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+    if not isinstance(refreshed, Mapping):
+        _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+    refreshed_table: dict[int, tuple[int, int, int, str]] = {}
+    for pid, current in refreshed.items():
+        if (
+            type(pid) is not int
+            or pid <= 0
+            or not isinstance(current, tuple)
+            or len(current) != 4
+            or any(type(value) is not int or value < 0 for value in current[:3])
+            or type(current[3]) is not str
+            or not current[3]
+        ):
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        refreshed_table[pid] = current
+    observed_open: dict[int, tuple[OpenRegularFile, ...]] = {}
+    observed_mapped: dict[int, tuple[MappedRegularFile, ...]] = {}
+    for pid, start_identity in expected.items():
+        current = refreshed_table.get(pid)
+        if current is None:
+            continue
+        if not _is_strong_process_identity(current[3]):
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        if current[3] != start_identity:
+            continue
+        failed_status = lookup_failed.get(pid)
+        if failed_status is not None:
+            _raise(failed_status)
+        open_records = inspected_open.get(pid)
+        mapped_records = inspected_mapped.get(pid)
+        if open_records is None:
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        if mapped_records is None:
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        observed_open[pid] = open_records
+        observed_mapped[pid] = mapped_records
+    return observed_open, observed_mapped, refreshed_table
+
+
+def _inspect_identity_open_regular_files(
+    identities: Sequence[tuple[int, str]],
+    *,
+    inspect_open_files: object | None = None,
+    process_snapshot: object | None = None,
+) -> tuple[
+    dict[int, tuple[OpenRegularFile, ...]],
+    dict[int, tuple[int, int, int, str]],
+]:
+    observed, _mapped, refreshed = _inspect_identity_live_storage(
+        identities,
+        inspect_open_files=inspect_open_files,
+        inspect_mapped_files=lambda _pid, _max_regions: (),
+        process_snapshot=process_snapshot,
+    )
+    return observed, refreshed
+
+
+def scan_live_invocation_usage(
+    root: Path,
+    process_ids: Sequence[int],
+    limits: Mapping[str, object],
+    *,
+    inspect_open_files: object = _inspect_open_regular_files,
+    inspect_mapped_files: object = _inspect_unlinked_regular_mappings,
+    baseline_usage: Mapping[str, object] | None = None,
+    linked_paths: Sequence[Path] = (),
+) -> dict[str, int]:
+    bounded = _validated_resource_limits(limits)
+    usage, identities = _scan_invocation_usage(
+        root, bounded, allow_disappeared=True
+    )
+
+    def enforce_usage_limits() -> None:
+        if usage["entries"] > bounded["invocation_entries"]:
+            _raise("GATE_INVOCATION_ENTRY_LIMIT_EXCEEDED")
+        if usage["bytes"] > bounded["aggregate_bytes"]:
+            _raise("GATE_AGGREGATE_BYTES_EXCEEDED")
+
+    if baseline_usage is not None:
+        if set(baseline_usage) != {"entries", "bytes"} or any(
+            type(baseline_usage[key]) is not int or baseline_usage[key] < 0
+            for key in ("entries", "bytes")
+        ):
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        usage["entries"] += int(baseline_usage["entries"])
+        usage["bytes"] += int(baseline_usage["bytes"])
+        enforce_usage_limits()
+    for path in linked_paths:
+        if not isinstance(path, Path) or not path.is_absolute():
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            _raise("GATE_INVOCATION_ENTRY_INVALID")
+        if metadata.st_size > bounded["per_file_bytes"]:
+            _raise("GATE_PER_FILE_BYTES_EXCEEDED")
+        identity = (int(metadata.st_dev), int(metadata.st_ino))
+        prior_size = identities.get(identity)
+        if prior_size is None:
+            identities[identity] = metadata.st_size
+            usage["entries"] += 1
+            usage["bytes"] += metadata.st_size
+        elif metadata.st_size > prior_size:
+            identities[identity] = metadata.st_size
+            usage["bytes"] += metadata.st_size - prior_size
+        enforce_usage_limits()
+    if not callable(inspect_open_files) or not callable(inspect_mapped_files):
+        _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+    open_unlinked: set[tuple[int, int]] = set()
+    for pid in process_ids:
+        if type(pid) is not int or pid <= 0:
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        try:
+            records = inspect_open_files(pid)
+        except (OSError, ValueError, TypeError, OverflowError):
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        if not isinstance(records, (tuple, list)):
+            _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+        for record in records:
+            if (
+                not isinstance(record, OpenRegularFile)
+                or type(record.device) is not int
+                or record.device < 0
+                or type(record.inode) is not int
+                or record.inode <= 0
+                or type(record.size) is not int
+                or record.size < 0
+                or type(record.links) is not int
+                or record.links < 0
+                or type(record.writable) is not bool
+            ):
+                _raise("GATE_OPEN_FILE_INVENTORY_FAILED")
+            if not record.writable and record.links != 0:
+                continue
+            if record.size > bounded["per_file_bytes"]:
                 _raise("GATE_PER_FILE_BYTES_EXCEEDED")
-            total += metadata.st_size
-            if total > bounded["aggregate_bytes"]:
-                _raise("GATE_AGGREGATE_BYTES_EXCEEDED")
-    return {"entries": entries, "bytes": total}
+            identity = (record.device, record.inode)
+            prior_size = identities.get(identity)
+            if prior_size is None:
+                identities[identity] = record.size
+                usage["entries"] += 1
+                usage["bytes"] += record.size
+            elif record.size > prior_size:
+                identities[identity] = record.size
+                usage["bytes"] += record.size - prior_size
+            if record.links == 0:
+                open_unlinked.add(identity)
+            enforce_usage_limits()
+    mapped_unlinked: set[tuple[int, int]] = set()
+    for pid in process_ids:
+        try:
+            records = inspect_mapped_files(pid, bounded["vm_regions"])
+        except FullGateError:
+            raise
+        except (OSError, ValueError, TypeError, OverflowError):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        if not isinstance(records, (tuple, list)):
+            _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+        for record in records:
+            if (
+                not isinstance(record, MappedRegularFile)
+                or type(record.device) is not int
+                or record.device < 0
+                or type(record.inode) is not int
+                or record.inode <= 0
+                or type(record.size) is not int
+                or record.size < 0
+                or type(record.links) is not int
+                or record.links != 0
+            ):
+                _raise("GATE_MAPPED_FILE_INVENTORY_FAILED")
+            if record.size > bounded["per_file_bytes"]:
+                _raise("GATE_PER_FILE_BYTES_EXCEEDED")
+            identity = (record.device, record.inode)
+            prior_size = identities.get(identity)
+            if prior_size is None:
+                identities[identity] = record.size
+                usage["entries"] += 1
+                usage["bytes"] += record.size
+            elif record.size > prior_size:
+                identities[identity] = record.size
+                usage["bytes"] += record.size - prior_size
+            mapped_unlinked.add(identity)
+            enforce_usage_limits()
+    return {
+        **usage,
+        "open_unlinked_entries": len(open_unlinked),
+        "open_unlinked_bytes": sum(identities[identity] for identity in open_unlinked),
+        "mapped_unlinked_entries": len(mapped_unlinked),
+        "mapped_unlinked_bytes": sum(
+            identities[identity] for identity in mapped_unlinked
+        ),
+    }
 
 
 def make_tree_readonly(root: Path) -> None:
@@ -2155,16 +3432,82 @@ def _terminate_process_group(pgid: int) -> bool:
     _raise("CHILD_CLEANUP_FAILED")
 
 
-def _read_capture(handle: object, status: str) -> bytes:
+def _cleanup_spawn_after_authority_pipe_close_failure(
+    process: subprocess.Popen[bytes],
+) -> None:
+    _terminate_process_group(process.pid)
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(process.pid)
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            _raise("CHILD_WAIT_FAILED")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        _raise("CHILD_WAIT_FAILED")
+
+
+def _read_capture(handle: object, status: str, *, max_bytes: int) -> bytes:
+    if type(max_bytes) is not int or max_bytes <= 0:
+        _raise(status)
     try:
         handle.flush()
         handle.seek(0)
-        data = handle.read(4 * 1024 * 1024 + 1)
+        data = handle.read(max_bytes + 1)
     except (AttributeError, OSError):
         _raise(status)
-    if not isinstance(data, bytes) or len(data) > 4 * 1024 * 1024:
+    if not isinstance(data, bytes) or len(data) > max_bytes:
         _raise(status)
     return data
+
+
+def _drain_authority_pipe_available(
+    authority_read_fd: int,
+    authority: bytearray,
+    *,
+    max_bytes: int,
+) -> bool:
+    if (
+        not isinstance(authority_read_fd, int)
+        or authority_read_fd < 0
+        or not isinstance(authority, bytearray)
+        or type(max_bytes) is not int
+        or max_bytes < 0
+    ):
+        _raise("AUTHORITY_PIPE_INVALID")
+    if len(authority) > max_bytes:
+        _raise("AUTHORITY_FRAME_AGGREGATE_EXCEEDED")
+    while True:
+        try:
+            chunk = os.read(authority_read_fd, 64 * 1024)
+        except BlockingIOError:
+            return False
+        except OSError:
+            _raise("AUTHORITY_PIPE_INVALID")
+        if not chunk:
+            return True
+        authority.extend(chunk)
+        if len(authority) > max_bytes:
+            _raise("AUTHORITY_FRAME_AGGREGATE_EXCEEDED")
+
+
+def _drain_authority_pipe_to_eof(
+    authority_read_fd: int,
+    authority: bytearray,
+    *,
+    max_bytes: int,
+    timeout: float,
+) -> None:
+    if not math.isfinite(timeout) or timeout <= 0:
+        _raise("AUTHORITY_PIPE_INVALID")
+    deadline = time.monotonic() + timeout
+    while not _drain_authority_pipe_available(
+        authority_read_fd, authority, max_bytes=max_bytes
+    ):
+        if time.monotonic() >= deadline:
+            _raise("AUTHORITY_PIPE_WRITER_LEAK")
+        time.sleep(0.01)
 
 
 def _bounded_internal_file(path: Path, max_bytes: object, status: str) -> bytes:
@@ -2198,10 +3541,125 @@ def _bounded_internal_file(path: Path, max_bytes: object, status: str) -> bytes:
     return data
 
 
+def _darwin_process_birth_identity(pid: int) -> tuple[int, str] | None:
+    if type(pid) is not int or pid <= 0:
+        return None
+    try:
+        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        pidinfo = library.proc_pidinfo
+        pidinfo.argtypes = [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint64,
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        pidinfo.restype = ctypes.c_int
+    except (AttributeError, OSError):
+        return None
+    info = _ProcBSDInfo()
+    ctypes.set_errno(0)
+    try:
+        used = pidinfo(
+            pid,
+            DARWIN_PROC_PIDTBSDINFO,
+            0,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        )
+    except (OSError, TypeError, ValueError, OverflowError):
+        return None
+    if used != ctypes.sizeof(info):
+        return None
+    process_pid = int(info.pbi_pid)
+    parent_pid = int(info.pbi_ppid)
+    start_seconds = int(info.pbi_start_tvsec)
+    start_microseconds = int(info.pbi_start_tvusec)
+    if (
+        process_pid != pid
+        or parent_pid < 0
+        or start_seconds <= 0
+        or start_microseconds < 0
+        or start_microseconds >= 1_000_000
+    ):
+        return None
+    return (
+        parent_pid,
+        f"darwin-proc-start:{start_seconds}:{start_microseconds}",
+    )
+
+
+def _linux_process_birth_identity(pid: int) -> tuple[int, str] | None:
+    if type(pid) is not int or pid <= 0:
+        return None
+    stat_path = Path("/proc") / str(pid) / "stat"
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = -1
+    close_failed = False
+    try:
+        descriptor = os.open(stat_path, flags)
+        payload = os.read(descriptor, 64 * 1024 + 1)
+    except OSError:
+        return None
+    finally:
+        if descriptor >= 0:
+            if _close_raw_descriptor_with_retry(descriptor) is not None:
+                close_failed = True
+    if close_failed:
+        return None
+    if len(payload) == 0 or len(payload) > 64 * 1024:
+        return None
+    command_end = payload.rfind(b") ")
+    if command_end <= 0:
+        return None
+    try:
+        parsed_pid = int(payload[: payload.find(b" ")])
+        fields = payload[command_end + 2 :].split()
+        parent_pid = int(fields[1])
+        start_ticks = int(fields[19])
+    except (IndexError, ValueError):
+        return None
+    if parsed_pid != pid or parent_pid < 0 or start_ticks <= 0:
+        return None
+    return parent_pid, f"linux-proc-start:{start_ticks}"
+
+
+def _process_birth_identity(pid: int) -> tuple[int, str] | None:
+    if sys.platform == "darwin":
+        return _darwin_process_birth_identity(pid)
+    if sys.platform.startswith("linux"):
+        return _linux_process_birth_identity(pid)
+    return None
+
+
+def _is_strong_process_identity(identity: object) -> bool:
+    if type(identity) is not str:
+        return False
+    darwin_match = DARWIN_PROCESS_IDENTITY_PATTERN.fullmatch(identity)
+    if darwin_match is not None:
+        microseconds = int(darwin_match.group(2))
+        return microseconds < 1_000_000
+    return LINUX_PROCESS_IDENTITY_PATTERN.fullmatch(identity) is not None
+
+
+def _detached_process_signal_supported() -> bool:
+    if (
+        not sys.platform.startswith("linux")
+        or not hasattr(os, "pidfd_open")
+        or not hasattr(signal, "pidfd_send_signal")
+    ):
+        return False
+    try:
+        descriptor = os.pidfd_open(os.getpid(), 0)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+    return _close_raw_descriptor_with_retry(descriptor) is None
+
+
 def _process_snapshot() -> dict[int, tuple[int, int, int, str]]:
     try:
         result = subprocess.run(
-            ["/bin/ps", "-axo", "pid=,ppid=,rss=,vsz=,lstart="],
+            ["/bin/ps", "-axo", "pid=,ppid=,rss=,vsz="],
             env={"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C", "LC_ALL": "C"},
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -2215,61 +3673,166 @@ def _process_snapshot() -> dict[int, tuple[int, int, int, str]]:
         _raise("PROCESS_INVENTORY_FAILED")
     table: dict[int, tuple[int, int, int, str]] = {}
     for raw in result.stdout.decode("utf-8", "strict").splitlines():
-        parts = raw.split(None, 4)
-        if len(parts) != 5:
+        parts = raw.split()
+        if len(parts) != 4:
             continue
         try:
-            pid, ppid, rss_kib, vsz_kib = map(int, parts[:4])
+            pid, ppid, rss_kib, vsz_kib = map(int, parts)
         except ValueError:
             continue
-        table[pid] = (ppid, rss_kib * 1024, vsz_kib * 1024, parts[4])
+        if pid <= 0 or ppid < 0 or rss_kib < 0 or vsz_kib < 0:
+            continue
+        birth = _process_birth_identity(pid)
+        if (
+            birth is None
+            or birth[0] != ppid
+            or not _is_strong_process_identity(birth[1])
+        ):
+            table[pid] = (
+                ppid,
+                rss_kib * 1024,
+                vsz_kib * 1024,
+                PROCESS_IDENTITY_UNAVAILABLE_SENTINEL,
+            )
+            continue
+        table[pid] = (birth[0], rss_kib * 1024, vsz_kib * 1024, birth[1])
     return table
 
 
 def _descendant_identities(
-    table: Mapping[int, tuple[int, int, int, str]], root_pid: int
+    table: Mapping[int, tuple[int, int, int, str]],
+    root_pid: int,
+    *,
+    max_descendants: int | None = None,
 ) -> tuple[tuple[int, str], ...]:
+    if max_descendants is not None and (
+        type(max_descendants) is not int or max_descendants <= 0
+    ):
+        _raise("GATE_DESCENDANT_LIMIT_EXCEEDED")
+    children: dict[int, list[int]] = {}
+    for pid, (ppid, _rss, _vsz, _start) in table.items():
+        children.setdefault(ppid, []).append(pid)
     descendants: set[int] = set()
-    frontier = {root_pid}
+    frontier = list(children.get(root_pid, ()))
     while frontier:
-        next_frontier = {
-            pid
-            for pid, (ppid, _rss, _vsz, _start) in table.items()
-            if ppid in frontier and pid not in descendants
-        }
-        descendants.update(next_frontier)
-        frontier = next_frontier
+        pid = frontier.pop()
+        if pid in descendants:
+            continue
+        if not _is_strong_process_identity(table[pid][3]):
+            _raise("PROCESS_INVENTORY_FAILED")
+        descendants.add(pid)
+        if max_descendants is not None and len(descendants) > max_descendants:
+            _raise("GATE_DESCENDANT_LIMIT_EXCEEDED")
+        frontier.extend(children.get(pid, ()))
     return tuple(sorted((pid, table[pid][3]) for pid in descendants))
 
 
+def _open_identity_bound_pidfd(pid: int, expected_identity: str) -> int | None:
+    if (
+        not sys.platform.startswith("linux")
+        or not _is_strong_process_identity(expected_identity)
+        or LINUX_PROCESS_IDENTITY_PATTERN.fullmatch(expected_identity) is None
+        or not hasattr(os, "pidfd_open")
+        or not hasattr(signal, "pidfd_send_signal")
+    ):
+        _raise(DETACHED_PROCESS_SIGNAL_UNAVAILABLE)
+    before = _process_birth_identity(pid)
+    if before is None or before[1] != expected_identity:
+        return None
+    try:
+        descriptor = os.pidfd_open(pid, 0)
+    except ProcessLookupError:
+        return None
+    except (AttributeError, OSError, TypeError, ValueError):
+        _raise(DETACHED_PROCESS_SIGNAL_UNAVAILABLE)
+    after = _process_birth_identity(pid)
+    if after is None or after[1] != expected_identity:
+        close_error = _close_raw_descriptor_with_retry(descriptor)
+        if close_error is not None:
+            _raise("CHILD_CLEANUP_FAILED")
+        return None
+    return descriptor
+
+
+def _signal_identity_bound_pidfd(descriptor: int, sig: signal.Signals) -> bool:
+    try:
+        signal.pidfd_send_signal(descriptor, sig, None, 0)
+    except ProcessLookupError:
+        return False
+    except (AttributeError, OSError, TypeError, ValueError):
+        _raise("CHILD_CLEANUP_FAILED")
+    return True
+
+
 def _kill_tracked_descendants(identities: Sequence[tuple[int, str]]) -> bool:
+    validated: list[tuple[int, str]] = []
+    seen: set[int] = set()
+    for identity in identities:
+        if (
+            not isinstance(identity, tuple)
+            or len(identity) != 2
+            or type(identity[0]) is not int
+            or identity[0] <= 0
+            or identity[0] in seen
+            or not _is_strong_process_identity(identity[1])
+        ):
+            _raise(DETACHED_PROCESS_SIGNAL_UNAVAILABLE)
+        seen.add(identity[0])
+        validated.append(identity)
+
+    def assert_relevant_identities_available(
+        table: Mapping[int, tuple[int, int, int, str]],
+    ) -> None:
+        if any(
+            pid in table and not _is_strong_process_identity(table[pid][3])
+            for pid, _start_identity in validated
+        ):
+            _raise("PROCESS_INVENTORY_FAILED")
+
     cleanup = False
     for sig in (signal.SIGTERM, signal.SIGKILL):
-        for pid, start_identity in identities:
-            table = _process_snapshot()
-            current = table.get(pid)
-            if current is None or current[3] != start_identity:
-                continue
-            try:
-                os.kill(pid, sig)
-                cleanup = True
-            except ProcessLookupError:
-                continue
-            except PermissionError:
-                _raise("CHILD_CLEANUP_FAILED")
+        table = _process_snapshot()
+        assert_relevant_identities_available(table)
+        descriptors: list[int] = []
+        signal_error: BaseException | None = None
+        try:
+            for pid, start_identity in validated:
+                current = table.get(pid)
+                if current is None or current[3] != start_identity:
+                    continue
+                descriptor = _open_identity_bound_pidfd(pid, start_identity)
+                if descriptor is not None:
+                    descriptors.append(descriptor)
+            for descriptor in descriptors:
+                cleanup = _signal_identity_bound_pidfd(descriptor, sig) or cleanup
+        except BaseException as exc:
+            signal_error = exc
+        close_error: BaseException | None = None
+        for descriptor in descriptors:
+            error = _close_raw_descriptor_with_retry(descriptor)
+            if close_error is None and error is not None:
+                close_error = error
+        if signal_error is not None:
+            if close_error is not None:
+                raise FullGateError("CHILD_CLEANUP_FAILED") from signal_error
+            raise signal_error
+        if close_error is not None:
+            _raise("CHILD_CLEANUP_FAILED")
         deadline = time.monotonic() + (0.25 if sig == signal.SIGTERM else 1.0)
         while time.monotonic() < deadline:
             table = _process_snapshot()
+            assert_relevant_identities_available(table)
             if not any(
                 pid in table and table[pid][3] == start_identity
-                for pid, start_identity in identities
+                for pid, start_identity in validated
             ):
                 return cleanup
             time.sleep(0.01)
     table = _process_snapshot()
+    assert_relevant_identities_available(table)
     if any(
         pid in table and table[pid][3] == start_identity
-        for pid, start_identity in identities
+        for pid, start_identity in validated
     ):
         _raise("CHILD_CLEANUP_FAILED")
     return cleanup
@@ -2281,6 +3844,9 @@ def supervise_process(
     timeout: float,
     stdout_handle: object,
     stderr_handle: object,
+    invocation_root: Path | None = None,
+    invocation_baseline: Mapping[str, object] | None = None,
+    linked_paths: Sequence[Path] = (),
     authority_read_fd: int | None = None,
     nonce: str | None = None,
     limits: Mapping[str, object] | None = None,
@@ -2313,6 +3879,29 @@ def supervise_process(
                 raise cleanup_error from inventory_error
             raise
 
+    def retain_live_observed_descendants(
+        current_table: Mapping[int, tuple[int, int, int, str]],
+        current_descendants: Sequence[tuple[int, str]] = (),
+    ) -> tuple[tuple[int, str], ...]:
+        if any(
+            pid in current_table
+            and not _is_strong_process_identity(current_table[pid][3])
+            for pid in observed_descendants
+        ):
+            _raise("PROCESS_INVENTORY_FAILED")
+        stale = tuple(
+            pid
+            for pid, start_identity in observed_descendants.items()
+            if pid not in current_table
+            or current_table[pid][3] != start_identity
+        )
+        for pid in stale:
+            observed_descendants.pop(pid, None)
+        for pid, start_identity in current_descendants:
+            observed_descendants[pid] = start_identity
+        return tuple(sorted(observed_descendants.items()))
+
+    table = process_snapshot()
     while process.poll() is None:
         try:
             stdout_size = os.fstat(stdout_handle.fileno()).st_size
@@ -2346,25 +3935,115 @@ def supervise_process(
                 resource_status = "AUTHORITY_PIPE_INVALID"
                 cleanup = _terminate_process_group(process.pid) or cleanup
                 break
-        table = process_snapshot()
+        carried_root = table.get(process.pid)
+        open_files: dict[int, tuple[OpenRegularFile, ...]] | None = None
+        mapped_files: dict[int, tuple[MappedRegularFile, ...]] | None = None
+        if carried_root is not None:
+            if not _is_strong_process_identity(carried_root[3]):
+                _terminate_process_group(process.pid)
+                _raise("PROCESS_INVENTORY_FAILED")
+            if wrapper_start_identity is None:
+                wrapper_start_identity = carried_root[3]
+            elif wrapper_start_identity != carried_root[3]:
+                resource_status = "WRAPPER_IDENTITY_DRIFT"
+                cleanup = _terminate_process_group(process.pid) or cleanup
+                break
+            try:
+                descendants = _descendant_identities(
+                    table,
+                    process.pid,
+                    max_descendants=bounded["descendants"],
+                )
+            except FullGateError as exc:
+                resource_status = exc.status
+                cleanup = _terminate_process_group(process.pid) or cleanup
+                break
+            carried_observed_descendants = retain_live_observed_descendants(
+                table,
+                descendants,
+            )
+            if len(carried_observed_descendants) > bounded["descendants"]:
+                resource_status = "GATE_DESCENDANT_LIMIT_EXCEEDED"
+                cleanup = _terminate_process_group(process.pid) or cleanup
+                break
+            if invocation_root is not None:
+                live_identities = (
+                    (process.pid, wrapper_start_identity),
+                    *carried_observed_descendants,
+                )
+                try:
+                    open_files, mapped_files, table = _inspect_identity_live_storage(
+                        live_identities,
+                        max_regions=bounded["vm_regions"],
+                        process_snapshot=process_snapshot,
+                    )
+                except FullGateError as exc:
+                    resource_status = exc.status
+                    cleanup = _terminate_process_group(process.pid) or cleanup
+                    break
+            else:
+                table = process_snapshot()
+        else:
+            table = process_snapshot()
         root = table.get(process.pid)
-        if root is not None:
+        descendants = ()
+        if root is None or not _is_strong_process_identity(root[3]):
+            _terminate_process_group(process.pid)
+            _raise("PROCESS_INVENTORY_FAILED")
+        else:
             if wrapper_start_identity is None:
                 wrapper_start_identity = root[3]
             elif wrapper_start_identity != root[3]:
                 resource_status = "WRAPPER_IDENTITY_DRIFT"
                 cleanup = _terminate_process_group(process.pid) or cleanup
                 break
-            descendants = _descendant_identities(table, process.pid)
-            for pid, start_identity in descendants:
-                observed_descendants[pid] = start_identity
-            if len(descendants) > bounded["descendants"]:
-                resource_status = "GATE_DESCENDANT_LIMIT_EXCEEDED"
+            try:
+                descendants = _descendant_identities(
+                    table,
+                    process.pid,
+                    max_descendants=bounded["descendants"],
+                )
+            except FullGateError as exc:
+                resource_status = exc.status
                 cleanup = _terminate_process_group(process.pid) or cleanup
                 break
-            rss = root[1] + sum(table[pid][1] for pid, _start in descendants if pid in table)
+        live_observed_descendants = retain_live_observed_descendants(
+            table,
+            descendants,
+        )
+        if len(live_observed_descendants) > bounded["descendants"]:
+            resource_status = "GATE_DESCENDANT_LIMIT_EXCEEDED"
+            cleanup = _terminate_process_group(process.pid) or cleanup
+            break
+        if (
+            invocation_root is not None
+            and open_files is not None
+            and mapped_files is not None
+        ):
+            try:
+                scan_live_invocation_usage(
+                    invocation_root,
+                    tuple(open_files),
+                    bounded,
+                    inspect_open_files=lambda pid: open_files[pid],
+                    inspect_mapped_files=lambda pid, _max_regions: mapped_files[pid],
+                    baseline_usage=invocation_baseline,
+                    linked_paths=linked_paths,
+                )
+            except FullGateError as exc:
+                resource_status = exc.status
+                cleanup = _terminate_process_group(process.pid) or cleanup
+                break
+        if root is not None:
+            rss = root[1] + sum(
+                table[pid][1]
+                for pid, _start in live_observed_descendants
+                if pid in table
+            )
             address_space = root[2] + sum(
-                table[pid][2] for pid, _start in descendants if pid in table
+                table[pid][2]
+                for pid, _start in live_observed_descendants
+                if pid in table
             )
             if rss > bounded["rss_bytes"]:
                 resource_status = "GATE_RSS_BYTES_EXCEEDED"
@@ -2387,20 +4066,17 @@ def supervise_process(
             process.wait(timeout=2)
         except subprocess.TimeoutExpired:
             _raise("CHILD_WAIT_FAILED")
+    authority_eof = False
+    post_exit_authority = bytearray()
+    if authority_read_fd is not None:
+        authority_eof = _drain_authority_pipe_available(
+            authority_read_fd,
+            authority,
+            max_bytes=bounded["authority_aggregate_bytes"],
+        )
+    writer_leak_observed = authority_read_fd is not None and not authority_eof
     if not timed_out and resource_status is None:
         cleanup = _terminate_process_group(process.pid) or cleanup
-    if authority_read_fd is not None:
-        try:
-            while True:
-                chunk = os.read(authority_read_fd, 64 * 1024)
-                if not chunk:
-                    break
-                authority.extend(chunk)
-        except BlockingIOError:
-            pass
-        except OSError:
-            _raise("AUTHORITY_PIPE_INVALID")
-    table = process_snapshot()
     survivors = tuple(
         (pid, start_identity)
         for pid, start_identity in sorted(observed_descendants.items())
@@ -2415,8 +4091,42 @@ def supervise_process(
             except BaseException as group_error:
                 raise group_error from cleanup_error
             raise
-    stdout = _read_capture(stdout_handle, "STDOUT_CAPTURE_INVALID")
-    stderr = _read_capture(stderr_handle, "STDERR_CAPTURE_INVALID")
+    if authority_read_fd is not None and not authority_eof:
+        _drain_authority_pipe_to_eof(
+            authority_read_fd,
+            post_exit_authority,
+            max_bytes=bounded["authority_aggregate_bytes"] - len(authority),
+            timeout=0.25,
+        )
+    if post_exit_authority:
+        _raise("AUTHORITY_POST_EXIT_BYTES")
+    if writer_leak_observed:
+        _raise("AUTHORITY_PIPE_WRITER_LEAK")
+    if resource_status is None:
+        try:
+            stdout_size = os.fstat(stdout_handle.fileno()).st_size
+            stderr_size = os.fstat(stderr_handle.fileno()).st_size
+        except (AttributeError, OSError):
+            resource_status = "capture_identity"
+        else:
+            if stdout_size > bounded["stdout_bytes"]:
+                resource_status = "GATE_STDOUT_BYTES_EXCEEDED"
+            elif stderr_size > bounded["stderr_bytes"]:
+                resource_status = "GATE_STDERR_BYTES_EXCEEDED"
+    if resource_status is None:
+        stdout = _read_capture(
+            stdout_handle,
+            "STDOUT_CAPTURE_INVALID",
+            max_bytes=bounded["stdout_bytes"],
+        )
+        stderr = _read_capture(
+            stderr_handle,
+            "STDERR_CAPTURE_INVALID",
+            max_bytes=bounded["stderr_bytes"],
+        )
+    else:
+        stdout = b""
+        stderr = b""
     frames: tuple[dict[str, object], ...] = ()
     if authority_read_fd is not None and resource_status is None and not timed_out:
         if nonce is None:
@@ -2426,6 +4136,7 @@ def supervise_process(
             nonce=nonce,
             limits=bounded,
             wrapper_exited=True,
+            post_exit_bytes=bytes(post_exit_authority),
         )
     return GateOutcome(
         returncode=process.returncode,
@@ -2459,6 +4170,7 @@ def run_gate_once(
     nonce: str,
 ) -> GateOutcome:
     bounded = _validated_resource_limits(limits)
+    timeout = _bounded_wall_timeout(timeout, bounded)
     argv = build_sandbox_argv(
         profile,
         snapshot,
@@ -2494,43 +4206,110 @@ def run_gate_once(
         )
         lower(resource.RLIMIT_NOFILE, bounded["nofile"])
 
-    read_fd, write_fd = create_cloexec_pipe()
-    actual_argv = argv
-    authority_index = actual_argv.index("--authority-fd") + 1
-    actual_argv = (*actual_argv[:authority_index], str(write_fd), *actual_argv[authority_index + 1 :])
+    baseline_usage = scan_invocation_baseline(snapshot.parent, scratch, bounded)
     with tempfile.TemporaryFile(mode="w+b", dir=tmpdir) as stdout_handle, tempfile.TemporaryFile(
         mode="w+b", dir=tmpdir
     ) as stderr_handle:
+        raw_read_fd: int | None = None
+        raw_write_fd: int | None = None
+        read_owner: _OwnedDescriptor | None = None
+        write_owner: _OwnedDescriptor | None = None
+        process: subprocess.Popen[bytes] | None = None
+        process_cleanup_attempted = False
         try:
-            process = subprocess.Popen(
-                actual_argv,
-                cwd=snapshot,
-                env=dict(environment),
-                stdin=subprocess.DEVNULL,
-                stdout=stdout_handle,
-                stderr=stderr_handle,
-                start_new_session=True,
-                preexec_fn=apply_limits,
-                close_fds=True,
-                pass_fds=(write_fd,),
-            )
-        except (OSError, ValueError, subprocess.SubprocessError):
-            os.close(read_fd)
-            os.close(write_fd)
-            _raise("GATE_SPAWN_FAILED")
-        os.close(write_fd)
-        try:
-            return supervise_process(
-                process,
-                timeout=timeout,
-                stdout_handle=stdout_handle,
-                stderr_handle=stderr_handle,
-                authority_read_fd=read_fd,
-                nonce=nonce,
-                limits=bounded,
-            )
-        finally:
-            os.close(read_fd)
+            try:
+                raw_read_fd, raw_write_fd = create_cloexec_pipe()
+                read_owner = _OwnedDescriptor.take(raw_read_fd)
+                raw_read_fd = None
+                write_owner = _OwnedDescriptor.take(raw_write_fd)
+                raw_write_fd = None
+                authority_read_fd = read_owner.fileno()
+                authority_write_fd = write_owner.fileno()
+                actual_argv = argv
+                try:
+                    authority_index = actual_argv.index("--authority-fd") + 1
+                except ValueError:
+                    _raise("GATE_SPAWN_FAILED")
+                actual_argv = (
+                    *actual_argv[:authority_index],
+                    str(authority_write_fd),
+                    *actual_argv[authority_index + 1 :],
+                )
+                try:
+                    process = subprocess.Popen(
+                        actual_argv,
+                        cwd=snapshot,
+                        env=dict(environment),
+                        stdin=subprocess.DEVNULL,
+                        stdout=stdout_handle,
+                        stderr=stderr_handle,
+                        start_new_session=True,
+                        preexec_fn=apply_limits,
+                        close_fds=True,
+                        pass_fds=(authority_write_fd,),
+                    )
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    _raise("GATE_SPAWN_FAILED")
+                try:
+                    write_owner.close()
+                except BaseException as close_error:
+                    try:
+                        _cleanup_spawn_after_authority_pipe_close_failure(process)
+                    finally:
+                        process_cleanup_attempted = True
+                    if isinstance(close_error, OSError):
+                        _raise("AUTHORITY_PIPE_CLOSE_FAILED")
+                    raise
+                return supervise_process(
+                    process,
+                    timeout=timeout,
+                    stdout_handle=stdout_handle,
+                    stderr_handle=stderr_handle,
+                    invocation_root=scratch,
+                    invocation_baseline=baseline_usage,
+                    linked_paths=tuple(Path(path) for path in FIXED_LOG_PATHS),
+                    authority_read_fd=authority_read_fd,
+                    nonce=nonce,
+                    limits=bounded,
+                )
+            finally:
+                primary_exception = sys.exc_info()[1]
+                close_error: BaseException | None = None
+                for owner in (write_owner, read_owner):
+                    if owner is None:
+                        continue
+                    owner_error = _close_owned_descriptor_with_retry(owner)
+                    if close_error is None and owner_error is not None:
+                        close_error = owner_error
+                write_owner = None
+                read_owner = None
+                for descriptor in (raw_write_fd, raw_read_fd):
+                    if descriptor is None:
+                        continue
+                    descriptor_error = _close_raw_descriptor_with_retry(descriptor)
+                    if close_error is None and descriptor_error is not None:
+                        close_error = descriptor_error
+                raw_write_fd = None
+                raw_read_fd = None
+                if close_error is not None:
+                    if primary_exception is None:
+                        _raise("AUTHORITY_PIPE_CLOSE_FAILED")
+                    primary_status = getattr(
+                        primary_exception,
+                        "status",
+                        type(primary_exception).__name__,
+                    )
+                    raise FullGateError(
+                        "AUTHORITY_PIPE_CLOSE_FAILED",
+                        primary_status=primary_status,
+                    ) from primary_exception
+        except BaseException as primary:
+            if process is not None and not process_cleanup_attempted:
+                try:
+                    _cleanup_spawn_after_authority_pipe_close_failure(process)
+                except BaseException as cleanup_error:
+                    raise cleanup_error from primary
+            raise
 
 
 def _one_counter(pattern: bytes, value: bytes, status: str) -> int:
@@ -2555,6 +4334,12 @@ def validate_gate_process_outcome(outcome: GateOutcome) -> None:
         _raise("GATE_DESCENDANT_CLEANUP_REQUIRED")
     if outcome.returncode != 0:
         _raise("GATE_EXIT_NONZERO")
+    if (
+        type(outcome.wrapper_pid) is not int
+        or outcome.wrapper_pid <= 0
+        or not _is_strong_process_identity(outcome.wrapper_start_identity)
+    ):
+        _raise("PROCESS_INVENTORY_FAILED")
 
 
 def validate_gate_outcome(
@@ -2837,8 +4622,12 @@ def build_pass_receipt(
     counters: Mapping[str, int],
     digests: ReceiptDigests,
     *,
+    storage_quota_authority: InvocationStorageQuotaAuthority | None = None,
     prior_receipt_sha256: str | None = None,
 ) -> bytes:
+    quota_authority = _validate_invocation_storage_quota_authority(
+        storage_quota_authority
+    )
     semantic = _validate_semantic_counters(
         dict(counters), "SEMANTIC_COUNTER_SCHEMA_INVALID"
     )
@@ -2888,6 +4677,7 @@ def build_pass_receipt(
         "identity_sha256": digests.identity,
         "tree_sha256": digests.tree,
         "runtime_sha256": digests.runtime,
+        "storage_quota_evidence_sha256": quota_authority.evidence_sha256,
         "semantic_counters": semantic,
         "promotion_limitations": list(PROMOTION_LIMITATIONS),
     }
@@ -2909,6 +4699,66 @@ def _reject_environment_authority(environment: Mapping[str, str]) -> None:
         key.startswith("SAMVIL_FULL_GATE_") for key in environment
     ):
         _raise("FULL_GATE_ENV_AUTHORITY_REJECTED")
+
+
+def _invocation_storage_quota_supported() -> bool:
+    """Return whether the production host provides a verified hard quota boundary.
+
+    No currently supported host adapter can prove an invocation-exclusive,
+    fixed-capacity filesystem boundary.  Keep this closed until that adapter
+    exists; tests may patch the function only to exercise downstream
+    orchestration contracts.
+    """
+
+    return False
+
+
+def _make_invocation_storage_quota_authority(
+    *, quota_bytes: int, filesystem_identity_sha256: str
+) -> InvocationStorageQuotaAuthority:
+    if type(quota_bytes) is not int or quota_bytes <= 0:
+        _raise(INVOCATION_STORAGE_QUOTA_BLOCKER)
+    filesystem_identity = _hex64(
+        filesystem_identity_sha256, INVOCATION_STORAGE_QUOTA_BLOCKER
+    )
+    payload = {
+        "schema": "samvil.invocation-storage-quota-authority.v1",
+        "quota_bytes": quota_bytes,
+        "filesystem_identity_sha256": filesystem_identity,
+    }
+    return InvocationStorageQuotaAuthority(
+        schema=payload["schema"],
+        quota_bytes=quota_bytes,
+        filesystem_identity_sha256=filesystem_identity,
+        evidence_sha256=sha256_bytes(canonical_json_bytes(payload)),
+    )
+
+
+def _validate_invocation_storage_quota_authority(
+    authority: InvocationStorageQuotaAuthority | None,
+) -> InvocationStorageQuotaAuthority:
+    if not isinstance(authority, InvocationStorageQuotaAuthority):
+        _raise(INVOCATION_STORAGE_QUOTA_BLOCKER)
+    expected = _make_invocation_storage_quota_authority(
+        quota_bytes=authority.quota_bytes,
+        filesystem_identity_sha256=authority.filesystem_identity_sha256,
+    )
+    if authority != expected:
+        _raise(INVOCATION_STORAGE_QUOTA_BLOCKER)
+    return authority
+
+
+def _acquire_invocation_storage_quota_authority() -> InvocationStorageQuotaAuthority:
+    """Acquire verified OS-backed quota evidence.
+
+    No production adapter exists yet.  Deliberately keep acquisition blocked
+    even if the coarse support probe is changed accidentally; a future adapter
+    must replace this function with evidence-producing verification.
+    """
+
+    if not _invocation_storage_quota_supported():
+        _raise(INVOCATION_STORAGE_QUOTA_BLOCKER)
+    _raise(INVOCATION_STORAGE_QUOTA_BLOCKER)
 
 
 def _validated_temp_parent(
@@ -3029,6 +4879,7 @@ def execute_full_gate(
     protocol: FixedLogProtocol | None = None
     invocation_root: Path | None = None
     platform_authority: HeldApplePlatformTCB | HeldCanonicalHostAuthority | None = None
+    storage_quota_authority: InvocationStorageQuotaAuthority | None = None
     outcome: GateOutcome | None = None
     primary: FullGateError | None = None
     receipt_bytes: bytes | None = None
@@ -3121,6 +4972,28 @@ def execute_full_gate(
             {_output_collision_key(path) for path in reserved}
         ):
             _raise("OUTPUT_PATH_COLLISION")
+
+        try:
+            storage_quota_authority = (
+                _acquire_invocation_storage_quota_authority()
+            )
+        except FullGateError as exc:
+            if exc.status != INVOCATION_STORAGE_QUOTA_BLOCKER:
+                raise
+            outputs = create_output_files(
+                arguments.receipt,
+                arguments.denial_log,
+                reserved_paths=reserved,
+            )
+            raise
+
+        if not _detached_process_signal_supported():
+            outputs = create_output_files(
+                arguments.receipt,
+                arguments.denial_log,
+                reserved_paths=reserved,
+            )
+            _raise(DETACHED_PROCESS_SIGNAL_UNAVAILABLE)
 
         temp_parent = _validated_temp_parent(source_environment, canonical_control)
         try:
@@ -3417,6 +5290,7 @@ def execute_full_gate(
                     )
                 ),
             ),
+            storage_quota_authority=storage_quota_authority,
             prior_receipt_sha256=accepted_prior_sha256,
         )
     except FullGateError as exc:
@@ -5451,6 +7325,7 @@ def validate_prior_receipt_object(
         "identity_sha256",
         "tree_sha256",
         "runtime_sha256",
+        "storage_quota_evidence_sha256",
     ):
         _hex64(receipt[field], "PRIOR_RECEIPT_INVALID")
     _validate_semantic_counters(
@@ -7522,26 +9397,105 @@ def _remove_invocation_tree(root: Path, status: str) -> None:
         except OSError:
             _raise(status)
         return
+    required_open_flags = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if any(not hasattr(os, name) for name in required_open_flags):
+        _raise(status)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    frames: list[tuple[int, object, int | None, str | None]] = []
     try:
-        with os.scandir(root) as entries:
-            children = list(entries)
-        for entry in children:
-            child = Path(entry.path)
-            child_metadata = entry.stat(follow_symlinks=False)
+        os.chmod(root, 0o700, follow_symlinks=False)
+        root_fd = os.open(root, directory_flags)
+        root_iterator = os.scandir(root_fd)
+        frames.append((root_fd, root_iterator, None, None))
+        while frames:
+            directory_fd, iterator, parent_fd, child_name = frames[-1]
+            try:
+                entry = next(iterator)  # type: ignore[arg-type]
+            except StopIteration:
+                frames.pop()
+                iterator_error = _close_iterator_with_retry(iterator)
+                descriptor_error = _close_raw_descriptor_with_retry(directory_fd)
+                if iterator_error is not None or descriptor_error is not None:
+                    _raise(status)
+                if parent_fd is None:
+                    os.rmdir(root)
+                else:
+                    if child_name is None:
+                        _raise(status)
+                    os.rmdir(child_name, dir_fd=parent_fd)
+                continue
+            name = entry.name
+            if (
+                type(name) is not str
+                or not name
+                or name in {".", ".."}
+                or "/" in name
+                or "\x00" in name
+            ):
+                _raise(status)
+            child_metadata = os.stat(
+                name, dir_fd=directory_fd, follow_symlinks=False
+            )
             if stat.S_ISDIR(child_metadata.st_mode):
+                os.chmod(
+                    name,
+                    0o700,
+                    dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+                child_fd = os.open(name, directory_flags, dir_fd=directory_fd)
                 try:
-                    os.chmod(child, 0o700, follow_symlinks=False)
-                except OSError:
-                    pass
-                _remove_invocation_tree(child, status)
+                    opened = os.fstat(child_fd)
+                    if (
+                        not stat.S_ISDIR(opened.st_mode)
+                        or (opened.st_dev, opened.st_ino)
+                        != (child_metadata.st_dev, child_metadata.st_ino)
+                    ):
+                        _raise(status)
+                    child_iterator = os.scandir(child_fd)
+                except BaseException as child_error:
+                    descriptor_error = _close_raw_descriptor_with_retry(child_fd)
+                    if descriptor_error is not None:
+                        primary_status = getattr(
+                            child_error,
+                            "status",
+                            type(child_error).__name__,
+                        )
+                        raise FullGateError(
+                            status,
+                            primary_status=primary_status,
+                        ) from child_error
+                    raise
+                frames.append(
+                    (child_fd, child_iterator, directory_fd, name)
+                )
             else:
-                os.unlink(child)
-        os.chmod(root, 0o700)
-        os.rmdir(root)
+                os.unlink(name, dir_fd=directory_fd)
     except FullGateError:
         raise
-    except OSError:
+    except (OSError, RuntimeError, RecursionError):
         _raise(status)
+    finally:
+        primary_exception = sys.exc_info()[1]
+        close_failed = False
+        while frames:
+            descriptor, iterator, _parent_fd, _child_name = frames.pop()
+            if _close_iterator_with_retry(iterator) is not None:
+                close_failed = True
+            if _close_raw_descriptor_with_retry(descriptor) is not None:
+                close_failed = True
+        if close_failed:
+            if primary_exception is None:
+                _raise(status)
+            primary_status = getattr(
+                primary_exception,
+                "status",
+                type(primary_exception).__name__,
+            )
+            raise FullGateError(
+                status,
+                primary_status=primary_status,
+            ) from primary_exception
 
 
 def _profile_literal(path: Path | str) -> bytes:
@@ -7661,6 +9615,7 @@ def render_loopback_profile(
             b"(deny default)",
             b"(deny network*)",
             b"(deny system-socket)",
+            b"(deny file-write-xattr)",
             b"(deny file-read-metadata file-test-existence (require-any (literal "
             + protected_one
             + b") (subpath "
@@ -7914,6 +9869,15 @@ def _emit_terminal(status: str) -> None:
     print(payload, file=sys.stderr)
 
 
+def _terminal_status(status: str) -> str:
+    if status in {
+        INVOCATION_STORAGE_QUOTA_BLOCKER,
+        DETACHED_PROCESS_SIGNAL_UNAVAILABLE,
+    }:
+        return "BLOCKED_ENVIRONMENT"
+    return status
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         arguments = parse_exact_argv(tuple(sys.argv[1:] if argv is None else argv))
@@ -7932,7 +9896,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             control_root=control_root,
         )
     except FullGateError as exc:
-        _emit_terminal(exc.status)
+        _emit_terminal(_terminal_status(exc.status))
         return 2
 
 

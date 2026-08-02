@@ -6,16 +6,19 @@
 > PR, update a remote ref, or touch a user-owned `HOME`/`CODEX_HOME` while
 > executing this plan.
 
-**Goal:** Build and prove the exact v4.32.2-version passive quarantine fuse and
-its pre-reviewed Stage R semantic restoration commit without changing the
-public repository.
+**Goal:** Freeze PR #14 as a fail-closed release-control foundation and, only
+after a separately reviewed Task -2 quota-storage adapter exists, build and
+prove the exact v4.32.2-version passive quarantine fuse and its pre-reviewed
+Stage R semantic restoration commit without changing the public repository.
 
 **Architecture:** Keep the current v4.32.2 tree as immutable input, render a
 same-version passive overlay for every auto-loaded or historically
 user-invokable surface, verify that overlay with a quarantine-specific gate,
 and rehearse expected-old Stage A plus fuse-parent/original-tree Stage R in a
 disposable local bare mirror. The fuse does not install v4.33 and is not the
-v4.32.3 bridge.
+v4.32.3 bridge. The current foundation stops at storage-capability admission;
+the remaining architecture is the conditional target after that blocker is
+removed.
 
 **Tech stack:** Python 3.12 standard library, POSIX shell, Git plumbing,
 existing pytest environment for the pre-render baseline, local bare Git
@@ -44,7 +47,8 @@ repositories for ref-transaction rehearsal. No new runtime dependencies.
 The implementation must abort if `origin/main`, the original commit tree, or
 the version files differ from the pinned identities captured at plan start.
 
-F0 has two distinct terminal states:
+F0 defines two distinct success terminal states, but neither is reachable on the
+currently audited host boundary:
 
 - `F0_LOCAL_IMPLEMENTATION_GREEN`: trusted control verifier, exact fuse commit,
   local Stage R object, no-write fixtures and disposable mirror are green.
@@ -52,6 +56,21 @@ F0 has two distinct terminal states:
   complete historical official-artifact ledger, actual supported-host
   cold/stale-disk/stale-process/no-ref/custom-main results and every design
   promotion receipt. F0 local success alone can never emit this verdict.
+
+Canonical PASS first requires a Task -2-owned invocation-exclusive filesystem
+whose fixed capacity is enforced by the kernel and whose class and identity
+digest are bound into the manifest and receipt. No reviewed adapter currently
+provides that boundary. Until it does, the exact F0 terminal is
+`BLOCKED_ENVIRONMENT` with low-level blocker
+`UNSUPPORTED_INVOCATION_STORAGE_QUOTA`; neither
+`F0_LOCAL_IMPLEMENTATION_GREEN` nor `STAGE_A_PROMOTION_READY` may be claimed.
+`INVOCATION_STORAGE_QUOTA_NOT_OS_ENFORCED` is a runtime-admission limitation,
+not a `promotion_limitations` entry that permits a local PASS. PR #14 therefore
+delivers a fail-closed control foundation only. Portable Linux/test-double
+results validate schema and orchestration contracts, not an actual supported-
+host canonical end-to-end gate. A Linux test that replaces the platform parser,
+host tool or quota adapter with a mock is never reported as a real external-
+parser or real OS-boundary result.
 
 ---
 
@@ -85,19 +104,19 @@ normal full gate expects those production surfaces to exist and be wired:
   safely resumable. That publisher is not used or repaired during F0; remote
   access is prohibited and bridge unit 3 owns its replacement.
 
-Therefore F0 has two independent full gates rather than pretending the normal
-production wiring suite remains meaningful after production wiring is
-intentionally removed:
+Therefore F0 defines two independent future canonical gate target contracts
+rather than pretending the normal production wiring suite remains meaningful
+after production wiring is intentionally removed:
 
-1. **Original-tree baseline gate:** an isolated exact-original clone is driven
-   by the exact committed control-only
+1. **Original-tree baseline gate:** an isolated exact-original clone will be
+   driven by the exact committed control-only
    `tools/release-control/run-full-gate-isolated.py` described below. Its one
    Seatbelt child is a digest-pinned trusted wrapper, not candidate shell
    bytes. The wrapper runs fixed independent runtime/import/test probes and the
    unmodified candidate subcommand `/bin/bash scripts/pre-commit-check.sh` with
    disjoint non-authoritative stdout/stderr channels.
-2. **Fuse-tree quarantine gate:** an isolated exact-candidate snapshot runs the
-   same trusted wrapper/probe sequence and candidate subcommand through that
+2. **Fuse-tree quarantine gate:** an isolated exact-candidate snapshot will run
+   the same trusted wrapper/probe sequence and candidate subcommand through that
    same committed runner before the final fuse
    commit exists, then the committed runner repeats the full gate after commit
    against that exact final commit and the same authorized tree. Quarantine
@@ -109,9 +128,13 @@ intentionally removed:
    empty MCP/hook registration, workflow containment, Stage A single-ref
    semantics, and Stage R byte-identical restoration.
 
-The outer trusted verifier is the only authority that may issue PASS. Candidate
-pre-commit/tests must print the original baseline receipt identity and the
-quarantine receipt, but their output is auxiliary untrusted data. A forged
+The outer trusted verifier is the only authority that may issue PASS, and only
+after Task -2 has admitted and attested the invocation-exclusive kernel-quota
+storage boundary. Until then it must emit the path-free
+`UNSUPPORTED_INVOCATION_STORAGE_QUOTA` blocker before wrapper, probe, candidate
+or target materialization and the F0 terminal remains `BLOCKED_ENVIRONMENT`.
+Candidate pre-commit/tests must print the original baseline receipt identity
+and the quarantine receipt, but their output is auxiliary untrusted data. A forged
 candidate `PASS`, omitted command or altered test runner is rejected by the
 outer verifier. Missing or stale original baseline evidence is a hard failure.
 
@@ -132,7 +155,7 @@ outer verifier. Missing or stale original baseline evidence is a hard failure.
 | `release/quarantine/v4322-passive-surface-manifest.json` | Create in the candidate and bind in external authorization | Canonical policy-classified passive-surface path/mode/blob manifest used as the explicit passive semantic role digest |
 | `tools/release-control/inherited_context.py` | Create and pin on design control branch before candidate work | Internal control-plane validator/probe module for the exact inherited-sandbox context and outer receipt protocol; not a candidate or public runtime API |
 | `tools/release-control/run-isolated.py` | Create and pin on design control branch before candidate work | Trusted `env -i`/sandbox/network-deny/child-supervision launcher |
-| `tools/release-control/run-full-gate-isolated.py` | Create and pin on design control branch before candidate work | Control-only deterministic original/candidate full-gate runner; embeds the canonical trusted-wrapper source bytes, materializes that non-tracked derived executable, verifies the exact control/tree/command/runtime/import manifests and applies the one fixed loopback-only profile |
+| `tools/release-control/run-full-gate-isolated.py` | Create and pin on design control branch before candidate work | Fail-closed control foundation for the future original/candidate canonical gate; before materialization or execution it requires Task -2-attested invocation-exclusive kernel-quota storage evidence, otherwise emits `UNSUPPORTED_INVOCATION_STORAGE_QUOTA` and cannot issue PASS |
 | `tools/release-control/verify-quarantine-candidate.py` | Create and pin on design control branch before candidate work | Independently verify authorization signature, control commit, candidate tree and every policy/manifest/passive/gate digest |
 | `tools/release-control/tests/test_release_control.py` | Create on design control branch | RED/GREEN tests for candidate bypass, forged GREEN output, sandbox escape, real-repository target and signature/digest failures |
 
@@ -211,11 +234,11 @@ runtime tree.
 
 The implementation commit may contain multiple RED/GREEN cycles, but no
 intermediate production commit is allowed. Before creating the exact fuse
-commit:
+commit, and only after the quota-backed storage adapter exists:
 
 - the original-tree baseline receipt is fixed;
 - all focused tests have demonstrated the expected RED failure at least once;
-- the candidate quarantine gate is green;
+- the quota-backed canonical candidate quarantine gate is green;
 - the candidate tree SHA and all candidate content digests are fixed in an
   external candidate-tree authorization;
 - the staged diff contains only the F0 surface;
@@ -239,8 +262,12 @@ included in this commit.
 ## 5. Task -2 — Bootstrap the first trusted execution boundary
 
 Task -1 cannot trust code that Task -1 is itself creating. Its first RED/GREEN,
-full-gate, review and commit operations therefore run through a minimal
-bootstrap boundary fixed by this already-reviewed plan commit.
+review and control-foundation operations therefore run through a minimal
+bootstrap boundary fixed by this already-reviewed plan commit. A canonical
+full-gate or F0 implementation-commit operation additionally requires Task -2-
+attested quota-backed invocation storage. On the current host the boundary must
+stop before wrapper/probe/candidate/materialization and report
+`UNSUPPORTED_INVOCATION_STORAGE_QUOTA` / `BLOCKED_ENVIRONMENT`.
 
 ### Scope correction — macOS Seatbelt must be applied exactly once
 
@@ -289,7 +316,10 @@ authority as follows:
   invoke nested `sandbox-exec`.
 - `run-full-gate-isolated.py` owns only the exact original/candidate trusted
   wrapper protocol. It validates the immutable external full-gate manifest and
-  control commit, materializes verified Git-object bytes, constructs the
+  control commit, then validates Task -2-supplied quota storage attestation
+  before any materialization. Missing, invalid, reused or drifted attestation
+  is `UNSUPPORTED_INVOCATION_STORAGE_QUOTA` and forbids PASS. After admission it
+  materializes verified Git-object bytes, constructs the
   hermetic runtime/facade and applies the one fixed
   `pinned-full-gate-loopback-only` profile. Its one Seatbelt child is the
   digest-pinned trusted wrapper, which runs fixed independent probes and only
@@ -374,23 +404,32 @@ The launcher grammar is exact for both modes:
   subprocesses belongs in the outer trusted-control manifest, not inside the
   inherited launcher child.
 - Before either mode executes its final command, the trusted wrapper lowers a
-  fixed resource manifest covering CPU time, regular-file size and open
-  descriptors. On macOS the TCB must first behaviorally probe whether a
-  meaningful hard address-space limit is enforceable: `RLIMIT_AS` aliases the
+  fixed defense-in-depth resource manifest covering CPU time, regular-file size
+  and open descriptors. On macOS the TCB must first behaviorally probe whether
+  a meaningful hard address-space limit is enforceable: `RLIMIT_AS` aliases the
   shared-region/RSS limit on supported hosts and may be impossible to lower
   below the runtime's large mapped region. If so, the external controller uses
   a fixed low RSS watchdog through the read-only kernel process API and records
-  that measured policy instead of claiming a nonexistent hard limit. Direct
-  mode also watches total non-followed bytes below its invocation root so many
-  individually bounded files cannot exhaust the host disk. `RLIMIT_FSIZE`
-  multiplied by usable `RLIMIT_NOFILE` must itself fit the aggregate disk
-  budget, bounding unlinked-but-open files that a directory scan cannot see.
-  Stdout/stderr are
+  that measured policy instead of claiming a nonexistent hard limit. Logical
+  path scans, `st_size`/`st_blocks`, FD/map inventories and
+  `RLIMIT_FSIZE × RLIMIT_NOFILE` are diagnostic telemetry only. They do not
+  account completely for `F_PREALLOCATE`, file or directory xattrs, metadata,
+  sparse/clone allocation, or mmap-unlink-close allocation and therefore cannot
+  establish an aggregate host-disk bound. Any execution that contributes to a
+  canonical F0 PASS must instead run on a Task -2-owned invocation-exclusive
+  fixed-capacity filesystem whose hard quota is kernel enforced, charges every
+  allocation class above, has no other writer, and cannot be mounted,
+  remounted, resized or replaced by candidate code. Its held filesystem/mount
+  identity, hard capacity, cleanup/unmount proof, `storage_boundary_class` and
+  `storage_boundary_sha256` are manifest/receipt authority. Missing or drifted
+  evidence is `UNSUPPORTED_INVOCATION_STORAGE_QUOTA` and
+  `BLOCKED_ENVIRONMENT` before the final command. Stdout/stderr remain
   controller-owned bounded captures and are never loaded with an unbounded
   `.read()`. Limit signals, watchdog termination and bounded-capture overflow
   produce a path-free `RESOURCE_LIMIT_EXCEEDED` blocker with the exact fixed
-  limit manifest; candidate output cannot downgrade it to PASS. All quota
-  checks run once more after child exit, so a fast exit cannot bypass them.
+  limit manifest; candidate output cannot downgrade it to PASS. Post-exit
+  telemetry may detect an additional failure, but it can never upgrade an
+  unsupported storage boundary to PASS.
 - In both modes, `--receipt` and `--denial-log` targets must be distinct
   absolute paths whose parents are already-existing canonical directories.
   Both targets must be absent, strictly contained within the mode's validated
@@ -545,8 +584,9 @@ environment.
 
 ### Task -2 TCB completion — invocation-owned tool facade
 
-The first plan-only full gate proved that the prior bootstrap executable
-closure was incomplete. Completing that closure is part of the Task -2 trusted
+The first plan-only gate-construction attempt exposed that the prior bootstrap
+executable closure was incomplete. It did not establish canonical PASS.
+Completing that closure is part of the Task -2 trusted
 computing base; it does not expand production behavior, product scope, or the
 sandbox's authority.
 
@@ -601,7 +641,7 @@ sandbox's authority.
   `/opt/homebrew` or `/var/select`, and actual read/write denial probes for the
   real `HOME` and `CODEX_HOME`. Network authority is selected only by the
   trusted bootstrap according to the three fixed profile classes below.
-- The tracked archive has no `.git`, but the full gate exercises
+- The tracked archive has no `.git`, but the future canonical full gate exercises
   `git rev-parse HEAD` and `git rev-parse --abbrev-ref HEAD`. After
   materializing the exact staged tracked snapshot and before creating ignored
   `mcp/.venv`, initialize an invocation-owned Git repository inside the temp
@@ -723,6 +763,19 @@ fields and binds exactly:
 - the exact five `/tmp` log names, semantic counter schema/expected values and
   deterministic receipt schema.
 
+The current `samvil.full-gate-manifest.v1` foundation has no trusted storage-
+boundary descriptor and therefore cannot authorize production execution or
+PASS. Enabling PASS requires a separately reviewed schema revision that binds a
+Task -2-issued, single-invocation storage attestation: exact
+`storage_boundary_class=invocation_exclusive_kernel_quota`, fixed hard capacity
+no greater than the manifest aggregate limit, held filesystem/mount identity,
+adapter/policy digest, exclusive-writer proof and cleanup/unmount contract. The
+matching PASS receipt must bind `storage_boundary_class` and
+`storage_boundary_sha256`. Candidate, CLI and environment input can neither
+supply nor weaken this evidence. A v1 manifest or an absent/invalid/drifted
+attestation deterministically returns `UNSUPPORTED_INVOCATION_STORAGE_QUOTA`
+before materialization.
+
 Every manifest-referenced input artifact, including the Git object pack and
 runtime/dependency/portable-tool archives, must be an external canonical regular
 `nlink == 1` file with an exact digest and stable held-descriptor identity.
@@ -753,8 +806,10 @@ children whose stdout/stderr are redirected to non-authoritative held files;
 the candidate receives no authority path, descriptor or environment key.
 Before `sandbox-exec`, the outer runner creates one bounded `O_CLOEXEC` pipe
 and passes only its write endpoint plus an exact nonce to the wrapper. The
-runner retains the read endpoint, supervises the exact wrapper PID/start
-identity and treats the pipe as exclusive only because no other process may
+runner retains the read endpoint, supervises the exact wrapper PID plus a
+kernel-derived birth identity (`proc_bsdinfo` seconds+microseconds on macOS,
+`/proc/<pid>/stat` start ticks on Linux; second-resolution `ps lstart` is not
+authority) and treats the pipe as exclusive only because no other process may
 inherit or obtain its write endpoint; an anonymous pipe does not authenticate
 the writer of each frame. The wrapper receives that one endpoint only for its own initial exec,
 immediately restores non-inheritable/`CLOEXEC`, closes every duplicate, and
@@ -775,13 +830,17 @@ PASS. Independent probes execute only held/materialized verified bytes, never
 paths that candidate code can replace.
 
 The full-gate manifest also fixes CPU/wall/RSS/address-space, `RLIMIT_FSIZE`,
-`RLIMIT_NOFILE`, maximum observed descendant count, per-file and aggregate
-invocation-root bytes, candidate stdout/stderr bytes, authority frame count and
+`RLIMIT_NOFILE`, maximum observed descendant count, per-file logical bytes,
+entry/depth bounds, candidate stdout/stderr bytes, authority frame count and
 per-frame/aggregate frame bytes. The runner concurrently drains bounded
 candidate stdout/stderr and the authority pipe so no child can deadlock the
-controller; exceeding any limit terminates the supervised tree, invalidates
-PASS and emits a typed resource blocker. Final cleanup performs an aggregate
-no-follow size/entry scan before removing the invocation root.
+controller; exceeding any controller-observable limit terminates the supervised
+tree, invalidates PASS and emits a typed resource blocker. Logical aggregate
+invocation-root byte counts and final no-follow size/entry scans remain
+diagnostic and cleanup checks only; they are not an aggregate quota and cannot
+authorize PASS. The Task -2 kernel quota is the sole hard storage-capacity
+boundary, and quota exhaustion after admission emits
+`GATE_INVOCATION_STORAGE_QUOTA_EXCEEDED`.
 
 The runner acquires the fixed exclusive `/tmp` full-gate lock, requires all
 five fixed log paths and both output paths to be absent, allows no other `/tmp`
@@ -791,7 +850,9 @@ move/identity mismatch, temp cleanup failure or invocation-root cleanup failure
 replaces every prior result with a typed blocker. A PASS requires the trusted
 runner to independently match the discriminated target identity, object
 closure, gate/runtime/test/import manifests, independently observed
-runtime/import/test evidence, candidate exit status and semantic counters;
+runtime/import/test evidence, candidate exit status, semantic counters and the
+Task -2 storage-boundary attestation. It additionally binds
+`storage_boundary_class` and `storage_boundary_sha256`;
 manifest text, candidate stdout/stderr, a forged `PASS` line or
 candidate-authored counters are never authority. The path-free receipt contains
 only semantic counters, typed promotion limitations and command/content/
@@ -804,10 +865,23 @@ ownership or complete descendant-absence assertion. Both limitations block
 exact final commit and the matching `candidate_precommit` tree and
 authorization digest plus the accepted prior receipt digest.
 
+`INVOCATION_STORAGE_QUOTA_NOT_OS_ENFORCED` must never appear in a PASS receipt's
+`promotion_limitations`: unlike the two limitations above, it is a canonical
+runtime-admission blocker. The failure receipt uses
+`samvil.full-gate-failure.v1`, verdict `BLOCKED`, exit 2 and the exact
+`UNSUPPORTED_INVOCATION_STORAGE_QUOTA` status with no local path. Retrying the
+same manifest and nonce must produce a byte-identical failure receipt and no
+candidate execution, materialization or release event.
+
 The loopback-only profile is not a candidate-selectable mode. The trusted
 bootstrap must fail closed unless all of the following are true before
 Seatbelt invocation:
 
+- Task -2 supplied a fresh single-invocation, descriptor-held attestation for an
+  invocation-exclusive kernel-quota filesystem, and its class, hard capacity,
+  filesystem/mount identity, adapter/policy digest and exclusive-writer proof
+  match the reviewed manifest. This check precedes wrapper, probe, candidate and
+  materialization work;
 - the requested profile class is derived by the trusted controller from a
   fixed trusted-wrapper/candidate-subcommand/probe manifest, not from an
   environment variable, CLI flag,
@@ -844,16 +918,24 @@ Profile acceptance is behavioral as well as textual. Before any gate:
   Cleanup failure replaces any prior PASS, FAIL or resource result with the
   typed `INVOCATION_CLEANUP_FAILED` blocker and exit code 2;
 - for the subprocess-capable full gate, the trusted wrapper and outer runner
-  maintain a baseline plus continuous `libproc` descendant inventory keyed by
-  PID and start identity, including detected `setsid` children. Any descendant
+  maintain a baseline plus continuous descendant inventory keyed by PID and a
+  kernel-derived birth identity, including detected `setsid` children. A `ps`
+  row whose parent/birth binding cannot be corroborated is retained as an
+  unavailable-identity sentinel so a possibly relevant wrapper/descendant
+  blocks before file inspection rather than disappearing from accounting. Any descendant
   observed after nominal candidate/probe completion, or any cleanup required,
-  makes the local gate fail with `GATE_DESCENDANT_CLEANUP_REQUIRED`; detected
-  processes are terminated and absence is rechecked. This is detection and
-  fail-closed cleanup, not a kernel process namespace: macOS `kqueue`
+  makes the local gate fail. Process-group cleanup remains allowed for the
+  owned wrapper group. Detached PID signaling is allowed only through an
+  identity-bound OS handle (Linux `pidfd`); macOS has no reviewed atomic handle
+  in this implementation, so after quota authority succeeds it blocks before
+  temp creation, materialization or execution with
+  `DETACHED_PROCESS_SIGNAL_UNAVAILABLE` and never calls `kill(pid)` for a
+  detached child. This is detection and fail-closed cleanup, not a kernel
+  process namespace: macOS `kqueue`
   `NOTE_FORK` does not expose the child PID and polling can miss a sufficiently
-  fast fork/reparent sequence. The receipt therefore always records
-  `DETACHED_DESCENDANT_NOT_OS_ISOLATED`, which permits only disposable local
-  Stage A transaction rehearsal but blocks public Stage A mutation and
+  fast fork/reparent sequence. A supported-host PASS receipt therefore always
+  records `DETACHED_DESCENDANT_NOT_OS_ISOLATED`, which permits only disposable
+  local Stage A transaction rehearsal but blocks public Stage A mutation and
   `STAGE_A_PROMOTION_READY` until a supported host supplies a reviewed
   VM/process namespace or equivalent OS boundary;
 - `pinned-full-gate-loopback-only` must successfully bind an ephemeral
@@ -1147,10 +1229,15 @@ root. The live ignored repository `.venv` is neither read nor executed.
   the independently pinned `release-candidate-network-zero` reference profile
   and apply `sandbox-exec` exactly once to the staged adversarial probe corpus;
   compare the staged launcher's pure rendered bytes/digests to that independent
-  reference inside the outer control test. Run the exact staged full gate
-  inside a third
-  `pinned-full-gate-loopback-only` outer sandbox invocation only after the
-  trusted command/test/import manifests are verified. That full-gate manifest
+  reference inside the outer control test. While no reviewed Task -2 quota
+  adapter exists, invoke the staged full-gate entry only to prove that it returns
+  `UNSUPPORTED_INVOCATION_STORAGE_QUOTA` before profile application, wrapper,
+  probe, candidate or materialization. Portable tests may patch the capability
+  check to exercise downstream orchestration, but those results are explicitly
+  non-authoritative and must not be named actual-host end-to-end evidence. Once
+  the adapter exists, run the exact staged canonical gate inside a third
+  `pinned-full-gate-loopback-only` outer sandbox invocation after the trusted
+  storage/command/test/import manifests are verified. That full-gate manifest
   must prove no Task -1 module is imported or executed. No path may nest or
   switch Seatbelt profiles. This pre-commit external-controller run is only
   bootstrap evidence for the uncommitted runner; an ephemeral controller or
@@ -1163,10 +1250,11 @@ root. The live ignored repository `.venv` is neither read nor executed.
   `process-fork`/spawn/signal denial. Retain each invocation's raw expanded
   `profile_sha256` only as its own exact-byte receipt evidence; do not require
   cross-invocation equality. After the one control commit is created, run the
-  exact committed launcher/verifier direct integration manifest and the exact
-  committed full-gate runner outside any existing Seatbelt so each applies its
-  own fixed profile exactly once. Any weaker or divergent result requires an
-  amend and a complete review/gate replay.
+  exact committed launcher/verifier direct integration manifest. The committed
+  full-gate runner remains fail closed at the storage admission check until a
+  reviewed quota adapter exists; only then may it run outside any existing
+  Seatbelt and apply its fixed profile exactly once. Any weaker or divergent
+  result requires an amend and a complete review/gate replay.
 - [ ] Do not broaden permissions to the real `HOME`/`CODEX_HOME`, writes below
   `/private/var/folders`, external network in either mode, or loopback
   bind/connect and packet/endpoint authority in release-control network-zero
@@ -1184,8 +1272,12 @@ root. The live ignored repository `.venv` is neither read nor executed.
 - [ ] Commit safety is part of Task -2. Because repository
   `.githooks/post-commit` invokes `scripts/sync-cache.sh`, commit with
   `git -c core.hooksPath=<invocation-owned-hooks> commit`. Install only an
-  invocation-owned pre-commit hook that re-runs and verifies the exact
-  hermetic full gate; install no post-commit hook. `--no-verify` is forbidden.
+  invocation-owned pre-commit hook that re-runs the complete portable/control
+  foundation suite and verifies the deterministic storage-admission blocker;
+  install no post-commit hook. This may freeze PR #14's fail-closed foundation
+  but is not canonical full-gate PASS or F0 green. After the quota adapter is
+  reviewed, the hook must instead re-run and verify the exact canonical
+  hermetic full gate. `--no-verify` is forbidden.
 
 No untrusted working-tree helper may wrap, replace, parameterize or interpret
 the outer bootstrap command/profile before the Task -1 control commit is
@@ -1347,8 +1439,12 @@ commit.
   Direct `/private/tmp` writes are forbidden, and missing, non-canonical,
   non-directory, invocation-root-escaping or execution-root-contained `TMPDIR`
   must be rejected before creating any probe or writable directory.
-- [ ] **E — control-only full-gate runner RED/GREEN:** implement the exact
-  no-command-tail CLI and `samvil.full-gate-manifest.v1` contract above. Add
+- [ ] **E — fail-closed control foundation RED/GREEN:** implement the exact
+  no-command-tail CLI and `samvil.full-gate-manifest.v1` foundation contract
+  above. On a real host without the Task -2 quota adapter, the only accepted
+  production result is `UNSUPPORTED_INVOCATION_STORAGE_QUOTA` before execution;
+  downstream PASS construction exercised with patched capability checks is
+  portable contract/orchestration coverage only. Add
   table/property/adversarial cases proving candidate bytes, environment keys,
   a generic launcher tail and any CLI/manifest `profile_class` selection are
   rejected; a forged manifest, forged PASS, altered semantic counter or
@@ -1371,6 +1467,8 @@ commit.
   require the staged runner parser to produce byte-identical outputs while
   remaining non-authoritative. Repeat after commit and permit runner authority
   only when the committed parser blob/digest and exact corpus comparison match.
+  A Linux/mock parser test is portable protocol coverage and cannot satisfy this
+  real external-parser evidence requirement.
   The one Seatbelt final argv is the exact copied Python plus digest-pinned
   trusted wrapper; the manifest separately binds that wrapper command, every
   ordered fixed probe command/digest and the candidate subcommand
@@ -1432,10 +1530,17 @@ commit.
   file attempts against tracked tests, entrypoint, facade and probe bytes; each
   must be denied, and complete target/runtime identity must be revalidated after
   candidate exit before PASS. Add adversarial CPU/wall/RSS/address-space,
-  FSIZE/NOFILE, descendant-count, per-file/aggregate invocation bytes,
-  stdout/stderr and authority-frame count/size overflow cases. Each overflow
-  must be concurrently drained, terminate supervision, leave no PASS and return
-  the exact typed resource blocker.
+  FSIZE/NOFILE, descendant-count, per-file logical bytes, entry/depth,
+  stdout/stderr and authority-frame count/size overflow cases. Each observable
+  overflow must be concurrently drained, terminate supervision, leave no PASS
+  and return the exact typed resource blocker.
+  For the future supported quota adapter, add actual-host adversarial allocation
+  cases for ordinary writes, raw-libc mmap-unlink-close, `F_PREALLOCATE`, file
+  and directory xattrs, metadata/inode growth, sparse/clone allocation and fast
+  exit. Each must remain charged to the same invocation-exclusive hard capacity;
+  quota exhaustion returns `GATE_INVOCATION_STORAGE_QUOTA_EXCEEDED`. Until those
+  tests run against the attested adapter, path/FD/map scans are telemetry and no
+  canonical PASS is possible.
   Prove the postcommit receipt binds the accepted prior receipt digest. Prove
   the runner materializes only
   verified Git-object-pack bytes and never recursively reads the real
@@ -1460,11 +1565,13 @@ commit.
   `release-candidate-network-zero`, with every network-zero assertion unchanged.
   Add full-gate lingering-child and `setsid`/double-fork adversarial cases.
   Every detected descendant or nominal-completion cleanup requirement must
-  fail with `GATE_DESCENDANT_CLEANUP_REQUIRED`, terminate the detected PID/start
-  identities and prove their absence. The tests and receipt must preserve the
+  fail with `GATE_DESCENDANT_CLEANUP_REQUIRED`; where an identity-bound OS
+  handle exists, terminate and prove absence, and otherwise fail closed with
+  `DETACHED_PROCESS_SIGNAL_UNAVAILABLE` without sending a PID-only signal. The tests and receipt must preserve the
   explicit macOS polling limitation and never claim complete detached-
   descendant absence.
-- [ ] **F — trust promotion:** run staged spec review and staged quality review,
+- [ ] **F — foundation freeze; canonical trust promotion deferred:** run staged
+  spec review and staged quality review,
   then use three disjoint pre-commit command manifests because macOS rejects
   nested `sandbox-exec`. Run pure/control/inherited focused tests inside one
   `release-control-network-zero` outer sandbox with a manifest proving they do
@@ -1473,24 +1580,27 @@ commit.
   pinned `release-candidate-network-zero` reference profile exactly once to
   every staged real-profile candidate/adversarial probe; do not execute the
   uncommitted launcher or verifier outside the outer control boundary. Run the
-  exact staged full pre-commit gate in a third, separate
-  `pinned-full-gate-loopback-only` invocation whose manifest proves it imports
-  no Task -1 module. This first staged run is controlled by the independently
-  pinned Task -2 bootstrap and validates the staged full-gate runner; it does
-  not make an ephemeral wrapper trusted. Bind all three manifests, profile
-  digests, staged blob identities and receipts before creating the one Task -1
-  control commit. Then run the exact committed launcher/verifier direct
-  integration manifest, the exact original-tree full gate and only
-  synthetic/adversarial candidate identity fixtures through the exact
-  committed `run-full-gate-isolated.py` against that immutable control tree.
+  staged full-gate entry in a third, separate invocation whose manifest proves
+  it imports no Task -1 module, but require the current real-host outcome to be
+  the deterministic pre-execution `UNSUPPORTED_INVOCATION_STORAGE_QUOTA`
+  blocker. This validates fail-closed admission only; it is not a full gate and
+  does not make an ephemeral wrapper trusted. Bind all three manifests, profile
+  digests, staged blob identities and foundation/blocker receipts before
+  creating the one Task -1 control-foundation commit. Then run the exact
+  committed launcher/verifier direct integration manifest and repeat the exact
+  storage blocker. Synthetic/adversarial downstream fixtures may patch the
+  capability check only to validate portable orchestration and receipt
+  invariants; they are not real original-tree or candidate gate evidence.
   Task -1 has no implementation candidate tree or authorization and therefore
   must not require or claim a real `candidate_precommit` or
   `candidate_postcommit` full-gate execution. The actual candidate-precommit
   gate moves to Task 4 after the candidate tree and authorization exist; the
   actual candidate-postcommit replay moves to Tasks 4-6 after the exact fuse
   commit exists. Candidate bytes may neither invoke nor choose that runner as
-  PASS authority. These local original/synthetic experiments may be green, but
-  they must retain
+  PASS authority. These local portable experiments may be green as tests, but
+  no canonical gate receipt or `F0_LOCAL_IMPLEMENTATION_GREEN` exists until the
+  reviewed quota adapter is present. After that adapter is implemented, rerun
+  this entire section on the attested boundary; any resulting PASS must retain
   `LOOPBACK_PORT_OWNERSHIP_NOT_OS_ISOLATED` and
   `DETACHED_DESCENDANT_NOT_OS_ISOLATED` and cannot satisfy
   `STAGE_A_PROMOTION_READY` until a supported-host verifier supplies a stronger
@@ -1501,7 +1611,8 @@ commit.
 - [ ] Because this plan scope-correction commit is a descendant of existing
   control commit `f6d50644a01c925b7910c494e2160bbac504dbd8`, amend history by
   this exact local procedure. First implement and stage the runner/tests on the
-  current branch. Using invocation-owned hooks and the required full gate,
+  current branch. Using invocation-owned hooks, the complete portable/control
+  foundation suite and the required deterministic storage-admission blocker,
   create one `git commit --fixup=f6d50644a01c925b7910c494e2160bbac504dbd8`
   commit; `--no-verify` is forbidden. Before rewriting, bind the reviewed plan
   file's Git blob ID and content SHA-256. Then autosquash-rebase from
@@ -1511,14 +1622,16 @@ commit.
 - [ ] The autosquash rewrites both the control commit SHA and descendant plan
   commit SHA. After rewrite, require the plan file content and Git blob to be
   byte-identical to the pre-rewrite bindings, then repeat plan spec review,
-  quality review, `git diff --check` and the full gate. Pin both new commit SHAs,
+  quality review, `git diff --check`, the portable/control foundation suite and
+  the storage-admission blocker. Pin both new commit SHAs,
   the plan blob/content SHA-256 and inherited-validator/verifier/generic-
   launcher/full-gate-runner/test digests plus approved public-key identity in
   the plan execution receipt. Any byte, blob, review, digest or gate mismatch
   aborts the rewrite result and repeats the complete procedure.
 - [ ] All later baseline, candidate, commit-hook and rehearsal subprocesses
-  must be launched through that exact control commit. Drift or replacement is a
-  blocker.
+  must be launched through that exact control commit and, for any canonical
+  gate, through the separately reviewed Task -2 quota adapter. Drift,
+  replacement or missing storage evidence is a blocker.
 
 Expected result: no candidate tree can select, weaken, replace or falsely
 report its own quarantine validation.
@@ -1546,11 +1659,14 @@ report its own quarantine validation.
 - [ ] Prove the isolation wrapper itself RED/GREEN: a probe that attempts to
   read or write a sentinel under the real user profile must be denied, while
   exact repository/worktree and temporary fixture paths remain available.
-- [ ] Run the original `/bin/bash scripts/pre-commit-check.sh` only through the exact
-  amended-control-commit `run-full-gate-isolated.py` before any candidate
-  surface edit and record its independently verified exit status and semantic
-  counters. A prior ephemeral Stage E controller or ad-hoc wrapper is stale,
-  untrusted evidence and cannot satisfy this step.
+- [ ] Before any candidate surface edit, invoke the original-tree entry only
+  through the exact amended-control-commit
+  `run-full-gate-isolated.py`. Without the Task -2 quota adapter, record the
+  deterministic `UNSUPPORTED_INVOCATION_STORAGE_QUOTA` blocker and do not claim
+  semantic counters or baseline PASS. After the adapter exists, rerun on its
+  attested boundary and record the independently verified exit status, storage
+  identity and semantic counters. A prior ephemeral Stage E controller or ad-
+  hoc wrapper is stale, untrusted evidence and cannot satisfy this step.
 - [ ] Store command names and content digests, not local absolute paths,
   usernames, environment values, or secrets.
 - [ ] Record the existing version policy explicitly: plugin, MCP `__init__`,
@@ -1656,10 +1772,12 @@ quarantine-gate: -I scripts/quarantine-fuse.py verify --policy release/quarantin
 `verify` binds its read-only root to the launcher's canonical current working
 directory, performs no subprocess or temporary write, and is distinct from the
 renderer subcommand whose output root must be explicit. The subprocess-heavy
-`/bin/bash scripts/pre-commit-check.sh` is not a direct candidate command; both the
-original-tree and candidate-tree full gates belong only to the separately
-pinned `samvil.full-gate-manifest.v1` consumed by the exact committed
-`run-full-gate-isolated.py`. Candidate focused/adversarial commands remain on
+`/bin/bash scripts/pre-commit-check.sh` is not a direct candidate command; after
+Task -2 storage admission, both the original-tree and candidate-tree canonical
+full gates belong only to the separately pinned full-gate manifest consumed by
+the exact committed `run-full-gate-isolated.py`. The current
+`samvil.full-gate-manifest.v1` foundation instead stops with
+`UNSUPPORTED_INVOCATION_STORAGE_QUOTA`. Candidate focused/adversarial commands remain on
 `verify-quarantine-candidate.py` plus `run-isolated.py` under
 `release-candidate-network-zero`. Candidate bytes cannot invoke, configure,
 select or replace the full-gate runner as PASS authority.
@@ -1794,14 +1912,19 @@ Expected GREEN: all passive entry points are idempotent no-write operations.
   quality review against the externally authorized staged tree. Findings must
   be fixed in the worktree, followed by a new tree SHA, new authorization and
   both reviews again.
-- [ ] Run the externally authorized quarantine pre-commit full gate through a
+- [ ] Only after Task -2 provides a valid invocation-exclusive kernel-quota
+  storage attestation, run the externally authorized quarantine pre-commit
+  canonical full gate through a
   `candidate_precommit` manifest whose final commit field is canonically
   `null`, then create the sole fuse implementation commit. Fixed parent, tree,
   message, author and committer inputs must be recorded so the exact commit
-  object is reviewable.
-- [ ] Immediately replay the full gate through a `candidate_postcommit`
-  manifest that binds the exact final commit and expected parent and proves its
-  tree and authorization digest equal the accepted precommit receipt, supplied
+  object is reviewable. Without that evidence, require
+  `UNSUPPORTED_INVOCATION_STORAGE_QUOTA`, leave mutation and commit count at 0,
+  and stop as `BLOCKED_ENVIRONMENT`.
+- [ ] Immediately replay the quota-backed canonical full gate through a
+  `candidate_postcommit` manifest that binds the exact final commit and expected
+  parent and proves its tree and authorization digest equal the accepted
+  precommit receipt, supplied
   through the required fixed-position `--prior-receipt` option. A green
   precommit tree without this exact post-commit replay is incomplete evidence.
 - [ ] Only after the exact fuse commit exists, create Stage R with Git plumbing
@@ -1872,22 +1995,30 @@ This rehearsal proves Git transaction mechanics and candidate semantics. It
 does not claim GitHub ruleset, CDN propagation, historical Claude package, or
 actual public updater coverage.
 
-Passing this task contributes to `F0_LOCAL_IMPLEMENTATION_GREEN` only. Actual
-Codex/Claude/OpenCode/Gemini first-open, existing global MCP, selection/cache,
-stale process/catalog and official historical-host execution remain mandatory
-inputs to the separate `STAGE_A_PROMOTION_READY` decision.
+Passing this rehearsal proves only its Git transaction and candidate-semantic
+scope. It contributes to `F0_LOCAL_IMPLEMENTATION_GREEN` only when the exact
+candidate receipts were produced by the attested quota-backed canonical gate.
+Before then it is supporting evidence, the terminal remains
+`BLOCKED_ENVIRONMENT`, and actual Codex/Claude/OpenCode/Gemini first-open,
+existing global MCP, selection/cache, stale process/catalog and official
+historical-host execution remain mandatory inputs to the separate
+`STAGE_A_PROMOTION_READY` decision.
 
 ---
 
 ## 13. Task 6 — Gates, commit, and reviews
 
 - [ ] Focused quarantine tests GREEN.
-- [ ] Quarantine-mode `/bin/bash scripts/pre-commit-check.sh` GREEN for both the
+- [ ] On a Task -2-attested invocation-exclusive kernel-quota filesystem,
+  quarantine-mode `/bin/bash scripts/pre-commit-check.sh` GREEN for both the
   authorized `candidate_precommit` tree and exact `candidate_postcommit`
-  commit replay.
+  commit replay. Without it, the expected gate result is
+  `UNSUPPORTED_INVOCATION_STORAGE_QUOTA`, not GREEN.
 - [ ] Original, candidate-precommit and candidate-postcommit gate commands were
-  executed only through the verified isolation runner; bare invocation is
-  forbidden.
+  executed only through the verified isolation runner and bound the same
+  `storage_boundary_class` and `storage_boundary_sha256`; bare invocation is
+  forbidden. Portable/test-double executions are reported separately as
+  contract/orchestration checks.
 - [ ] Before commit, `git diff --cached --check` is GREEN and staged files
   exactly equal the policy-derived F0 file set.
 - [ ] Before commit, staged-tree spec-compliance and code-quality reviews are
@@ -1916,10 +2047,14 @@ Do not push after the commit. Stop and report:
 - signed Stage R commit SHA and tree equality proof, or an explicit unsigned
   rehearsal SHA plus `BLOCKED_RELEASE_AUTHORIZATION`;
 - original and quarantine gate receipts;
+- quota storage-boundary class/digest/capacity evidence, or the exact
+  `UNSUPPORTED_INVOCATION_STORAGE_QUOTA` blocker;
 - mirror rehearsal receipt;
 - exact remaining untested public/historical surfaces;
-- exact terminal status: `F0_LOCAL_IMPLEMENTATION_GREEN`,
-  `BLOCKED_RELEASE_AUTHORIZATION`, or another typed blocker; never
+- exact terminal status: currently `BLOCKED_ENVIRONMENT`; only after the
+  quota-backed canonical gates exist may it become
+  `F0_LOCAL_IMPLEMENTATION_GREEN`, `BLOCKED_RELEASE_AUTHORIZATION`, or another
+  typed blocker; never
   `STAGE_A_PROMOTION_READY` without the actual-host and complete-ledger gate;
 - proposed GitHub ref/ruleset mutations for a separate approval.
 
@@ -1938,6 +2073,8 @@ before commit:
 - candidate contains an unclassified auto-loaded or executable path;
 - passive invocation changes any protected state;
 - normal production checks are hidden or reported as run in quarantine mode;
+- Task -2 cannot provide fresh invocation-exclusive kernel-quota storage
+  evidence, or its class/capacity/filesystem/mount/adapter identity drifts;
 - a repeated same-root failure occurs twice;
 - implementation attempts public GitHub mutation or credentials;
 
@@ -1947,10 +2084,22 @@ or final review finds a P1/P2—the commit/catalog/Stage R are marked `REJECTED`
 and the fresh replacement cycle in Task 6 is mandatory. The rejected object is
 not promotion eligible.
 
-### 14.2 Promotion-only blockers
+### 14.2 Runtime-admission blocker
 
-The following conditions allow a verified local implementation commit and an
-honest `F0_LOCAL_IMPLEMENTATION_GREEN`, but prohibit
+`INVOCATION_STORAGE_QUOTA_NOT_OS_ENFORCED` is not promotion-only. It means the
+runner cannot prove an aggregate storage bound against preallocation, xattrs,
+metadata, sparse/clone allocation or mmap-unlink-close allocation. It must
+produce `UNSUPPORTED_INVOCATION_STORAGE_QUOTA`, verdict `BLOCKED`, exit 2 and
+terminal `BLOCKED_ENVIRONMENT` before candidate/materialization work. Logical
+byte scans, FD/map inventory and `RLIMIT_FSIZE × RLIMIT_NOFILE` cannot weaken
+this blocker, and it must not appear in a PASS receipt's
+`promotion_limitations`.
+
+### 14.3 Promotion-only blockers
+
+After quota-backed canonical original/candidate gates have passed, the
+following conditions allow a verified local implementation commit and an honest
+`F0_LOCAL_IMPLEMENTATION_GREEN`, but prohibit
 `STAGE_A_PROMOTION_READY` and every public mutation:
 
 - historical official-artifact ledger is incomplete or has an unverifiable
@@ -1964,16 +2113,23 @@ honest `F0_LOCAL_IMPLEMENTATION_GREEN`, but prohibit
 - `LOOPBACK_PORT_OWNERSHIP_NOT_OS_ISOLATED`: the macOS Seatbelt full-gate
   profile permits the fixed IPv4 `localhost:*` TCP endpoint class but cannot
   prove exact ephemeral-port ownership. Local original, candidate-precommit
-  and candidate-postcommit full-gate experiments may remain green, but
+  and candidate-postcommit full-gate experiments may remain green only on a
+  future supported-host boundary that independently provides both the admitted
+  kernel-quota filesystem and atomic identity-bound descendant signaling. The
+  current macOS foundation cannot reach this promotion-only limitation because
+  it is blocked before execution, but
   promotion stays blocked until a supported-host verifier supplies a stronger
   isolated network namespace, VM or equivalent reviewed OS boundary.
-- `DETACHED_DESCENDANT_NOT_OS_ISOLATED`: the trusted wrapper detects, fails and
-  cleans every descendant identity it observes, but macOS Seatbelt plus
-  `libproc` polling cannot prove that a sufficiently fast fork/reparent was
-  never missed. Disposable local Stage A transaction rehearsal may remain
-  green, but public Stage A mutation and `STAGE_A_PROMOTION_READY` stay blocked
-  until a supported-host verifier supplies a reviewed process namespace, VM or
-  equivalent OS boundary.
+- `DETACHED_DESCENDANT_NOT_OS_ISOLATED`: the trusted wrapper detects and fails
+  every descendant identity it observes. Linux may clean through identity-bound
+  `pidfd`; macOS deliberately refuses PID-only detached signaling, because
+  `proc_bsdinfo` recheck followed by `kill(pid)` would retain a PID-reuse TOCTOU.
+  Consequently this foundation blocks macOS before execution with
+  `DETACHED_PROCESS_SIGNAL_UNAVAILABLE`; it does not report a green local full
+  gate. On a host with atomic identity-bound signaling, disposable local Stage
+  A transaction rehearsal may remain green, but public Stage A mutation and
+  `STAGE_A_PROMOTION_READY` stay blocked until a supported-host verifier
+  supplies a reviewed process namespace, VM or equivalent OS boundary.
 
 Both typed limitations must be removed by, or explicitly replaced with,
 reviewed stronger OS-boundary evidence before promotion-ready can be true.

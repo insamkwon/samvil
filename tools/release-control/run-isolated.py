@@ -8,23 +8,24 @@ profile or policy bytes.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import asdict, dataclass
 import ctypes
 import errno
 import hashlib
 import json
 import math
+import mmap
 import os
 from pathlib import Path
 import pwd
 import re
-import shutil
 import signal
 import stat
 import subprocess
 import sys
 import time
-from typing import Iterable, Mapping, NoReturn, Sequence
+from typing import Callable, Iterable, Mapping, NoReturn, Sequence
 import unicodedata
 
 import inherited_context as inherited
@@ -41,9 +42,16 @@ RLIMIT_NOFILE_COUNT = 32
 RLIMIT_NPROC_COUNT = 1
 CAPTURE_BYTE_LIMIT = 1 * 1024 * 1024
 INVOCATION_TOTAL_BYTE_LIMIT = 32 * 1024 * 1024
+INVOCATION_ENTRY_COUNT_LIMIT = 20_000
+INVOCATION_DEPTH_LIMIT = 32
+VM_REGION_COUNT_LIMIT = 65_536
 CHILD_RSS_BYTE_LIMIT = 192 * 1024 * 1024
 RESOURCE_WATCH_INTERVAL_SECONDS = 0.02
 MAX_EXECUTION_MARKER_BYTES = 4096
+DARWIN_MAXPATHLEN = 1024
+PROC_PIDREGIONPATHINFO = 8
+INVOCATION_STORAGE_QUOTA_BLOCKER = "UNSUPPORTED_INVOCATION_STORAGE_QUOTA"
+BLOCKED_ENVIRONMENT = "BLOCKED_ENVIRONMENT"
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 REMOTE_TOKEN = re.compile(r"(?:^[^/\s]+@[^:\s]+:|^[a-z][a-z0-9+.-]*://)", re.I)
 SSH_COMMANDS = frozenset({"ssh", "scp", "sftp"})
@@ -87,6 +95,7 @@ CONTROL_PROFILE_SOURCE_TEMPLATE = b"\n".join(
         b"(deny default)",
         b"(deny network*)",
         b"(deny system-socket)",
+        b"(deny file-write-xattr)",
         b"(allow process*)",
         b"(allow signal (target children))",
         b"(deny file-read-metadata file-test-existence (require-any (literal "
@@ -113,6 +122,7 @@ CONTROL_PROFILE_DECISIONS = (
     "execution_root_read=allow",
     "invocation_root_write=allow",
     "network=deny",
+    "file_write_xattr=deny",
     "protected_read=deny",
     "protected_write=deny",
     "process_group=allow",
@@ -129,6 +139,7 @@ CANDIDATE_PROFILE_SOURCE_TEMPLATE = b"\n".join(
         b"(deny default)",
         b"(deny network*)",
         b"(deny system-socket)",
+        b"(deny file-write-xattr)",
         b"(deny process-fork)",
         b"(allow process-exec)",
         b"(deny file-read-metadata file-test-existence (require-any (literal "
@@ -156,6 +167,7 @@ CANDIDATE_PROFILE_DECISIONS = (
     "execution_root_read=allow",
     "invocation_root_write=allow",
     "network=deny",
+    "file_write_xattr=deny",
     "protected_read=deny",
     "protected_write=deny",
     "process_exec=allow",
@@ -266,13 +278,43 @@ class OutputFiles:
     denial_identity: tuple[int, int, int, int]
 
     def close(self) -> None:
-        for name in ("receipt_fd", "denial_fd"):
+        first_error: BaseException | None = None
+        fields = (
+            ("receipt_fd", self.receipt_identity),
+            ("denial_fd", self.denial_identity),
+        )
+        for name, identity in fields:
             descriptor = getattr(self, name)
-            if descriptor >= 0:
+            for _attempt in range(2):
+                if descriptor < 0:
+                    break
                 try:
                     os.close(descriptor)
-                finally:
+                except BaseException as exc:
+                    if first_error is None:
+                        first_error = exc
+                    try:
+                        metadata = os.fstat(descriptor)
+                    except OSError:
+                        setattr(self, name, -1)
+                        descriptor = -1
+                        break
+                    current_identity = (
+                        int(metadata.st_dev),
+                        int(metadata.st_ino),
+                        stat.S_IFMT(metadata.st_mode),
+                    )
+                    expected_identity = (identity[0], identity[1], identity[2])
+                    if current_identity != expected_identity:
+                        setattr(self, name, -1)
+                        descriptor = -1
+                        break
+                else:
                     setattr(self, name, -1)
+                    descriptor = -1
+                    break
+        if first_error is not None:
+            raise LaunchError("OUTPUT_CLOSE_FAILED") from first_error
 
     def validate_receipt(self) -> None:
         _validate_output_identity(
@@ -306,6 +348,12 @@ def canonical_json_bytes(value: object) -> bytes:
 
 def _raise(status: str) -> NoReturn:
     raise LaunchError(status)
+
+
+def _invocation_storage_quota_supported() -> bool:
+    """Return whether an invocation-exclusive fixed-capacity store is active."""
+
+    return False
 
 
 def _profile_literal(value: str) -> bytes:
@@ -800,6 +848,14 @@ def _identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
     )
 
 
+def _descriptor_identity(metadata: os.stat_result) -> tuple[int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        stat.S_IFMT(metadata.st_mode),
+    )
+
+
 def _validate_output_identity(
     path: Path,
     descriptor: int,
@@ -963,6 +1019,9 @@ def blocker_receipt(
         "profile_class": profile_class,
         "promotable": False,
     }
+    if status == INVOCATION_STORAGE_QUOTA_BLOCKER:
+        payload["terminal_state"] = BLOCKED_ENVIRONMENT
+        payload["exit_code"] = 2
     if primary_status is not None:
         payload["primary_status"] = primary_status
     if evidence:
@@ -1116,6 +1175,98 @@ class ChildOutcome:
     resource_evidence: dict[str, object]
 
 
+@dataclass(frozen=True)
+class InvocationUsage:
+    regular_bytes: int
+    entries: int
+    max_depth: int
+    identities: tuple[tuple[int, int, int], ...]
+    vm_regions: int = 0
+    mapped_entries: int = 0
+    limit_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class MappedRegularFile:
+    device: int
+    inode: int
+    size: int
+    links: int
+
+
+@dataclass(frozen=True)
+class MappedFileInventory:
+    files: tuple[MappedRegularFile, ...]
+    regions: int
+    limit_reason: str | None = None
+
+
+@dataclass
+class _CleanupFrame:
+    descriptor: int
+    iterator: object
+    parent_descriptor: int | None
+    name: str | None
+
+
+@dataclass
+class _OwnedDescriptor:
+    descriptor: int
+    identity: tuple[int, int, int] | None = None
+
+    def capture_identity(self) -> None:
+        try:
+            self.identity = _descriptor_identity(os.fstat(self.fileno()))
+        except OSError:
+            self.identity = None
+
+    def fileno(self) -> int:
+        if self.descriptor < 0:
+            raise ValueError("descriptor is closed")
+        return self.descriptor
+
+    def release(self) -> int:
+        descriptor = self.fileno()
+        self.descriptor = -1
+        return descriptor
+
+    def close(self) -> None:
+        if self.descriptor < 0:
+            return
+        descriptor = self.descriptor
+        try:
+            os.close(descriptor)
+        except BaseException:
+            if self.identity is None:
+                self.descriptor = -1
+            else:
+                try:
+                    current = _descriptor_identity(os.fstat(descriptor))
+                except OSError as exc:
+                    if exc.errno == errno.EBADF:
+                        self.descriptor = -1
+                else:
+                    if current != self.identity:
+                        self.descriptor = -1
+            raise
+        self.descriptor = -1
+
+
+def _close_owned_descriptor_with_retry(
+    owner: _OwnedDescriptor,
+) -> BaseException | None:
+    first_error: BaseException | None = None
+    for _attempt in range(2):
+        if owner.descriptor < 0:
+            break
+        try:
+            owner.close()
+        except BaseException as exc:
+            if first_error is None:
+                first_error = exc
+    return first_error
+
+
 class _RUsageInfoV2(ctypes.Structure):
     _fields_ = [
         ("ri_uuid", ctypes.c_uint8 * 16),
@@ -1140,6 +1291,81 @@ class _RUsageInfoV2(ctypes.Structure):
     ]
 
 
+class _VInfoStat(ctypes.Structure):
+    _fields_ = [
+        ("vst_dev", ctypes.c_uint32),
+        ("vst_mode", ctypes.c_uint16),
+        ("vst_nlink", ctypes.c_uint16),
+        ("vst_ino", ctypes.c_uint64),
+        ("vst_uid", ctypes.c_uint32),
+        ("vst_gid", ctypes.c_uint32),
+        ("vst_atime", ctypes.c_int64),
+        ("vst_atimensec", ctypes.c_int64),
+        ("vst_mtime", ctypes.c_int64),
+        ("vst_mtimensec", ctypes.c_int64),
+        ("vst_ctime", ctypes.c_int64),
+        ("vst_ctimensec", ctypes.c_int64),
+        ("vst_birthtime", ctypes.c_int64),
+        ("vst_birthtimensec", ctypes.c_int64),
+        ("vst_size", ctypes.c_int64),
+        ("vst_blocks", ctypes.c_int64),
+        ("vst_blksize", ctypes.c_int32),
+        ("vst_flags", ctypes.c_uint32),
+        ("vst_gen", ctypes.c_uint32),
+        ("vst_rdev", ctypes.c_uint32),
+        ("vst_qspare", ctypes.c_int64 * 2),
+    ]
+
+
+class _VnodeInfo(ctypes.Structure):
+    _fields_ = [
+        ("vi_stat", _VInfoStat),
+        ("vi_type", ctypes.c_int32),
+        ("vi_pad", ctypes.c_int32),
+        ("vi_fsid", ctypes.c_int32 * 2),
+    ]
+
+
+class _VnodeInfoPath(ctypes.Structure):
+    _fields_ = [
+        ("vip_vi", _VnodeInfo),
+        ("vip_path", ctypes.c_char * DARWIN_MAXPATHLEN),
+    ]
+
+
+class _ProcRegionInfo(ctypes.Structure):
+    _fields_ = [
+        ("pri_protection", ctypes.c_uint32),
+        ("pri_max_protection", ctypes.c_uint32),
+        ("pri_inheritance", ctypes.c_uint32),
+        ("pri_flags", ctypes.c_uint32),
+        ("pri_offset", ctypes.c_uint64),
+        ("pri_behavior", ctypes.c_uint32),
+        ("pri_user_wired_count", ctypes.c_uint32),
+        ("pri_user_tag", ctypes.c_uint32),
+        ("pri_pages_resident", ctypes.c_uint32),
+        ("pri_pages_shared_now_private", ctypes.c_uint32),
+        ("pri_pages_swapped_out", ctypes.c_uint32),
+        ("pri_pages_dirtied", ctypes.c_uint32),
+        ("pri_ref_count", ctypes.c_uint32),
+        ("pri_shadow_depth", ctypes.c_uint32),
+        ("pri_share_mode", ctypes.c_uint32),
+        ("pri_private_pages_resident", ctypes.c_uint32),
+        ("pri_shared_pages_resident", ctypes.c_uint32),
+        ("pri_obj_id", ctypes.c_uint32),
+        ("pri_depth", ctypes.c_uint32),
+        ("pri_address", ctypes.c_uint64),
+        ("pri_size", ctypes.c_uint64),
+    ]
+
+
+class _ProcRegionWithPathInfo(ctypes.Structure):
+    _fields_ = [
+        ("prp_prinfo", _ProcRegionInfo),
+        ("prp_vip", _VnodeInfoPath),
+    ]
+
+
 def _child_resource_usage(pid: int) -> tuple[int, int]:
     try:
         library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
@@ -1160,7 +1386,194 @@ def _child_resource_usage(pid: int) -> tuple[int, int]:
         raise LaunchError("RESOURCE_MONITOR_UNAVAILABLE") from exc
 
 
+def _scan_invocation_usage(root: Path) -> InvocationUsage:
+    """Stream one invocation tree without following candidate-controlled links."""
+
+    required_flags = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if any(not hasattr(os, name) for name in required_flags):
+        return InvocationUsage(
+            INVOCATION_TOTAL_BYTE_LIMIT + 1,
+            0,
+            0,
+            (),
+            limit_reason="invocation_scan",
+        )
+    directory_flags = (
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    )
+    root_fd: int | None = None
+    try:
+        canonical = root.resolve(strict=True)
+        expected_root = os.stat(canonical, follow_symlinks=False)
+        root_fd = os.open(canonical, directory_flags)
+        opened_root = os.fstat(root_fd)
+    except (OSError, RuntimeError):
+        if root_fd is not None:
+            try:
+                os.close(root_fd)
+            except OSError:
+                pass
+        return InvocationUsage(
+            INVOCATION_TOTAL_BYTE_LIMIT + 1,
+            0,
+            0,
+            (),
+            limit_reason="invocation_scan",
+        )
+    assert root_fd is not None
+    if (
+        canonical != root
+        or not stat.S_ISDIR(expected_root.st_mode)
+        or not stat.S_ISDIR(opened_root.st_mode)
+        or (expected_root.st_dev, expected_root.st_ino)
+        != (opened_root.st_dev, opened_root.st_ino)
+    ):
+        try:
+            os.close(root_fd)
+        except OSError:
+            pass
+        return InvocationUsage(
+            INVOCATION_TOTAL_BYTE_LIMIT + 1,
+            0,
+            0,
+            (),
+            limit_reason="invocation_scan",
+        )
+
+    total = 0
+    observed_entries = 0
+    max_depth = 0
+    identities: dict[tuple[int, int], int] = {}
+    limit_reason: str | None = None
+
+    def visit(directory_fd: int, depth: int) -> bool:
+        nonlocal limit_reason, max_depth, observed_entries, total
+        try:
+            iterator = os.scandir(directory_fd)
+        except OSError:
+            limit_reason = "invocation_scan"
+            return False
+        try:
+            with iterator:
+                for entry in iterator:
+                    name = entry.name
+                    if (
+                        type(name) is not str
+                        or not name
+                        or name in {".", ".."}
+                        or "/" in name
+                        or "\x00" in name
+                    ):
+                        limit_reason = "invocation_scan"
+                        return False
+                    observed_entries += 1
+                    if observed_entries > INVOCATION_ENTRY_COUNT_LIMIT:
+                        limit_reason = "invocation_entries"
+                        return False
+                    entry_depth = depth + 1
+                    max_depth = max(max_depth, entry_depth)
+                    if entry_depth > INVOCATION_DEPTH_LIMIT:
+                        limit_reason = "invocation_depth"
+                        return False
+                    try:
+                        metadata = os.stat(
+                            name,
+                            dir_fd=directory_fd,
+                            follow_symlinks=False,
+                        )
+                    except OSError as exc:
+                        if exc.errno in {errno.ENOENT, errno.ENOTDIR}:
+                            continue
+                        limit_reason = "invocation_scan"
+                        return False
+                    if stat.S_ISDIR(metadata.st_mode):
+                        child_fd: int | None = None
+                        child_close_failed = False
+                        child_disappeared = False
+                        child_valid = True
+                        try:
+                            child_fd = os.open(
+                                name,
+                                directory_flags,
+                                dir_fd=directory_fd,
+                            )
+                            opened = os.fstat(child_fd)
+                            if (
+                                not stat.S_ISDIR(opened.st_mode)
+                                or (metadata.st_dev, metadata.st_ino)
+                                != (opened.st_dev, opened.st_ino)
+                            ):
+                                limit_reason = "invocation_scan"
+                                child_valid = False
+                            elif not visit(child_fd, entry_depth):
+                                child_valid = False
+                        except OSError as exc:
+                            if exc.errno in {errno.ENOENT, errno.ENOTDIR}:
+                                child_disappeared = True
+                            else:
+                                limit_reason = "invocation_scan"
+                                child_valid = False
+                        finally:
+                            if child_fd is not None:
+                                try:
+                                    os.close(child_fd)
+                                except OSError:
+                                    child_close_failed = True
+                        if child_close_failed:
+                            limit_reason = "invocation_scan"
+                            return False
+                        if child_disappeared:
+                            continue
+                        if not child_valid:
+                            return False
+                        continue
+                    if not stat.S_ISREG(metadata.st_mode):
+                        continue
+                    identity = (int(metadata.st_dev), int(metadata.st_ino))
+                    size = int(metadata.st_size)
+                    if identity[0] < 0 or identity[1] <= 0 or size < 0:
+                        limit_reason = "invocation_scan"
+                        return False
+                    prior_size = identities.get(identity)
+                    if prior_size is None:
+                        identities[identity] = size
+                        total += size
+                    elif size > prior_size:
+                        identities[identity] = size
+                        total += size - prior_size
+                    if total > INVOCATION_TOTAL_BYTE_LIMIT:
+                        limit_reason = "invocation_total_bytes"
+                        return False
+        except OSError:
+            limit_reason = "invocation_scan"
+            return False
+        return True
+
+    try:
+        visit(root_fd, 0)
+    finally:
+        try:
+            os.close(root_fd)
+        except OSError:
+            if limit_reason is None:
+                limit_reason = "invocation_scan"
+    return InvocationUsage(
+        total,
+        observed_entries,
+        max_depth,
+        tuple(
+            sorted(
+                (device, inode, size)
+                for (device, inode), size in identities.items()
+            )
+        ),
+        limit_reason=limit_reason,
+    )
+
+
 def _invocation_regular_bytes(root: Path) -> int:
+    """Preserve the inherited-mode aggregate scanner contract unchanged."""
+
     total = 0
     stack = [root]
     observed_entries = 0
@@ -1184,6 +1597,257 @@ def _invocation_regular_bytes(root: Path) -> int:
     return total
 
 
+def _inspect_mapped_regular_files(pid: int) -> MappedFileInventory:
+    """Inventory all regular unlinked vnodes retained only by VM mappings."""
+
+    if type(pid) is not int or pid <= 0 or sys.platform != "darwin":
+        raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE")
+    try:
+        library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+        function = library.proc_pidinfo
+        function.argtypes = [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint64,
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        function.restype = ctypes.c_int
+    except (AttributeError, OSError) as exc:
+        raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE") from exc
+
+    address = 0
+    regions = 0
+    observed: dict[tuple[int, int], MappedRegularFile] = {}
+    while True:
+        info = _ProcRegionWithPathInfo()
+        ctypes.set_errno(0)
+        used = function(
+            pid,
+            PROC_PIDREGIONPATHINFO,
+            address,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
+        )
+        if used == 0:
+            error = ctypes.get_errno()
+            if error in {errno.ENOENT, errno.ESRCH}:
+                raise ProcessLookupError(error, "process exited", pid)
+            if error in {0, errno.EINVAL} and regions > 0:
+                break
+            if error == 0:
+                if regions == 0:
+                    raise ProcessLookupError(
+                        errno.ESRCH, "process has no VM regions", pid
+                    )
+            raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE")
+        if used != ctypes.sizeof(info):
+            raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE")
+        region = info.prp_prinfo
+        start = int(region.pri_address)
+        size = int(region.pri_size)
+        next_address = start + size
+        if (
+            size <= 0
+            or start < address
+            or next_address <= start
+            or next_address >= 2**64
+        ):
+            raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE")
+        regions += 1
+        if regions > VM_REGION_COUNT_LIMIT:
+            return MappedFileInventory(
+                tuple(
+                    sorted(
+                        observed.values(),
+                        key=lambda item: (item.device, item.inode),
+                    )
+                ),
+                regions,
+                limit_reason="vm_regions",
+            )
+        metadata = info.prp_vip.vip_vi.vi_stat
+        if (
+            stat.S_ISREG(int(metadata.vst_mode))
+            and int(metadata.vst_ino) > 0
+            and int(metadata.vst_nlink) == 0
+        ):
+            record = MappedRegularFile(
+                device=int(metadata.vst_dev),
+                inode=int(metadata.vst_ino),
+                size=int(metadata.vst_size),
+                links=int(metadata.vst_nlink),
+            )
+            if record.device < 0 or record.size < 0:
+                raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE")
+            identity = (record.device, record.inode)
+            prior = observed.get(identity)
+            if prior is None or record.size > prior.size:
+                observed[identity] = record
+        address = next_address
+    return MappedFileInventory(
+        tuple(sorted(observed.values(), key=lambda item: (item.device, item.inode))),
+        regions,
+    )
+
+
+def _probe_mapped_vnode_monitor(invocation_tmpdir: Path) -> None:
+    """Behaviorally prove shared and private deleted mappings remain observable."""
+
+    page_size = int(mmap.PAGESIZE)
+    if page_size <= 0 or page_size > RLIMIT_FSIZE_BYTES:
+        raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE")
+    mappings: list[mmap.mmap] = []
+    descriptors: list[int] = []
+    paths = (
+        invocation_tmpdir / ".mapped-vnode-shared-probe",
+        invocation_tmpdir / ".mapped-vnode-private-probe",
+    )
+    expected: dict[tuple[int, int], int] = {}
+    try:
+        for index, path in enumerate(paths):
+            descriptor = os.open(
+                path,
+                os.O_RDWR
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+            descriptors.append(descriptor)
+            if os.write(descriptor, b"x") != 1:
+                raise OSError(errno.EIO, "mapped vnode probe short write")
+            os.ftruncate(descriptor, page_size)
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE")
+            if index == 0:
+                mapped = mmap.mmap(
+                    descriptor,
+                    page_size,
+                    flags=mmap.MAP_SHARED,
+                    prot=mmap.PROT_READ | mmap.PROT_WRITE,
+                )
+                mappings.append(mapped)
+                mapped[0:1] = b"s"
+                mapped.flush()
+            else:
+                mapped = mmap.mmap(
+                    descriptor,
+                    page_size,
+                    flags=mmap.MAP_PRIVATE,
+                    prot=mmap.PROT_READ,
+                )
+                mappings.append(mapped)
+                if mapped[0:1] != b"x":
+                    raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE")
+            expected[(int(metadata.st_dev), int(metadata.st_ino))] = page_size
+            os.unlink(path)
+            os.close(descriptor)
+            descriptors.pop()
+        inventory = _inspect_mapped_regular_files(os.getpid())
+        observed = {
+            (record.device, record.inode): record.size
+            for record in inventory.files
+            if record.links == 0
+        }
+        if inventory.limit_reason is not None or any(
+            observed.get(identity) != size for identity, size in expected.items()
+        ):
+            raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE")
+    except LaunchError:
+        raise
+    except (BufferError, OSError, OverflowError, TypeError, ValueError) as exc:
+        raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE") from exc
+    finally:
+        primary_exception = sys.exc_info()[1]
+        cleanup_error = False
+        for mapped in reversed(mappings):
+            try:
+                mapped.close()
+            except (BufferError, OSError):
+                cleanup_error = True
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                cleanup_error = True
+        for path in paths:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                cleanup_error = True
+        if cleanup_error:
+            raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE") from primary_exception
+
+
+def _direct_invocation_usage(root: Path, pid: int) -> InvocationUsage:
+    tree = _scan_invocation_usage(root)
+    if tree.limit_reason is not None:
+        return tree
+    mapped = _inspect_mapped_regular_files(pid)
+    if mapped.limit_reason is not None:
+        return InvocationUsage(
+            tree.regular_bytes,
+            tree.entries,
+            tree.max_depth,
+            tree.identities,
+            vm_regions=mapped.regions,
+            limit_reason=mapped.limit_reason,
+        )
+    identities = {
+        (device, inode): size for device, inode, size in tree.identities
+    }
+    total = tree.regular_bytes
+    entries = tree.entries
+    mapped_entries = 0
+    limit_reason: str | None = None
+    for record in mapped.files:
+        if (
+            type(record.device) is not int
+            or record.device < 0
+            or type(record.inode) is not int
+            or record.inode <= 0
+            or type(record.size) is not int
+            or record.size < 0
+            or record.links != 0
+        ):
+            raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE")
+        identity = (record.device, record.inode)
+        prior_size = identities.get(identity)
+        if prior_size is None:
+            identities[identity] = record.size
+            total += record.size
+            entries += 1
+            mapped_entries += 1
+        elif record.size > prior_size:
+            identities[identity] = record.size
+            total += record.size - prior_size
+        if entries > INVOCATION_ENTRY_COUNT_LIMIT:
+            limit_reason = "invocation_entries"
+            break
+        if total > INVOCATION_TOTAL_BYTE_LIMIT:
+            limit_reason = "invocation_total_bytes"
+            break
+    return InvocationUsage(
+        total,
+        entries,
+        tree.max_depth,
+        tuple(
+            sorted(
+                (device, inode, size)
+                for (device, inode), size in identities.items()
+            )
+        ),
+        vm_regions=mapped.regions,
+        mapped_entries=mapped_entries,
+        limit_reason=limit_reason,
+    )
+
+
 def _resource_manifest(*, inherited_mode: bool) -> dict[str, int]:
     manifest = {
         "fsize_bytes": RLIMIT_FSIZE_BYTES,
@@ -1193,6 +1857,14 @@ def _resource_manifest(*, inherited_mode: bool) -> dict[str, int]:
         "invocation_total_bytes": INVOCATION_TOTAL_BYTE_LIMIT,
         "rss_bytes": CHILD_RSS_BYTE_LIMIT,
     }
+    if not inherited_mode:
+        manifest.update(
+            {
+                "invocation_entries": INVOCATION_ENTRY_COUNT_LIMIT,
+                "invocation_depth": INVOCATION_DEPTH_LIMIT,
+                "vm_regions": VM_REGION_COUNT_LIMIT,
+            }
+        )
     if inherited_mode:
         manifest["nproc_count"] = RLIMIT_NPROC_COUNT
     return manifest
@@ -1234,6 +1906,10 @@ def _supervise_child(
     max_rss = 0
     max_cpu = 0
     max_invocation = 0
+    max_invocation_entries = 0
+    max_invocation_depth = 0
+    max_vm_regions = 0
+    max_mapped_entries = 0
     exit_usage: object | None = None
     evidence_bytes = bytearray()
     evidence_eof = False
@@ -1299,7 +1975,36 @@ def _supervise_child(
             cleanup = _terminate_process_group(process.pid)
             _, exit_usage = _wait4_child(process, block=True)
             break
-        invocation_size = _invocation_regular_bytes(invocation_root)
+        invocation_limit_reason: str | None = None
+        if inherited_mode:
+            invocation_size = _invocation_regular_bytes(invocation_root)
+        else:
+            try:
+                invocation_usage = _direct_invocation_usage(
+                    invocation_root, process.pid
+                )
+            except (LaunchError, ProcessLookupError) as monitor_error:
+                returncode, observed_exit_usage = _wait4_child(process, block=False)
+                if returncode is not None:
+                    exit_usage = observed_exit_usage
+                    break
+                cleanup = _terminate_process_group(process.pid)
+                _wait4_child(process, block=True)
+                if isinstance(monitor_error, LaunchError):
+                    raise
+                raise LaunchError("MAPPED_VNODE_MONITOR_UNAVAILABLE") from None
+            invocation_size = invocation_usage.regular_bytes
+            invocation_limit_reason = invocation_usage.limit_reason
+            max_invocation_entries = max(
+                max_invocation_entries, invocation_usage.entries
+            )
+            max_invocation_depth = max(
+                max_invocation_depth, invocation_usage.max_depth
+            )
+            max_vm_regions = max(max_vm_regions, invocation_usage.vm_regions)
+            max_mapped_entries = max(
+                max_mapped_entries, invocation_usage.mapped_entries
+            )
         max_invocation = max(max_invocation, invocation_size)
         try:
             rss_size, cpu_time = _child_resource_usage(process.pid)
@@ -1315,6 +2020,8 @@ def _supervise_child(
         max_cpu = max(max_cpu, cpu_time)
         if stdout_size >= CAPTURE_BYTE_LIMIT or stderr_size >= CAPTURE_BYTE_LIMIT:
             reason = "capture_bytes"
+        elif invocation_limit_reason is not None:
+            reason = invocation_limit_reason
         elif invocation_size > INVOCATION_TOTAL_BYTE_LIMIT:
             reason = "invocation_total_bytes"
         elif rss_size > CHILD_RSS_BYTE_LIMIT:
@@ -1343,7 +2050,24 @@ def _supervise_child(
     except (AttributeError, OSError):
         final_stdout_size = CAPTURE_BYTE_LIMIT + 1
         final_stderr_size = CAPTURE_BYTE_LIMIT + 1
-    final_invocation_size = _invocation_regular_bytes(invocation_root)
+    if inherited_mode:
+        final_invocation_size = _invocation_regular_bytes(invocation_root)
+        final_usage = InvocationUsage(
+            final_invocation_size,
+            0,
+            0,
+            (),
+            limit_reason=(
+                "invocation_total_bytes"
+                if final_invocation_size > INVOCATION_TOTAL_BYTE_LIMIT
+                else None
+            ),
+        )
+    else:
+        final_usage = _scan_invocation_usage(invocation_root)
+        final_invocation_size = final_usage.regular_bytes
+        max_invocation_entries = max(max_invocation_entries, final_usage.entries)
+        max_invocation_depth = max(max_invocation_depth, final_usage.max_depth)
     max_invocation = max(max_invocation, final_invocation_size)
     if reason is None:
         if (
@@ -1351,6 +2075,8 @@ def _supervise_child(
             or final_stderr_size >= CAPTURE_BYTE_LIMIT
         ):
             reason = "capture_bytes"
+        elif final_usage.limit_reason is not None:
+            reason = final_usage.limit_reason
         elif final_invocation_size > INVOCATION_TOTAL_BYTE_LIMIT:
             reason = "invocation_total_bytes"
     if reason is None and process.returncode in {
@@ -1369,12 +2095,18 @@ def _supervise_child(
         "observed_status": "exceeded" if reason is not None else "within_limits",
         "reason": reason,
     }
+    if not inherited_mode:
+        evidence["mapped_vnode_monitor"] = "proc_pidregionpathinfo_verified"
     if reason is not None:
         evidence.update(
             {
                 "max_rss_bytes": max_rss,
                 "max_cpu_time": max_cpu,
                 "max_invocation_bytes": max_invocation,
+                "max_invocation_entries": max_invocation_entries,
+                "max_invocation_depth": max_invocation_depth,
+                "max_vm_regions": max_vm_regions,
+                "max_mapped_entries": max_mapped_entries,
             }
         )
     return timed_out, cleanup, reason, evidence, bytes(evidence_bytes)
@@ -1423,25 +2155,7 @@ def _create_direct_invocation_root(tmpdir: Path, nonce: str) -> Path:
 
 
 def _cleanup_direct_invocation_root(invocation_root: Path) -> None:
-    """Remove a candidate-writable tree without following candidate symlinks."""
-
-    def repair_and_retry(function: object, raw_path: str, _: object) -> None:
-        path = Path(raw_path)
-        try:
-            metadata = os.lstat(path)
-            if stat.S_ISLNK(metadata.st_mode):
-                os.unlink(path)
-                return
-            if stat.S_ISDIR(metadata.st_mode):
-                os.chmod(path, 0o700)
-                if function is os.open:
-                    shutil.rmtree(path, onerror=repair_and_retry)
-                else:
-                    function(raw_path)  # type: ignore[operator]
-                return
-            os.unlink(path)
-        except (OSError, TypeError):
-            return
+    """Iteratively remove one candidate tree without following candidate links."""
 
     try:
         metadata = os.lstat(invocation_root)
@@ -1449,13 +2163,142 @@ def _cleanup_direct_invocation_root(invocation_root: Path) -> None:
         if exc.errno == errno.ENOENT:
             return
         raise LaunchError("INVOCATION_CLEANUP_FAILED") from None
+    required_flags = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if any(not hasattr(os, name) for name in required_flags):
+        raise LaunchError("INVOCATION_CLEANUP_FAILED")
+    directory_flags = (
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    )
+    frames: list[_CleanupFrame] = []
+    root_fd: int | None = None
+
+    def close_frame(frame: _CleanupFrame) -> bool:
+        failed = False
+        close_iterator = getattr(frame.iterator, "close", None)
+        if callable(close_iterator):
+            try:
+                close_iterator()
+            except OSError:
+                failed = True
+        if frame.descriptor >= 0:
+            try:
+                os.close(frame.descriptor)
+            except OSError:
+                failed = True
+            frame.descriptor = -1
+        return failed
+
     try:
         if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
             raise LaunchError("INVOCATION_CLEANUP_FAILED")
-        os.chmod(invocation_root, 0o700)
-        shutil.rmtree(invocation_root, onerror=repair_and_retry)
-    except OSError:
+        os.chmod(invocation_root, 0o700, follow_symlinks=False)
+        root_fd = os.open(invocation_root, directory_flags)
+        opened_root = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(opened_root.st_mode)
+            or (metadata.st_dev, metadata.st_ino)
+            != (opened_root.st_dev, opened_root.st_ino)
+        ):
+            raise LaunchError("INVOCATION_CLEANUP_FAILED")
+        frames.append(
+            _CleanupFrame(root_fd, os.scandir(root_fd), None, None)
+        )
+        root_fd = None
+        while frames:
+            frame = frames[-1]
+            try:
+                entry = next(frame.iterator)  # type: ignore[arg-type]
+            except StopIteration:
+                parent_descriptor = frame.parent_descriptor
+                name = frame.name
+                try:
+                    os.fchmod(frame.descriptor, 0o700)
+                except OSError:
+                    raise LaunchError("INVOCATION_CLEANUP_FAILED") from None
+                if close_frame(frame):
+                    raise LaunchError("INVOCATION_CLEANUP_FAILED")
+                frames.pop()
+                if parent_descriptor is None:
+                    os.rmdir(invocation_root)
+                elif name is not None:
+                    os.rmdir(name, dir_fd=parent_descriptor)
+                else:
+                    raise LaunchError("INVOCATION_CLEANUP_FAILED")
+                continue
+            name = entry.name
+            if (
+                type(name) is not str
+                or not name
+                or name in {".", ".."}
+                or "/" in name
+                or "\x00" in name
+            ):
+                raise LaunchError("INVOCATION_CLEANUP_FAILED")
+            try:
+                child_metadata = os.stat(
+                    name,
+                    dir_fd=frame.descriptor,
+                    follow_symlinks=False,
+                )
+            except OSError as exc:
+                if exc.errno in {errno.ENOENT, errno.ENOTDIR}:
+                    continue
+                raise
+            if stat.S_ISDIR(child_metadata.st_mode):
+                os.chmod(
+                    name,
+                    0o700,
+                    dir_fd=frame.descriptor,
+                    follow_symlinks=False,
+                )
+                child_fd = os.open(
+                    name,
+                    directory_flags,
+                    dir_fd=frame.descriptor,
+                )
+                try:
+                    opened_child = os.fstat(child_fd)
+                    if (
+                        not stat.S_ISDIR(opened_child.st_mode)
+                        or (child_metadata.st_dev, child_metadata.st_ino)
+                        != (opened_child.st_dev, opened_child.st_ino)
+                    ):
+                        raise LaunchError("INVOCATION_CLEANUP_FAILED")
+                    child_iterator = os.scandir(child_fd)
+                except BaseException as primary_exception:
+                    try:
+                        os.close(child_fd)
+                    except OSError:
+                        raise LaunchError(
+                            "INVOCATION_CLEANUP_FAILED"
+                        ) from primary_exception
+                    raise
+                frames.append(
+                    _CleanupFrame(
+                        child_fd,
+                        child_iterator,
+                        frame.descriptor,
+                        name,
+                    )
+                )
+                continue
+            os.unlink(name, dir_fd=frame.descriptor)
+    except LaunchError:
+        raise
+    except (OSError, TypeError, ValueError, NotImplementedError):
         raise LaunchError("INVOCATION_CLEANUP_FAILED") from None
+    finally:
+        primary_exception = sys.exc_info()[1]
+        cleanup_close_failed = False
+        while frames:
+            cleanup_close_failed = close_frame(frames.pop()) or cleanup_close_failed
+        if root_fd is not None:
+            try:
+                os.close(root_fd)
+            except OSError:
+                cleanup_close_failed = True
+        if cleanup_close_failed:
+            raise LaunchError("INVOCATION_CLEANUP_FAILED") from primary_exception
     try:
         os.lstat(invocation_root)
     except OSError as exc:
@@ -1476,11 +2319,120 @@ def _direct_invocation_root_preflight(tmpdir: Path, nonce: str) -> Path:
     _raise("DIRECT_INVOCATION_ROOT_INVALID")
 
 
-def _capture_file(invocation_tmpdir: Path, name: str) -> tuple[int, object]:
+def _capture_file(invocation_tmpdir: Path, name: str) -> object:
     path = invocation_tmpdir / name
-    descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
-    os.unlink(path)
-    return descriptor, os.fdopen(descriptor, "w+b", closefd=True)
+    owner = _OwnedDescriptor(
+        os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+    )
+    try:
+        owner.capture_identity()
+        os.unlink(path)
+        handle = os.fdopen(owner.fileno(), "w+b", closefd=True)
+        owner.release()
+        return handle
+    except BaseException:
+        _close_owned_descriptor_with_retry(owner)
+        raise
+
+
+def _close_best_effort(resource: object) -> None:
+    try:
+        close = getattr(resource, "close")
+        if callable(close):
+            close()
+    except BaseException:
+        pass
+
+
+def _terminate_and_reap_child_best_effort(
+    process: subprocess.Popen[bytes],
+) -> None:
+    try:
+        _terminate_process_group(process.pid)
+    except BaseException:
+        pass
+    if process.returncode is None:
+        try:
+            _wait4_child(process, block=True)
+        except BaseException:
+            pass
+
+
+def _launch_and_supervise_child(
+    *,
+    root: Path,
+    capture_root: Path,
+    stdout_name: str,
+    stderr_name: str,
+    environment: Mapping[str, str],
+    invocation_root: Path,
+    timeout: float,
+    inherited_mode: bool,
+    build_argv: Callable[[int], Sequence[str]],
+) -> ChildOutcome:
+    process: subprocess.Popen[bytes] | None = None
+    with contextlib.ExitStack() as resources:
+        stdout_handle = _capture_file(capture_root, stdout_name)
+        resources.callback(_close_best_effort, stdout_handle)
+        stderr_handle = _capture_file(capture_root, stderr_name)
+        resources.callback(_close_best_effort, stderr_handle)
+        read_fd, write_fd = os.pipe()
+        read_owner = _OwnedDescriptor(read_fd)
+        write_owner = _OwnedDescriptor(write_fd)
+        resources.callback(_close_owned_descriptor_with_retry, read_owner)
+        resources.callback(_close_owned_descriptor_with_retry, write_owner)
+        try:
+            read_owner.capture_identity()
+            write_owner.capture_identity()
+            os.set_blocking(read_owner.fileno(), False)
+            wrapper_argv = tuple(build_argv(write_owner.fileno()))
+            try:
+                process = subprocess.Popen(
+                    wrapper_argv,
+                    cwd=root,
+                    env=dict(environment),
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
+                    start_new_session=True,
+                    pass_fds=(write_owner.fileno(),),
+                )
+            except OSError:
+                raise LaunchError("CHILD_SPAWN_FAILED") from None
+            try:
+                write_owner.close()
+            except OSError:
+                raise LaunchError("CHILD_SPAWN_FAILED") from None
+            (
+                timed_out,
+                cleanup,
+                resource_reason,
+                resource_evidence,
+                boundary_raw,
+            ) = _supervise_child(
+                process,
+                timeout=timeout,
+                invocation_root=invocation_root,
+                stdout_handle=stdout_handle,
+                stderr_handle=stderr_handle,
+                evidence_fd=read_owner.fileno(),
+                inherited_mode=inherited_mode,
+            )
+            stdout = _bounded_capture_read(stdout_handle)
+            stderr = _bounded_capture_read(stderr_handle)
+            return ChildOutcome(
+                returncode=process.returncode,
+                timed_out=timed_out,
+                child_cleanup_performed=cleanup,
+                stdout=stdout,
+                stderr=stderr,
+                boundary_raw=boundary_raw,
+                resource_limit_reason=resource_reason,
+                resource_evidence=resource_evidence,
+            )
+        except BaseException:
+            if process is not None:
+                _terminate_and_reap_child_best_effort(process)
+            raise
 
 
 def _terminate_process_group(pgid: int) -> bool:
@@ -1519,73 +2471,38 @@ def _run_direct_child(
 ) -> ChildOutcome:
     invocation_tmpdir = Path(environment["TMPDIR"])
     temp_probe = invocation_tmpdir / "boundary-probe"
-    read_fd, write_fd = os.pipe()
-    os.set_blocking(read_fd, False)
-    _, stdout_handle = _capture_file(invocation_tmpdir, "stdout.capture")
-    _, stderr_handle = _capture_file(invocation_tmpdir, "stderr.capture")
-    wrapper_argv = [
-        str(SANDBOX_EXEC),
-        "-p",
-        policy.profile_bytes.decode("utf-8"),
-        sys.executable,
-        "-c",
-        DIRECT_BOUNDARY_WRAPPER,
-        str(write_fd),
-        json.dumps([str(path) for path in protected_roots], separators=(",", ":")),
-        json.dumps([str(path) for path in protected_writes], separators=(",", ":")),
-        str(temp_probe),
-        str(root),
-        json.dumps(list(command), separators=(",", ":")),
-        json.dumps(list(CHILD_ENVIRONMENT_KEYS), separators=(",", ":")),
-        json.dumps(_resource_manifest(inherited_mode=False), separators=(",", ":")),
-    ]
-    try:
-        process = subprocess.Popen(
-            wrapper_argv,
-            cwd=root,
-            env=dict(environment),
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-            start_new_session=True,
-            pass_fds=(write_fd,),
-        )
-    except OSError:
-        os.close(write_fd)
-        os.close(read_fd)
-        stdout_handle.close()
-        stderr_handle.close()
-        raise LaunchError("CHILD_SPAWN_FAILED") from None
-    else:
-        os.close(write_fd)
-    try:
-        timed_out, cleanup, resource_reason, resource_evidence, boundary_raw = _supervise_child(
-            process,
-            timeout=timeout,
-            invocation_root=invocation_root,
-            stdout_handle=stdout_handle,
-            stderr_handle=stderr_handle,
-            evidence_fd=read_fd,
-            inherited_mode=False,
-        )
-    except LaunchError:
-        stdout_handle.close()
-        stderr_handle.close()
-        os.close(read_fd)
-        raise
-    stdout = _bounded_capture_read(stdout_handle)
-    stderr = _bounded_capture_read(stderr_handle)
-    stdout_handle.close()
-    stderr_handle.close()
-    os.close(read_fd)
-    return ChildOutcome(
-        returncode=process.returncode,
-        timed_out=timed_out,
-        child_cleanup_performed=cleanup,
-        stdout=stdout,
-        stderr=stderr,
-        boundary_raw=boundary_raw,
-        resource_limit_reason=resource_reason,
-        resource_evidence=resource_evidence,
+    _probe_mapped_vnode_monitor(invocation_tmpdir)
+    return _launch_and_supervise_child(
+        root=root,
+        capture_root=invocation_tmpdir,
+        stdout_name="stdout.capture",
+        stderr_name="stderr.capture",
+        environment=environment,
+        invocation_root=invocation_root,
+        timeout=timeout,
+        inherited_mode=False,
+        build_argv=lambda write_fd: (
+            str(SANDBOX_EXEC),
+            "-p",
+            policy.profile_bytes.decode("utf-8"),
+            sys.executable,
+            "-c",
+            DIRECT_BOUNDARY_WRAPPER,
+            str(write_fd),
+            json.dumps(
+                [str(path) for path in protected_roots], separators=(",", ":")
+            ),
+            json.dumps(
+                [str(path) for path in protected_writes], separators=(",", ":")
+            ),
+            str(temp_probe),
+            str(root),
+            json.dumps(list(command), separators=(",", ":")),
+            json.dumps(list(CHILD_ENVIRONMENT_KEYS), separators=(",", ":")),
+            json.dumps(
+                _resource_manifest(inherited_mode=False), separators=(",", ":")
+            ),
+        ),
     )
 
 
@@ -1689,70 +2606,27 @@ def _run_inherited_child(
     command: Sequence[str],
     timeout: float,
 ) -> ChildOutcome:
-    _, stdout_handle = _capture_file(tmpdir, "inherited-stdout.capture")
-    _, stderr_handle = _capture_file(tmpdir, "inherited-stderr.capture")
-    read_fd, write_fd = os.pipe()
-    os.set_blocking(read_fd, False)
-    wrapper_argv = [
-        sys.executable,
-        "-I",
-        "-c",
-        INHERITED_EXEC_WRAPPER,
-        str(write_fd),
-        json.dumps(list(command), separators=(",", ":")),
-        json.dumps(list(CHILD_ENVIRONMENT_KEYS), separators=(",", ":")),
-        json.dumps(_resource_manifest(inherited_mode=True), separators=(",", ":")),
-    ]
-    try:
-        process = subprocess.Popen(
-            wrapper_argv,
-            cwd=root,
-            env=dict(environment),
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-            start_new_session=True,
-            pass_fds=(write_fd,),
-        )
-    except OSError:
-        os.close(write_fd)
-        os.close(read_fd)
-        stdout_handle.close()
-        stderr_handle.close()
-        raise LaunchError("CHILD_SPAWN_FAILED") from None
-    else:
-        os.close(write_fd)
-    try:
-        timed_out, cleanup, resource_reason, resource_evidence, boundary_raw = _supervise_child(
-            process,
-            timeout=timeout,
-            invocation_root=invocation_root,
-            stdout_handle=stdout_handle,
-            stderr_handle=stderr_handle,
-            evidence_fd=read_fd,
-            inherited_mode=True,
-        )
-    except LaunchError:
-        stdout_handle.close()
-        stderr_handle.close()
-        os.close(read_fd)
-        raise
-    stdout = _bounded_capture_read(stdout_handle)
-    stderr = _bounded_capture_read(stderr_handle)
-    stdout_handle.close()
-    stderr_handle.close()
-    os.close(read_fd)
-    return ChildOutcome(
-        returncode=process.returncode,
-        timed_out=timed_out,
-        child_cleanup_performed=cleanup,
-        stdout=stdout,
-        stderr=stderr,
-        boundary_raw=boundary_raw,
-        resource_limit_reason=resource_reason,
-        resource_evidence={
-            **resource_evidence,
-            "limits": _resource_manifest(inherited_mode=True),
-        },
+    return _launch_and_supervise_child(
+        root=root,
+        capture_root=tmpdir,
+        stdout_name="inherited-stdout.capture",
+        stderr_name="inherited-stderr.capture",
+        environment=environment,
+        invocation_root=invocation_root,
+        timeout=timeout,
+        inherited_mode=True,
+        build_argv=lambda write_fd: (
+            sys.executable,
+            "-I",
+            "-c",
+            INHERITED_EXEC_WRAPPER,
+            str(write_fd),
+            json.dumps(list(command), separators=(",", ":")),
+            json.dumps(list(CHILD_ENVIRONMENT_KEYS), separators=(",", ":")),
+            json.dumps(
+                _resource_manifest(inherited_mode=True), separators=(",", ":")
+            ),
+        ),
     )
 
 
@@ -1867,6 +2741,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             outputs = create_outputs(
                 validated.receipt_path, validated.denial_log_path
             )
+            if not _invocation_storage_quota_supported():
+                _raise(INVOCATION_STORAGE_QUOTA_BLOCKER)
             try:
                 probe_evidence = inherited.run_boundary_probes(validated)
             except inherited.ProtocolError as exc:
@@ -1906,8 +2782,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         if any(key.startswith(BOOTSTRAP_PREFIX) for key in os.environ):
             _raise("INHERITED_ENVIRONMENT_ONLY")
-        if not SANDBOX_EXEC.is_file():
-            _raise("SANDBOX_UNAVAILABLE")
         tmpdir = validate_direct_tmpdir(os.environ, root)
         protected_roots, protected_writes = _protected_roots_and_writes(args.nonce)
         invocation_candidate = _direct_invocation_root_preflight(tmpdir, args.nonce)
@@ -1923,6 +2797,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
         outputs = create_outputs(receipt, denial)
+        if not _invocation_storage_quota_supported():
+            _raise(INVOCATION_STORAGE_QUOTA_BLOCKER)
+        if not SANDBOX_EXEC.is_file():
+            _raise("SANDBOX_UNAVAILABLE")
         invocation_root = _create_direct_invocation_root(tmpdir, args.nonce)
         environment = build_direct_environment(invocation_root)
         policy = render_candidate_policy(root, invocation_root, protected_roots)
@@ -1992,6 +2870,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     finally:
         cleanup_failed = False
+        output_close_failed = False
         if invocation_root is not None:
             try:
                 _cleanup_direct_invocation_root(invocation_root)
@@ -2010,9 +2889,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if not exc.fallback_written:
                         print(exc.status, file=sys.stderr)
         if outputs is not None:
-            outputs.close()
+            try:
+                outputs.close()
+            except LaunchError:
+                output_close_failed = True
+                try:
+                    outputs.close()
+                except LaunchError:
+                    pass
         if cleanup_failed:
             print("INVOCATION_CLEANUP_FAILED", file=sys.stderr)
+        if output_close_failed:
+            print("OUTPUT_CLOSE_FAILED", file=sys.stderr)
+        if cleanup_failed or output_close_failed:
             return 2
 
 

@@ -15,8 +15,11 @@ import importlib.util
 import inspect
 import io
 import json
+import math
+import mmap
 import os
 from pathlib import Path
+import platform
 import pwd
 import re
 import shutil
@@ -72,6 +75,138 @@ FULL_GATE_RUNNER = TOOLS_ROOT / "run-full-gate-isolated.py"
 VERIFIER = TOOLS_ROOT / "verify-quarantine-candidate.py"
 SYSTEM_PYTHON = Path(sys.executable)
 PINNED_RUNTIME_SOURCE_ENV = "SAMVIL_PINNED_RUNTIME_SOURCE"
+REQUIRE_COMPLETE_RELEASE_CONTROL_ENV = "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL"
+ENABLE_REAL_SEATBELT_TESTS_ENV = "SAMVIL_ENABLE_REAL_SEATBELT_TESTS"
+ENABLE_DARWIN_COPIED_RUNTIME_TESTS_ENV = (
+    "SAMVIL_ENABLE_DARWIN_COPIED_RUNTIME_TESTS"
+)
+PINNED_PYTEST_COMPONENTS = (
+    "_pytest",
+    "iniconfig",
+    "iniconfig-2.3.0.dist-info",
+    "packaging",
+    "packaging-26.2.dist-info",
+    "pluggy",
+    "pluggy-1.6.0.dist-info",
+    "py.py",
+    "pygments",
+    "pygments-2.20.0.dist-info",
+    "pytest",
+    "pytest-9.1.1.dist-info",
+    "pytest_asyncio",
+    "pytest_asyncio-1.4.0.dist-info",
+    "typing_extensions.py",
+    "typing_extensions-4.16.0.dist-info",
+)
+PINNED_PYTEST_IMPORTS = (
+    "_pytest",
+    "iniconfig",
+    "packaging",
+    "pluggy",
+    "py",
+    "pygments",
+    "pytest",
+    "pytest_asyncio",
+    "typing_extensions",
+)
+COPIED_RUNTIME_PROBE_SOURCE = r'''
+import importlib
+import json
+import pathlib
+import sys
+
+module_names = (
+    "_pytest",
+    "iniconfig",
+    "packaging",
+    "pluggy",
+    "py",
+    "pygments",
+    "pytest",
+    "pytest_asyncio",
+    "typing_extensions",
+)
+module_paths = {}
+for name in module_names:
+    module = importlib.import_module(name)
+    module_paths[name] = getattr(module, "__file__", None)
+
+mapped_files = []
+maps = pathlib.Path("/proc/self/maps")
+if sys.platform.startswith("linux") and maps.is_file():
+    for line in maps.read_text(encoding="utf-8", errors="strict").splitlines():
+        fields = line.split(None, 5)
+        if len(fields) == 6 and fields[5].startswith("/"):
+            mapped_files.append(fields[5])
+
+payload = {
+    "schema": "samvil.copied-runtime-probe.v1",
+    "executable": sys.executable,
+    "prefix": sys.prefix,
+    "base_prefix": sys.base_prefix,
+    "sys_path": sys.path,
+    "module_paths": module_paths,
+    "mapped_files": sorted(set(mapped_files)),
+}
+sys.stdout.buffer.write(
+    json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+)
+'''.strip()
+
+
+class ReleaseControlConfigurationError(RuntimeError):
+    def __init__(self, status: str, detail: str) -> None:
+        super().__init__(f"{status}: {detail}")
+        self.status = status
+
+
+class ReleaseControlHarnessError(RuntimeError):
+    def __init__(
+        self, status: str, detail: str = "", *, primary_status: str | None = None
+    ) -> None:
+        super().__init__(f"{status}: {detail}" if detail else status)
+        self.status = status
+        self.primary_status = primary_status
+
+
+@dataclass(frozen=True)
+class RealSeatbeltContext:
+    sandbox_executable: Path
+    pinned_runtime_source: Path
+    invocation_tmpdir: Path
+
+
+@dataclass(frozen=True)
+class RealSeatbeltOptInContext:
+    sandbox_executable: Path
+    invocation_tmpdir: Path
+
+
+@dataclass(frozen=True)
+class CopiedRuntimeExecutionContext:
+    pinned_runtime_source: Path
+    invocation_tmpdir: Path
+
+
+def _strict_opt_in(
+    environment: dict[str, str] | os._Environ[str], name: str
+) -> bool:
+    raw = environment.get(name)
+    if raw is None:
+        return False
+    if raw == "1":
+        return True
+    raise ReleaseControlConfigurationError(
+        "RELEASE_CONTROL_FLAG_INVALID", f"{name} must be exactly 1 or unset"
+    )
+
+
+def _configuration_error_or_skip(
+    environment: dict[str, str] | os._Environ[str], status: str, detail: str
+) -> None:
+    if _strict_opt_in(environment, REQUIRE_COMPLETE_RELEASE_CONTROL_ENV):
+        raise ReleaseControlConfigurationError(status, detail)
+    raise unittest.SkipTest(f"{status}: {detail}")
 
 
 def resolve_pinned_runtime_source(
@@ -88,17 +223,145 @@ def resolve_pinned_runtime_source(
         raise ValueError(
             f"{PINNED_RUNTIME_SOURCE_ENV} must contain bin/python3.12"
         )
+    if (resolved / "pyvenv.cfg").exists():
+        raise ValueError(
+            f"{PINNED_RUNTIME_SOURCE_ENV} must reference a base Python installation, not a virtual environment"
+        )
     return resolved
 
 
-PINNED_RUNTIME_SOURCE = resolve_pinned_runtime_source(os.environ)
-
-
-def copy_pinned_runtime(destination: Path) -> None:
-    if PINNED_RUNTIME_SOURCE is None:
-        raise unittest.SkipTest(
-            f"set {PINNED_RUNTIME_SOURCE_ENV} to an approved Python 3.12 runtime"
+def require_pinned_runtime_source(
+    environment: dict[str, str] | os._Environ[str] = os.environ,
+) -> Path:
+    try:
+        source = resolve_pinned_runtime_source(environment)
+    except (OSError, RuntimeError, ValueError) as exc:
+        _configuration_error_or_skip(
+            environment, "PINNED_RUNTIME_INVALID", str(exc)
         )
+    if source is None:
+        _configuration_error_or_skip(
+            environment,
+            "PINNED_RUNTIME_REQUIRED",
+            f"set {PINNED_RUNTIME_SOURCE_ENV} to an approved Python 3.12 runtime",
+        )
+    return source
+
+
+def require_invocation_tmpdir(
+    environment: dict[str, str] | os._Environ[str] = os.environ,
+) -> Path:
+    raw = environment.get("TMPDIR")
+    if raw is None or not raw.strip():
+        _configuration_error_or_skip(
+            environment,
+            "INVOCATION_TMPDIR_INVALID",
+            "trusted bootstrap must provide an invocation-owned TMPDIR",
+        )
+    candidate = Path(raw)
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        _configuration_error_or_skip(
+            environment, "INVOCATION_TMPDIR_INVALID", str(exc)
+        )
+    if not candidate.is_absolute() or not resolved.is_dir():
+        _configuration_error_or_skip(
+            environment,
+            "INVOCATION_TMPDIR_INVALID",
+            "TMPDIR must be an existing absolute directory",
+        )
+    return resolved
+
+
+def require_copied_runtime_execution(
+    environment: dict[str, str] | os._Environ[str] = os.environ,
+) -> CopiedRuntimeExecutionContext:
+    runtime_source = require_pinned_runtime_source(environment)
+    tmpdir = require_invocation_tmpdir(environment)
+    if platform.system() == "Darwin" and not _strict_opt_in(
+        environment, ENABLE_DARWIN_COPIED_RUNTIME_TESTS_ENV
+    ):
+        _configuration_error_or_skip(
+            environment,
+            "DARWIN_COPIED_RUNTIME_OPT_IN_REQUIRED",
+            f"set {ENABLE_DARWIN_COPIED_RUNTIME_TESTS_ENV}=1 after host restart and validation",
+        )
+    return CopiedRuntimeExecutionContext(
+        pinned_runtime_source=runtime_source,
+        invocation_tmpdir=tmpdir,
+    )
+
+
+def require_real_seatbelt_opt_in(
+    environment: dict[str, str] | os._Environ[str] = os.environ,
+) -> RealSeatbeltOptInContext:
+    if not _strict_opt_in(environment, ENABLE_REAL_SEATBELT_TESTS_ENV):
+        raise unittest.SkipTest(
+            f"REAL_SEATBELT_OPT_IN_REQUIRED: set {ENABLE_REAL_SEATBELT_TESTS_ENV}=1"
+        )
+    if platform.system() != "Darwin" or platform.machine().lower() != "arm64":
+        raise ReleaseControlConfigurationError(
+            "REAL_SEATBELT_UNSUPPORTED",
+            "real Seatbelt tests require a supported Darwin arm64 host",
+        )
+    sandbox_executable = Path("/usr/bin/sandbox-exec")
+    try:
+        resolved_sandbox = sandbox_executable.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ReleaseControlConfigurationError(
+            "REAL_SEATBELT_UNSUPPORTED", str(exc)
+        ) from None
+    if (
+        resolved_sandbox != sandbox_executable
+        or not resolved_sandbox.is_file()
+        or not os.access(resolved_sandbox, os.X_OK)
+    ):
+        raise ReleaseControlConfigurationError(
+            "REAL_SEATBELT_UNSUPPORTED",
+            "canonical /usr/bin/sandbox-exec is unavailable",
+        )
+    return RealSeatbeltOptInContext(
+        sandbox_executable=resolved_sandbox,
+        invocation_tmpdir=require_invocation_tmpdir(environment),
+    )
+
+
+def require_real_seatbelt_context(
+    environment: dict[str, str] | os._Environ[str] = os.environ,
+) -> RealSeatbeltContext:
+    host_context = require_real_seatbelt_opt_in(environment)
+    runtime_context = require_copied_runtime_execution(environment)
+    runtime_source = runtime_context.pinned_runtime_source
+    executable = runtime_source / "bin/python3.12"
+    try:
+        slices = full_gate._macho_slices(executable.read_bytes())
+    except (OSError, full_gate.FullGateError):
+        raise ReleaseControlConfigurationError(
+            "REAL_SEATBELT_UNSUPPORTED",
+            "pinned Python must be a supported Mach-O runtime",
+        ) from None
+    if "arm64" not in slices and "arm64e" not in slices:
+        raise ReleaseControlConfigurationError(
+            "REAL_SEATBELT_UNSUPPORTED",
+            "pinned Python must contain an arm64 slice",
+        )
+    return RealSeatbeltContext(
+        sandbox_executable=host_context.sandbox_executable,
+        pinned_runtime_source=runtime_source,
+        invocation_tmpdir=host_context.invocation_tmpdir,
+    )
+
+
+def copy_pinned_runtime(
+    destination: Path,
+    *,
+    environment: dict[str, str] | os._Environ[str] = os.environ,
+    runtime_source: Path | None = None,
+    pytest_source: Path | None = None,
+) -> None:
+    source_runtime = runtime_source or require_pinned_runtime_source(environment)
+
     def ignore_broken_links(directory: str, names: list[str]) -> set[str]:
         root = Path(directory)
         ignored = {
@@ -108,39 +371,30 @@ def copy_pinned_runtime(destination: Path) -> None:
         }
         if (
             root.resolve(strict=True)
-            == PINNED_RUNTIME_SOURCE / "lib/python3.12"
+            == source_runtime / "lib/python3.12"
         ):
             ignored.add("site-packages")
         return ignored
 
     shutil.copytree(
-        PINNED_RUNTIME_SOURCE,
+        source_runtime,
         destination,
         symlinks=False,
         ignore=ignore_broken_links,
     )
-    fixture_site_packages = (
+    fixture_site_packages = pytest_source or (
         TOOLS_ROOT.parents[1] / "mcp/.venv/lib/python3.12/site-packages"
     )
     destination_site_packages = destination / "lib/python3.12/site-packages"
     destination_site_packages.mkdir()
-    for name in (
-        "_pytest",
-        "iniconfig",
-        "iniconfig-2.3.0.dist-info",
-        "packaging",
-        "packaging-26.2.dist-info",
-        "pluggy",
-        "pluggy-1.6.0.dist-info",
-        "py.py",
-        "pygments",
-        "pygments-2.20.0.dist-info",
-        "pytest",
-        "pytest-9.1.1.dist-info",
-    ):
+    for name in PINNED_PYTEST_COMPONENTS:
         source = fixture_site_packages / name
         if not source.exists():
-            raise unittest.SkipTest(f"pinned pytest fixture component missing: {name}")
+            _configuration_error_or_skip(
+                environment,
+                "PINNED_PYTEST_COMPONENT_MISSING",
+                f"pinned pytest fixture component missing: {name}",
+            )
         target = destination_site_packages / name
         if target.exists():
             if target.is_dir():
@@ -151,6 +405,371 @@ def copy_pinned_runtime(destination: Path) -> None:
             shutil.copytree(source, target, symlinks=False)
         else:
             shutil.copy2(source, target)
+
+
+def _harness_process_group_exists(process: subprocess.Popen[bytes]) -> bool:
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError as exc:
+        raise ReleaseControlHarnessError(
+            "HARNESS_CLEANUP_FAILED", str(exc)
+        ) from None
+    return True
+
+
+def _terminate_harness_process_group(
+    process: subprocess.Popen[bytes], *, primary_status: str
+) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        try:
+            process.communicate(timeout=2)
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise ReleaseControlHarnessError(
+                "HARNESS_CLEANUP_FAILED",
+                str(exc),
+                primary_status=primary_status,
+            ) from None
+        return
+    except (OSError, ValueError) as exc:
+        raise ReleaseControlHarnessError(
+            "HARNESS_CLEANUP_FAILED", str(exc), primary_status=primary_status
+        ) from None
+    try:
+        process.communicate(timeout=0.25)
+    except subprocess.TimeoutExpired:
+        pass
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise ReleaseControlHarnessError(
+            "HARNESS_CLEANUP_FAILED", str(exc), primary_status=primary_status
+        ) from None
+    else:
+        deadline = time.monotonic() + 0.25
+        while time.monotonic() < deadline:
+            if not _harness_process_group_exists(process):
+                return
+            time.sleep(0.01)
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except (OSError, ValueError) as exc:
+        raise ReleaseControlHarnessError(
+            "HARNESS_CLEANUP_FAILED", str(exc), primary_status=primary_status
+        ) from None
+    try:
+        process.communicate(timeout=2)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise ReleaseControlHarnessError(
+            "HARNESS_CLEANUP_FAILED", str(exc), primary_status=primary_status
+        ) from None
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        try:
+            if not _harness_process_group_exists(process):
+                return
+        except ReleaseControlHarnessError as exc:
+            raise ReleaseControlHarnessError(
+                "HARNESS_CLEANUP_FAILED",
+                str(exc),
+                primary_status=primary_status,
+            ) from None
+        time.sleep(0.01)
+    raise ReleaseControlHarnessError(
+        "HARNESS_CLEANUP_FAILED",
+        "process group survived SIGKILL",
+        primary_status=primary_status,
+    )
+
+def _close_owned_harness_fds(
+    descriptors: tuple[int, ...], *, primary_exception: BaseException | None
+) -> None:
+    first_error: OSError | None = None
+    for descriptor in descriptors:
+        try:
+            os.close(descriptor)
+        except OSError as exc:
+            if first_error is None:
+                first_error = exc
+    if first_error is not None:
+        primary_status = (
+            getattr(
+                primary_exception,
+                "status",
+                type(primary_exception).__name__,
+            )
+            if primary_exception is not None
+            else None
+        )
+        blocker = ReleaseControlHarnessError(
+            "HARNESS_FD_CLOSE_FAILED",
+            str(first_error),
+            primary_status=primary_status,
+        )
+        if primary_exception is None:
+            raise blocker from None
+        raise blocker from primary_exception
+
+
+def _close_owned_harness_fd(
+    descriptor: int, *, primary_exception: BaseException | None
+) -> None:
+    _close_owned_harness_fds(
+        (descriptor,), primary_exception=primary_exception
+    )
+
+
+def _close_owned_harness_owners(
+    owners: tuple[full_gate._OwnedDescriptor, ...],
+    *,
+    primary_exception: BaseException | None,
+) -> None:
+    first_error: BaseException | None = None
+    for owner in owners:
+        error = full_gate._close_owned_descriptor_with_retry(owner)
+        if first_error is None and error is not None:
+            first_error = error
+    if first_error is None:
+        return
+    if not isinstance(first_error, OSError):
+        raise first_error
+    primary_status = (
+        getattr(
+            primary_exception,
+            "status",
+            type(primary_exception).__name__,
+        )
+        if primary_exception is not None
+        else None
+    )
+    blocker = ReleaseControlHarnessError(
+        "HARNESS_FD_CLOSE_FAILED",
+        str(first_error),
+        primary_status=primary_status,
+    )
+    if primary_exception is None:
+        raise blocker from None
+    raise blocker from primary_exception
+
+
+def _close_owned_harness_owner(
+    owner: full_gate._OwnedDescriptor,
+    *,
+    primary_exception: BaseException | None,
+) -> None:
+    _close_owned_harness_owners(
+        (owner,), primary_exception=primary_exception
+    )
+
+
+def run_bounded_harness_process(
+    argv: list[str],
+    *,
+    cwd: Path,
+    environment: dict[str, str],
+    tmpdir: Path,
+    timeout: float,
+    pass_fds: tuple[int, ...] = (),
+) -> subprocess.CompletedProcess[bytes]:
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ReleaseControlHarnessError("HARNESS_TIMEOUT_INVALID")
+    with tempfile.TemporaryFile(mode="w+b", dir=tmpdir) as stdout_handle, tempfile.TemporaryFile(
+        mode="w+b", dir=tmpdir
+    ) as stderr_handle:
+        try:
+            process = subprocess.Popen(
+                argv,
+                cwd=cwd,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                start_new_session=True,
+                close_fds=True,
+                pass_fds=pass_fds,
+            )
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise ReleaseControlHarnessError(
+                "HARNESS_SPAWN_FAILED", str(exc)
+            ) from None
+        try:
+            outcome = full_gate.supervise_process(
+                process,
+                timeout=timeout,
+                stdout_handle=stdout_handle,
+                stderr_handle=stderr_handle,
+                limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+            )
+        except BaseException as primary:
+            try:
+                if _harness_process_group_exists(process):
+                    _terminate_harness_process_group(
+                        process,
+                        primary_status=getattr(
+                            primary, "status", "HARNESS_INTERRUPTED"
+                        ),
+                    )
+                else:
+                    process.communicate(timeout=2)
+            except BaseException as cleanup_error:
+                raise cleanup_error from primary
+            if isinstance(primary, full_gate.FullGateError):
+                raise ReleaseControlHarnessError(
+                    "HARNESS_SUPERVISION_FAILED", primary.status
+                ) from primary
+            raise
+        if outcome.timed_out:
+            raise ReleaseControlHarnessError("HARNESS_TIMEOUT")
+        if outcome.resource_status is not None:
+            raise ReleaseControlHarnessError(
+                "HARNESS_RESOURCE_LIMIT", outcome.resource_status
+            )
+        if outcome.cleanup_performed:
+            raise ReleaseControlHarnessError(
+                "HARNESS_DESCENDANT_CLEANUP_REQUIRED"
+            )
+        return subprocess.CompletedProcess(
+            argv, outcome.returncode, outcome.stdout, outcome.stderr
+        )
+
+
+def probe_copied_runtime_pytest(
+    pinned_python: Path,
+    environment: dict[str, str] | os._Environ[str] = os.environ,
+    *,
+    execution_context: CopiedRuntimeExecutionContext | None = None,
+) -> None:
+    context = execution_context or require_copied_runtime_execution(environment)
+    tmpdir = context.invocation_tmpdir
+    try:
+        runtime_root = pinned_python.parent.parent.resolve(strict=True)
+        expected_python = pinned_python.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        _configuration_error_or_skip(
+            environment, "COPIED_RUNTIME_NOT_HERMETIC", str(exc)
+        )
+    probe_environment = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "HOME": str(tmpdir),
+        "CODEX_HOME": str(tmpdir),
+        "TMPDIR": str(tmpdir),
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    }
+    argv = [
+        str(pinned_python),
+        "-I",
+        "-B",
+        "-c",
+        COPIED_RUNTIME_PROBE_SOURCE,
+    ]
+    try:
+        probe = run_bounded_harness_process(
+            argv,
+            cwd=tmpdir,
+            environment=probe_environment,
+            tmpdir=tmpdir,
+            timeout=10,
+        )
+    except ReleaseControlHarnessError as exc:
+        _configuration_error_or_skip(
+            environment, "COPIED_RUNTIME_PYTEST_UNAVAILABLE", str(exc)
+        )
+    if probe.returncode != 0:
+        _configuration_error_or_skip(
+            environment,
+            "COPIED_RUNTIME_PYTEST_UNAVAILABLE",
+            "copied pinned Python lacks isolated pytest",
+        )
+    if probe.stderr:
+        _configuration_error_or_skip(
+            environment,
+            "COPIED_RUNTIME_NOT_HERMETIC",
+            "copied runtime probe wrote stderr",
+        )
+    try:
+        decoded = full_gate.decode_canonical_json_bytes(
+            probe.stdout,
+            status="COPIED_RUNTIME_NOT_HERMETIC",
+            max_bytes=1024 * 1024,
+        )
+    except full_gate.FullGateError as exc:
+        _configuration_error_or_skip(environment, exc.status, str(exc))
+    expected_fields = {
+        "schema",
+        "executable",
+        "prefix",
+        "base_prefix",
+        "sys_path",
+        "module_paths",
+        "mapped_files",
+    }
+    if not isinstance(decoded, dict) or set(decoded) != expected_fields:
+        _configuration_error_or_skip(
+            environment,
+            "COPIED_RUNTIME_NOT_HERMETIC",
+            "copied runtime probe schema is invalid",
+        )
+
+    def resolved_path(value: object, *, must_exist: bool) -> Path:
+        if not isinstance(value, str) or not value or not Path(value).is_absolute():
+            raise ValueError("probe path must be a non-empty absolute path")
+        return Path(value).resolve(strict=must_exist)
+
+    def require_within_runtime(value: object, *, must_exist: bool) -> Path:
+        resolved = resolved_path(value, must_exist=must_exist)
+        try:
+            resolved.relative_to(runtime_root)
+        except ValueError:
+            raise ValueError(f"path escapes copied runtime: {resolved}") from None
+        return resolved
+
+    try:
+        if decoded["schema"] != "samvil.copied-runtime-probe.v1":
+            raise ValueError("copied runtime probe schema version mismatch")
+        if require_within_runtime(decoded["executable"], must_exist=True) != expected_python:
+            raise ValueError("copied runtime executable identity mismatch")
+        if require_within_runtime(decoded["prefix"], must_exist=True) != runtime_root:
+            raise ValueError("copied runtime prefix mismatch")
+        if require_within_runtime(decoded["base_prefix"], must_exist=True) != runtime_root:
+            raise ValueError("copied runtime base_prefix mismatch")
+        sys_path = decoded["sys_path"]
+        if not isinstance(sys_path, list) or not sys_path:
+            raise ValueError("copied runtime sys.path is invalid")
+        for entry in sys_path:
+            require_within_runtime(entry, must_exist=False)
+        module_paths = decoded["module_paths"]
+        if not isinstance(module_paths, dict) or set(module_paths) != set(
+            PINNED_PYTEST_IMPORTS
+        ):
+            raise ValueError("copied runtime module closure is incomplete")
+        for entry in module_paths.values():
+            require_within_runtime(entry, must_exist=True)
+        mapped_files = decoded["mapped_files"]
+        if not isinstance(mapped_files, list):
+            raise ValueError("copied runtime mapped-file closure is invalid")
+        system_roots = tuple(
+            Path(path).resolve(strict=True)
+            for path in ("/lib", "/usr/lib")
+            if Path(path).exists()
+        )
+        for entry in mapped_files:
+            resolved = resolved_path(entry, must_exist=True)
+            if resolved.is_relative_to(runtime_root):
+                continue
+            if any(resolved.is_relative_to(root) for root in system_roots):
+                continue
+            raise ValueError(f"mapped file escapes copied runtime: {resolved}")
+    except (OSError, RuntimeError, ValueError) as exc:
+        _configuration_error_or_skip(
+            environment, "COPIED_RUNTIME_NOT_HERMETIC", str(exc)
+        )
 OPENSSL = Path("/usr/bin/openssl")
 BOOTSTRAP_NONCE_ENV = "SAMVIL_BOOTSTRAP_NONCE"
 BOOTSTRAP_CONTEXT_DIGEST_ENV = "SAMVIL_BOOTSTRAP_CONTEXT_SHA256"
@@ -285,6 +904,13 @@ def independent_render_profile(
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def quota_authority_fixture() -> full_gate.InvocationStorageQuotaAuthority:
+    return full_gate._make_invocation_storage_quota_authority(
+        quota_bytes=full_gate.DEFAULT_RESOURCE_LIMITS["aggregate_bytes"],
+        filesystem_identity_sha256="f" * 64,
+    )
 
 
 def canonical_codesign_channel_fixture(
@@ -582,6 +1208,146 @@ def capture_outer_absence(path: Path, status: str) -> OuterAbsenceEvidence:
 
 
 class PinnedRuntimeFixtureResolutionTest(unittest.TestCase):
+    def test_pinned_pytest_fixture_contains_explicit_async_plugin_closure(self) -> None:
+        self.assertEqual(
+            set(PINNED_PYTEST_COMPONENTS),
+            {
+                "_pytest",
+                "iniconfig",
+                "iniconfig-2.3.0.dist-info",
+                "packaging",
+                "packaging-26.2.dist-info",
+                "pluggy",
+                "pluggy-1.6.0.dist-info",
+                "py.py",
+                "pygments",
+                "pygments-2.20.0.dist-info",
+                "pytest",
+                "pytest-9.1.1.dist-info",
+                "pytest_asyncio",
+                "pytest_asyncio-1.4.0.dist-info",
+                "typing_extensions.py",
+                "typing_extensions-4.16.0.dist-info",
+            },
+        )
+        self.assertEqual(
+            set(PINNED_PYTEST_IMPORTS),
+            {
+                "_pytest",
+                "iniconfig",
+                "packaging",
+                "pluggy",
+                "py",
+                "pygments",
+                "pytest",
+                "pytest_asyncio",
+                "typing_extensions",
+            },
+        )
+        for module_name in PINNED_PYTEST_IMPORTS:
+            self.assertIn(f'"{module_name}"', COPIED_RUNTIME_PROBE_SOURCE)
+
+    def test_linux_portable_orchestration_fixture_owns_platform_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            runtime = root / "runtime"
+            (runtime / "bin").mkdir(parents=True)
+            (runtime / "bin/python3.12").write_bytes(b"portable-python")
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            context = CopiedRuntimeExecutionContext(
+                pinned_runtime_source=runtime,
+                invocation_tmpdir=tmpdir,
+            )
+            case = PortableFullGateOrchestrationTest(
+                "test_cleanup_failure_overrides_a_pass_and_writes_typed_blocker"
+            )
+            with mock.patch.object(
+                platform, "system", return_value="Linux"
+            ), mock.patch(
+                f"{__name__}.require_copied_runtime_execution",
+                return_value=context,
+            ):
+                case.setUp()
+            try:
+                control_identity = FullGateManifestProtocolTest().manifest()["control"]
+                with mock.patch.object(
+                    full_gate,
+                    "apple_platform_tcb_binding",
+                    side_effect=AssertionError(
+                        "portable E2E fixture reached real Apple binding"
+                    ),
+                ), mock.patch(
+                    f"{__name__}.real_canonical_platform_rows",
+                    side_effect=AssertionError(
+                        "portable E2E fixture reached real canonical tools"
+                    ),
+                ):
+                    legacy = case.manifest_fixture("original", control_identity)
+                    approved = case.approved_manifest_fixture(
+                        "original", control_identity
+                    )
+
+                authority = full_gate.acquire_apple_platform_tcb(
+                    legacy["apple_platform_tcb"], case.base
+                )
+                self.assertEqual(
+                    authority.complete()["schema"],
+                    "samvil.apple-platform-evidence.v1",
+                )
+                authority.close()
+
+                parser_inputs = approved["host_tool_identity_parser"]["inputs"]
+                self.assertTrue(parser_inputs)
+                self.assertTrue(
+                    all(
+                        Path(entry["path"]).is_relative_to(case.base)
+                        for entry in parser_inputs
+                    )
+                )
+
+                copied_runtime = case.base / "portable-materialized-runtime"
+                full_gate.materialize_closure_archive(
+                    b"portable-fixture",
+                    b"portable-fixture",
+                    copied_runtime,
+                    expected_role="python",
+                )
+                self.assertEqual(
+                    (copied_runtime / "bin/python3.12").read_bytes(),
+                    b"portable-python",
+                )
+            finally:
+                case.tearDown()
+
+    def test_linux_portable_orchestration_cases_execute_without_skips(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            runtime = root / "runtime"
+            (runtime / "bin").mkdir(parents=True)
+            (runtime / "bin/python3.12").write_bytes(b"portable-python")
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            context = CopiedRuntimeExecutionContext(
+                pinned_runtime_source=runtime,
+                invocation_tmpdir=tmpdir,
+            )
+            suite = unittest.defaultTestLoader.loadTestsFromTestCase(
+                PortableFullGateOrchestrationTest
+            )
+            result = unittest.TestResult()
+            with mock.patch.object(
+                platform, "system", return_value="Linux"
+            ), mock.patch(
+                f"{__name__}.require_copied_runtime_execution",
+                return_value=context,
+            ):
+                suite.run(result)
+        self.assertEqual(result.testsRun, 4)
+        self.assertFalse(result.skipped)
+        self.assertFalse(result.failures)
+        self.assertFalse(result.errors)
+
     def test_runtime_fixture_is_resolved_from_explicit_environment(self) -> None:
         with tempfile.TemporaryDirectory() as raw_temp:
             runtime = Path(raw_temp) / "runtime"
@@ -594,6 +1360,829 @@ class PinnedRuntimeFixtureResolutionTest(unittest.TestCase):
 
     def test_runtime_fixture_is_unavailable_without_explicit_environment(self) -> None:
         self.assertIsNone(resolve_pinned_runtime_source({}))
+
+    def test_runtime_fixture_rejects_virtual_environment_source(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            runtime = Path(raw_temp).resolve(strict=True)
+            (runtime / "bin").mkdir()
+            (runtime / "bin/python3.12").write_bytes(b"fixture")
+            (runtime / "pyvenv.cfg").write_text(
+                "home = /outside/base-python\n", encoding="utf-8"
+            )
+            with self.assertRaises(ValueError):
+                resolve_pinned_runtime_source(
+                    {PINNED_RUNTIME_SOURCE_ENV: str(runtime)}
+                )
+
+    def test_complete_mode_missing_runtime_is_typed_configuration_error(self) -> None:
+        self.assertIn(
+            "require_pinned_runtime_source",
+            globals(),
+            "complete-mode pinned-runtime preflight is not implemented",
+        )
+        with self.assertRaises(ReleaseControlConfigurationError) as raised:
+            require_pinned_runtime_source(
+                {"SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1"}
+            )
+        self.assertEqual(raised.exception.status, "PINNED_RUNTIME_REQUIRED")
+
+    def test_normal_mode_missing_runtime_remains_an_individual_typed_skip(self) -> None:
+        self.assertIn(
+            "require_pinned_runtime_source",
+            globals(),
+            "local pinned-runtime skip helper is not implemented",
+        )
+        with self.assertRaises(unittest.SkipTest) as raised:
+            require_pinned_runtime_source({})
+        self.assertIn("PINNED_RUNTIME_REQUIRED", str(raised.exception))
+
+    def test_complete_mode_tmpdir_preflight_fails_before_any_subprocess(self) -> None:
+        self.assertIn(
+            "require_invocation_tmpdir",
+            globals(),
+            "complete-mode TMPDIR preflight is not implemented",
+        )
+        environments = (
+            {"SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1"},
+            {
+                "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1",
+                "TMPDIR": "relative",
+            },
+            {
+                "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1",
+                "TMPDIR": "/definitely/missing/samvil-release-control",
+            },
+        )
+        for environment in environments:
+            with self.subTest(environment=environment), mock.patch.object(
+                subprocess,
+                "Popen",
+                side_effect=AssertionError("TMPDIR preflight reached Popen"),
+            ), mock.patch.object(
+                subprocess,
+                "run",
+                side_effect=AssertionError("TMPDIR preflight reached run"),
+            ), self.assertRaises(ReleaseControlConfigurationError) as raised:
+                require_invocation_tmpdir(environment)
+            self.assertEqual(raised.exception.status, "INVOCATION_TMPDIR_INVALID")
+
+    def test_real_seatbelt_preflight_is_opt_in_before_platform_or_subprocess(self) -> None:
+        self.assertIn(
+            "require_real_seatbelt_context",
+            globals(),
+            "real Seatbelt opt-in preflight is not implemented",
+        )
+        with mock.patch.object(
+            subprocess,
+            "Popen",
+            side_effect=AssertionError("Seatbelt preflight reached Popen"),
+        ), mock.patch.object(
+            subprocess,
+            "run",
+            side_effect=AssertionError("Seatbelt preflight reached run"),
+        ), self.assertRaises(unittest.SkipTest) as raised:
+            require_real_seatbelt_context({})
+        self.assertIn("REAL_SEATBELT_OPT_IN_REQUIRED", str(raised.exception))
+
+    def test_opted_in_unsupported_seatbelt_host_is_typed_configuration_error(self) -> None:
+        self.assertIn(
+            "require_real_seatbelt_context",
+            globals(),
+            "real Seatbelt platform preflight is not implemented",
+        )
+        environment = {
+            "SAMVIL_ENABLE_REAL_SEATBELT_TESTS": "1",
+            "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1",
+        }
+        with mock.patch("platform.system", return_value="Linux"), mock.patch.object(
+            subprocess,
+            "Popen",
+            side_effect=AssertionError("unsupported Seatbelt host reached Popen"),
+        ), mock.patch.object(
+            subprocess,
+            "run",
+            side_effect=AssertionError("unsupported Seatbelt host reached run"),
+        ), self.assertRaises(ReleaseControlConfigurationError) as raised:
+            require_real_seatbelt_context(environment)
+        self.assertEqual(raised.exception.status, "REAL_SEATBELT_UNSUPPORTED")
+
+    def test_complete_mode_copied_pytest_probe_failure_is_typed(self) -> None:
+        self.assertIn(
+            "probe_copied_runtime_pytest",
+            globals(),
+            "copied-runtime pytest probe is not implemented",
+        )
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp)
+            python = root / "python3.12"
+            python.write_bytes(b"fixture")
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            environment = {
+                "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1",
+                "TMPDIR": str(tmpdir),
+            }
+            failed = subprocess.CompletedProcess(
+                [str(python), "-I", "-B", "-m", "pytest", "--version"],
+                1,
+                b"",
+                b"probe failed",
+            )
+            with mock.patch(
+                f"{__name__}.run_bounded_harness_process", return_value=failed
+            ) as run:
+                with self.assertRaises(ReleaseControlConfigurationError) as raised:
+                    probe_copied_runtime_pytest(
+                        python,
+                        environment,
+                        execution_context=CopiedRuntimeExecutionContext(
+                            pinned_runtime_source=root,
+                            invocation_tmpdir=tmpdir,
+                        ),
+                    )
+            self.assertEqual(
+                raised.exception.status, "COPIED_RUNTIME_PYTEST_UNAVAILABLE"
+            )
+            self.assertEqual(
+                run.call_args.args[0],
+                [str(python), "-I", "-B", "-c", COPIED_RUNTIME_PROBE_SOURCE],
+            )
+
+    def test_complete_mode_copied_runtime_outside_root_is_typed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            runtime = root / "runtime"
+            python = runtime / "bin/python3.12"
+            python.parent.mkdir(parents=True)
+            python.write_bytes(b"fixture")
+            runtime_lib = runtime / "lib/python3.12"
+            site_packages = runtime_lib / "site-packages"
+            site_packages.mkdir(parents=True)
+            module_paths: dict[str, str] = {}
+            for name in PINNED_PYTEST_IMPORTS:
+                module_path = site_packages / f"{name}.py"
+                module_path.write_bytes(b"fixture")
+                module_paths[name] = str(module_path)
+            mapped_library = runtime / "lib/libpython3.12.so"
+            mapped_library.write_bytes(b"fixture")
+            outside = root / "outside-runtime"
+            outside.mkdir()
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            probe_payload = {
+                "schema": "samvil.copied-runtime-probe.v1",
+                "executable": str(python),
+                "prefix": str(runtime),
+                "base_prefix": str(runtime),
+                "sys_path": [str(runtime_lib), str(outside)],
+                "module_paths": module_paths,
+                "mapped_files": [str(mapped_library)],
+            }
+            completed = subprocess.CompletedProcess(
+                [str(python), "-I", "-B", "-c", "probe"],
+                0,
+                full_gate.canonical_json_bytes(probe_payload),
+                b"",
+            )
+            environment = {
+                REQUIRE_COMPLETE_RELEASE_CONTROL_ENV: "1",
+                "TMPDIR": str(tmpdir),
+            }
+            with mock.patch(
+                f"{__name__}.run_bounded_harness_process",
+                return_value=completed,
+            ), self.assertRaises(ReleaseControlConfigurationError) as raised:
+                probe_copied_runtime_pytest(
+                    python,
+                    environment,
+                    execution_context=CopiedRuntimeExecutionContext(
+                        pinned_runtime_source=runtime,
+                        invocation_tmpdir=tmpdir,
+                    ),
+                )
+        self.assertEqual(
+            raised.exception.status, "COPIED_RUNTIME_NOT_HERMETIC"
+        )
+
+    def test_complete_mode_copied_runtime_contained_closure_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            runtime = root / "runtime"
+            python = runtime / "bin/python3.12"
+            python.parent.mkdir(parents=True)
+            python.write_bytes(b"fixture")
+            runtime_lib = runtime / "lib/python3.12"
+            site_packages = runtime_lib / "site-packages"
+            site_packages.mkdir(parents=True)
+            module_paths: dict[str, str] = {}
+            for name in PINNED_PYTEST_IMPORTS:
+                module_path = site_packages / f"{name}.py"
+                module_path.write_bytes(b"fixture")
+                module_paths[name] = str(module_path)
+            mapped_library = runtime / "lib/libpython3.12.so"
+            mapped_library.write_bytes(b"fixture")
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            probe_payload = {
+                "schema": "samvil.copied-runtime-probe.v1",
+                "executable": str(python),
+                "prefix": str(runtime),
+                "base_prefix": str(runtime),
+                "sys_path": [str(runtime_lib), str(site_packages)],
+                "module_paths": module_paths,
+                "mapped_files": [str(mapped_library)],
+            }
+            completed = subprocess.CompletedProcess(
+                [str(python), "-I", "-B", "-c", "probe"],
+                0,
+                full_gate.canonical_json_bytes(probe_payload),
+                b"",
+            )
+            with mock.patch(
+                f"{__name__}.run_bounded_harness_process",
+                return_value=completed,
+            ):
+                probe_copied_runtime_pytest(
+                    python,
+                    {
+                        REQUIRE_COMPLETE_RELEASE_CONTROL_ENV: "1",
+                        "TMPDIR": str(tmpdir),
+                    },
+                    execution_context=CopiedRuntimeExecutionContext(
+                        pinned_runtime_source=runtime,
+                        invocation_tmpdir=tmpdir,
+                    ),
+                )
+
+    def test_complete_mode_missing_pytest_component_is_typed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp)
+            runtime = root / "runtime-source"
+            (runtime / "bin").mkdir(parents=True)
+            (runtime / "bin/python3.12").write_bytes(b"fixture")
+            (runtime / "lib/python3.12").mkdir(parents=True)
+            pytest_source = root / "pytest-source"
+            pytest_source.mkdir()
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            with self.assertRaises(ReleaseControlConfigurationError) as raised:
+                copy_pinned_runtime(
+                    root / "copied",
+                    environment={
+                        "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1",
+                        "TMPDIR": str(tmpdir),
+                    },
+                    runtime_source=runtime,
+                    pytest_source=pytest_source,
+                )
+            self.assertEqual(
+                raised.exception.status, "PINNED_PYTEST_COMPONENT_MISSING"
+            )
+
+    def test_missing_runtime_is_accounted_per_release_control_test(self) -> None:
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(ReleaseControlTest)
+        result = unittest.TestResult()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            suite.run(result)
+        self.assertEqual(result.testsRun, suite.countTestCases())
+        self.assertEqual(len(result.skipped), suite.countTestCases())
+        self.assertFalse(result.errors)
+
+    def test_complete_mode_runtime_setup_io_failure_is_accounted_per_test(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            runtime = root / "runtime"
+            (runtime / "bin").mkdir(parents=True)
+            (runtime / "bin/python3.12").write_bytes(b"fixture")
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            context = CopiedRuntimeExecutionContext(
+                pinned_runtime_source=runtime,
+                invocation_tmpdir=tmpdir,
+            )
+            suite = unittest.defaultTestLoader.loadTestsFromTestCase(
+                ReleaseControlTest
+            )
+            expected = suite.countTestCases()
+            with mock.patch.dict(
+                os.environ,
+                {
+                    REQUIRE_COMPLETE_RELEASE_CONTROL_ENV: "1",
+                    "TMPDIR": str(tmpdir),
+                },
+                clear=True,
+            ), mock.patch(
+                f"{__name__}.require_copied_runtime_execution",
+                return_value=context,
+            ), mock.patch(
+                f"{__name__}.copy_pinned_runtime",
+                side_effect=OSError(errno.EIO, "injected runtime copy failure"),
+            ):
+                result = unittest.TestResult()
+                suite.run(result)
+        self.assertEqual(result.testsRun, expected)
+        self.assertEqual(len(result.errors), expected)
+        self.assertFalse(result.skipped)
+        self.assertTrue(
+            all("PINNED_RUNTIME_SETUP_FAILED" in detail for _test, detail in result.errors)
+        )
+
+    def test_complete_mode_turns_all_pinned_test_skips_into_errors(self) -> None:
+        suites = [
+            unittest.defaultTestLoader.loadTestsFromName(
+                "FullGateMaterializationAndRuntimeTest."
+                "test_real_copied_macho_python_identity_and_import_closure_are_exact",
+                module=sys.modules[__name__],
+            ),
+            unittest.TestSuite(
+                unittest.defaultTestLoader.loadTestsFromName(
+                    f"FullGateTrustedWrapperDirectIntegrationTest.{name}",
+                    module=sys.modules[__name__],
+                )
+                for name in (
+                    "test_candidate_observation_and_frame_spoof_cannot_reach_authority_fd",
+                    "test_candidate_toctou_mutation_prevents_complete_pass_frame",
+                    "test_real_profile_denies_snapshot_mutation_and_still_runs_fixed_probes",
+                )
+            ),
+            unittest.defaultTestLoader.loadTestsFromTestCase(
+                PortableFullGateOrchestrationTest
+            ),
+        ]
+        suite = unittest.TestSuite(suites)
+        result = unittest.TestResult()
+        with mock.patch.dict(
+            os.environ,
+            {"SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1"},
+            clear=True,
+        ):
+            suite.run(result)
+        self.assertEqual(suite.countTestCases(), 8)
+        self.assertEqual(result.testsRun, 8)
+        self.assertEqual(len(result.errors), 8)
+        self.assertFalse(result.skipped)
+
+    def test_complete_mode_without_real_seatbelt_opt_in_is_still_a_typed_skip(
+        self,
+    ) -> None:
+        with mock.patch.object(
+            subprocess,
+            "Popen",
+            side_effect=AssertionError("Seatbelt skip reached Popen"),
+        ), mock.patch.object(
+            subprocess,
+            "run",
+            side_effect=AssertionError("Seatbelt skip reached run"),
+        ), self.assertRaises(unittest.SkipTest) as raised:
+            require_real_seatbelt_context(
+                {REQUIRE_COMPLETE_RELEASE_CONTROL_ENV: "1"}
+            )
+        self.assertIn("REAL_SEATBELT_OPT_IN_REQUIRED", str(raised.exception))
+
+    def test_strict_opt_in_rejects_false_like_spellings(self) -> None:
+        for value in ("", "0", "true"):
+            with self.subTest(value=value), self.assertRaises(
+                ReleaseControlConfigurationError
+            ) as raised:
+                _strict_opt_in(
+                    {"SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": value},
+                    "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL",
+                )
+            self.assertEqual(raised.exception.status, "RELEASE_CONTROL_FLAG_INVALID")
+
+    def test_darwin_pinned_runtime_alone_skips_before_subprocess(self) -> None:
+        self.assertIn(
+            "require_copied_runtime_execution",
+            globals(),
+            "Darwin copied-runtime execution preflight is not implemented",
+        )
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            runtime = root / "runtime"
+            (runtime / "bin").mkdir(parents=True)
+            (runtime / "bin/python3.12").write_bytes(b"fixture")
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            environment = {
+                PINNED_RUNTIME_SOURCE_ENV: str(runtime),
+                "TMPDIR": str(tmpdir),
+            }
+            with mock.patch.object(
+                platform, "system", return_value="Darwin"
+            ), mock.patch.object(
+                subprocess,
+                "Popen",
+                side_effect=AssertionError("Darwin runtime preflight reached Popen"),
+            ), mock.patch.object(
+                subprocess,
+                "run",
+                side_effect=AssertionError("Darwin runtime preflight reached run"),
+            ), self.assertRaises(unittest.SkipTest) as raised:
+                require_copied_runtime_execution(environment)
+        self.assertIn("DARWIN_COPIED_RUNTIME_OPT_IN_REQUIRED", str(raised.exception))
+
+    def test_complete_mode_darwin_runtime_without_opt_in_is_configuration_error(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            runtime = root / "runtime"
+            (runtime / "bin").mkdir(parents=True)
+            (runtime / "bin/python3.12").write_bytes(b"fixture")
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            environment = {
+                PINNED_RUNTIME_SOURCE_ENV: str(runtime),
+                REQUIRE_COMPLETE_RELEASE_CONTROL_ENV: "1",
+                "TMPDIR": str(tmpdir),
+            }
+            with mock.patch.object(
+                platform, "system", return_value="Darwin"
+            ), mock.patch.object(
+                subprocess,
+                "Popen",
+                side_effect=AssertionError("Darwin runtime preflight reached Popen"),
+            ), mock.patch.object(
+                subprocess,
+                "run",
+                side_effect=AssertionError("Darwin runtime preflight reached run"),
+            ), self.assertRaises(ReleaseControlConfigurationError) as raised:
+                require_copied_runtime_execution(environment)
+        self.assertEqual(
+            raised.exception.status, "DARWIN_COPIED_RUNTIME_OPT_IN_REQUIRED"
+        )
+
+    def test_linux_copied_runtime_remains_portable_without_darwin_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            runtime = root / "runtime"
+            (runtime / "bin").mkdir(parents=True)
+            (runtime / "bin/python3.12").write_bytes(b"ELF fixture")
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            environment = {
+                PINNED_RUNTIME_SOURCE_ENV: str(runtime),
+                REQUIRE_COMPLETE_RELEASE_CONTROL_ENV: "1",
+                "TMPDIR": str(tmpdir),
+            }
+            with mock.patch.object(platform, "system", return_value="Linux"):
+                context = require_copied_runtime_execution(environment)
+        self.assertEqual(context.pinned_runtime_source, runtime)
+        self.assertEqual(context.invocation_tmpdir, tmpdir)
+
+    def test_darwin_copied_runtime_gate_precedes_all_pinned_execution_paths(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            runtime = root / "runtime"
+            (runtime / "bin").mkdir(parents=True)
+            (runtime / "bin/python3.12").write_bytes(b"fixture")
+            tmpdir = root / "tmp"
+            tmpdir.mkdir()
+            environment = {
+                PINNED_RUNTIME_SOURCE_ENV: str(runtime),
+                "TMPDIR": str(tmpdir),
+            }
+            suites = [
+                unittest.defaultTestLoader.loadTestsFromName(
+                    "FullGateMaterializationAndRuntimeTest."
+                    "test_real_copied_macho_python_identity_and_import_closure_are_exact",
+                    module=sys.modules[__name__],
+                ),
+                unittest.defaultTestLoader.loadTestsFromTestCase(
+                    FullGateTrustedWrapperDirectIntegrationTest
+                ),
+                unittest.defaultTestLoader.loadTestsFromTestCase(
+                    PortableFullGateOrchestrationTest
+                ),
+                unittest.defaultTestLoader.loadTestsFromTestCase(ReleaseControlTest),
+            ]
+            suite = unittest.TestSuite(suites)
+            expected = suite.countTestCases()
+            pure_mock_tests = len(
+                (
+                    "test_parent_authority_close_interruption_cleans_spawned_group",
+                    "test_sandboxed_wrapper_is_opt_in_before_copy_or_spawn",
+                    "test_wrapper_supervisor_cleanup_required_is_typed",
+                    "test_wrapper_supervisor_timeout_is_typed_without_blocking_pipe_reads",
+                )
+            )
+            result = unittest.TestResult()
+            with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
+                platform, "system", return_value="Darwin"
+            ), mock.patch.object(
+                subprocess,
+                "Popen",
+                side_effect=AssertionError("Darwin copied runtime gate reached Popen"),
+            ), mock.patch.object(
+                subprocess,
+                "run",
+                side_effect=AssertionError("Darwin copied runtime gate reached run"),
+            ):
+                suite.run(result)
+        self.assertEqual(result.testsRun, expected)
+        self.assertEqual(len(result.skipped), expected - pure_mock_tests)
+        self.assertFalse(result.errors)
+        self.assertFalse(result.failures)
+
+
+class ReleaseControlHarnessSupervisionTest(unittest.TestCase):
+    class FakeProcess:
+        def __init__(self, communicate_results: list[object]) -> None:
+            self.pid = 424242
+            self.returncode = 0
+            self._communicate_results = iter(communicate_results)
+
+        def communicate(self, timeout: float | None = None) -> tuple[None, None]:
+            result = next(self._communicate_results)
+            if isinstance(result, BaseException):
+                raise result
+            return (None, None)
+
+    def test_bounded_process_uses_tempfile_captures_and_new_session(self) -> None:
+        self.assertIn(
+            "run_bounded_harness_process",
+            globals(),
+            "bounded harness process helper is not implemented",
+        )
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            fake = self.FakeProcess([None])
+            clean_outcome = full_gate.GateOutcome(
+                0, False, False, None, b"", b""
+            )
+            with mock.patch.object(
+                subprocess, "Popen", return_value=fake
+            ) as popen, mock.patch.object(
+                full_gate, "supervise_process", return_value=clean_outcome
+            ) as supervise:
+                completed = run_bounded_harness_process(
+                    ["/approved/python", "-I", "-B", "-c", "pass"],
+                    cwd=root,
+                    environment={"TMPDIR": str(root)},
+                    tmpdir=root,
+                    timeout=1,
+                )
+        self.assertEqual(completed.returncode, 0)
+        kwargs = popen.call_args.kwargs
+        self.assertTrue(kwargs["start_new_session"])
+        self.assertIsNot(kwargs["stdout"], subprocess.PIPE)
+        self.assertIsNot(kwargs["stderr"], subprocess.PIPE)
+        self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+        supervise.assert_called_once()
+
+    def test_bounded_process_rejects_resource_and_cleanup_outcomes(self) -> None:
+        cases = (
+            (
+                full_gate.GateOutcome(
+                    0,
+                    False,
+                    True,
+                    None,
+                    b"",
+                    b"",
+                ),
+                "HARNESS_DESCENDANT_CLEANUP_REQUIRED",
+            ),
+            (
+                full_gate.GateOutcome(
+                    -signal.SIGTERM,
+                    False,
+                    True,
+                    "GATE_STDOUT_BYTES_EXCEEDED",
+                    b"",
+                    b"",
+                ),
+                "HARNESS_RESOURCE_LIMIT",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            for outcome, expected in cases:
+                with self.subTest(expected=expected):
+                    fake = self.FakeProcess([None])
+                    with mock.patch.object(
+                        subprocess, "Popen", return_value=fake
+                    ), mock.patch.object(
+                        full_gate, "supervise_process", return_value=outcome
+                    ), mock.patch.object(
+                        os, "killpg", side_effect=ProcessLookupError
+                    ), self.assertRaises(ReleaseControlHarnessError) as raised:
+                        run_bounded_harness_process(
+                            ["/approved/python", "-I", "-B", "-c", "pass"],
+                            cwd=root,
+                            environment={"TMPDIR": str(root)},
+                            tmpdir=root,
+                            timeout=1,
+                        )
+                self.assertEqual(raised.exception.status, expected)
+
+    def test_timeout_escalates_term_to_kill_and_preserves_timeout_status(self) -> None:
+        self.assertIn(
+            "run_bounded_harness_process",
+            globals(),
+            "bounded harness timeout cleanup is not implemented",
+        )
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            timeout = subprocess.TimeoutExpired(("/approved/python",), 0.01)
+            fake = self.FakeProcess([timeout, None])
+            signals: list[int] = []
+            killed = False
+
+            def observe_cleanup(_pid: int, sig: int) -> None:
+                nonlocal killed
+                if sig == 0 and killed:
+                    raise ProcessLookupError
+                if sig != 0:
+                    signals.append(sig)
+                if sig == signal.SIGKILL:
+                    killed = True
+
+            with mock.patch.object(
+                os, "killpg", side_effect=observe_cleanup
+            ):
+                _terminate_harness_process_group(
+                    fake, primary_status="HARNESS_TIMEOUT"
+                )
+        self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
+
+    def test_spawn_failure_is_typed(self) -> None:
+        self.assertIn(
+            "run_bounded_harness_process",
+            globals(),
+            "bounded harness spawn typing is not implemented",
+        )
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            with mock.patch.object(
+                subprocess, "Popen", side_effect=OSError(errno.ENOEXEC, "injected")
+            ), self.assertRaises(ReleaseControlHarnessError) as raised:
+                run_bounded_harness_process(
+                    ["/approved/python"],
+                    cwd=root,
+                    environment={"TMPDIR": str(root)},
+                    tmpdir=root,
+                    timeout=1,
+                )
+        self.assertEqual(raised.exception.status, "HARNESS_SPAWN_FAILED")
+
+    def test_interruption_still_cleans_the_spawned_process_group(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            fake = self.FakeProcess([None])
+            with mock.patch.object(
+                subprocess, "Popen", return_value=fake
+            ), mock.patch.object(
+                full_gate, "supervise_process", side_effect=KeyboardInterrupt
+            ), mock.patch(
+                f"{__name__}._harness_process_group_exists", return_value=True
+            ), mock.patch(
+                f"{__name__}._terminate_harness_process_group"
+            ) as terminate, self.assertRaises(KeyboardInterrupt):
+                run_bounded_harness_process(
+                    ["/approved/python"],
+                    cwd=root,
+                    environment={"TMPDIR": str(root)},
+                    tmpdir=root,
+                    timeout=1,
+                )
+        terminate.assert_called_once_with(
+            fake, primary_status="HARNESS_INTERRUPTED"
+        )
+
+    def test_nonfinite_timeout_is_rejected_before_spawn(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            for timeout in (float("nan"), float("inf")):
+                with self.subTest(timeout=timeout), mock.patch.object(
+                    subprocess,
+                    "Popen",
+                    side_effect=AssertionError("invalid timeout reached Popen"),
+                ), self.assertRaises(ReleaseControlHarnessError) as raised:
+                    run_bounded_harness_process(
+                        ["/approved/python"],
+                        cwd=root,
+                        environment={"TMPDIR": str(root)},
+                        tmpdir=root,
+                        timeout=timeout,
+                    )
+                self.assertEqual(raised.exception.status, "HARNESS_TIMEOUT_INVALID")
+
+    def test_timeout_cleanup_fails_if_group_survives_sigkill(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            root = Path(raw_temp).resolve(strict=True)
+            timeout = subprocess.TimeoutExpired(("/approved/python",), 0.01)
+            fake = self.FakeProcess([timeout, None])
+
+            def persistent_group(_pid: int, _sig: int) -> None:
+                return None
+
+            with mock.patch.object(
+                os, "killpg", side_effect=persistent_group
+            ), mock.patch.object(
+                time, "monotonic", side_effect=(0.0, 2.0)
+            ), self.assertRaises(ReleaseControlHarnessError) as raised:
+                _terminate_harness_process_group(
+                    fake, primary_status="HARNESS_TIMEOUT"
+                )
+        self.assertEqual(raised.exception.status, "HARNESS_CLEANUP_FAILED")
+        self.assertEqual(raised.exception.primary_status, "HARNESS_TIMEOUT")
+
+    def test_wrapper_direct_runner_uses_supervisor_without_pipe_backpressure(self) -> None:
+        source = inspect.getsource(
+            FullGateTrustedWrapperDirectIntegrationTest.run_wrapper
+        )
+        self.assertNotIn("stdout=subprocess.PIPE", source)
+        self.assertNotIn("stderr=subprocess.PIPE", source)
+        self.assertNotIn("os.read(", source)
+        self.assertIn("full_gate.supervise_process", source)
+        self.assertIn("start_new_session=True", source)
+
+    def test_copied_pytest_probe_uses_bounded_group_supervision(self) -> None:
+        source = inspect.getsource(probe_copied_runtime_pytest)
+        self.assertIn("run_bounded_harness_process", source)
+        self.assertNotIn("subprocess.run", source)
+        self.assertIn('"-I"', source)
+        self.assertIn('"-B"', source)
+
+    def test_real_seatbelt_integrations_are_runtime_opt_in_not_decorated(self) -> None:
+        for test_class in (
+            LauncherDirectC3Test,
+            InheritedLauncherIntegrationFixture,
+            LauncherSupervisionC5Test,
+        ):
+            with self.subTest(test_class=test_class.__name__):
+                self.assertFalse(
+                    getattr(test_class, "__unittest_skip__", False),
+                    f"{test_class.__name__} is still import-time sandbox gated",
+                )
+                self.assertIn(
+                    "require_real_seatbelt_opt_in",
+                    inspect.getsource(test_class.setUp),
+                )
+        for method in (
+            ReleaseControlTest.test_signed_candidate_passes_external_direct_candidate_profile,
+            ReleaseControlTest.test_historical_pytest_and_script_shadow_surfaces_are_unreachable,
+        ):
+            with self.subTest(method=method.__name__):
+                self.assertFalse(getattr(method, "__unittest_skip__", False))
+                self.assertIn(
+                    "require_real_seatbelt_opt_in", inspect.getsource(method)
+                )
+        release_setup = inspect.getsource(ReleaseControlTest.setUpClass)
+        self.assertIn("require_copied_runtime_execution", release_setup)
+        self.assertNotIn("require_real_seatbelt_context", release_setup)
+
+    def test_fd_close_failure_replaces_and_preserves_active_primary(self) -> None:
+        self.assertIn(
+            "_close_owned_harness_fd",
+            globals(),
+            "owned harness FD close helper is not implemented",
+        )
+        primary = ReleaseControlHarnessError("PRIMARY_FAILURE")
+        with mock.patch.object(
+            os, "close", side_effect=OSError(errno.EIO, "injected")
+        ), self.assertRaises(ReleaseControlHarnessError) as raised:
+            _close_owned_harness_fd(7, primary_exception=primary)
+        self.assertEqual(raised.exception.status, "HARNESS_FD_CLOSE_FAILED")
+        self.assertEqual(raised.exception.primary_status, "PRIMARY_FAILURE")
+        self.assertIs(raised.exception.__cause__, primary)
+
+    def test_fd_close_failure_without_primary_is_typed(self) -> None:
+        self.assertIn(
+            "_close_owned_harness_fd",
+            globals(),
+            "owned harness FD close helper is not implemented",
+        )
+        with mock.patch.object(
+            os, "close", side_effect=OSError(errno.EIO, "injected")
+        ), self.assertRaises(ReleaseControlHarnessError) as raised:
+            _close_owned_harness_fd(7, primary_exception=None)
+        self.assertEqual(raised.exception.status, "HARNESS_FD_CLOSE_FAILED")
+
+    def test_fd_batch_closes_each_owned_descriptor_exactly_once(self) -> None:
+        self.assertIn(
+            "_close_owned_harness_fds",
+            globals(),
+            "owned harness FD batch close helper is not implemented",
+        )
+        closed: list[int] = []
+
+        def close_with_first_failure(descriptor: int) -> None:
+            closed.append(descriptor)
+            if descriptor == 7:
+                raise OSError(errno.EIO, "injected")
+
+        with mock.patch.object(
+            os, "close", side_effect=close_with_first_failure
+        ), self.assertRaises(ReleaseControlHarnessError) as raised:
+            _close_owned_harness_fds((7, 8), primary_exception=None)
+        self.assertEqual(raised.exception.status, "HARNESS_FD_CLOSE_FAILED")
+        self.assertEqual(closed, [7, 8])
 
 
 class FullGateRunnerGrammarTest(unittest.TestCase):
@@ -1287,6 +2876,7 @@ class FullGateManifestProtocolTest(unittest.TestCase):
             "identity_sha256": "4" * 64,
             "tree_sha256": "5" * 64,
             "runtime_sha256": "6" * 64,
+            "storage_quota_evidence_sha256": "8" * 64,
             "semantic_counters": {
                 "pytest_passed": 1,
                 "mcp_tools": 1,
@@ -1344,6 +2934,9 @@ class FullGateManifestProtocolTest(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(full_gate.FullGateError) as raised:
                 full_gate.validate_manifest_object(forged)
             self.assertEqual(raised.exception.status, status)
+
+    def test_production_storage_quota_boundary_is_fail_closed(self) -> None:
+        self.assertFalse(full_gate._invocation_storage_quota_supported())
 
     def test_copied_platform_binary_is_typed_rejected_at_static_manifest_boundary(self) -> None:
         with mock.patch.object(
@@ -2119,10 +3712,7 @@ class FullGateArtifactAndControlIdentityTest(unittest.TestCase):
 
 class FullGateMaterializationAndRuntimeTest(unittest.TestCase):
     def setUp(self) -> None:
-        raw_temp_parent = os.environ.get("TMPDIR")
-        if not raw_temp_parent:
-            self.fail("trusted bootstrap must provide an invocation-owned TMPDIR")
-        temp_parent = Path(raw_temp_parent).resolve(strict=True)
+        temp_parent = require_invocation_tmpdir()
         self._temp = tempfile.TemporaryDirectory(
             prefix="samvil-full-gate-materialize-", dir=temp_parent
         )
@@ -2347,14 +3937,13 @@ class FullGateMaterializationAndRuntimeTest(unittest.TestCase):
             )
         self.assertEqual(raised.exception.status, "DEPENDENCY_CLOSURE_INVALID")
 
-    @unittest.skipUnless(
-        PINNED_RUNTIME_SOURCE is not None,
-        f"set {PINNED_RUNTIME_SOURCE_ENV} to an approved Python 3.12 runtime",
-    )
     def test_real_copied_macho_python_identity_and_import_closure_are_exact(self) -> None:
-        self.assertIsNotNone(PINNED_RUNTIME_SOURCE)
+        execution_context = require_copied_runtime_execution()
+        runtime_source = execution_context.pinned_runtime_source
+        if platform.system() != "Darwin":
+            self.skipTest("DARWIN_MACHO_RUNTIME_REQUIRED: real Mach-O test is Darwin-only")
         runtime = self.base / "real-runtime"
-        copy_pinned_runtime(runtime)
+        copy_pinned_runtime(runtime, runtime_source=runtime_source)
         expected = full_gate.capture_hermetic_runtime_identity(runtime)
         self.assertEqual(expected["major_minor"], "3.12")
         self.assertEqual(expected["version"].split(".")[:2], ["3", "12"])
@@ -2790,11 +4379,9 @@ class FullGateExternalParserAuthorityTest(unittest.TestCase):
         self.base = Path(self._temp.name).resolve(strict=True)
         self.scratch = self.base / "scratch"
         self.scratch.mkdir()
-        self.runtime = Path(sys.base_prefix).resolve(strict=True)
-        self.interpreter_relative = "Resources/Python.app/Contents/MacOS/Python"
-        self.interpreter = (
-            self.runtime / self.interpreter_relative
-        ).resolve(strict=True)
+        self.interpreter = Path(sys.executable).resolve(strict=True)
+        self.runtime = self.interpreter.parent
+        self.interpreter_relative = self.interpreter.name
 
     def tearDown(self) -> None:
         self._temp.cleanup()
@@ -4515,6 +6102,11 @@ class FullGateLoopbackProfileTest(unittest.TestCase):
         self.assertLess(protected_metadata, global_metadata)
         self.assertIn(b"deny file-read*", profile)
         self.assertIn(b"deny file-write*", profile)
+        self.assertEqual(profile.count(b"(deny file-write-xattr)"), 1)
+        self.assertLess(
+            profile.index(b"(deny file-write-xattr)"),
+            profile.index(b"(allow file-write*"),
+        )
         self.assertEqual(profile.count(b"(allow process-fork)"), 1)
         self.assertNotIn(b"(allow process*)", profile)
         process_exec_lines = [
@@ -4647,16 +6239,105 @@ class FullGateLoopbackProfileTest(unittest.TestCase):
         self.assertEqual(environment["PYTHONNOUSERSITE"], "1")
         self.assertTrue(Path(environment["GIT_CONFIG_GLOBAL"]).is_file())
 
+    def test_real_profile_preflight_skips_before_spawn_without_opt_in(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+            subprocess,
+            "Popen",
+            side_effect=AssertionError("non-opted-in real profile reached Popen"),
+        ), self.assertRaises(unittest.SkipTest) as raised:
+            self.test_real_profile_allows_loopback_tcp_and_denies_other_authority()
+        self.assertIn("REAL_SEATBELT_OPT_IN_REQUIRED", str(raised.exception))
+
+    def test_real_profile_uses_copied_python_hermetic_env_and_bounded_runner(
+        self,
+    ) -> None:
+        runtime_source = self.base / "approved-source"
+        (runtime_source / "bin").mkdir(parents=True)
+        (runtime_source / "bin/python3.12").write_bytes(b"approved")
+        context = RealSeatbeltContext(
+            sandbox_executable=Path("/usr/bin/sandbox-exec"),
+            pinned_runtime_source=runtime_source,
+            invocation_tmpdir=self.base,
+        )
+
+        def fake_copy(destination: Path, **_kwargs: object) -> None:
+            (destination / "bin").mkdir(parents=True)
+            executable = destination / "bin/python3.12"
+            executable.write_bytes(b"copied")
+            executable.chmod(0o755)
+
+        payload = {
+            "loopback_tcp": True,
+            "external_tcp": errno.EPERM,
+            "udp": errno.EPERM,
+            "unix": errno.EPERM,
+            "stat": errno.EPERM,
+            "lstat": errno.EPERM,
+            "read": errno.EPERM,
+            "write": errno.EPERM,
+            "access": False,
+            "exists": False,
+        }
+        completed = subprocess.CompletedProcess(
+            [], 0, json.dumps(payload).encode("utf-8"), b""
+        )
+        with mock.patch(
+            f"{__name__}.require_real_seatbelt_context", return_value=context
+        ), mock.patch(
+            f"{__name__}.copy_pinned_runtime", side_effect=fake_copy
+        ), mock.patch(
+            f"{__name__}.run_bounded_harness_process", return_value=completed
+        ) as run:
+            self.test_real_profile_allows_loopback_tcp_and_denies_other_authority()
+
+        argv = run.call_args.args[0]
+        environment = run.call_args.kwargs["environment"]
+        self.assertEqual(argv[0], "/usr/bin/sandbox-exec")
+        copied_python = str(self.invocation / "seatbelt-runtime/bin/python3.12")
+        self.assertIn(copied_python, argv)
+        self.assertNotIn(str(SYSTEM_PYTHON), argv)
+        profile_text = argv[argv.index("-p") + 1]
+        self.assertIn(copied_python, profile_text)
+        self.assertNotIn(str(SYSTEM_PYTHON), profile_text)
+        python_index = argv.index(copied_python)
+        self.assertEqual(argv[python_index + 1 : python_index + 3], ["-I", "-B"])
+        probe_source = argv[argv.index("-c") + 1]
+        for timeout_statement in (
+            "listener.settimeout(1.0)",
+            "client.settimeout(1.0)",
+            "accepted.settimeout(1.0)",
+        ):
+            self.assertIn(timeout_statement, probe_source)
+        self.assertEqual(set(environment), set(full_gate.HERMETIC_ENVIRONMENT_KEYS))
+        socket_path = Path(argv[-1])
+        self.assertTrue(socket_path.is_relative_to(Path(environment["TMPDIR"])))
+        self.assertIsNone(run.call_args.kwargs.get("pass_fds"))
+        source = inspect.getsource(
+            FullGateLoopbackProfileTest.test_real_profile_allows_loopback_tcp_and_denies_other_authority
+        )
+        self.assertGreaterEqual(source.count(".settimeout("), 4)
+        self.assertIn("run_bounded_harness_process", source)
+        self.assertNotIn("subprocess.run", source)
+
     def test_real_profile_allows_loopback_tcp_and_denies_other_authority(self) -> None:
-        if not Path("/usr/bin/sandbox-exec").is_file():
-            self.skipTest("macOS sandbox-exec is unavailable")
+        context = require_real_seatbelt_context()
+        runtime = self.invocation / "seatbelt-runtime"
+        copy_pinned_runtime(
+            runtime,
+            runtime_source=context.pinned_runtime_source,
+        )
+        pinned_python = runtime / "bin/python3.12"
+        executable_allowlist = [str(pinned_python)]
         profile, _source_digest, _rendered_digest = full_gate.render_loopback_profile(
             self.invocation,
             self.snapshot,
-            self.runtime,
+            runtime,
             self.tools,
             protected_roots=(self.protected_home, self.protected_codex),
-            executable_allowlist=self.executable_allowlist,
+            executable_allowlist=executable_allowlist,
+        )
+        environment = full_gate.build_hermetic_environment(
+            self.invocation, runtime, self.tools
         )
         probe = r'''
 import errno, json, os, socket, sys
@@ -4664,11 +6345,14 @@ protected_home, protected_codex, socket_path = sys.argv[1:]
 results = {}
 
 listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+listener.settimeout(1.0)
 listener.bind(("127.0.0.1", 0))
 listener.listen(1)
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.settimeout(1.0)
 client.connect(("127.0.0.1", listener.getsockname()[1]))
 accepted, _ = listener.accept()
+accepted.settimeout(1.0)
 accepted.close(); client.close(); listener.close()
 results["loopback_tcp"] = True
 
@@ -4713,31 +6397,37 @@ results["access"] = os.access(protected_home, os.F_OK)
 results["exists"] = os.path.exists(protected_codex)
 print(json.dumps(results, sort_keys=True, separators=(",", ":")))
 '''
-        result = subprocess.run(
+        socket_path = Path(environment["TMPDIR"]) / "seatbelt-denied.sock"
+        result = run_bounded_harness_process(
             [
-                "/usr/bin/sandbox-exec",
+                str(context.sandbox_executable),
                 "-p",
                 profile.decode("utf-8"),
-                str(SYSTEM_PYTHON),
+                str(pinned_python),
+                "-I",
+                "-B",
                 "-c",
                 probe,
                 str(self.protected_home),
                 str(self.protected_codex),
-                f"/tmp/samvil-full-gate-unix-{os.getpid()}.sock",
+                str(socket_path),
             ],
             cwd=self.invocation,
-            env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            environment=environment,
+            tmpdir=Path(environment["TMPDIR"]),
             timeout=10,
-            check=False,
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads(result.stdout)
+        self.assertEqual(
+            result.returncode, 0, result.stderr.decode("utf-8", "replace")
+        )
+        payload = json.loads(result.stdout.decode("utf-8", "strict"))
         self.assertTrue(payload["loopback_tcp"])
         for key in ("external_tcp", "udp", "unix", "stat", "lstat", "read", "write"):
-            self.assertEqual(payload[key], errno.EPERM, (key, payload, result.stderr))
+            self.assertEqual(
+                payload[key],
+                errno.EPERM,
+                (key, payload, result.stderr.decode("utf-8", "replace")),
+            )
         self.assertFalse(payload["access"])
         self.assertFalse(payload["exists"])
 
@@ -4916,6 +6606,59 @@ class FullGateOutputAndFixedLogProtocolTest(unittest.TestCase):
                 self.assertEqual(raised.exception.status, "OUTPUT_FINALIZATION_FAILED")
                 assert_not_pass(receipt)
 
+    def test_finalization_invalidates_pass_after_pre_close_base_exception(
+        self,
+    ) -> None:
+        outputs = full_gate.create_output_files(
+            str(self.receipt), str(self.denial), reserved_paths=()
+        )
+        pass_receipt = full_gate.canonical_json_bytes(
+            {"schema": "test", "status": "PASS", "verdict": "PASS"}
+        )
+        receipt_descriptor = outputs.receipt.descriptor
+        denial_descriptor = outputs.denial_log.descriptor
+        real_close = os.close
+        injected = False
+        close_calls = 0
+
+        def interrupt_receipt_close(descriptor: int) -> None:
+            nonlocal injected, close_calls
+            close_calls += 1
+            if (
+                descriptor == receipt_descriptor
+                and not injected
+                and b'"status":"PASS"' in os.pread(descriptor, 1024, 0)
+            ):
+                injected = True
+                raise KeyboardInterrupt("injected pre-close interrupt")
+            real_close(descriptor)
+
+        with mock.patch.object(
+            full_gate.os,
+            "close",
+            side_effect=interrupt_receipt_close,
+        ), self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.finalize_outputs(
+                outputs,
+                denial_bytes=b"diagnostic\n",
+                receipt_bytes=pass_receipt,
+                nonce="a" * 64,
+            )
+
+        self.assertTrue(injected)
+        self.assertGreaterEqual(close_calls, 3)
+        self.assertEqual(raised.exception.status, "OUTPUT_FINALIZATION_FAILED")
+        self.assertEqual(raised.exception.primary_status, "OUTPUT_CLOSE_FAILED")
+        self.assertTrue(outputs.closed)
+        self.assertTrue(outputs.receipt.closed)
+        self.assertTrue(outputs.denial_log.closed)
+        payload = json.loads(self.receipt.read_bytes())
+        self.assertNotEqual(payload.get("status"), "PASS")
+        self.assertNotEqual(payload.get("verdict"), "PASS")
+        for descriptor in (receipt_descriptor, denial_descriptor):
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+
 
 class FullGateExecutionAndReceiptTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -5009,6 +6752,8 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
             resource_status=None,
             stdout=stdout,
             stderr=b"",
+            wrapper_pid=101,
+            wrapper_start_identity="linux-proc-start:1",
         )
         observed = full_gate.validate_gate_outcome(
             outcome,
@@ -5032,6 +6777,8 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
             resource_status=None,
             stdout=stdout,
             stderr=b"",
+            wrapper_pid=101,
+            wrapper_start_identity="linux-proc-start:1",
         )
         with self.assertRaises(full_gate.FullGateError) as raised:
             full_gate.validate_gate_outcome(
@@ -5051,6 +6798,8 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
             resource_status=None,
             stdout=stdout,
             stderr=b"",
+            wrapper_pid=101,
+            wrapper_start_identity="linux-proc-start:1",
         )
         with self.assertRaises(full_gate.FullGateError) as raised:
             full_gate.validate_gate_outcome(
@@ -5163,6 +6912,8 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
             resource_status=None,
             stdout=stdout,
             stderr=b"",
+            wrapper_pid=101,
+            wrapper_start_identity="linux-proc-start:1",
         )
         self.assertEqual(
             full_gate.validate_gate_outcome(
@@ -5254,8 +7005,19 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
             tree="5" * 64,
             runtime="6" * 64,
         )
-        first = full_gate.build_pass_receipt(manifest, counters, digests)
-        second = full_gate.build_pass_receipt(manifest, counters, digests)
+        quota_authority = quota_authority_fixture()
+        first = full_gate.build_pass_receipt(
+            manifest,
+            counters,
+            digests,
+            storage_quota_authority=quota_authority,
+        )
+        second = full_gate.build_pass_receipt(
+            manifest,
+            counters,
+            digests,
+            storage_quota_authority=quota_authority,
+        )
         self.assertEqual(first, second)
         payload = json.loads(first)
         self.assertEqual(
@@ -5265,11 +7027,50 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
                 "DETACHED_DESCENDANT_NOT_OS_ISOLATED",
             ],
         )
+        self.assertEqual(
+            payload["storage_quota_evidence_sha256"],
+            quota_authority.evidence_sha256,
+        )
         self.assertNotIn("path", first.decode("utf-8").lower())
         self.assertNotIn("stdout", payload)
         self.assertNotIn("stderr", payload)
         self.assertNotIn("attempt", first.decode("utf-8").lower())
         self.assertNotIn("exact_port", first.decode("utf-8").lower())
+
+    def test_pass_receipt_requires_verified_storage_quota_authority(self) -> None:
+        manifest = full_gate.validate_manifest_object(
+            FullGateManifestProtocolTest().manifest("candidate_precommit")
+        )
+        _stdout, _logs, counters = self.semantic_fixture()
+        digests = full_gate.ReceiptDigests(
+            command="1" * 64,
+            content="2" * 64,
+            profile="3" * 64,
+            imports=manifest.raw["import_manifest"]["sha256"],
+            identity="4" * 64,
+            tree="5" * 64,
+            runtime="6" * 64,
+        )
+        with self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.build_pass_receipt(manifest, counters, digests)
+        self.assertEqual(
+            raised.exception.status,
+            full_gate.INVOCATION_STORAGE_QUOTA_BLOCKER,
+        )
+
+        authority = quota_authority_fixture()
+        forged = dataclasses.replace(authority, evidence_sha256="0" * 64)
+        with self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.build_pass_receipt(
+                manifest,
+                counters,
+                digests,
+                storage_quota_authority=forged,
+            )
+        self.assertEqual(
+            raised.exception.status,
+            full_gate.INVOCATION_STORAGE_QUOTA_BLOCKER,
+        )
 
     def test_timeout_supervision_kills_the_process_group(self) -> None:
         self.assertTrue(
@@ -5292,6 +7093,7 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
                 timeout=0.1,
                 stdout_handle=stdout_handle,
                 stderr_handle=stderr_handle,
+                invocation_root=self.base,
             )
         self.assertTrue(outcome.timed_out)
         self.assertTrue(outcome.cleanup_performed)
@@ -5336,6 +7138,353 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
         with self.assertRaises(ProcessLookupError):
             os.killpg(process.pid, 0)
 
+    def test_process_snapshot_binds_ps_rows_to_strong_native_birth_identity(
+        self,
+    ) -> None:
+        ps_result = subprocess.CompletedProcess(
+            args=(),
+            returncode=0,
+            stdout=b"101 10 3 4\n102 20 5 6\n103 30 7 8\n",
+            stderr=b"",
+        )
+        identities = {
+            101: (10, "darwin-proc-start:100:7"),
+            102: (999, "darwin-proc-start:101:8"),
+            103: None,
+        }
+        with mock.patch.object(
+            full_gate.subprocess, "run", return_value=ps_result
+        ) as run, mock.patch.object(
+            full_gate,
+            "_process_birth_identity",
+            side_effect=lambda pid: identities[pid],
+        ):
+            table = full_gate._process_snapshot()
+
+        self.assertEqual(
+            table,
+            {
+                101: (10, 3 * 1024, 4 * 1024, "darwin-proc-start:100:7"),
+                102: (
+                    20,
+                    5 * 1024,
+                    6 * 1024,
+                    full_gate.PROCESS_IDENTITY_UNAVAILABLE_SENTINEL,
+                ),
+                103: (
+                    30,
+                    7 * 1024,
+                    8 * 1024,
+                    full_gate.PROCESS_IDENTITY_UNAVAILABLE_SENTINEL,
+                ),
+            },
+        )
+        self.assertNotIn("lstart=", run.call_args.args[0])
+
+    def test_live_wrapper_missing_or_weak_birth_identity_fails_closed(self) -> None:
+        class RunningProcess:
+            pid = 999_974
+            returncode = -signal.SIGTERM
+
+            def poll(self) -> None:
+                return None
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        stdout = self.base / "missing-birth.stdout"
+        stderr = self.base / "missing-birth.stderr"
+        for name, table in (
+            ("missing", {}),
+            ("weak", {RunningProcess.pid: (1, 0, 0, "second-resolution")}),
+        ):
+            with self.subTest(name=name), stdout.open("w+b") as stdout_handle, stderr.open(
+                "w+b"
+            ) as stderr_handle, mock.patch.object(
+                full_gate, "_process_snapshot", return_value=table
+            ), mock.patch.object(
+                full_gate, "_terminate_process_group", return_value=True
+            ) as terminate, self.assertRaises(full_gate.FullGateError) as raised:
+                full_gate.supervise_process(
+                    RunningProcess(),
+                    timeout=1,
+                    stdout_handle=stdout_handle,
+                    stderr_handle=stderr_handle,
+                )
+            self.assertEqual(raised.exception.status, "PROCESS_INVENTORY_FAILED")
+            terminate.assert_called()
+
+    def test_gate_outcome_cannot_pass_without_strong_wrapper_identity(self) -> None:
+        for name, wrapper_pid, identity in (
+            ("missing", None, None),
+            ("weak", 101, "second-resolution"),
+        ):
+            with self.subTest(name=name), self.assertRaises(
+                full_gate.FullGateError
+            ) as raised:
+                full_gate.validate_gate_process_outcome(
+                    full_gate.GateOutcome(
+                        returncode=0,
+                        timed_out=False,
+                        cleanup_performed=False,
+                        resource_status=None,
+                        stdout=b"",
+                        stderr=b"",
+                        wrapper_pid=wrapper_pid,
+                        wrapper_start_identity=identity,
+                    )
+                )
+            self.assertEqual(raised.exception.status, "PROCESS_INVENTORY_FAILED")
+
+    def test_descendant_with_unavailable_birth_identity_blocks_before_inspection(
+        self,
+    ) -> None:
+        class RunningProcess:
+            pid = 999_973
+            returncode = -signal.SIGTERM
+
+            def poll(self) -> None:
+                return None
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        table = {
+            RunningProcess.pid: (1, 0, 0, "linux-proc-start:1"),
+            999_972: (
+                RunningProcess.pid,
+                0,
+                0,
+                full_gate.PROCESS_IDENTITY_UNAVAILABLE_SENTINEL,
+            ),
+        }
+        stdout = self.base / "missing-descendant-birth.stdout"
+        stderr = self.base / "missing-descendant-birth.stderr"
+        with stdout.open("w+b") as stdout_handle, stderr.open(
+            "w+b"
+        ) as stderr_handle, mock.patch.object(
+            full_gate, "_process_snapshot", return_value=table
+        ), mock.patch.object(
+            full_gate, "_terminate_process_group", return_value=True
+        ) as terminate, mock.patch.object(
+            full_gate, "_inspect_open_regular_files"
+        ) as inspect_open:
+            outcome = full_gate.supervise_process(
+                RunningProcess(),
+                timeout=1,
+                stdout_handle=stdout_handle,
+                stderr_handle=stderr_handle,
+                invocation_root=self.base,
+            )
+
+        self.assertEqual(outcome.resource_status, "PROCESS_INVENTORY_FAILED")
+        terminate.assert_called()
+        inspect_open.assert_not_called()
+
+    def test_detached_signal_refuses_weak_or_non_atomic_identity(self) -> None:
+        identity = "darwin-proc-start:100:7"
+        alive = {101: (1, 0, 0, identity)}
+        for name, identities in (
+            ("weak_identity", ((101, "Mon Jan 1 00:00:00 2026"),)),
+            ("darwin_has_no_atomic_pid_handle", ((101, identity),)),
+        ):
+            with self.subTest(name=name), mock.patch.object(
+                full_gate, "_process_snapshot", return_value=alive
+            ), mock.patch.object(
+                full_gate.sys, "platform", "darwin"
+            ), mock.patch.object(
+                full_gate.os, "kill"
+            ) as raw_kill, self.assertRaises(full_gate.FullGateError) as raised:
+                full_gate._kill_tracked_descendants(identities)
+            self.assertEqual(
+                raised.exception.status,
+                full_gate.DETACHED_PROCESS_SIGNAL_UNAVAILABLE,
+            )
+            raw_kill.assert_not_called()
+
+    def test_linux_detached_signal_uses_identity_bound_pidfd_only(self) -> None:
+        identity = "linux-proc-start:123456"
+        alive = {101: (1, 0, 0, identity)}
+        with mock.patch.object(
+            full_gate.sys, "platform", "linux"
+        ), mock.patch.object(
+            full_gate, "_process_snapshot", side_effect=(alive, {})
+        ), mock.patch.object(
+            full_gate,
+            "_process_birth_identity",
+            side_effect=((1, identity), (1, identity)),
+        ), mock.patch.object(
+            full_gate.os, "pidfd_open", create=True, return_value=700
+        ) as pidfd_open, mock.patch.object(
+            full_gate.signal, "pidfd_send_signal", create=True
+        ) as pidfd_signal, mock.patch.object(
+            full_gate, "_close_raw_descriptor_with_retry", return_value=None
+        ) as close_descriptor, mock.patch.object(
+            full_gate.os, "kill"
+        ) as raw_kill:
+            cleaned = full_gate._kill_tracked_descendants(((101, identity),))
+
+        self.assertTrue(cleaned)
+        pidfd_open.assert_called_once_with(101, 0)
+        pidfd_signal.assert_called_once_with(700, signal.SIGTERM, None, 0)
+        close_descriptor.assert_called_once_with(700)
+        raw_kill.assert_not_called()
+
+    def test_pidfd_open_identity_drift_closes_handle_without_signaling(self) -> None:
+        expected = "linux-proc-start:123456"
+        replacement = "linux-proc-start:123457"
+        with mock.patch.object(
+            full_gate.sys, "platform", "linux"
+        ), mock.patch.object(
+            full_gate,
+            "_process_birth_identity",
+            side_effect=((1, expected), (1, replacement)),
+        ), mock.patch.object(
+            full_gate.os, "pidfd_open", create=True, return_value=700
+        ), mock.patch.object(
+            full_gate.signal, "pidfd_send_signal", create=True
+        ) as pidfd_signal, mock.patch.object(
+            full_gate, "_close_raw_descriptor_with_retry", return_value=None
+        ) as close_descriptor:
+            descriptor = full_gate._open_identity_bound_pidfd(101, expected)
+
+        self.assertIsNone(descriptor)
+        close_descriptor.assert_called_once_with(700)
+        pidfd_signal.assert_not_called()
+
+    def test_authority_final_drain_requires_eof_and_rejects_leaked_writer(
+        self,
+    ) -> None:
+        self.assertTrue(
+            hasattr(full_gate, "_drain_authority_pipe_to_eof"),
+            "post-wrapper authority EOF verification is not implemented",
+        )
+        authority = bytearray()
+        with mock.patch.object(
+            full_gate.os,
+            "read",
+            side_effect=(
+                b"buffered-frame",
+                BlockingIOError(errno.EAGAIN, "writer still open"),
+                BlockingIOError(errno.EAGAIN, "writer still open"),
+            ),
+        ), mock.patch.object(
+            full_gate.time,
+            "monotonic",
+            side_effect=(0.0, 0.1, 0.3),
+        ), mock.patch.object(
+            full_gate.time,
+            "sleep",
+        ), self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate._drain_authority_pipe_to_eof(
+                701,
+                authority,
+                max_bytes=1024,
+                timeout=0.25,
+            )
+        self.assertEqual(raised.exception.status, "AUTHORITY_PIPE_WRITER_LEAK")
+        self.assertEqual(authority, b"buffered-frame")
+
+        authority = bytearray()
+        with mock.patch.object(
+            full_gate.os,
+            "read",
+            side_effect=(b"buffered-frame", b""),
+        ):
+            full_gate._drain_authority_pipe_to_eof(
+                701,
+                authority,
+                max_bytes=1024,
+                timeout=0.25,
+            )
+        self.assertEqual(authority, b"buffered-frame")
+        supervision_source = inspect.getsource(full_gate.supervise_process)
+        self.assertIn("_drain_authority_pipe_to_eof", supervision_source)
+        self.assertIn("writer_leak_observed", supervision_source)
+        self.assertIn("post_exit_bytes=", supervision_source)
+
+    def test_supervision_sticky_rejects_writer_open_at_wrapper_exit(self) -> None:
+        class FinishedProcess:
+            pid = 999_980
+            returncode = 0
+
+            def poll(self) -> int:
+                return self.returncode
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        stdout = self.base / "authority-leak.stdout"
+        stderr = self.base / "authority-leak.stderr"
+        with stdout.open("w+b") as stdout_handle, stderr.open(
+            "w+b"
+        ) as stderr_handle, mock.patch.object(
+            full_gate.fcntl, "fcntl", return_value=0
+        ), mock.patch.object(
+            full_gate, "_process_snapshot", return_value={}
+        ), mock.patch.object(
+            full_gate, "_terminate_process_group", return_value=False
+        ), mock.patch.object(
+            full_gate.os,
+            "read",
+            side_effect=(
+                BlockingIOError(errno.EAGAIN, "writer open at exit"),
+                b"",
+            ),
+        ), self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.supervise_process(
+                FinishedProcess(),
+                timeout=1,
+                stdout_handle=stdout_handle,
+                stderr_handle=stderr_handle,
+                authority_read_fd=701,
+                nonce="a" * 64,
+                limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+            )
+        self.assertEqual(raised.exception.status, "AUTHORITY_PIPE_WRITER_LEAK")
+
+    def test_supervision_accepts_buffered_final_transcript_followed_by_eof(
+        self,
+    ) -> None:
+        class FinishedProcess:
+            pid = 999_979
+            returncode = 0
+
+            def poll(self) -> int:
+                return self.returncode
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        transcript = FullGateAuthorityFrameProtocolTest().transcript()
+        stdout = self.base / "authority-buffered.stdout"
+        stderr = self.base / "authority-buffered.stderr"
+        with stdout.open("w+b") as stdout_handle, stderr.open(
+            "w+b"
+        ) as stderr_handle, mock.patch.object(
+            full_gate.fcntl, "fcntl", return_value=0
+        ), mock.patch.object(
+            full_gate, "_process_snapshot", return_value={}
+        ), mock.patch.object(
+            full_gate, "_terminate_process_group", return_value=False
+        ), mock.patch.object(
+            full_gate.os, "read", side_effect=(transcript, b"")
+        ):
+            outcome = full_gate.supervise_process(
+                FinishedProcess(),
+                timeout=1,
+                stdout_handle=stdout_handle,
+                stderr_handle=stderr_handle,
+                authority_read_fd=701,
+                nonce="a" * 64,
+                limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+            )
+        self.assertFalse(outcome.cleanup_performed)
+        self.assertEqual(
+            tuple(frame["phase"] for frame in outcome.authority_frames),
+            full_gate.AUTHORITY_PHASES,
+        )
+
     def test_stdout_and_address_space_overflow_are_typed_blockers(self) -> None:
         cases = (
             (
@@ -5376,58 +7525,158 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
                 self.assertEqual(outcome.resource_status, expected)
                 self.assertTrue(outcome.cleanup_performed)
 
-    def test_setsid_double_fork_survivor_requires_cleanup_and_cannot_pass(self) -> None:
-        source = r'''
-import os,time
-first=os.fork()
-if first==0:
-    second=os.fork()
-    if second==0:
-        os.setsid()
-        time.sleep(30)
-        os._exit(0)
-    time.sleep(0.4)
-    os._exit(0)
-time.sleep(0.5)
-'''
+    def test_fast_exit_capture_caps_use_signed_limits_with_stdout_precedence(
+        self,
+    ) -> None:
+        class FinishedProcess:
+            pid = 999_978
+            returncode = 0
+
+            def poll(self) -> int:
+                return self.returncode
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        cases = (
+            (b"x" * 2048, b"y" * 2048, "GATE_STDOUT_BYTES_EXCEEDED"),
+            (b"", b"y" * 2048, "GATE_STDERR_BYTES_EXCEEDED"),
+            (b"x" * 1024, b"", None),
+        )
+        for index, (stdout_raw, stderr_raw, expected) in enumerate(cases):
+            with self.subTest(expected=expected):
+                limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+                limits["stdout_bytes"] = 1024
+                limits["stderr_bytes"] = 1024
+                stdout = self.base / f"fast-exit-{index}.stdout"
+                stderr = self.base / f"fast-exit-{index}.stderr"
+                with stdout.open("w+b") as stdout_handle, stderr.open(
+                    "w+b"
+                ) as stderr_handle:
+                    stdout_handle.write(stdout_raw)
+                    stderr_handle.write(stderr_raw)
+                    stdout_handle.flush()
+                    stderr_handle.flush()
+                    with mock.patch.object(
+                        full_gate, "_process_snapshot", return_value={}
+                    ), mock.patch.object(
+                        full_gate, "_terminate_process_group", return_value=False
+                    ):
+                        outcome = full_gate.supervise_process(
+                            FinishedProcess(),
+                            timeout=1,
+                            stdout_handle=stdout_handle,
+                            stderr_handle=stderr_handle,
+                            limits=limits,
+                        )
+                self.assertEqual(outcome.resource_status, expected)
+                self.assertEqual(outcome.stdout, stdout_raw if expected is None else b"")
+                self.assertEqual(outcome.stderr, stderr_raw if expected is None else b"")
+
+    def test_setsid_survivor_fails_closed_without_identity_bound_signal(
+        self,
+    ) -> None:
+        class ExitedAfterOneInventory:
+            pid = 999_976
+            returncode = 0
+
+            def __init__(self) -> None:
+                self.polls = 0
+
+            def poll(self) -> int | None:
+                self.polls += 1
+                return None if self.polls == 1 else self.returncode
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        root_identity = "darwin-proc-start:100:1"
+        child_identity = "darwin-proc-start:101:2"
+        table = {
+            ExitedAfterOneInventory.pid: (1, 0, 0, root_identity),
+            999_975: (ExitedAfterOneInventory.pid, 0, 0, child_identity),
+        }
         stdout = self.base / "double-fork.stdout"
         stderr = self.base / "double-fork.stderr"
-        with stdout.open("w+b") as stdout_handle, stderr.open("w+b") as stderr_handle:
-            process = subprocess.Popen(
-                [str(SYSTEM_PYTHON), "-c", source],
-                cwd=self.base,
-                env={"PATH": "/usr/bin:/bin"},
-                stdout=stdout_handle,
-                stderr=stderr_handle,
-                start_new_session=True,
-            )
-            outcome = full_gate.supervise_process(
-                process,
+        with stdout.open("w+b") as stdout_handle, stderr.open(
+            "w+b"
+        ) as stderr_handle, mock.patch.object(
+            full_gate, "_process_snapshot", return_value=table
+        ), mock.patch.object(
+            full_gate, "_terminate_process_group", return_value=False
+        ), mock.patch.object(
+            full_gate.sys, "platform", "darwin"
+        ), mock.patch.object(
+            full_gate.os, "kill"
+        ) as raw_kill, self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.supervise_process(
+                ExitedAfterOneInventory(),
                 timeout=3,
                 stdout_handle=stdout_handle,
                 stderr_handle=stderr_handle,
             )
-        self.assertEqual(outcome.returncode, 0)
-        self.assertTrue(outcome.cleanup_performed)
-        self.assertTrue(outcome.observed_descendants)
-        table = full_gate._process_snapshot()
-        self.assertFalse(
-            any(
-                pid in table and table[pid][3] == start_identity
-                for pid, start_identity in outcome.observed_descendants
-            )
-        )
-        semantic_stdout, logs, counters = self.semantic_fixture()
-        with self.assertRaises(full_gate.FullGateError) as raised:
-            full_gate.validate_gate_outcome(
-                dataclasses.replace(outcome, stdout=semantic_stdout),
-                logs,
-                counters,
-                execution_evidence=self.execution_evidence(),
-            )
         self.assertEqual(
-            raised.exception.status, "GATE_DESCENDANT_CLEANUP_REQUIRED"
+            raised.exception.status,
+            full_gate.DETACHED_PROCESS_SIGNAL_UNAVAILABLE,
         )
+        raw_kill.assert_not_called()
+
+    def test_supervision_prunes_dead_descendant_churn_from_retained_state(
+        self,
+    ) -> None:
+        class ChurningProcess:
+            pid = 999_977
+            returncode = 0
+
+            def __init__(self) -> None:
+                self.polls = 0
+
+            def poll(self) -> int | None:
+                self.polls += 1
+                return None if self.polls <= 500 else self.returncode
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        snapshots = 0
+
+        def churning_snapshot() -> dict[int, tuple[int, int, int, str]]:
+            nonlocal snapshots
+            snapshots += 1
+            child_pid = 100_000 + snapshots
+            return {
+                ChurningProcess.pid: (1, 1, 1, "linux-proc-start:1"),
+                child_pid: (
+                    ChurningProcess.pid,
+                    1,
+                    1,
+                    f"linux-proc-start:{1_000 + snapshots}",
+                ),
+            }
+
+        stdout = self.base / "descendant-churn.stdout"
+        stderr = self.base / "descendant-churn.stderr"
+        with stdout.open("w+b") as stdout_handle, stderr.open(
+            "w+b"
+        ) as stderr_handle, mock.patch.object(
+            full_gate, "_process_snapshot", side_effect=churning_snapshot
+        ), mock.patch.object(
+            full_gate, "_terminate_process_group", return_value=False
+        ), mock.patch.object(
+            full_gate, "_kill_tracked_descendants", return_value=False
+        ), mock.patch.object(
+            full_gate.time, "sleep"
+        ):
+            outcome = full_gate.supervise_process(
+                ChurningProcess(),
+                timeout=30,
+                stdout_handle=stdout_handle,
+                stderr_handle=stderr_handle,
+                limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+            )
+
+        self.assertGreater(snapshots, 500)
+        self.assertLessEqual(len(outcome.observed_descendants), 1)
 
     def test_invocation_per_file_and_aggregate_byte_overflow_are_typed(self) -> None:
         root = self.base / "usage"
@@ -5440,10 +7689,2137 @@ time.sleep(0.5)
             full_gate.scan_invocation_usage(root, limits)
         self.assertEqual(raised.exception.status, "GATE_PER_FILE_BYTES_EXCEEDED")
         limits["per_file_bytes"] = 16
+        limits["file_size_bytes"] = 8
+        limits["nofile"] = 1
         limits["aggregate_bytes"] = 12
         with self.assertRaises(full_gate.FullGateError) as raised:
             full_gate.scan_invocation_usage(root, limits)
         self.assertEqual(raised.exception.status, "GATE_AGGREGATE_BYTES_EXCEEDED")
+
+    def test_invocation_entry_limit_streams_and_stops_before_third_stat(self) -> None:
+        root = self.base / "entry-limit"
+        root.mkdir()
+        for name in ("one", "two", "three", "four"):
+            (root / name).write_bytes(b"")
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        self.assertEqual(limits["invocation_entries"], 20_000)
+        self.assertEqual(limits["invocation_depth"], 32)
+        limits["invocation_entries"] = 2
+        limits["invocation_depth"] = 2
+        real_scandir = full_gate.os.scandir
+        real_stat = full_gate.os.stat
+        yielded = 0
+        entry_stats = 0
+
+        class CountingScandir:
+            def __init__(self, descriptor: int) -> None:
+                self._inner = real_scandir(descriptor)
+
+            def __iter__(self) -> CountingScandir:
+                return self
+
+            def __next__(self) -> os.DirEntry[str]:
+                nonlocal yielded
+                yielded += 1
+                return next(self._inner)
+
+            def close(self) -> None:
+                self._inner.close()
+
+        def counted_stat(
+            path: object,
+            *,
+            dir_fd: int | None = None,
+            follow_symlinks: bool = True,
+        ) -> os.stat_result:
+            nonlocal entry_stats
+            if dir_fd is not None:
+                entry_stats += 1
+            return real_stat(
+                path,
+                dir_fd=dir_fd,
+                follow_symlinks=follow_symlinks,
+            )
+
+        with mock.patch.object(
+            full_gate.os, "scandir", side_effect=CountingScandir
+        ), mock.patch.object(
+            full_gate.os, "stat", side_effect=counted_stat
+        ), self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.scan_invocation_usage(root, limits)
+
+        self.assertEqual(
+            raised.exception.status, "GATE_INVOCATION_ENTRY_LIMIT_EXCEEDED"
+        )
+        self.assertEqual(yielded, 3)
+        self.assertEqual(entry_stats, 2)
+
+    def test_invocation_usage_counts_directories_and_files(self) -> None:
+        root = self.base / "entry-count"
+        nested = root / "directory"
+        nested.mkdir(parents=True)
+        (root / "root-file").write_bytes(b"a")
+        (nested / "nested-file").write_bytes(b"b")
+
+        usage = full_gate.scan_invocation_usage(
+            root, full_gate.DEFAULT_RESOURCE_LIMITS
+        )
+
+        self.assertEqual(usage, {"entries": 3, "bytes": 2})
+
+    def test_invocation_depth_limit_rejects_before_opening_too_deep_child(self) -> None:
+        root = self.base / "depth-limit"
+        deepest = root / "one" / "two" / "three"
+        deepest.mkdir(parents=True)
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["invocation_depth"] = 2
+        real_open = full_gate.os.open
+        opened: list[object] = []
+
+        def tracked_open(
+            path: object,
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            opened.append(path)
+            if dir_fd is None:
+                return real_open(path, flags, mode)
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+
+        with mock.patch.object(
+            full_gate.os, "open", side_effect=tracked_open
+        ), self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.scan_invocation_usage(root, limits)
+
+        self.assertEqual(
+            raised.exception.status, "GATE_INVOCATION_DEPTH_LIMIT_EXCEEDED"
+        )
+        self.assertNotIn("three", opened)
+
+    def test_streaming_scan_closes_every_frame_and_preserves_primary_on_close_error(
+        self,
+    ) -> None:
+        root = self.base / "scan-close-failure"
+        (root / "one" / "two").mkdir(parents=True)
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["invocation_entries"] = 1
+        limits["invocation_depth"] = 1
+        real_open = full_gate.os.open
+        real_close = full_gate.os.close
+        opened_descriptors: list[int] = []
+        close_attempts: dict[int, int] = {}
+        injected = False
+
+        def tracked_open(
+            path: object,
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            descriptor = (
+                real_open(path, flags, mode)
+                if dir_fd is None
+                else real_open(path, flags, mode, dir_fd=dir_fd)
+            )
+            if flags & os.O_DIRECTORY:
+                opened_descriptors.append(descriptor)
+            return descriptor
+
+        def fail_first_directory_close(descriptor: int) -> None:
+            nonlocal injected
+            if descriptor in opened_descriptors:
+                close_attempts[descriptor] = close_attempts.get(descriptor, 0) + 1
+                if not injected:
+                    injected = True
+                    raise OSError(errno.EIO, "injected directory close failure")
+            real_close(descriptor)
+
+        with mock.patch.object(
+            full_gate.os, "open", side_effect=tracked_open
+        ), mock.patch.object(
+            full_gate.os, "close", side_effect=fail_first_directory_close
+        ), self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.scan_invocation_usage(root, limits)
+
+        self.assertEqual(raised.exception.status, "GATE_INVOCATION_ENTRY_INVALID")
+        self.assertEqual(
+            raised.exception.primary_status,
+            "GATE_INVOCATION_ENTRY_LIMIT_EXCEEDED",
+        )
+        self.assertGreaterEqual(len(opened_descriptors), 2)
+        self.assertTrue(injected)
+        self.assertIn(2, close_attempts.values())
+        for descriptor in opened_descriptors:
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+
+    def test_streaming_scan_retries_iterator_close_after_base_exception(
+        self,
+    ) -> None:
+        root = self.base / "scan-iterator-close-interrupt"
+        (root / "one" / "two").mkdir(parents=True)
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["invocation_entries"] = 1
+        limits["invocation_depth"] = 1
+        real_open = full_gate.os.open
+        real_scandir = full_gate.os.scandir
+        opened_descriptors: list[int] = []
+        wrappers: list[InterruptingScandir] = []
+        injected = False
+
+        class InterruptingScandir:
+            def __init__(self, descriptor: int) -> None:
+                self._inner = real_scandir(descriptor)
+                self.close_calls = 0
+                self.closed = False
+                wrappers.append(self)
+
+            def __iter__(self) -> InterruptingScandir:
+                return self
+
+            def __next__(self) -> os.DirEntry[str]:
+                return next(self._inner)
+
+            def close(self) -> None:
+                nonlocal injected
+                self.close_calls += 1
+                if not injected:
+                    injected = True
+                    raise KeyboardInterrupt("injected pre-close interrupt")
+                self._inner.close()
+                self.closed = True
+
+        def tracked_open(
+            path: object,
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            descriptor = (
+                real_open(path, flags, mode)
+                if dir_fd is None
+                else real_open(path, flags, mode, dir_fd=dir_fd)
+            )
+            if flags & os.O_DIRECTORY:
+                opened_descriptors.append(descriptor)
+            return descriptor
+
+        with mock.patch.object(
+            full_gate.os, "open", side_effect=tracked_open
+        ), mock.patch.object(
+            full_gate.os, "scandir", side_effect=InterruptingScandir
+        ), self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.scan_invocation_usage(root, limits)
+
+        self.assertEqual(raised.exception.status, "GATE_INVOCATION_ENTRY_INVALID")
+        self.assertEqual(
+            raised.exception.primary_status,
+            "GATE_INVOCATION_ENTRY_LIMIT_EXCEEDED",
+        )
+        self.assertTrue(injected)
+        self.assertTrue(any(wrapper.close_calls == 2 for wrapper in wrappers))
+        self.assertTrue(all(wrapper.closed for wrapper in wrappers))
+        for descriptor in opened_descriptors:
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+
+    def test_resource_manifest_rejects_invalid_entry_and_depth_limits(self) -> None:
+        mutations = (
+            lambda value: value.pop("invocation_entries"),
+            lambda value: value.__setitem__("unexpected_limit", 1),
+            lambda value: value.__setitem__("invocation_entries", 0),
+            lambda value: value.__setitem__("invocation_depth", 0),
+            lambda value: value.__setitem__(
+                "invocation_depth", value["invocation_entries"] + 1
+            ),
+        )
+        for mutate in mutations:
+            with self.subTest(mutate=mutate):
+                limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+                mutate(limits)
+                with self.assertRaises(full_gate.FullGateError) as raised:
+                    full_gate._validated_resource_limits(limits)
+                self.assertEqual(
+                    raised.exception.status, "RESOURCE_LIMIT_MANIFEST_INVALID"
+                )
+
+    def test_resource_manifest_cannot_raise_any_host_hard_cap(self) -> None:
+        self.assertEqual(
+            full_gate.MAX_RESOURCE_LIMITS,
+            full_gate.DEFAULT_RESOURCE_LIMITS,
+        )
+        for key, cap in full_gate.MAX_RESOURCE_LIMITS.items():
+            with self.subTest(key=key):
+                limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+                limits[key] = cap + 1
+                with self.assertRaises(full_gate.FullGateError) as raised:
+                    full_gate._validated_resource_limits(limits)
+                self.assertEqual(
+                    raised.exception.status, "RESOURCE_LIMIT_MANIFEST_INVALID"
+                )
+
+    def test_cli_timeout_is_bounded_by_signed_wall_limit(self) -> None:
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        self.assertEqual(full_gate._bounded_wall_timeout(10, limits), 10.0)
+        self.assertEqual(
+            full_gate._bounded_wall_timeout(10**9, limits),
+            float(limits["wall_seconds"]),
+        )
+        for invalid in (0, -1, math.inf, math.nan, True):
+            with self.subTest(invalid=invalid), self.assertRaises(
+                full_gate.FullGateError
+            ) as raised:
+                full_gate._bounded_wall_timeout(invalid, limits)
+            self.assertEqual(raised.exception.status, "FULL_GATE_USAGE")
+
+    def test_invocation_cleanup_handles_deep_tree_without_recursion(self) -> None:
+        root = self.base / "deep-cleanup"
+        root.mkdir()
+        current = root
+        for _index in range(80):
+            current = current / "d"
+            current.mkdir()
+        (current / "leaf").write_bytes(b"x")
+
+        full_gate._remove_invocation_tree(root, "INVOCATION_CLEANUP_FAILED")
+
+        self.assertFalse(root.exists())
+
+    def test_default_limits_fit_static_host_caps(self) -> None:
+        limits = full_gate.DEFAULT_RESOURCE_LIMITS
+        self.assertEqual(limits["vm_regions"], 65_536)
+        self.assertEqual(limits, full_gate.MAX_RESOURCE_LIMITS)
+
+    def test_manifest_rejects_per_process_open_file_budget_gap(self) -> None:
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["aggregate_bytes"] = (
+            limits["file_size_bytes"] * limits["nofile"] - 1
+        )
+        with self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate._validated_resource_limits(limits)
+        self.assertEqual(raised.exception.status, "RESOURCE_LIMIT_MANIFEST_INVALID")
+
+    def test_unlinked_read_only_fd_and_mapped_vnodes_are_accounted_once(self) -> None:
+        self.assertTrue(
+            hasattr(full_gate, "MappedRegularFile"),
+            "mapped regular-file inventory is not implemented",
+        )
+        root = self.base / "mapped-usage"
+        root.mkdir()
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["file_size_bytes"] = 8
+        limits["nofile"] = 2
+        limits["per_file_bytes"] = 16
+        limits["aggregate_bytes"] = 16
+        read_only_unlinked = full_gate.OpenRegularFile(
+            device=99,
+            inode=1,
+            size=8,
+            links=0,
+            writable=False,
+        )
+        read_only_linked = full_gate.OpenRegularFile(
+            device=99,
+            inode=3,
+            size=8,
+            links=1,
+            writable=False,
+        )
+        mappings = (
+            full_gate.MappedRegularFile(
+                device=99,
+                inode=1,
+                size=8,
+                links=0,
+            ),
+            full_gate.MappedRegularFile(
+                device=99,
+                inode=2,
+                size=8,
+                links=0,
+            ),
+        )
+
+        usage = full_gate.scan_live_invocation_usage(
+            root,
+            (100,),
+            limits,
+            inspect_open_files=lambda _pid: (
+                read_only_unlinked,
+                read_only_linked,
+            ),
+            inspect_mapped_files=lambda _pid, _max_regions: mappings,
+        )
+
+        self.assertEqual(
+            usage,
+            {
+                "entries": 2,
+                "bytes": 16,
+                "open_unlinked_entries": 1,
+                "open_unlinked_bytes": 8,
+                "mapped_unlinked_entries": 2,
+                "mapped_unlinked_bytes": 16,
+            },
+        )
+
+    def test_mapped_vnodes_enforce_aggregate_and_entry_limits(self) -> None:
+        root = self.base / "mapped-overflow"
+        root.mkdir()
+        records = (
+            full_gate.MappedRegularFile(99, 1, 9, 0),
+            full_gate.MappedRegularFile(99, 2, 8, 0),
+        )
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["file_size_bytes"] = 8
+        limits["nofile"] = 2
+        limits["per_file_bytes"] = 16
+        limits["aggregate_bytes"] = 16
+        with self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.scan_live_invocation_usage(
+                root,
+                (100,),
+                limits,
+                inspect_open_files=lambda _pid: (),
+                inspect_mapped_files=lambda _pid, _max_regions: records,
+            )
+        self.assertEqual(raised.exception.status, "GATE_AGGREGATE_BYTES_EXCEEDED")
+
+        limits["aggregate_bytes"] = 17
+        limits["invocation_entries"] = 1
+        limits["invocation_depth"] = 1
+        with self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.scan_live_invocation_usage(
+                root,
+                (100,),
+                limits,
+                inspect_open_files=lambda _pid: (),
+                inspect_mapped_files=lambda _pid, _max_regions: records,
+            )
+        self.assertEqual(
+            raised.exception.status, "GATE_INVOCATION_ENTRY_LIMIT_EXCEEDED"
+        )
+
+    def test_live_mapping_inventory_shares_one_aggregate_region_budget(self) -> None:
+        identities = tuple(
+            (100 + index, f"linux-proc-start:{index + 1}")
+            for index in range(4)
+        )
+        observed_caps: list[int] = []
+
+        def inspect_mapped(_pid: int, max_regions: int) -> tuple[object, ...]:
+            observed_caps.append(max_regions)
+            return ()
+
+        refreshed = {
+            pid: (1, 0, 0, start_identity)
+            for pid, start_identity in identities
+        }
+        _open, _mapped, table = full_gate._inspect_identity_live_storage(
+            identities,
+            inspect_open_files=lambda _pid: (),
+            inspect_mapped_files=inspect_mapped,
+            max_regions=8,
+            process_snapshot=lambda: refreshed,
+        )
+        self.assertEqual(table, refreshed)
+        self.assertEqual(observed_caps, [2, 2, 2, 2])
+
+        with self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate._inspect_identity_live_storage(
+                (
+                    *identities,
+                    *((200 + index, f"linux-proc-start:{index + 10}") for index in range(5)),
+                ),
+                inspect_open_files=lambda _pid: (),
+                inspect_mapped_files=inspect_mapped,
+                max_regions=8,
+                process_snapshot=lambda: {},
+            )
+        self.assertEqual(
+            raised.exception.status, "GATE_MAPPED_FILE_INVENTORY_FAILED"
+        )
+
+    def test_linux_mapping_inventory_uses_kernel_identity_and_nlink(self) -> None:
+        inspect_mappings = getattr(
+            full_gate, "_inspect_unlinked_regular_mappings_linux", None
+        )
+        self.assertTrue(callable(inspect_mappings))
+        payload = (
+            b"1000-2000 rw-s 00000000 00:2a 123 /tmp/hidden (deleted)\n"
+            b"2000-3000 r--p 00000000 00:2a 124 /tmp/literal (deleted)\n"
+        )
+        metadata = {
+            "1000-2000": os.stat_result(
+                (stat.S_IFREG | 0o600, 123, os.makedev(0, 0x2A), 0, 0, 0, 8, 0, 0, 0)
+            ),
+            "2000-3000": os.stat_result(
+                (stat.S_IFREG | 0o600, 124, os.makedev(0, 0x2A), 1, 0, 0, 8, 0, 0, 0)
+            ),
+        }
+
+        observed = inspect_mappings(
+            100,
+            8,
+            read_maps=lambda _path: payload,
+            stat_mapping=lambda path: metadata[path.name],
+        )
+
+        self.assertEqual(
+            observed,
+            (full_gate.MappedRegularFile(os.makedev(0, 0x2A), 123, 8, 0),),
+        )
+
+    def test_linux_mapping_inventory_rejects_malformed_or_unbounded_maps(self) -> None:
+        inspect_mappings = getattr(
+            full_gate, "_inspect_unlinked_regular_mappings_linux", None
+        )
+        self.assertTrue(callable(inspect_mappings))
+        for payload, maximum, expected in (
+            (b"not-a-proc-map-line\n", 8, "GATE_MAPPED_FILE_INVENTORY_FAILED"),
+            (
+                b"1000-2000 rw-s 00000000 00:2a 123 /tmp/a (deleted)\n"
+                b"2000-3000 rw-s 00000000 00:2a 124 /tmp/b (deleted)\n",
+                1,
+                "GATE_VM_REGION_LIMIT_EXCEEDED",
+            ),
+        ):
+            with self.subTest(expected=expected), self.assertRaises(
+                full_gate.FullGateError
+            ) as raised:
+                inspect_mappings(
+                    100,
+                    maximum,
+                    read_maps=lambda _path, value=payload: value,
+                    stat_mapping=lambda _path: os.stat_result(
+                        (
+                            stat.S_IFREG | 0o600,
+                            123,
+                            os.makedev(0, 0x2A),
+                            0,
+                            0,
+                            0,
+                            8,
+                            0,
+                            0,
+                            0,
+                        )
+                    ),
+                )
+            self.assertEqual(raised.exception.status, expected)
+
+    def test_macos_mapping_inventory_uses_region_vnode_identity(self) -> None:
+        inspect_mappings = getattr(
+            full_gate, "_inspect_unlinked_regular_mappings_macos", None
+        )
+        self.assertTrue(callable(inspect_mappings))
+        calls: list[tuple[int, int]] = []
+
+        def fake_pidinfo(
+            pid: int,
+            flavor: int,
+            address: int,
+            buffer: object,
+            size: int,
+        ) -> int:
+            self.assertEqual(pid, 100)
+            self.assertEqual(flavor, full_gate.DARWIN_PROC_PIDREGIONPATHINFO)
+            self.assertEqual(size, ctypes.sizeof(full_gate._ProcRegionWithPathInfo))
+            calls.append((flavor, address))
+            if address >= 0x3000:
+                return 0
+            info = ctypes.cast(
+                buffer, ctypes.POINTER(full_gate._ProcRegionWithPathInfo)
+            ).contents
+            info.prp_prinfo.pri_address = 0x1000 if address == 0 else 0x2000
+            info.prp_prinfo.pri_size = 0x1000
+            metadata = info.prp_vip.vip_vi.vi_stat
+            metadata.vst_mode = stat.S_IFREG | 0o600
+            metadata.vst_dev = 99
+            metadata.vst_ino = 123 if address == 0 else 124
+            metadata.vst_size = 8
+            metadata.vst_nlink = 0 if address == 0 else 1
+            return ctypes.sizeof(info)
+
+        observed = inspect_mappings(
+            100, 8, pidinfo_function=fake_pidinfo
+        )
+
+        self.assertEqual(
+            observed,
+            (full_gate.MappedRegularFile(99, 123, 8, 0),),
+        )
+        self.assertEqual(calls, [(8, 0), (8, 0x2000), (8, 0x3000)])
+
+    def test_platform_mapping_inventory_observes_raw_mmap_after_unlink_and_close(
+        self,
+    ) -> None:
+        inspect_mappings = getattr(
+            full_gate, "_inspect_unlinked_regular_mappings", None
+        )
+        self.assertTrue(callable(inspect_mappings))
+        libc = ctypes.CDLL(None, use_errno=True)
+        mmap_fn = libc.mmap
+        mmap_fn.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_longlong,
+        ]
+        mmap_fn.restype = ctypes.c_void_p
+        munmap_fn = libc.munmap
+        munmap_fn.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+        munmap_fn.restype = ctypes.c_int
+        page_size = mmap.PAGESIZE
+        mapped: list[int] = []
+        expected: set[tuple[int, int]] = set()
+        try:
+            for index, (protection, flags) in enumerate(
+                (
+                    (mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED),
+                    (mmap.PROT_READ, mmap.MAP_PRIVATE),
+                )
+            ):
+                path = self.base / f"raw-mapping-{index}"
+                descriptor = os.open(
+                    path,
+                    os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_CLOEXEC,
+                    0o600,
+                )
+                try:
+                    os.ftruncate(descriptor, page_size)
+                    metadata = os.fstat(descriptor)
+                    address = mmap_fn(
+                        None,
+                        page_size,
+                        protection,
+                        flags,
+                        descriptor,
+                        0,
+                    )
+                    if address == ctypes.c_void_p(-1).value:
+                        self.fail(f"raw mmap failed: errno={ctypes.get_errno()}")
+                    mapped.append(int(address))
+                    expected.add((int(metadata.st_dev), int(metadata.st_ino)))
+                    os.unlink(path)
+                finally:
+                    os.close(descriptor)
+
+            observed = inspect_mappings(
+                os.getpid(), full_gate.DEFAULT_RESOURCE_LIMITS["vm_regions"]
+            )
+            observed_identities = {
+                (record.device, record.inode) for record in observed
+            }
+            self.assertTrue(expected.issubset(observed_identities))
+        finally:
+            for address in mapped:
+                self.assertEqual(munmap_fn(address, page_size), 0)
+
+    def test_supervision_terminates_on_unlinked_mapping_overflow(self) -> None:
+        root = self.base / "supervised-mapped-usage"
+        root.mkdir()
+        stdout = self.base / "mapped-overflow.stdout"
+        stderr = self.base / "mapped-overflow.stderr"
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["file_size_bytes"] = 4
+        limits["nofile"] = 2
+        limits["per_file_bytes"] = 8
+        limits["aggregate_bytes"] = 8
+        records = (
+            full_gate.MappedRegularFile(99, 1, 5, 0),
+            full_gate.MappedRegularFile(99, 2, 5, 0),
+        )
+        with stdout.open("w+b") as stdout_handle, stderr.open("w+b") as stderr_handle:
+            process = subprocess.Popen(
+                [str(SYSTEM_PYTHON), "-c", "import time;time.sleep(30)"],
+                cwd=self.base,
+                env={"PATH": "/usr/bin:/bin"},
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                start_new_session=True,
+            )
+            with mock.patch.object(
+                full_gate, "_inspect_open_regular_files", return_value=()
+            ), mock.patch.object(
+                full_gate,
+                "_inspect_unlinked_regular_mappings",
+                return_value=records,
+            ):
+                outcome = full_gate.supervise_process(
+                    process,
+                    timeout=5,
+                    stdout_handle=stdout_handle,
+                    stderr_handle=stderr_handle,
+                    limits=limits,
+                    invocation_root=root,
+                )
+        self.assertEqual(
+            outcome.resource_status, "GATE_AGGREGATE_BYTES_EXCEEDED"
+        )
+        self.assertTrue(outcome.cleanup_performed)
+
+    def test_live_open_regular_files_close_descendant_amplification_gap(self) -> None:
+        self.assertTrue(
+            hasattr(full_gate, "OpenRegularFile")
+            and hasattr(full_gate, "scan_live_invocation_usage"),
+            "tree-wide live regular-file accounting is not implemented",
+        )
+        root = self.base / "live-usage"
+        root.mkdir()
+        linked = root / "linked"
+        linked.write_bytes(b"a" * 8)
+        linked_metadata = linked.stat()
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["file_size_bytes"] = 8
+        limits["nofile"] = 3
+        limits["per_file_bytes"] = 16
+        limits["aggregate_bytes"] = 24
+        records = {
+            100: (
+                full_gate.OpenRegularFile(
+                    device=linked_metadata.st_dev,
+                    inode=linked_metadata.st_ino,
+                    size=8,
+                    links=1,
+                    writable=True,
+                ),
+                full_gate.OpenRegularFile(
+                    device=99,
+                    inode=1,
+                    size=8,
+                    links=0,
+                    writable=True,
+                ),
+            ),
+            101: (
+                full_gate.OpenRegularFile(
+                    device=99,
+                    inode=1,
+                    size=8,
+                    links=0,
+                    writable=True,
+                ),
+            ),
+            102: (
+                full_gate.OpenRegularFile(
+                    device=99,
+                    inode=2,
+                    size=8,
+                    links=0,
+                    writable=True,
+                ),
+            ),
+        }
+
+        usage = full_gate.scan_live_invocation_usage(
+            root,
+            (100, 101, 102),
+            limits,
+            inspect_open_files=lambda pid: records[pid],
+            inspect_mapped_files=lambda _pid, _max_regions: (),
+        )
+
+        self.assertEqual(
+            usage,
+            {
+                "entries": 3,
+                "bytes": 24,
+                "open_unlinked_entries": 2,
+                "open_unlinked_bytes": 16,
+                "mapped_unlinked_entries": 0,
+                "mapped_unlinked_bytes": 0,
+            },
+        )
+        records[102] = (
+            full_gate.OpenRegularFile(
+                device=99,
+                inode=2,
+                size=8,
+                links=0,
+                writable=True,
+            ),
+            full_gate.OpenRegularFile(
+                device=99,
+                inode=3,
+                size=1,
+                links=0,
+                writable=True,
+            ),
+        )
+        with self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.scan_live_invocation_usage(
+                root,
+                (100, 101, 102),
+                limits,
+                inspect_open_files=lambda pid: records[pid],
+                inspect_mapped_files=lambda _pid, _max_regions: (),
+            )
+        self.assertEqual(raised.exception.status, "GATE_AGGREGATE_BYTES_EXCEEDED")
+
+    def test_live_usage_adds_static_baseline_and_external_fixed_logs(self) -> None:
+        self.assertTrue(
+            hasattr(full_gate, "scan_live_invocation_usage"),
+            "tree-wide live regular-file accounting is not implemented",
+        )
+        parameters = inspect.signature(
+            full_gate.scan_live_invocation_usage
+        ).parameters
+        self.assertIn("baseline_usage", parameters)
+        self.assertIn("linked_paths", parameters)
+        root = self.base / "live-writable-root"
+        root.mkdir()
+        fixed_log = self.base / "fixed.log"
+        fixed_log.write_bytes(b"f" * 8)
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["file_size_bytes"] = 8
+        limits["nofile"] = 3
+        limits["per_file_bytes"] = 16
+        limits["aggregate_bytes"] = 24
+        record = full_gate.OpenRegularFile(
+            device=99,
+            inode=1,
+            size=8,
+            links=0,
+            writable=True,
+        )
+
+        usage = full_gate.scan_live_invocation_usage(
+            root,
+            (100,),
+            limits,
+            inspect_open_files=lambda _pid: (record,),
+            inspect_mapped_files=lambda _pid, _max_regions: (),
+            baseline_usage={"entries": 1, "bytes": 8},
+            linked_paths=(fixed_log,),
+        )
+
+        self.assertEqual(
+            usage,
+            {
+                "entries": 3,
+                "bytes": 24,
+                "open_unlinked_entries": 1,
+                "open_unlinked_bytes": 8,
+                "mapped_unlinked_entries": 0,
+                "mapped_unlinked_bytes": 0,
+            },
+        )
+
+    def test_static_baseline_excludes_initial_writable_scratch_entries(self) -> None:
+        self.assertTrue(
+            hasattr(full_gate, "scan_invocation_baseline"),
+            "disjoint static invocation baseline is not implemented",
+        )
+        invocation = self.base / "baseline-invocation"
+        scratch = invocation / "scratch"
+        scratch.mkdir(parents=True)
+        (invocation / "static").write_bytes(b"s" * 8)
+        (scratch / "initial").write_bytes(b"w" * 8)
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["file_size_bytes"] = 8
+        limits["nofile"] = 2
+        limits["per_file_bytes"] = 16
+        limits["aggregate_bytes"] = 24
+
+        baseline = full_gate.scan_invocation_baseline(
+            invocation, scratch, limits
+        )
+        usage = full_gate.scan_live_invocation_usage(
+            scratch,
+            (),
+            limits,
+            inspect_open_files=lambda _pid: (),
+            baseline_usage=baseline,
+        )
+
+        self.assertEqual(baseline, {"entries": 2, "bytes": 8})
+        self.assertEqual(usage["entries"], 3)
+        self.assertEqual(usage["bytes"], 16)
+
+    def test_live_scan_tolerates_entries_that_close_and_disappear(self) -> None:
+        self.assertIn(
+            "allow_disappeared",
+            inspect.signature(full_gate._scan_invocation_usage).parameters,
+            "live scratch scan does not handle normal unlink races",
+        )
+        root = self.base / "live-disappearing-entry"
+        root.mkdir()
+        (root / "gone").write_bytes(b"transient")
+        real_stat = full_gate.os.stat
+
+        def disappearing_stat(
+            path: object,
+            *,
+            dir_fd: int | None = None,
+            follow_symlinks: bool = True,
+        ) -> os.stat_result:
+            if path == "gone" and dir_fd is not None:
+                self.assertFalse(follow_symlinks)
+                raise FileNotFoundError(errno.ENOENT, "entry disappeared")
+            return real_stat(
+                path,
+                dir_fd=dir_fd,
+                follow_symlinks=follow_symlinks,
+            )
+
+        with mock.patch.object(full_gate.os, "stat", side_effect=disappearing_stat):
+            usage = full_gate.scan_live_invocation_usage(
+                root,
+                (),
+                full_gate.DEFAULT_RESOURCE_LIMITS,
+                inspect_open_files=lambda _pid: (),
+            )
+
+        self.assertEqual(usage["entries"], 0)
+        self.assertEqual(usage["bytes"], 0)
+
+    def test_live_scan_rejects_stat_to_symlink_directory_replacement(self) -> None:
+        root = self.base / "live-directory-race"
+        child = root / "child"
+        moved = root / "moved-child"
+        outside = self.base / "outside-directory"
+        child.mkdir(parents=True)
+        outside.mkdir()
+        (child / "inside").write_bytes(b"i")
+        (outside / "payload").write_bytes(b"o" * 64)
+        real_open = full_gate.os.open
+        replaced = False
+
+        def racing_open(
+            path: object,
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            nonlocal replaced
+            if path == "child" and dir_fd is not None and not replaced:
+                child.rename(moved)
+                child.symlink_to(outside, target_is_directory=True)
+                replaced = True
+            if dir_fd is None:
+                return real_open(path, flags, mode)
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+
+        with mock.patch.object(full_gate.os, "open", side_effect=racing_open):
+            with self.assertRaises(full_gate.FullGateError) as raised:
+                full_gate.scan_live_invocation_usage(
+                    root,
+                    (),
+                    full_gate.DEFAULT_RESOURCE_LIMITS,
+                    inspect_open_files=lambda _pid: (),
+                )
+
+        self.assertTrue(replaced)
+        self.assertEqual(
+            raised.exception.status, "GATE_INVOCATION_ENTRY_INVALID"
+        )
+
+    def test_live_open_regular_file_inventory_failure_is_typed(self) -> None:
+        self.assertTrue(
+            hasattr(full_gate, "OpenRegularFile")
+            and hasattr(full_gate, "scan_live_invocation_usage"),
+            "tree-wide live regular-file accounting is not implemented",
+        )
+        root = self.base / "live-inventory-failure"
+        root.mkdir()
+
+        def fail_inventory(_pid: int) -> tuple[full_gate.OpenRegularFile, ...]:
+            raise OSError("process inspection failed")
+
+        with self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.scan_live_invocation_usage(
+                root,
+                (100,),
+                full_gate.DEFAULT_RESOURCE_LIMITS,
+                inspect_open_files=fail_inventory,
+            )
+        self.assertEqual(
+            raised.exception.status, "GATE_OPEN_FILE_INVENTORY_FAILED"
+        )
+
+    def test_darwin_open_flags_require_kernel_fwrite(self) -> None:
+        self.assertTrue(
+            hasattr(full_gate, "_darwin_file_flags_writable"),
+            "Darwin FREAD/FWRITE classification is not implemented",
+        )
+        self.assertFalse(full_gate._darwin_file_flags_writable(0x0))
+        self.assertFalse(full_gate._darwin_file_flags_writable(0x1))
+        self.assertTrue(full_gate._darwin_file_flags_writable(0x2))
+        self.assertTrue(full_gate._darwin_file_flags_writable(0x3))
+
+    def test_linux_fdinfo_requires_stable_exact_identity_and_flags(self) -> None:
+        inspect_descriptor = getattr(
+            full_gate, "_inspect_linux_open_regular_file", None
+        )
+        self.assertTrue(
+            callable(inspect_descriptor),
+            "stable bounded Linux fdinfo inspection is not implemented",
+        )
+        metadata = os.stat_result(
+            (stat.S_IFREG | 0o600, 123, 99, 0, 0, 0, 8, 0, 0, 0)
+        )
+        stable_cases = (
+            (b"flags:\t0100000\nmnt_id:\t42\nino:\t123\npos:\t0\n", False),
+            (b"flags:\t0100001\nmnt_id:\t42\nino:\t123\npos:\t99\n", True),
+        )
+        for fdinfo, writable in stable_cases:
+            with self.subTest(writable=writable):
+                reads = mock.Mock(side_effect=(fdinfo, fdinfo))
+                record = inspect_descriptor(
+                    100,
+                    "7",
+                    read_fdinfo=reads,
+                    stat_descriptor=lambda _path: metadata,
+                )
+                self.assertEqual(
+                    record,
+                    full_gate.OpenRegularFile(
+                        device=99,
+                        inode=123,
+                        size=8,
+                        links=0,
+                        writable=writable,
+                    ),
+                )
+                self.assertEqual(reads.call_count, 2)
+
+    def test_linux_fdinfo_reuse_race_fails_closed_after_fixed_retries(self) -> None:
+        inspect_descriptor = getattr(
+            full_gate, "_inspect_linux_open_regular_file", None
+        )
+        self.assertTrue(
+            callable(inspect_descriptor),
+            "stable bounded Linux fdinfo inspection is not implemented",
+        )
+        metadata = os.stat_result(
+            (stat.S_IFREG | 0o600, 456, 99, 1, 0, 0, 8, 0, 0, 0)
+        )
+        old = b"flags:\t0100000\nmnt_id:\t42\nino:\t123\n"
+        reused = b"flags:\t0100001\nmnt_id:\t43\nino:\t456\n"
+        reads = mock.Mock(side_effect=(old, reused) * 3)
+
+        with self.assertRaises(OSError):
+            inspect_descriptor(
+                100,
+                "7",
+                read_fdinfo=reads,
+                stat_descriptor=lambda _path: metadata,
+            )
+
+        self.assertEqual(reads.call_count, 6)
+
+    def test_linux_fdinfo_rejects_missing_duplicate_and_malformed_fields(self) -> None:
+        inspect_descriptor = getattr(
+            full_gate, "_inspect_linux_open_regular_file", None
+        )
+        self.assertTrue(
+            callable(inspect_descriptor),
+            "stable bounded Linux fdinfo inspection is not implemented",
+        )
+        metadata = os.stat_result(
+            (stat.S_IFREG | 0o600, 123, 99, 1, 0, 0, 8, 0, 0, 0)
+        )
+        invalid_payloads = (
+            b"flags:\t0100000\nino:\t123\n",
+            b"flags:\t0100000\nflags:\t0100001\nmnt_id:\t42\nino:\t123\n",
+            b"flags:\t0100000\nmnt_id:\t42\nino:\tnot-an-inode\n",
+        )
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload), self.assertRaises(OSError):
+                inspect_descriptor(
+                    100,
+                    "7",
+                    read_fdinfo=lambda _path, value=payload: value,
+                    stat_descriptor=lambda _path: metadata,
+                )
+
+    def test_linux_fdinfo_reader_rejects_payload_over_four_kibibytes(self) -> None:
+        fdinfo = self.base / "oversized-fdinfo"
+        fdinfo.write_bytes(b"x" * (4 * 1024 + 1))
+
+        with self.assertRaises(OSError) as raised:
+            full_gate._read_linux_fdinfo(fdinfo)
+
+        self.assertEqual(raised.exception.errno, errno.EOVERFLOW)
+
+    def test_open_file_inventory_skips_confirmed_exit_and_identity_reuse(self) -> None:
+        self.assertTrue(
+            hasattr(full_gate, "_inspect_identity_open_regular_files"),
+            "identity-safe open-file inventory is not implemented",
+        )
+
+        def exited(_pid: int) -> tuple[full_gate.OpenRegularFile, ...]:
+            raise ProcessLookupError(errno.ESRCH, "process exited")
+
+        observed, refreshed = full_gate._inspect_identity_open_regular_files(
+            ((100, "linux-proc-start:1"), (101, "linux-proc-start:2")),
+            inspect_open_files=exited,
+            process_snapshot=lambda: {
+                101: (1, 0, 0, "linux-proc-start:3"),
+            },
+        )
+
+        self.assertEqual(observed, {})
+        self.assertEqual(
+            refreshed, {101: (1, 0, 0, "linux-proc-start:3")}
+        )
+
+    def test_open_file_inventory_recheck_fails_closed_for_same_identity(self) -> None:
+        self.assertTrue(
+            hasattr(full_gate, "_inspect_identity_open_regular_files"),
+            "identity-safe open-file inventory is not implemented",
+        )
+
+        def exited(_pid: int) -> tuple[full_gate.OpenRegularFile, ...]:
+            raise ProcessLookupError(errno.ESRCH, "process exited")
+
+        def unavailable() -> dict[int, tuple[int, int, int, str]]:
+            raise full_gate.FullGateError("PROCESS_INVENTORY_FAILED")
+
+        for name, snapshot in (
+            (
+                "same_identity",
+                lambda: {100: (1, 0, 0, "linux-proc-start:1")},
+            ),
+            ("recheck_unavailable", unavailable),
+        ):
+            with self.subTest(name=name), self.assertRaises(
+                full_gate.FullGateError
+            ) as raised:
+                full_gate._inspect_identity_open_regular_files(
+                    ((100, "linux-proc-start:1"),),
+                    inspect_open_files=exited,
+                    process_snapshot=snapshot,
+                )
+            self.assertEqual(
+                raised.exception.status, "GATE_OPEN_FILE_INVENTORY_FAILED"
+            )
+
+    def test_open_file_inventory_rechecks_successful_reads_for_pid_reuse(self) -> None:
+        record = full_gate.OpenRegularFile(
+            device=99,
+            inode=1,
+            size=8,
+            links=0,
+            writable=True,
+        )
+        for name, start_identity, expected in (
+            ("same_identity", "linux-proc-start:1", {100: (record,)}),
+            ("identity_drift", "linux-proc-start:2", {}),
+            ("process_exited", None, {}),
+        ):
+            snapshot = (
+                {}
+                if start_identity is None
+                else {100: (1, 0, 0, start_identity)}
+            )
+            with self.subTest(name=name):
+                observed, refreshed = full_gate._inspect_identity_open_regular_files(
+                    ((100, "linux-proc-start:1"),),
+                    inspect_open_files=lambda _pid: (record,),
+                    process_snapshot=lambda: snapshot,
+                )
+                self.assertEqual(observed, expected)
+                self.assertEqual(refreshed, snapshot)
+
+    def test_supervision_terminates_on_live_unlinked_aggregate_overflow(self) -> None:
+        self.assertTrue(
+            hasattr(full_gate, "OpenRegularFile")
+            and hasattr(full_gate, "_inspect_open_regular_files"),
+            "supervised live regular-file inventory is not implemented",
+        )
+        root = self.base / "supervised-live-usage"
+        root.mkdir()
+        stdout = self.base / "live-overflow.stdout"
+        stderr = self.base / "live-overflow.stderr"
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["file_size_bytes"] = 8
+        limits["nofile"] = 1
+        limits["per_file_bytes"] = 16
+        limits["aggregate_bytes"] = 8
+        records = (
+            full_gate.OpenRegularFile(
+                device=99,
+                inode=1,
+                size=5,
+                links=0,
+                writable=True,
+            ),
+            full_gate.OpenRegularFile(
+                device=99,
+                inode=2,
+                size=5,
+                links=0,
+                writable=True,
+            ),
+        )
+        with stdout.open("w+b") as stdout_handle, stderr.open("w+b") as stderr_handle:
+            process = subprocess.Popen(
+                [str(SYSTEM_PYTHON), "-c", "import time;time.sleep(30)"],
+                cwd=self.base,
+                env={"PATH": "/usr/bin:/bin"},
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                start_new_session=True,
+            )
+            with mock.patch.object(
+                full_gate,
+                "_inspect_open_regular_files",
+                return_value=records,
+            ):
+                outcome = full_gate.supervise_process(
+                    process,
+                    timeout=5,
+                    stdout_handle=stdout_handle,
+                    stderr_handle=stderr_handle,
+                    limits=limits,
+                    invocation_root=root,
+                )
+        self.assertEqual(
+            outcome.resource_status, "GATE_AGGREGATE_BYTES_EXCEEDED"
+        )
+        self.assertTrue(outcome.cleanup_performed)
+
+    def test_supervision_keeps_reparented_observed_descendant_in_live_budget(
+        self,
+    ) -> None:
+        root = self.base / "reparented-live-usage"
+        root.mkdir()
+        stdout = self.base / "reparented-overflow.stdout"
+        stderr = self.base / "reparented-overflow.stderr"
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["file_size_bytes"] = 5
+        limits["nofile"] = 1
+        limits["per_file_bytes"] = 8
+        limits["aggregate_bytes"] = 5
+        root_record = full_gate.OpenRegularFile(
+            device=99,
+            inode=1,
+            size=5,
+            links=0,
+            writable=True,
+        )
+        child_record = full_gate.OpenRegularFile(
+            device=99,
+            inode=2,
+            size=5,
+            links=0,
+            writable=True,
+        )
+        child_inspections = 0
+        process_holder: dict[str, subprocess.Popen[bytes]] = {}
+        snapshot_calls = 0
+
+        def inspect_open_files(pid: int) -> tuple[full_gate.OpenRegularFile, ...]:
+            nonlocal child_inspections
+            if pid == process_holder["process"].pid:
+                return (root_record,)
+            if pid == 999_991:
+                child_inspections += 1
+                return () if child_inspections == 1 else (child_record,)
+            return ()
+
+        def process_snapshot() -> dict[int, tuple[int, int, int, str]]:
+            nonlocal snapshot_calls
+            process = process_holder["process"]
+            if process.poll() is not None:
+                return {}
+            snapshot_calls += 1
+            child_parent = process.pid if snapshot_calls == 1 else 1
+            return {
+                process.pid: (1, 0, 0, "linux-proc-start:1"),
+                999_991: (child_parent, 0, 0, "linux-proc-start:2"),
+            }
+
+        with stdout.open("w+b") as stdout_handle, stderr.open("w+b") as stderr_handle:
+            process = subprocess.Popen(
+                [str(SYSTEM_PYTHON), "-c", "import time;time.sleep(30)"],
+                cwd=self.base,
+                env={"PATH": "/usr/bin:/bin"},
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                start_new_session=True,
+            )
+            process_holder["process"] = process
+            with mock.patch.object(
+                full_gate,
+                "_process_snapshot",
+                side_effect=process_snapshot,
+            ), mock.patch.object(
+                full_gate,
+                "_inspect_open_regular_files",
+                side_effect=inspect_open_files,
+            ), mock.patch.object(
+                full_gate,
+                "_inspect_unlinked_regular_mappings",
+                return_value=(),
+            ):
+                outcome = full_gate.supervise_process(
+                    process,
+                    timeout=0.1,
+                    stdout_handle=stdout_handle,
+                    stderr_handle=stderr_handle,
+                    limits=limits,
+                    invocation_root=root,
+                )
+
+        self.assertGreaterEqual(child_inspections, 2)
+        self.assertEqual(
+            outcome.resource_status, "GATE_AGGREGATE_BYTES_EXCEEDED"
+        )
+        self.assertTrue(outcome.cleanup_performed)
+
+    def test_descendant_cap_precedes_all_live_storage_inventory(self) -> None:
+        class RunningProcess:
+            pid = 999_977
+            returncode = -signal.SIGTERM
+
+            def poll(self) -> None:
+                return None
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        process = RunningProcess()
+        table = {
+            process.pid: (1, 0, 0, "linux-proc-start:1"),
+            999_976: (process.pid, 0, 0, "linux-proc-start:2"),
+            999_975: (process.pid, 0, 0, "linux-proc-start:3"),
+        }
+        limits = dict(full_gate.DEFAULT_RESOURCE_LIMITS)
+        limits["descendants"] = 1
+        root = self.base / "descendant-precheck"
+        root.mkdir()
+        stdout = self.base / "descendant-precheck.stdout"
+        stderr = self.base / "descendant-precheck.stderr"
+        with stdout.open("w+b") as stdout_handle, stderr.open(
+            "w+b"
+        ) as stderr_handle, mock.patch.object(
+            full_gate, "_process_snapshot", return_value=table
+        ), mock.patch.object(
+            full_gate, "_inspect_open_regular_files"
+        ) as inspect_open, mock.patch.object(
+            full_gate, "_inspect_unlinked_regular_mappings"
+        ) as inspect_mapped, mock.patch.object(
+            full_gate, "_terminate_process_group", return_value=True
+        ), mock.patch.object(
+            full_gate, "_kill_tracked_descendants", return_value=True
+        ):
+            outcome = full_gate.supervise_process(
+                process,
+                timeout=1,
+                stdout_handle=stdout_handle,
+                stderr_handle=stderr_handle,
+                invocation_root=root,
+                limits=limits,
+            )
+        self.assertEqual(
+            outcome.resource_status, "GATE_DESCENDANT_LIMIT_EXCEEDED"
+        )
+        inspect_open.assert_not_called()
+        inspect_mapped.assert_not_called()
+
+    def test_descendant_cleanup_snapshots_are_bounded_independent_of_pid_count(
+        self,
+    ) -> None:
+        identities = tuple(
+            (900_000 + index, f"linux-proc-start:{index + 1}")
+            for index in range(32)
+        )
+        alive = {
+            pid: (1, 0, 0, start_identity)
+            for pid, start_identity in identities
+        }
+        with mock.patch.object(
+            full_gate, "_process_snapshot", side_effect=(alive, {})
+        ) as snapshots, mock.patch.object(
+            full_gate,
+            "_open_identity_bound_pidfd",
+            side_effect=range(700, 732),
+        ), mock.patch.object(
+            full_gate, "_signal_identity_bound_pidfd", return_value=True
+        ) as signal_pidfd, mock.patch.object(
+            full_gate, "_close_raw_descriptor_with_retry", return_value=None
+        ):
+            cleaned = full_gate._kill_tracked_descendants(identities)
+        self.assertTrue(cleaned)
+        self.assertEqual(snapshots.call_count, 2)
+        self.assertEqual(signal_pidfd.call_count, len(identities))
+        self.assertTrue(
+            all(call.args[1] == signal.SIGTERM for call in signal_pidfd.call_args_list)
+        )
+
+    def test_supervision_uses_one_initial_snapshot_plus_one_per_accounting_iteration(
+        self,
+    ) -> None:
+        root = self.base / "single-snapshot-accounting"
+        root.mkdir()
+        stdout = self.base / "single-snapshot.stdout"
+        stderr = self.base / "single-snapshot.stderr"
+        iterations = 3
+        snapshot_calls = 0
+
+        class FinishedAfterIterations:
+            pid = 999_989
+            returncode = 0
+
+            def __init__(self) -> None:
+                self.poll_calls = 0
+
+            def poll(self) -> int | None:
+                if self.poll_calls < iterations:
+                    self.poll_calls += 1
+                    return None
+                return self.returncode
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        process = FinishedAfterIterations()
+
+        def process_snapshot() -> dict[int, tuple[int, int, int, str]]:
+            nonlocal snapshot_calls
+            snapshot_calls += 1
+            return {
+                process.pid: (1, 0, 0, "linux-proc-start:1"),
+            }
+
+        with stdout.open("w+b") as stdout_handle, stderr.open("w+b") as stderr_handle:
+            with mock.patch.object(
+                full_gate,
+                "_process_snapshot",
+                side_effect=process_snapshot,
+            ), mock.patch.object(
+                full_gate,
+                "_inspect_open_regular_files",
+                return_value=(),
+            ), mock.patch.object(
+                full_gate,
+                "_inspect_unlinked_regular_mappings",
+                return_value=(),
+            ), mock.patch.object(
+                full_gate,
+                "_terminate_process_group",
+                return_value=False,
+            ), mock.patch.object(full_gate.time, "sleep"):
+                outcome = full_gate.supervise_process(
+                    process,
+                    timeout=5,
+                    stdout_handle=stdout_handle,
+                    stderr_handle=stderr_handle,
+                    invocation_root=root,
+                )
+
+        self.assertEqual(outcome.returncode, 0)
+        self.assertEqual(snapshot_calls, 1 + iterations)
+
+    def test_supervision_refreshes_without_live_fd_scan_and_detects_pid_drift(
+        self,
+    ) -> None:
+        stdout = self.base / "no-live-fd-drift.stdout"
+        stderr = self.base / "no-live-fd-drift.stderr"
+        snapshots = iter(
+            (
+                {999_987: (1, 0, 0, "linux-proc-start:1")},
+                {999_987: (1, 0, 0, "linux-proc-start:2")},
+            )
+        )
+        snapshot_calls = 0
+
+        class RunningProcess:
+            pid = 999_987
+            returncode = -signal.SIGTERM
+
+            def poll(self) -> None:
+                return None
+
+            def wait(self, timeout: float | None = None) -> int:
+                return self.returncode
+
+        def process_snapshot() -> dict[int, tuple[int, int, int, str]]:
+            nonlocal snapshot_calls
+            snapshot_calls += 1
+            return next(snapshots)
+
+        with stdout.open("w+b") as stdout_handle, stderr.open("w+b") as stderr_handle:
+            with mock.patch.object(
+                full_gate,
+                "_process_snapshot",
+                side_effect=process_snapshot,
+            ), mock.patch.object(
+                full_gate,
+                "_terminate_process_group",
+                return_value=True,
+            ):
+                outcome = full_gate.supervise_process(
+                    RunningProcess(),
+                    timeout=5,
+                    stdout_handle=stdout_handle,
+                    stderr_handle=stderr_handle,
+                )
+
+        self.assertEqual(outcome.resource_status, "WRAPPER_IDENTITY_DRIFT")
+        self.assertEqual(snapshot_calls, 2)
+
+    def _minimal_run_gate_fixture(self) -> dict[str, object]:
+        invocation = self.base / "pipe-ownership-invocation"
+        paths = {
+            "snapshot": invocation / "snapshot",
+            "runtime": invocation / "runtime",
+            "dependencies": invocation / "dependencies",
+            "tools": invocation / "tools",
+            "wrapper": invocation / "wrapper.py",
+            "contract": invocation / "contract.json",
+            "scratch": invocation / "scratch",
+            "tmpdir": invocation / "tmp",
+        }
+        for key, path in paths.items():
+            if key not in {"wrapper", "contract"}:
+                path.mkdir(parents=True, exist_ok=True)
+        return paths
+
+    def test_run_gate_computes_baseline_before_creating_authority_pipe(self) -> None:
+        paths = self._minimal_run_gate_fixture()
+        with mock.patch.object(
+            full_gate,
+            "build_sandbox_argv",
+            return_value=("sandbox-exec", "--authority-fd", "3"),
+        ), mock.patch.object(
+            full_gate,
+            "scan_invocation_baseline",
+            side_effect=full_gate.FullGateError("GATE_INVOCATION_ENTRY_INVALID"),
+        ), mock.patch.object(
+            full_gate,
+            "create_cloexec_pipe",
+            return_value=(701, 702),
+        ) as create_pipe, mock.patch.object(full_gate.os, "close"):
+            with self.assertRaises(full_gate.FullGateError):
+                full_gate.run_gate_once(
+                    b"profile",
+                    paths["snapshot"],
+                    paths["runtime"],
+                    paths["dependencies"],
+                    paths["tools"],
+                    paths["wrapper"],
+                    paths["contract"],
+                    "a" * 64,
+                    paths["scratch"],
+                    {"TMPDIR": str(paths["tmpdir"])},
+                    sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                    timeout=10,
+                    limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+                    nonce="b" * 64,
+                )
+        create_pipe.assert_not_called()
+
+    def test_owned_descriptor_retries_pre_close_interrupt_and_avoids_reused_fd(
+        self,
+    ) -> None:
+        real_close = os.close
+
+        read_fd, write_fd = os.pipe()
+        before_owner = full_gate._OwnedDescriptor.take(write_fd)
+        os.write(write_fd, b"buffered-before-close")
+        before_calls = 0
+
+        def interrupt_before_close(descriptor: int) -> None:
+            nonlocal before_calls
+            self.assertEqual(descriptor, write_fd)
+            before_calls += 1
+            if before_calls == 1:
+                raise KeyboardInterrupt()
+            real_close(descriptor)
+
+        try:
+            with mock.patch.object(
+                full_gate.os, "close", side_effect=interrupt_before_close
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    before_owner.close()
+                self.assertEqual(before_owner.fileno(), write_fd)
+                before_owner.close()
+            self.assertEqual(before_calls, 2)
+            with self.assertRaises(OSError):
+                os.fstat(write_fd)
+        finally:
+            real_close(read_fd)
+
+        read_fd, write_fd = os.pipe()
+        after_owner = full_gate._OwnedDescriptor.take(write_fd)
+        replacement: dict[str, int] = {}
+
+        def interrupt_after_close(descriptor: int) -> None:
+            self.assertEqual(descriptor, write_fd)
+            real_close(descriptor)
+            replacement_fd = os.open("/dev/null", os.O_RDONLY)
+            if replacement_fd != descriptor:
+                os.dup2(replacement_fd, descriptor)
+                real_close(replacement_fd)
+            replacement["fd"] = descriptor
+            raise KeyboardInterrupt()
+
+        try:
+            with mock.patch.object(
+                full_gate.os, "close", side_effect=interrupt_after_close
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    after_owner.close()
+                after_owner.close()
+            self.assertEqual(after_owner.descriptor, -1)
+            self.assertTrue(stat.S_ISCHR(os.fstat(replacement["fd"]).st_mode))
+        finally:
+            real_close(replacement.get("fd", write_fd))
+            real_close(read_fd)
+
+    def test_create_cloexec_pipe_closes_both_fds_on_set_or_get_failure(
+        self,
+    ) -> None:
+        real_pipe = os.pipe
+        real_set_inheritable = os.set_inheritable
+        for stage in ("set", "get"):
+            with self.subTest(stage=stage):
+                created: tuple[int, int] | None = None
+
+                def tracked_pipe() -> tuple[int, int]:
+                    nonlocal created
+                    created = real_pipe()
+                    return created
+
+                def set_inheritable(descriptor: int, inheritable: bool) -> None:
+                    if stage == "set":
+                        raise OSError(errno.EIO, "injected set failure")
+                    real_set_inheritable(descriptor, inheritable)
+
+                def get_inheritable(_descriptor: int) -> bool:
+                    if stage == "get":
+                        raise OSError(errno.EIO, "injected get failure")
+                    return False
+
+                with mock.patch.object(
+                    full_gate.os, "pipe", side_effect=tracked_pipe
+                ), mock.patch.object(
+                    full_gate.os, "set_inheritable", side_effect=set_inheritable
+                ), mock.patch.object(
+                    full_gate.os, "get_inheritable", side_effect=get_inheritable
+                ), self.assertRaises(full_gate.FullGateError) as raised:
+                    full_gate.create_cloexec_pipe()
+
+                self.assertEqual(
+                    raised.exception.status,
+                    "AUTHORITY_PIPE_CREATE_FAILED",
+                )
+                self.assertIsNotNone(created)
+                for descriptor in created or ():
+                    with self.assertRaises(OSError):
+                        os.fstat(descriptor)
+
+    def test_create_cloexec_pipe_retries_pre_close_interrupt_for_both_fds(
+        self,
+    ) -> None:
+        real_pipe = os.pipe
+        real_close = os.close
+        created: tuple[int, int] | None = None
+        close_calls: list[int] = []
+
+        def tracked_pipe() -> tuple[int, int]:
+            nonlocal created
+            created = real_pipe()
+            return created
+
+        def interrupt_first_close(descriptor: int) -> None:
+            close_calls.append(descriptor)
+            if len(close_calls) == 1:
+                raise KeyboardInterrupt("injected pre-close interrupt")
+            real_close(descriptor)
+
+        with mock.patch.object(
+            full_gate.os, "pipe", side_effect=tracked_pipe
+        ), mock.patch.object(
+            full_gate.os, "get_inheritable", return_value=True
+        ), mock.patch.object(
+            full_gate.os, "close", side_effect=interrupt_first_close
+        ), self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.create_cloexec_pipe()
+
+        self.assertEqual(raised.exception.status, "AUTHORITY_PIPE_CREATE_FAILED")
+        self.assertEqual(
+            raised.exception.primary_status,
+            "AUTHORITY_PIPE_CLOSE_FAILED",
+        )
+        self.assertIsNotNone(created)
+        self.assertEqual(len(close_calls), 3)
+        self.assertEqual(close_calls[0], close_calls[1])
+        self.assertNotEqual(close_calls[1], close_calls[2])
+        for descriptor in created or ():
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+
+    def test_run_gate_closes_owned_pipe_fds_on_pre_spawn_failure(self) -> None:
+        paths = self._minimal_run_gate_fixture()
+        with mock.patch.object(
+            full_gate,
+            "build_sandbox_argv",
+            return_value=("sandbox-exec",),
+        ), mock.patch.object(
+            full_gate,
+            "scan_invocation_baseline",
+            return_value={"entries": 0, "bytes": 0},
+        ), mock.patch.object(
+            full_gate,
+            "create_cloexec_pipe",
+            return_value=(701, 702),
+        ), mock.patch.object(full_gate.os, "close") as close_fd:
+            with self.assertRaises(full_gate.FullGateError) as raised:
+                full_gate.run_gate_once(
+                    b"profile",
+                    paths["snapshot"],
+                    paths["runtime"],
+                    paths["dependencies"],
+                    paths["tools"],
+                    paths["wrapper"],
+                    paths["contract"],
+                    "a" * 64,
+                    paths["scratch"],
+                    {"TMPDIR": str(paths["tmpdir"])},
+                    sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                    timeout=10,
+                    limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+                    nonce="b" * 64,
+                )
+        self.assertEqual(raised.exception.status, "GATE_SPAWN_FAILED")
+        self.assertEqual(close_fd.call_count, 2)
+        close_fd.assert_any_call(701)
+        close_fd.assert_any_call(702)
+
+    def test_run_gate_closes_owned_pipe_fds_on_spawn_failure_and_success(self) -> None:
+        paths = self._minimal_run_gate_fixture()
+
+        class FinishedProcess:
+            pid = 999_988
+            returncode = 0
+
+        for name, popen_result, supervise_result, expected_error in (
+            (
+                "spawn_failure",
+                OSError("spawn failed"),
+                full_gate.GateOutcome(0, False, False, None, b"", b""),
+                "GATE_SPAWN_FAILED",
+            ),
+            (
+                "supervision_failure",
+                FinishedProcess(),
+                full_gate.FullGateError("PROCESS_INVENTORY_FAILED"),
+                "PROCESS_INVENTORY_FAILED",
+            ),
+            (
+                "success",
+                FinishedProcess(),
+                full_gate.GateOutcome(0, False, False, None, b"", b""),
+                None,
+            ),
+        ):
+            with self.subTest(name=name):
+                with mock.patch.object(
+                    full_gate,
+                    "build_sandbox_argv",
+                    return_value=("sandbox-exec", "--authority-fd", "3"),
+                ), mock.patch.object(
+                    full_gate,
+                    "scan_invocation_baseline",
+                    return_value={"entries": 0, "bytes": 0},
+                ), mock.patch.object(
+                    full_gate,
+                    "create_cloexec_pipe",
+                    return_value=(701, 702),
+                ), mock.patch.object(
+                    full_gate.subprocess,
+                    "Popen",
+                    side_effect=popen_result if isinstance(popen_result, OSError) else None,
+                    return_value=None if isinstance(popen_result, OSError) else popen_result,
+                ), mock.patch.object(
+                    full_gate,
+                    "supervise_process",
+                    side_effect=(
+                        supervise_result
+                        if isinstance(supervise_result, full_gate.FullGateError)
+                        else None
+                    ),
+                    return_value=(
+                        None
+                        if isinstance(supervise_result, full_gate.FullGateError)
+                        else supervise_result
+                    ),
+                ), mock.patch.object(
+                    full_gate,
+                    "_cleanup_spawn_after_authority_pipe_close_failure",
+                ) as cleanup, mock.patch.object(
+                    full_gate.os, "close"
+                ) as close_fd:
+                    if expected_error is None:
+                        outcome = full_gate.run_gate_once(
+                            b"profile",
+                            paths["snapshot"],
+                            paths["runtime"],
+                            paths["dependencies"],
+                            paths["tools"],
+                            paths["wrapper"],
+                            paths["contract"],
+                            "a" * 64,
+                            paths["scratch"],
+                            {"TMPDIR": str(paths["tmpdir"])},
+                            sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                            timeout=10,
+                            limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+                            nonce="b" * 64,
+                        )
+                        self.assertEqual(outcome.returncode, 0)
+                    else:
+                        with self.assertRaises(full_gate.FullGateError) as raised:
+                            full_gate.run_gate_once(
+                                b"profile",
+                                paths["snapshot"],
+                                paths["runtime"],
+                                paths["dependencies"],
+                                paths["tools"],
+                                paths["wrapper"],
+                                paths["contract"],
+                                "a" * 64,
+                                paths["scratch"],
+                                {"TMPDIR": str(paths["tmpdir"])},
+                                sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                                timeout=10,
+                                limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+                                nonce="b" * 64,
+                            )
+                        self.assertEqual(raised.exception.status, expected_error)
+                if name == "supervision_failure":
+                    cleanup.assert_called_once_with(popen_result)
+                else:
+                    cleanup.assert_not_called()
+                self.assertEqual(close_fd.call_count, 2)
+                close_fd.assert_any_call(701)
+                close_fd.assert_any_call(702)
+
+    def test_run_gate_cleans_spawned_process_on_supervision_interruption(
+        self,
+    ) -> None:
+        paths = self._minimal_run_gate_fixture()
+        process = mock.Mock(pid=999_987, returncode=None)
+        with mock.patch.object(
+            full_gate,
+            "build_sandbox_argv",
+            return_value=("sandbox-exec", "--authority-fd", "3"),
+        ), mock.patch.object(
+            full_gate,
+            "scan_invocation_baseline",
+            return_value={"entries": 0, "bytes": 0},
+        ), mock.patch.object(
+            full_gate,
+            "create_cloexec_pipe",
+            return_value=(701, 702),
+        ), mock.patch.object(
+            full_gate.subprocess,
+            "Popen",
+            return_value=process,
+        ), mock.patch.object(
+            full_gate,
+            "supervise_process",
+            side_effect=KeyboardInterrupt,
+        ), mock.patch.object(
+            full_gate,
+            "_cleanup_spawn_after_authority_pipe_close_failure",
+        ) as cleanup, mock.patch.object(
+            full_gate.os,
+            "close",
+        ) as close_fd, self.assertRaises(KeyboardInterrupt):
+            full_gate.run_gate_once(
+                b"profile",
+                paths["snapshot"],
+                paths["runtime"],
+                paths["dependencies"],
+                paths["tools"],
+                paths["wrapper"],
+                paths["contract"],
+                "a" * 64,
+                paths["scratch"],
+                {"TMPDIR": str(paths["tmpdir"])},
+                sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                timeout=10,
+                limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+                nonce="b" * 64,
+            )
+        cleanup.assert_called_once_with(process)
+        self.assertEqual(close_fd.call_args_list, [mock.call(702), mock.call(701)])
+
+    def test_run_gate_cleans_spawned_process_when_parent_write_close_fails(
+        self,
+    ) -> None:
+        paths = self._minimal_run_gate_fixture()
+        process = mock.Mock(pid=999_986, returncode=-signal.SIGTERM)
+        process.wait.return_value = process.returncode
+
+        def close_fd(descriptor: int) -> None:
+            if descriptor == 702:
+                raise OSError(errno.EIO, "parent write close failed")
+
+        with mock.patch.object(
+            full_gate,
+            "build_sandbox_argv",
+            return_value=("sandbox-exec", "--authority-fd", "3"),
+        ), mock.patch.object(
+            full_gate,
+            "scan_invocation_baseline",
+            return_value={"entries": 0, "bytes": 0},
+        ), mock.patch.object(
+            full_gate,
+            "create_cloexec_pipe",
+            return_value=(701, 702),
+        ), mock.patch.object(
+            full_gate.subprocess,
+            "Popen",
+            return_value=process,
+        ), mock.patch.object(
+            full_gate,
+            "supervise_process",
+        ) as supervise, mock.patch.object(
+            full_gate,
+            "_terminate_process_group",
+            return_value=True,
+        ) as terminate, mock.patch.object(
+            full_gate.os,
+            "close",
+            side_effect=close_fd,
+        ) as close:
+            with self.assertRaises(full_gate.FullGateError) as raised:
+                full_gate.run_gate_once(
+                    b"profile",
+                    paths["snapshot"],
+                    paths["runtime"],
+                    paths["dependencies"],
+                    paths["tools"],
+                    paths["wrapper"],
+                    paths["contract"],
+                    "a" * 64,
+                    paths["scratch"],
+                    {"TMPDIR": str(paths["tmpdir"])},
+                    sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                    timeout=10,
+                    limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+                    nonce="b" * 64,
+                )
+
+        self.assertEqual(raised.exception.status, "AUTHORITY_PIPE_CLOSE_FAILED")
+        supervise.assert_not_called()
+        terminate.assert_called_once_with(process.pid)
+        process.wait.assert_called_once_with(timeout=2)
+        self.assertEqual(close.call_args_list, [mock.call(702), mock.call(701)])
+
+    def test_run_gate_final_owned_fd_close_failure_is_typed_and_not_retried(
+        self,
+    ) -> None:
+        paths = self._minimal_run_gate_fixture()
+
+        class FinishedProcess:
+            pid = 999_985
+            returncode = 0
+
+        def close_fd(descriptor: int) -> None:
+            if descriptor == 701:
+                raise OSError(errno.EIO, "parent read close failed")
+
+        with mock.patch.object(
+            full_gate,
+            "build_sandbox_argv",
+            return_value=("sandbox-exec", "--authority-fd", "3"),
+        ), mock.patch.object(
+            full_gate,
+            "scan_invocation_baseline",
+            return_value={"entries": 0, "bytes": 0},
+        ), mock.patch.object(
+            full_gate,
+            "create_cloexec_pipe",
+            return_value=(701, 702),
+        ), mock.patch.object(
+            full_gate.subprocess,
+            "Popen",
+            return_value=FinishedProcess(),
+        ), mock.patch.object(
+            full_gate,
+            "supervise_process",
+            return_value=full_gate.GateOutcome(0, False, False, None, b"", b""),
+        ), mock.patch.object(
+            full_gate,
+            "_cleanup_spawn_after_authority_pipe_close_failure",
+        ) as cleanup, mock.patch.object(
+            full_gate.os, "close", side_effect=close_fd
+        ) as close:
+            with self.assertRaises(full_gate.FullGateError) as raised:
+                full_gate.run_gate_once(
+                    b"profile",
+                    paths["snapshot"],
+                    paths["runtime"],
+                    paths["dependencies"],
+                    paths["tools"],
+                    paths["wrapper"],
+                    paths["contract"],
+                    "a" * 64,
+                    paths["scratch"],
+                    {"TMPDIR": str(paths["tmpdir"])},
+                    sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                    timeout=10,
+                    limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+                    nonce="b" * 64,
+                )
+
+        self.assertEqual(raised.exception.status, "AUTHORITY_PIPE_CLOSE_FAILED")
+        cleanup.assert_called_once()
+        self.assertEqual(close.call_args_list, [mock.call(702), mock.call(701)])
+
+    def test_run_gate_read_close_failure_replaces_and_preserves_child_wait_failure(
+        self,
+    ) -> None:
+        paths = self._minimal_run_gate_fixture()
+        process = mock.Mock(pid=999_984, returncode=None)
+        process.wait.side_effect = (
+            subprocess.TimeoutExpired(("sandbox-exec",), 2),
+            subprocess.TimeoutExpired(("sandbox-exec",), 2),
+        )
+
+        def close_fd(descriptor: int) -> None:
+            if descriptor in {701, 702}:
+                raise OSError(errno.EIO, "authority close failed")
+
+        with mock.patch.object(
+            full_gate,
+            "build_sandbox_argv",
+            return_value=("sandbox-exec", "--authority-fd", "3"),
+        ), mock.patch.object(
+            full_gate,
+            "scan_invocation_baseline",
+            return_value={"entries": 0, "bytes": 0},
+        ), mock.patch.object(
+            full_gate,
+            "create_cloexec_pipe",
+            return_value=(701, 702),
+        ), mock.patch.object(
+            full_gate.subprocess,
+            "Popen",
+            return_value=process,
+        ), mock.patch.object(
+            full_gate,
+            "supervise_process",
+        ) as supervise, mock.patch.object(
+            full_gate,
+            "_terminate_process_group",
+            return_value=True,
+        ) as terminate, mock.patch.object(
+            full_gate.os,
+            "close",
+            side_effect=close_fd,
+        ) as close:
+            with self.assertRaises(full_gate.FullGateError) as raised:
+                full_gate.run_gate_once(
+                    b"profile",
+                    paths["snapshot"],
+                    paths["runtime"],
+                    paths["dependencies"],
+                    paths["tools"],
+                    paths["wrapper"],
+                    paths["contract"],
+                    "a" * 64,
+                    paths["scratch"],
+                    {"TMPDIR": str(paths["tmpdir"])},
+                    sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                    timeout=10,
+                    limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+                    nonce="b" * 64,
+                )
+
+        self.assertEqual(raised.exception.status, "AUTHORITY_PIPE_CLOSE_FAILED")
+        self.assertEqual(raised.exception.primary_status, "CHILD_WAIT_FAILED")
+        self.assertIsInstance(raised.exception.__cause__, full_gate.FullGateError)
+        self.assertEqual(raised.exception.__cause__.status, "CHILD_WAIT_FAILED")
+        supervise.assert_not_called()
+        self.assertEqual(terminate.call_count, 2)
+        self.assertEqual(process.wait.call_count, 2)
+        self.assertEqual(close.call_args_list, [mock.call(702), mock.call(701)])
+
+    def test_run_gate_read_close_failure_replaces_and_preserves_supervision_blocker(
+        self,
+    ) -> None:
+        paths = self._minimal_run_gate_fixture()
+
+        class FinishedProcess:
+            pid = 999_983
+            returncode = 1
+
+        def close_fd(descriptor: int) -> None:
+            if descriptor == 701:
+                raise OSError(errno.EIO, "parent read close failed")
+
+        with mock.patch.object(
+            full_gate,
+            "build_sandbox_argv",
+            return_value=("sandbox-exec", "--authority-fd", "3"),
+        ), mock.patch.object(
+            full_gate,
+            "scan_invocation_baseline",
+            return_value={"entries": 0, "bytes": 0},
+        ), mock.patch.object(
+            full_gate,
+            "create_cloexec_pipe",
+            return_value=(701, 702),
+        ), mock.patch.object(
+            full_gate.subprocess,
+            "Popen",
+            return_value=FinishedProcess(),
+        ), mock.patch.object(
+            full_gate,
+            "supervise_process",
+            side_effect=full_gate.FullGateError("GATE_AGGREGATE_BYTES_EXCEEDED"),
+        ), mock.patch.object(
+            full_gate,
+            "_cleanup_spawn_after_authority_pipe_close_failure",
+        ) as cleanup, mock.patch.object(
+            full_gate.os, "close", side_effect=close_fd
+        ) as close:
+            with self.assertRaises(full_gate.FullGateError) as raised:
+                full_gate.run_gate_once(
+                    b"profile",
+                    paths["snapshot"],
+                    paths["runtime"],
+                    paths["dependencies"],
+                    paths["tools"],
+                    paths["wrapper"],
+                    paths["contract"],
+                    "a" * 64,
+                    paths["scratch"],
+                    {"TMPDIR": str(paths["tmpdir"])},
+                    sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                    timeout=10,
+                    limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+                    nonce="b" * 64,
+                )
+
+        self.assertEqual(raised.exception.status, "AUTHORITY_PIPE_CLOSE_FAILED")
+        self.assertEqual(
+            raised.exception.primary_status, "GATE_AGGREGATE_BYTES_EXCEEDED"
+        )
+        self.assertIsInstance(raised.exception.__cause__, full_gate.FullGateError)
+        self.assertEqual(
+            raised.exception.__cause__.status,
+            "GATE_AGGREGATE_BYTES_EXCEEDED",
+        )
+        cleanup.assert_called_once()
+        self.assertEqual(close.call_args_list, [mock.call(702), mock.call(701)])
 
     def test_run_gate_spawns_exactly_one_sandbox_with_no_inherited_environment(self) -> None:
         self.assertTrue(
@@ -5566,6 +9942,27 @@ class FullGateTrustedWrapperProtocolTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(os.lstat(wrapper).st_mode), 0o555)
         self.assertEqual(observed, binding)
         self.assertFalse(wrapper.is_symlink())
+
+    def test_trusted_pytest_probe_explicitly_loads_the_async_plugin(self) -> None:
+        pytest_command = dict(full_gate.TRUSTED_PROBE_COMMANDS)["pytest"]
+        inventory_index = pytest_command.index("<VERIFIED_TEST_INVENTORY>")
+        self.assertEqual(
+            pytest_command[5:inventory_index],
+            (
+                "-p",
+                "pytest_asyncio.plugin",
+                "-p",
+                "no:cacheprovider",
+            ),
+        )
+        wrapper_source = full_gate.TRUSTED_WRAPPER_SOURCE.decode("utf-8")
+        explicit_plugin = '"-p", "pytest_asyncio.plugin"'
+        verified_inventory = "*test_paths"
+        self.assertIn(explicit_plugin, wrapper_source)
+        self.assertLess(
+            wrapper_source.index(explicit_plugin),
+            wrapper_source.index(verified_inventory),
+        )
 
     def test_exact_one_sandbox_final_argv_is_copied_python_plus_wrapper(self) -> None:
         binding = full_gate.trusted_wrapper_binding()
@@ -5750,18 +10147,12 @@ class FullGateAuthorityFrameProtocolTest(unittest.TestCase):
         self.assertEqual(raised.exception.status, "AUTHORITY_POST_EXIT_BYTES")
 
 
-@unittest.skipUnless(
-    PINNED_RUNTIME_SOURCE is not None,
-    f"set {PINNED_RUNTIME_SOURCE_ENV} to an approved Python 3.12 runtime",
-)
 class FullGateTrustedWrapperDirectIntegrationTest(unittest.TestCase):
     def setUp(self) -> None:
-        raw_temp_parent = os.environ.get("TMPDIR")
-        if not raw_temp_parent:
-            self.fail("trusted bootstrap must provide an invocation-owned TMPDIR")
+        temp_parent = require_invocation_tmpdir()
         self._temp = tempfile.TemporaryDirectory(
             prefix="samvil-full-gate-wrapper-direct-",
-            dir=Path(raw_temp_parent).resolve(strict=True),
+            dir=temp_parent,
         )
         self.base = Path(self._temp.name).resolve(strict=True)
 
@@ -5769,12 +10160,27 @@ class FullGateTrustedWrapperDirectIntegrationTest(unittest.TestCase):
         self._temp.cleanup()
 
     def run_wrapper(
-        self, gate_source: bytes, *, sandboxed: bool = False
+        self,
+        gate_source: bytes,
+        *,
+        sandboxed: bool = False,
+        timeout: float = 120,
     ) -> tuple[subprocess.CompletedProcess[bytes], bytes, Path]:
+        seatbelt_context = require_real_seatbelt_context() if sandboxed else None
+        execution_context = (
+            None if seatbelt_context is not None else require_copied_runtime_execution()
+        )
         invocation = self.base / sha256(gate_source)[:12]
         invocation.mkdir()
         runtime = invocation / "runtime"
-        copy_pinned_runtime(runtime)
+        copy_pinned_runtime(
+            runtime,
+            runtime_source=(
+                seatbelt_context.pinned_runtime_source
+                if seatbelt_context is not None
+                else execution_context.pinned_runtime_source
+            ),
+        )
         dependencies = invocation / "dependencies"
         tools = invocation / "tools"
         scratch = invocation / "scratch"
@@ -5811,98 +10217,192 @@ class FullGateTrustedWrapperDirectIntegrationTest(unittest.TestCase):
             wrapper=wrapper,
             scratch=scratch,
         )
-        read_fd, write_fd = full_gate.create_cloexec_pipe()
-        environment = {
-            "PATH": f"{tools / 'bin'}:{runtime / 'bin'}:/usr/bin:/bin:/usr/sbin:/sbin",
-            "HOME": str(invocation / "home"),
-            "CODEX_HOME": str(invocation / "codex-home"),
-            "TMPDIR": str(scratch),
-            "LANG": "C",
-            "LC_ALL": "C",
-            "PYTHONNOUSERSITE": "1",
-            "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
-        }
-        Path(environment["HOME"]).mkdir()
-        Path(environment["CODEX_HOME"]).mkdir()
-        argv = [
-            str(runtime / "bin/python3.12"),
-            str(wrapper),
-            "--authority-fd",
-            str(write_fd),
-            "--nonce",
-            "a" * 64,
-            "--snapshot",
-            str(snapshot),
-            "--runtime",
-            str(runtime),
-            "--dependencies",
-            str(dependencies),
-            "--tools",
-            str(tools),
-            "--wrapper",
-            str(wrapper),
-            "--contract",
-            str(contract),
-            "--contract-sha256",
-            contract_sha256,
-            "--scratch",
-            str(scratch),
-        ]
-        if sandboxed:
-            profile, _source_sha256, _rendered_sha256 = full_gate.render_loopback_profile(
-                invocation,
-                snapshot,
-                runtime,
-                tools,
-                protected_roots=(self.base / "protected-home", self.base / "protected-codex"),
-                executable_allowlist=sorted(
-                    ["/bin/bash", str(runtime / "bin/python3.12"), str(wrapper)]
-                ),
-                writable_roots=(
-                    scratch,
-                    Path(environment["HOME"]),
-                    Path(environment["CODEX_HOME"]),
-                ),
-            )
-            argv = list(
-                full_gate.build_sandbox_argv(
-                    profile,
-                    snapshot,
-                    runtime,
-                    dependencies,
-                    tools,
-                    wrapper,
-                    contract,
-                    contract_sha256,
-                    scratch,
-                    environment,
-                    sandbox_executable=Path("/usr/bin/sandbox-exec"),
-                    authority_fd=write_fd,
-                    nonce="a" * 64,
-                )
-            )
-        process = subprocess.Popen(
-            argv,
-            cwd=snapshot,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            close_fds=True,
-            pass_fds=(write_fd,),
+        environment = full_gate.build_hermetic_environment(
+            invocation, runtime, tools
         )
-        os.close(write_fd)
-        chunks = []
-        while True:
-            chunk = os.read(read_fd, 64 * 1024)
-            if not chunk:
-                break
-            chunks.append(chunk)
-        os.close(read_fd)
-        stdout, stderr = process.communicate(timeout=120)
-        completed = subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
-        return completed, b"".join(chunks), scratch
+        raw_read_fd: int | None = None
+        raw_write_fd: int | None = None
+        read_owner: full_gate._OwnedDescriptor | None = None
+        write_owner: full_gate._OwnedDescriptor | None = None
+        with tempfile.TemporaryFile(
+            mode="w+b", dir=Path(environment["TMPDIR"])
+        ) as stdout_handle, tempfile.TemporaryFile(
+            mode="w+b", dir=Path(environment["TMPDIR"])
+        ) as stderr_handle:
+            try:
+                raw_read_fd, raw_write_fd = full_gate.create_cloexec_pipe()
+                read_owner = full_gate._OwnedDescriptor.take(raw_read_fd)
+                raw_read_fd = None
+                write_owner = full_gate._OwnedDescriptor.take(raw_write_fd)
+                raw_write_fd = None
+                read_fd = read_owner.fileno()
+                write_fd = write_owner.fileno()
+                argv = [
+                    str(runtime / "bin/python3.12"),
+                    str(wrapper),
+                    "--authority-fd",
+                    str(write_fd),
+                    "--nonce",
+                    "a" * 64,
+                    "--snapshot",
+                    str(snapshot),
+                    "--runtime",
+                    str(runtime),
+                    "--dependencies",
+                    str(dependencies),
+                    "--tools",
+                    str(tools),
+                    "--wrapper",
+                    str(wrapper),
+                    "--contract",
+                    str(contract),
+                    "--contract-sha256",
+                    contract_sha256,
+                    "--scratch",
+                    str(scratch),
+                ]
+                if sandboxed:
+                    assert seatbelt_context is not None
+                    profile, _source_sha256, _rendered_sha256 = (
+                        full_gate.render_loopback_profile(
+                            invocation,
+                            snapshot,
+                            runtime,
+                            tools,
+                            protected_roots=(
+                                self.base / "protected-home",
+                                self.base / "protected-codex",
+                            ),
+                            executable_allowlist=sorted(
+                                [
+                                    "/bin/bash",
+                                    str(runtime / "bin/python3.12"),
+                                    str(wrapper),
+                                ]
+                            ),
+                            writable_roots=tuple(
+                                Path(environment[key])
+                                for key in (
+                                    "HOME",
+                                    "CODEX_HOME",
+                                    "CLAUDE_CONFIG_DIR",
+                                    "GNUPGHOME",
+                                    "TMPDIR",
+                                    "XDG_CACHE_HOME",
+                                    "XDG_CONFIG_HOME",
+                                    "XDG_DATA_HOME",
+                                    "XDG_STATE_HOME",
+                                )
+                            )
+                            + (scratch,),
+                        )
+                    )
+                    argv = list(
+                        full_gate.build_sandbox_argv(
+                            profile,
+                            snapshot,
+                            runtime,
+                            dependencies,
+                            tools,
+                            wrapper,
+                            contract,
+                            contract_sha256,
+                            scratch,
+                            environment,
+                            sandbox_executable=seatbelt_context.sandbox_executable,
+                            authority_fd=write_fd,
+                            nonce="a" * 64,
+                        )
+                    )
+                try:
+                    process = subprocess.Popen(
+                        argv,
+                        cwd=snapshot,
+                        env=environment,
+                        stdin=subprocess.DEVNULL,
+                        stdout=stdout_handle,
+                        stderr=stderr_handle,
+                        start_new_session=True,
+                        close_fds=True,
+                        pass_fds=(write_fd,),
+                    )
+                except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                    raise ReleaseControlHarnessError(
+                        "HARNESS_SPAWN_FAILED", str(exc)
+                    ) from None
+                try:
+                    _close_owned_harness_owner(
+                        write_owner, primary_exception=None
+                    )
+                    outcome = full_gate.supervise_process(
+                        process,
+                        timeout=timeout,
+                        stdout_handle=stdout_handle,
+                        stderr_handle=stderr_handle,
+                        invocation_root=scratch,
+                        authority_read_fd=read_fd,
+                        nonce="a" * 64,
+                        limits=full_gate.DEFAULT_RESOURCE_LIMITS,
+                    )
+                except BaseException as primary:
+                    try:
+                        if _harness_process_group_exists(process):
+                            _terminate_harness_process_group(
+                                process,
+                                primary_status=getattr(
+                                    primary, "status", "HARNESS_INTERRUPTED"
+                                ),
+                            )
+                        else:
+                            process.communicate(timeout=2)
+                    except BaseException as cleanup_error:
+                        raise cleanup_error from primary
+                    raise
+                if outcome.timed_out:
+                    raise ReleaseControlHarnessError("HARNESS_TIMEOUT")
+                if outcome.resource_status is not None:
+                    raise ReleaseControlHarnessError(
+                        "HARNESS_RESOURCE_LIMIT", outcome.resource_status
+                    )
+                if outcome.cleanup_performed:
+                    raise ReleaseControlHarnessError(
+                        "HARNESS_DESCENDANT_CLEANUP_REQUIRED"
+                    )
+                transcript = b"".join(
+                    full_gate.encode_authority_frame(
+                        frame, limits=full_gate.DEFAULT_RESOURCE_LIMITS
+                    )
+                    for frame in outcome.authority_frames
+                )
+                completed = subprocess.CompletedProcess(
+                    argv,
+                    outcome.returncode,
+                    outcome.stdout,
+                    outcome.stderr,
+                )
+                return completed, transcript, scratch
+            finally:
+                primary_exception = sys.exc_info()[1]
+                owners = tuple(
+                    owner
+                    for owner in (write_owner, read_owner)
+                    if owner is not None
+                )
+                write_owner = None
+                read_owner = None
+                _close_owned_harness_owners(
+                    owners, primary_exception=primary_exception
+                )
+                raw_descriptors = tuple(
+                    descriptor
+                    for descriptor in (raw_write_fd, raw_read_fd)
+                    if descriptor is not None
+                )
+                raw_write_fd = None
+                raw_read_fd = None
+                _close_owned_harness_fds(
+                    raw_descriptors, primary_exception=primary_exception
+                )
 
     def test_candidate_observation_and_frame_spoof_cannot_reach_authority_fd(self) -> None:
         gate = b'''#!/bin/bash
@@ -5948,7 +10448,159 @@ exit 0
         self.assertEqual(frames[-1]["status"], "FAIL")
         self.assertNotIn("complete", {frame["phase"] for frame in frames})
 
-    @unittest.skipUnless(Path("/usr/bin/sandbox-exec").is_file(), "macOS sandbox required")
+    def test_sandboxed_wrapper_is_opt_in_before_copy_or_spawn(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {"TMPDIR": str(self.base)},
+            clear=True,
+        ), mock.patch(
+            f"{__name__}.copy_pinned_runtime",
+            side_effect=AssertionError("Seatbelt preflight reached runtime copy"),
+        ), mock.patch.object(
+            subprocess,
+            "Popen",
+            side_effect=AssertionError("Seatbelt preflight reached Popen"),
+        ), self.assertRaises(unittest.SkipTest) as raised:
+            self.run_wrapper(b"#!/bin/bash\nexit 0\n", sandboxed=True)
+        self.assertIn("REAL_SEATBELT_OPT_IN_REQUIRED", str(raised.exception))
+
+    def test_parent_authority_close_interruption_cleans_spawned_group(self) -> None:
+        fd_root = Path("/dev/fd") if Path("/dev/fd").is_dir() else Path("/proc/self/fd")
+
+        def open_descriptors() -> set[int]:
+            observed: set[int] = set()
+            for name in os.listdir(fd_root):
+                if not name.isdigit():
+                    continue
+                descriptor = int(name)
+                try:
+                    os.fstat(descriptor)
+                except OSError:
+                    continue
+                observed.add(descriptor)
+            return observed
+
+        def fake_copy(destination: Path, **_kwargs: object) -> None:
+            (destination / "bin").mkdir(parents=True)
+            executable = destination / "bin/python3.12"
+            executable.write_bytes(b"fixture")
+            executable.chmod(0o755)
+
+        execution_context = CopiedRuntimeExecutionContext(
+            pinned_runtime_source=self.base / "approved-runtime-source",
+            invocation_tmpdir=self.base,
+        )
+        for index, primary in enumerate((KeyboardInterrupt(), SystemExit(17))):
+            with self.subTest(primary=type(primary).__name__):
+                before_descriptors = open_descriptors()
+                fake_process = mock.Mock(pid=424250 + index, returncode=None)
+                with mock.patch(
+                    f"{__name__}.require_copied_runtime_execution",
+                    return_value=execution_context,
+                ), mock.patch(
+                    f"{__name__}.copy_pinned_runtime", side_effect=fake_copy
+                ), mock.patch.object(
+                    subprocess, "Popen", return_value=fake_process
+                ), mock.patch(
+                    f"{__name__}._close_owned_harness_owner",
+                    side_effect=primary,
+                ), mock.patch(
+                    f"{__name__}._harness_process_group_exists",
+                    return_value=True,
+                ), mock.patch(
+                    f"{__name__}._terminate_harness_process_group"
+                ) as terminate, mock.patch.object(
+                    full_gate,
+                    "supervise_process",
+                    side_effect=AssertionError(
+                        "supervision ran after parent authority close failure"
+                    ),
+                ) as supervise, self.assertRaises(type(primary)) as raised:
+                    self.run_wrapper(
+                        f"#!/bin/bash\n# case-{index}\nexit 0\n".encode()
+                    )
+                self.assertIs(raised.exception, primary)
+                terminate.assert_called_once_with(
+                    fake_process, primary_status="HARNESS_INTERRUPTED"
+                )
+                supervise.assert_not_called()
+                self.assertEqual(open_descriptors(), before_descriptors)
+
+    def test_wrapper_supervisor_timeout_is_typed_without_blocking_pipe_reads(
+        self,
+    ) -> None:
+        def fake_copy(destination: Path, **_kwargs: object) -> None:
+            (destination / "bin").mkdir(parents=True)
+            executable = destination / "bin/python3.12"
+            executable.write_bytes(b"fixture")
+            executable.chmod(0o755)
+
+        fake_process = mock.Mock(pid=424242, returncode=-signal.SIGTERM)
+        timeout_outcome = full_gate.GateOutcome(
+            returncode=-signal.SIGTERM,
+            timed_out=True,
+            cleanup_performed=True,
+            resource_status=None,
+            stdout=b"",
+            stderr=b"",
+        )
+        execution_context = CopiedRuntimeExecutionContext(
+            pinned_runtime_source=self.base / "approved-runtime-source",
+            invocation_tmpdir=self.base,
+        )
+        with mock.patch(
+            f"{__name__}.require_copied_runtime_execution",
+            return_value=execution_context,
+        ), mock.patch(
+            f"{__name__}.copy_pinned_runtime", side_effect=fake_copy
+        ), mock.patch.object(
+            subprocess, "Popen", return_value=fake_process
+        ) as popen, mock.patch.object(
+            full_gate, "supervise_process", return_value=timeout_outcome
+        ) as supervise, self.assertRaises(ReleaseControlHarnessError) as raised:
+            self.run_wrapper(b"#!/bin/bash\nsleep 30\n", timeout=0.05)
+        self.assertEqual(raised.exception.status, "HARNESS_TIMEOUT")
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+        self.assertIsNot(popen.call_args.kwargs["stdout"], subprocess.PIPE)
+        self.assertIsNot(popen.call_args.kwargs["stderr"], subprocess.PIPE)
+        self.assertEqual(supervise.call_args.kwargs["timeout"], 0.05)
+
+    def test_wrapper_supervisor_cleanup_required_is_typed(self) -> None:
+        def fake_copy(destination: Path, **_kwargs: object) -> None:
+            (destination / "bin").mkdir(parents=True)
+            executable = destination / "bin/python3.12"
+            executable.write_bytes(b"fixture")
+            executable.chmod(0o755)
+
+        fake_process = mock.Mock(pid=424243, returncode=0)
+        cleanup_outcome = full_gate.GateOutcome(
+            returncode=0,
+            timed_out=False,
+            cleanup_performed=True,
+            resource_status=None,
+            stdout=b"",
+            stderr=b"",
+        )
+        execution_context = CopiedRuntimeExecutionContext(
+            pinned_runtime_source=self.base / "approved-runtime-source",
+            invocation_tmpdir=self.base,
+        )
+        with mock.patch(
+            f"{__name__}.require_copied_runtime_execution",
+            return_value=execution_context,
+        ), mock.patch(
+            f"{__name__}.copy_pinned_runtime", side_effect=fake_copy
+        ), mock.patch.object(
+            subprocess, "Popen", return_value=fake_process
+        ), mock.patch.object(
+            full_gate, "supervise_process", return_value=cleanup_outcome
+        ), self.assertRaises(ReleaseControlHarnessError) as raised:
+            self.run_wrapper(b"#!/bin/bash\nexit 0\n")
+        self.assertEqual(
+            raised.exception.status,
+            "HARNESS_DESCENDANT_CLEANUP_REQUIRED",
+        )
+
     def test_real_profile_denies_snapshot_mutation_and_still_runs_fixed_probes(self) -> None:
         gate = b'''#!/bin/bash
 chmod 0777 mcp/tests/test_example.py 2>/dev/null && exit 91
@@ -6187,6 +10839,20 @@ class FullGateCompleteExecutionTest(unittest.TestCase):
             stack.enter_context(
                 mock.patch.object(
                     full_gate,
+                    "_acquire_invocation_storage_quota_authority",
+                    return_value=quota_authority_fixture(),
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    full_gate,
+                    "_detached_process_signal_supported",
+                    return_value=True,
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(
+                    full_gate,
                     "open_external_control_artifact",
                     return_value=manifest_artifact,
                 )
@@ -6404,16 +11070,230 @@ class FullGateCompleteExecutionTest(unittest.TestCase):
         self.assertEqual(authority.close_calls, 1)
 
 
-@unittest.skipUnless(
-    PINNED_RUNTIME_SOURCE is not None,
-    f"set {PINNED_RUNTIME_SOURCE_ENV} to an approved Python 3.12 runtime",
-)
-class FullGateEndToEndTest(unittest.TestCase):
+class FullGateStorageQuotaBlockerTest(unittest.TestCase):
     def setUp(self) -> None:
-        raw_temp_parent = os.environ.get("TMPDIR")
-        if not raw_temp_parent:
-            self.fail("trusted bootstrap must provide an invocation-owned TMPDIR")
-        temp_parent = Path(raw_temp_parent).resolve(strict=True)
+        temp_parent = require_invocation_tmpdir()
+        self._temp = tempfile.TemporaryDirectory(
+            prefix="samvil-full-gate-quota-blocker-",
+            dir=temp_parent,
+        )
+        self.base = Path(self._temp.name).resolve(strict=True)
+        self.control = (self.base / "control").resolve()
+        self.control.mkdir()
+        self.manifest = self.base / "manifest.json"
+        self.manifest.write_bytes(full_gate.canonical_json_bytes({}))
+
+    def tearDown(self) -> None:
+        self._temp.cleanup()
+
+    def test_missing_quota_is_deterministic_path_free_and_pre_materialization(
+        self,
+    ) -> None:
+        class ValidatedQuotaFixture:
+            raw: dict[str, object] = {}
+            prior_receipt_sha256: str | None = None
+
+        receipts: list[bytes] = []
+        output_paths: list[Path] = []
+        with mock.patch.object(
+            full_gate,
+            "validate_manifest_object",
+            return_value=ValidatedQuotaFixture(),
+        ), mock.patch.object(
+            full_gate, "validate_cli_target_binding"
+        ), mock.patch.object(
+            full_gate, "_external_references", return_value=()
+        ), mock.patch.object(
+            full_gate.tempfile,
+            "mkdtemp",
+            side_effect=AssertionError("quota blocker reached invocation creation"),
+        ) as create_invocation, mock.patch.object(
+            full_gate,
+            "materialize_closure_archive",
+            side_effect=AssertionError("quota blocker reached materialization"),
+        ) as materialize, mock.patch.object(
+            full_gate.subprocess,
+            "Popen",
+            side_effect=AssertionError("quota blocker reached candidate spawn"),
+        ) as spawn:
+            for attempt in range(2):
+                receipt = self.base / f"receipt-{attempt}.json"
+                denial = self.base / f"denial-{attempt}.log"
+                output_paths.extend((receipt, denial))
+                with self.assertRaises(full_gate.FullGateError) as raised:
+                    full_gate.execute_full_gate(
+                        full_gate.FullGateArguments(
+                            manifest=str(self.manifest),
+                            prior_receipt=None,
+                            nonce="a" * 64,
+                            timeout=10,
+                            receipt=str(receipt),
+                            denial_log=str(denial),
+                        ),
+                        source_environment={},
+                        control_root=self.control,
+                    )
+                self.assertEqual(
+                    raised.exception.status,
+                    full_gate.INVOCATION_STORAGE_QUOTA_BLOCKER,
+                )
+                receipts.append(receipt.read_bytes())
+                self.assertEqual(denial.read_bytes(), b"")
+
+        self.assertEqual(receipts[0], receipts[1])
+        self.assertEqual(
+            json.loads(receipts[0]),
+            {
+                "schema": "samvil.full-gate-failure.v1",
+                "status": "UNSUPPORTED_INVOCATION_STORAGE_QUOTA",
+                "verdict": "BLOCKED",
+                "nonce": "a" * 64,
+            },
+        )
+        for path in (self.manifest, self.control, *output_paths):
+            self.assertNotIn(str(path).encode("utf-8"), receipts[0])
+        create_invocation.assert_not_called()
+        materialize.assert_not_called()
+        spawn.assert_not_called()
+
+    def test_quota_blocker_maps_to_environment_terminal(self) -> None:
+        self.assertEqual(
+            full_gate._terminal_status(full_gate.INVOCATION_STORAGE_QUOTA_BLOCKER),
+            "BLOCKED_ENVIRONMENT",
+        )
+        self.assertEqual(
+            full_gate._terminal_status(
+                full_gate.DETACHED_PROCESS_SIGNAL_UNAVAILABLE
+            ),
+            "BLOCKED_ENVIRONMENT",
+        )
+        self.assertEqual(
+            full_gate._terminal_status("MANIFEST_JSON_INVALID"),
+            "MANIFEST_JSON_INVALID",
+        )
+
+    def test_missing_identity_bound_signal_blocks_before_materialization(
+        self,
+    ) -> None:
+        class ValidatedQuotaFixture:
+            raw: dict[str, object] = {}
+            prior_receipt_sha256: str | None = None
+
+        receipt = self.base / "signal-receipt.json"
+        denial = self.base / "signal-denial.log"
+        with mock.patch.object(
+            full_gate,
+            "validate_manifest_object",
+            return_value=ValidatedQuotaFixture(),
+        ), mock.patch.object(
+            full_gate, "validate_cli_target_binding"
+        ), mock.patch.object(
+            full_gate, "_external_references", return_value=()
+        ), mock.patch.object(
+            full_gate,
+            "_acquire_invocation_storage_quota_authority",
+            return_value=quota_authority_fixture(),
+        ) as acquire_quota, mock.patch.object(
+            full_gate,
+            "_detached_process_signal_supported",
+            return_value=False,
+        ) as signal_supported, mock.patch.object(
+            full_gate.tempfile,
+            "mkdtemp",
+            side_effect=AssertionError("signal blocker reached invocation creation"),
+        ) as create_invocation, mock.patch.object(
+            full_gate,
+            "materialize_closure_archive",
+            side_effect=AssertionError("signal blocker reached materialization"),
+        ) as materialize, mock.patch.object(
+            full_gate.subprocess,
+            "Popen",
+            side_effect=AssertionError("signal blocker reached candidate spawn"),
+        ) as spawn, self.assertRaises(full_gate.FullGateError) as raised:
+            full_gate.execute_full_gate(
+                full_gate.FullGateArguments(
+                    manifest=str(self.manifest),
+                    prior_receipt=None,
+                    nonce="b" * 64,
+                    timeout=10,
+                    receipt=str(receipt),
+                    denial_log=str(denial),
+                ),
+                source_environment={},
+                control_root=self.control,
+            )
+
+        self.assertEqual(
+            raised.exception.status,
+            full_gate.DETACHED_PROCESS_SIGNAL_UNAVAILABLE,
+        )
+        self.assertEqual(
+            json.loads(receipt.read_bytes()),
+            {
+                "schema": "samvil.full-gate-failure.v1",
+                "status": "DETACHED_PROCESS_SIGNAL_UNAVAILABLE",
+                "verdict": "BLOCKED",
+                "nonce": "b" * 64,
+            },
+        )
+        self.assertEqual(denial.read_bytes(), b"")
+        acquire_quota.assert_called_once_with()
+        signal_supported.assert_called_once_with()
+        create_invocation.assert_not_called()
+        materialize.assert_not_called()
+        spawn.assert_not_called()
+
+
+class PortableFullGatePlatformAuthority:
+    def __init__(self, kind: str) -> None:
+        if kind not in {"apple", "canonical"}:
+            raise ValueError("unsupported portable platform authority kind")
+        self.kind = kind
+        self.closed = False
+
+    def complete(self) -> dict[str, object]:
+        if self.closed:
+            raise AssertionError("portable platform authority is already closed")
+        if self.kind == "apple":
+            payload: dict[str, object] = {
+                "schema": "samvil.apple-platform-evidence.v1",
+                "platform": "portable-test-double",
+                "pre_post_identity": "stable",
+            }
+        else:
+            payload = {
+                "schema": "samvil.canonical-host-admission.v1",
+                "rows": [
+                    {
+                        "role": "sandbox-exec",
+                        "path": "/usr/bin/sandbox-exec",
+                        "admission_state": "PORTABLE_TEST_DOUBLE",
+                    }
+                ],
+            }
+        return {
+            **payload,
+            "result_sha256": sha256(full_gate.canonical_json_bytes(payload)),
+        }
+
+    def executable_path(self, role: str) -> Path:
+        if self.closed or self.kind != "canonical" or role != "sandbox-exec":
+            raise AssertionError("invalid portable platform executable request")
+        return Path("/usr/bin/sandbox-exec")
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class PortableFullGateOrchestrationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._portable_stack = contextlib.ExitStack()
+        self.portable_platform = platform.system() != "Darwin"
+        if not self.portable_platform:
+            self.skipTest(full_gate.INVOCATION_STORAGE_QUOTA_BLOCKER)
+        execution_context = require_copied_runtime_execution()
+        self.runtime_source = execution_context.pinned_runtime_source
+        temp_parent = execution_context.invocation_tmpdir
         self._temp = tempfile.TemporaryDirectory(
             prefix="samvil-full-gate-e2e-", dir=temp_parent
         )
@@ -6428,9 +11308,107 @@ class FullGateEndToEndTest(unittest.TestCase):
         }
         self.lock = self.base / "full-gate.lock"
         self.logs = tuple(self.base / Path(path).name for path in full_gate.FIXED_LOG_PATHS)
+        if self.portable_platform:
+            self._portable_stack.enter_context(
+                mock.patch.object(
+                    full_gate,
+                    "_acquire_invocation_storage_quota_authority",
+                    return_value=quota_authority_fixture(),
+                )
+            )
+            self._native_materialize_closure = full_gate.materialize_closure_archive
+            self._portable_stack.enter_context(
+                mock.patch.object(
+                    full_gate,
+                    "materialize_closure_archive",
+                    side_effect=self._portable_materialize_closure,
+                )
+            )
+            self.portable_apple_acquire = self._portable_stack.enter_context(
+                mock.patch.object(
+                    full_gate,
+                    "acquire_apple_platform_tcb",
+                    side_effect=lambda *_args, **_kwargs: PortableFullGatePlatformAuthority(
+                        "apple"
+                    ),
+                )
+            )
+            self.portable_parser_prepare = self._portable_stack.enter_context(
+                mock.patch.object(
+                    full_gate,
+                    "prepare_approved_host_tool_parser",
+                    side_effect=self._portable_parser_evidence,
+                )
+            )
+            self.portable_canonical_acquire = self._portable_stack.enter_context(
+                mock.patch.object(
+                    full_gate,
+                    "acquire_runtime_manifest_host_tool_authority",
+                    side_effect=lambda *_args, **_kwargs: PortableFullGatePlatformAuthority(
+                        "canonical"
+                    ),
+                )
+            )
 
     def tearDown(self) -> None:
-        self._temp.cleanup()
+        try:
+            self._portable_stack.close()
+        finally:
+            self._temp.cleanup()
+
+    def _portable_materialize_closure(
+        self,
+        archive_raw: bytes,
+        manifest_raw: bytes,
+        destination: Path,
+        *,
+        expected_role: str,
+    ) -> str:
+        if expected_role != "python":
+            return self._native_materialize_closure(
+                archive_raw,
+                manifest_raw,
+                destination,
+                expected_role=expected_role,
+            )
+        destination.mkdir(mode=0o700)
+        executable = destination / "bin/python3.12"
+        executable.parent.mkdir()
+        source = self.runtime_source / "bin/python3.12"
+        shutil.copyfile(source, executable)
+        executable.chmod(0o755)
+        stdlib = destination / "lib/python3.12"
+        stdlib.mkdir(parents=True)
+        (stdlib / "os.py").write_bytes(b"# portable E2E fixture\n")
+        payload = {
+            "schema": "samvil.portable-e2e-python-materialization.v1",
+            "archive_sha256": sha256(archive_raw),
+            "manifest_sha256": sha256(manifest_raw),
+            "executable_sha256": sha256(executable.read_bytes()),
+        }
+        return sha256(full_gate.canonical_json_bytes(payload))
+
+    def _portable_parser_evidence(
+        self,
+        parser_manifest: Mapping[str, object],
+        _artifacts: Mapping[str, object],
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        payload = {
+            "schema": "samvil.host-tool-identity-parser-evidence.v1",
+            "source_sha256": parser_manifest["source_sha256"],
+            "interpreter_sha256": parser_manifest["materialized"]["interpreter"][
+                "sha256"
+            ],
+            "input_count": len(parser_manifest["inputs"]),
+            "result_sha256": parser_manifest["result_sha256"],
+            "byte_identical": True,
+            "staged_runner_authority": False,
+        }
+        return {
+            **payload,
+            "evidence_sha256": sha256(full_gate.canonical_json_bytes(payload)),
+        }
 
     def write_artifact(self, name: str, data: bytes) -> dict[str, str]:
         path = self.base / name
@@ -6489,7 +11467,7 @@ class FullGateEndToEndTest(unittest.TestCase):
         python_files = {
             "bin/python3.12": (
                 0o100755,
-                (PINNED_RUNTIME_SOURCE / "bin/python3.12").read_bytes(),
+                (self.runtime_source / "bin/python3.12").read_bytes(),
             ),
             "lib/python3.12/os.py": (0o100644, b"# pinned\n"),
         }
@@ -6558,7 +11536,11 @@ class FullGateEndToEndTest(unittest.TestCase):
         manifest, pack, _files = FullGateGitObjectPackTest().fixture(kind)
         manifest["control"] = control_identity
         if "apple_platform_tcb" in manifest:
-            manifest["apple_platform_tcb"] = full_gate.apple_platform_tcb_binding()
+            manifest["apple_platform_tcb"] = (
+                FullGateManifestProtocolTest().legacy_apple_platform_tcb()
+                if self.portable_platform
+                else full_gate.apple_platform_tcb_binding()
+            )
         manifest["object_pack"] = self.write_artifact(f"{kind}-objects.json", pack)
         manifest["runtime"] = self.runtime_artifacts()
         _stdout, _logs, counters = FullGateExecutionAndReceiptTest().semantic_fixture()
@@ -6595,10 +11577,27 @@ sys.stdout.buffer.write(
         )
         input_rows = []
         result_items = []
-        for role, path in (
-            ("codesign", Path("/usr/bin/codesign")),
-            ("sandbox-exec", Path("/usr/bin/sandbox-exec")),
-        ):
+        if self.portable_platform:
+            input_paths = (
+                (
+                    "codesign",
+                    self.base / f"{kind}-portable-codesign.fixture",
+                    b"portable codesign fixture\n",
+                ),
+                (
+                    "sandbox-exec",
+                    self.base / f"{kind}-portable-sandbox-exec.fixture",
+                    b"portable sandbox-exec fixture\n",
+                ),
+            )
+            for _role, path, content in input_paths:
+                path.write_bytes(content)
+        else:
+            input_paths = (
+                ("codesign", Path("/usr/bin/codesign"), None),
+                ("sandbox-exec", Path("/usr/bin/sandbox-exec"), None),
+            )
+        for role, path, _content in input_paths:
             metadata = os.lstat(path)
             content = path.read_bytes()
             input_rows.append(
@@ -6634,7 +11633,7 @@ sys.stdout.buffer.write(
                 "classification": "copied_application_runtime",
                 "relative_path": "bin/python3.12",
                 "sha256": sha256(
-                    (PINNED_RUNTIME_SOURCE / "bin/python3.12").read_bytes()
+                    (self.runtime_source / "bin/python3.12").read_bytes()
                 ),
             },
         }
@@ -6650,7 +11649,11 @@ sys.stdout.buffer.write(
         )
         manifest["canonical_host_tools"] = {
             "schema": "samvil.canonical-host-tools.v1",
-            "rows": real_canonical_platform_rows(self.base),
+            "rows": (
+                FullGateApprovedHostToolAuthorityDispatcherTest().canonical_rows()
+                if self.portable_platform
+                else real_canonical_platform_rows(self.base)
+            ),
         }
         manifest["command"] = ["/bin/bash", "scripts/pre-commit-check.sh"]
         return manifest
@@ -6699,7 +11702,9 @@ sys.stdout.buffer.write(
             authority_frames=frames,
         )
 
-    def test_original_and_precommit_full_flow_are_deterministic_and_clean(self) -> None:
+    def test_original_and_precommit_portable_orchestration_is_deterministic_and_clean(
+        self,
+    ) -> None:
         self.assertTrue(
             hasattr(full_gate, "execute_full_gate"),
             "full-gate orchestration is not implemented",
@@ -6759,7 +11764,7 @@ sys.stdout.buffer.write(
                 leftovers = list(self.caller_tmp.iterdir())
                 self.assertFalse(leftovers, leftovers)
 
-    def test_approved_full_flow_uses_real_external_parser_and_canonical_tools(
+    def test_approved_portable_authority_contract_uses_fixture_parser_and_tools(
         self,
     ) -> None:
         control, identity = self.control_identity()
@@ -6772,7 +11777,7 @@ sys.stdout.buffer.write(
             *,
             expected_role: str,
         ) -> str:
-            if expected_role != "python":
+            if expected_role != "python" or self.portable_platform:
                 return materialize_closure(
                     archive_raw,
                     manifest_raw,
@@ -6782,16 +11787,16 @@ sys.stdout.buffer.write(
             (destination / "bin").mkdir(parents=True)
             (destination / "lib").mkdir()
             shutil.copyfile(
-                PINNED_RUNTIME_SOURCE / "bin/python3.12",
+                self.runtime_source / "bin/python3.12",
                 destination / "bin/python3.12",
             )
             (destination / "bin/python3.12").chmod(0o755)
             shutil.copyfile(
-                PINNED_RUNTIME_SOURCE / "lib/libpython3.12.dylib",
+                self.runtime_source / "lib/libpython3.12.dylib",
                 destination / "lib/libpython3.12.dylib",
             )
             shutil.copytree(
-                PINNED_RUNTIME_SOURCE / "lib/python3.12",
+                self.runtime_source / "lib/python3.12",
                 destination / "lib/python3.12",
                 ignore=shutil.ignore_patterns("site-packages", "__pycache__"),
             )
@@ -8847,6 +13852,340 @@ class LauncherContractC1Test(unittest.TestCase):
             ),
         )
 
+    def test_unlinked_capture_fd_retries_pre_close_interrupt_without_leaking(self) -> None:
+        capture_path = self.caller_tmpdir / "interrupted-unlinked.capture"
+        real_close = os.close
+        captured_descriptor: int | None = None
+        close_calls = 0
+
+        def fail_after_unlink(
+            descriptor: int,
+            _mode: str,
+            *,
+            closefd: bool,
+        ) -> object:
+            nonlocal captured_descriptor
+            self.assertTrue(closefd)
+            self.assertFalse(capture_path.exists())
+            captured_descriptor = descriptor
+            raise RuntimeError("injected fdopen failure after unlink")
+
+        def interrupt_first_close(descriptor: int) -> None:
+            nonlocal close_calls
+            self.assertEqual(descriptor, captured_descriptor)
+            close_calls += 1
+            if close_calls == 1:
+                raise KeyboardInterrupt()
+            real_close(descriptor)
+
+        try:
+            with mock.patch.object(
+                launcher.os,
+                "fdopen",
+                side_effect=fail_after_unlink,
+            ), mock.patch.object(
+                launcher.os,
+                "close",
+                side_effect=interrupt_first_close,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "injected fdopen failure after unlink",
+                ):
+                    launcher._capture_file(
+                        self.caller_tmpdir,
+                        capture_path.name,
+                    )
+
+            self.assertEqual(close_calls, 2)
+            self.assertIsNotNone(captured_descriptor)
+            with self.assertRaises(OSError):
+                os.fstat(captured_descriptor)
+        finally:
+            if captured_descriptor is not None:
+                try:
+                    real_close(captured_descriptor)
+                except OSError:
+                    pass
+
+    def test_output_files_close_retries_interrupt_and_closes_both_descriptors(
+        self,
+    ) -> None:
+        receipt, denial = self._paths("output-close-interrupt")
+        outputs = launcher.create_outputs(receipt, denial)
+        receipt_descriptor = outputs.receipt_fd
+        denial_descriptor = outputs.denial_fd
+        real_close = os.close
+        close_calls: list[int] = []
+
+        def interrupt_first_receipt_close(descriptor: int) -> None:
+            close_calls.append(descriptor)
+            if descriptor == receipt_descriptor and close_calls.count(descriptor) == 1:
+                raise KeyboardInterrupt("injected pre-close interrupt")
+            real_close(descriptor)
+
+        try:
+            with mock.patch.object(
+                launcher.os,
+                "close",
+                side_effect=interrupt_first_receipt_close,
+            ), self.assertRaises(launcher.LaunchError) as raised:
+                outputs.close()
+
+            self.assertEqual(raised.exception.status, "OUTPUT_CLOSE_FAILED")
+            self.assertEqual(close_calls.count(receipt_descriptor), 2)
+            self.assertIn(denial_descriptor, close_calls)
+            self.assertEqual(outputs.receipt_fd, -1)
+            self.assertEqual(outputs.denial_fd, -1)
+            for descriptor in (receipt_descriptor, denial_descriptor):
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor)
+        finally:
+            for descriptor in (outputs.receipt_fd, outputs.denial_fd):
+                if descriptor >= 0:
+                    try:
+                        real_close(descriptor)
+                    except OSError:
+                        pass
+
+    def test_main_converts_output_close_failure_to_typed_exit(self) -> None:
+        receipt, denial = self._paths("main-output-close")
+        stderr = io.StringIO()
+        real_output_close = launcher.OutputFiles.close
+        close_attempts = 0
+
+        def fail_once(outputs: launcher.OutputFiles) -> None:
+            nonlocal close_attempts
+            close_attempts += 1
+            if close_attempts == 1:
+                raise launcher.LaunchError("OUTPUT_CLOSE_FAILED")
+            real_output_close(outputs)
+
+        with mock.patch.dict(
+            launcher.os.environ,
+            self.environment,
+            clear=True,
+        ), mock.patch.object(
+            launcher.OutputFiles,
+            "close",
+            autospec=True,
+            side_effect=fail_once,
+        ) as close_outputs, contextlib.redirect_stderr(stderr):
+            result = launcher.main(
+                [
+                    *self._valid_prefix(receipt, denial),
+                    "--",
+                    "/usr/bin/true",
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        self.assertEqual(close_outputs.call_count, 2)
+        self.assertIn("OUTPUT_CLOSE_FAILED", stderr.getvalue())
+
+    def test_direct_quota_blocker_precedes_invocation_materialization_and_spawn(
+        self,
+    ) -> None:
+        receipts: list[bytes] = []
+        with mock.patch.object(
+            launcher,
+            "_create_direct_invocation_root",
+            side_effect=AssertionError("quota blocker reached invocation creation"),
+        ) as create_invocation, mock.patch.object(
+            launcher,
+            "build_direct_environment",
+            side_effect=AssertionError("quota blocker reached environment materialization"),
+        ) as materialize, mock.patch.object(
+            launcher,
+            "_run_direct_child",
+            side_effect=AssertionError("quota blocker reached candidate child"),
+        ) as run_child, mock.patch.object(
+            launcher.subprocess,
+            "Popen",
+            side_effect=AssertionError("quota blocker reached candidate spawn"),
+        ) as spawn:
+            for attempt in range(2):
+                receipt, denial = self._paths(f"quota-direct-{attempt}")
+                stderr = io.StringIO()
+                with mock.patch.dict(
+                    launcher.os.environ,
+                    self.environment,
+                    clear=True,
+                ), contextlib.redirect_stderr(stderr):
+                    result = launcher.main(
+                        [
+                            *self._valid_prefix(receipt, denial),
+                            "--",
+                            "/usr/bin/true",
+                        ]
+                    )
+                self.assertEqual(result, 2)
+                self.assertEqual(stderr.getvalue(), "")
+                receipts.append(receipt.read_bytes())
+                self.assertEqual(denial.read_bytes(), b"")
+
+        self.assertEqual(receipts[0], receipts[1])
+        self.assertEqual(
+            json.loads(receipts[0]),
+            {
+                "schema": "samvil.release-control.launch-receipt.v1",
+                "status": "UNSUPPORTED_INVOCATION_STORAGE_QUOTA",
+                "profile_class": CANDIDATE_PROFILE_CLASS,
+                "promotable": False,
+                "terminal_state": "BLOCKED_ENVIRONMENT",
+                "exit_code": 2,
+            },
+        )
+        create_invocation.assert_not_called()
+        materialize.assert_not_called()
+        run_child.assert_not_called()
+        spawn.assert_not_called()
+
+    def test_inherited_quota_blocker_precedes_boundary_probe_and_spawn(self) -> None:
+        receipt, denial = self._paths("quota-inherited")
+        invocation_root = self.base / "inherited-invocation"
+        invocation_root.mkdir()
+        inherited_tmpdir = invocation_root / "tmp"
+        inherited_tmpdir.mkdir()
+        policy = launcher.render_trusted_policy(
+            self.root,
+            invocation_root,
+            self.protected_roots,
+        )
+        validated = mock.Mock(
+            execution_root=self.root,
+            invocation_root=invocation_root,
+            protected_read_roots=self.protected_roots,
+            profile_class=policy.profile_class,
+            profile_bytes=policy.profile_bytes,
+            environment_keys=launcher.CHILD_ENVIRONMENT_KEYS,
+            receipt_path=receipt,
+            denial_log_path=denial,
+            tmpdir=inherited_tmpdir,
+        )
+        context = self.caller_tmpdir / "quota-inherited-context.json"
+        with mock.patch.object(
+            launcher,
+            "sanitize_inherited_environment",
+            return_value={},
+        ), mock.patch.object(
+            launcher.inherited,
+            "validate_inherited_request",
+            return_value=validated,
+        ), mock.patch.object(
+            launcher.inherited,
+            "run_boundary_probes",
+            side_effect=AssertionError("quota blocker reached boundary probes"),
+        ) as probes, mock.patch.object(
+            launcher,
+            "_run_inherited_child",
+            side_effect=AssertionError("quota blocker reached inherited child"),
+        ) as run_child, mock.patch.object(
+            launcher.subprocess,
+            "Popen",
+            side_effect=AssertionError("quota blocker reached inherited spawn"),
+        ) as spawn, mock.patch.dict(
+            launcher.os.environ,
+            self.environment,
+            clear=True,
+        ):
+            result = launcher.main(
+                [
+                    *self._valid_prefix(receipt, denial),
+                    "--inherited-sandbox-context",
+                    str(context),
+                    "--",
+                    "/usr/bin/true",
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        self.assertEqual(
+            json.loads(receipt.read_bytes()),
+            {
+                "schema": "samvil.release-control.launch-receipt.v1",
+                "status": "UNSUPPORTED_INVOCATION_STORAGE_QUOTA",
+                "profile_class": launcher.CONTROL_PROFILE_CLASS,
+                "promotable": False,
+                "terminal_state": "BLOCKED_ENVIRONMENT",
+                "exit_code": 2,
+            },
+        )
+        self.assertEqual(denial.read_bytes(), b"")
+        probes.assert_not_called()
+        run_child.assert_not_called()
+        spawn.assert_not_called()
+
+    def test_verifier_quota_blocker_precedes_candidate_resolution_and_materialization(
+        self,
+    ) -> None:
+        receipt = self.caller_tmpdir / "quota-verifier-receipt.json"
+        argv = [
+            str(VERIFIER),
+            "--candidate",
+            str(self.base / "missing-candidate"),
+            "--authorization",
+            str(self.base / "missing-authorization.json"),
+            "--control-root",
+            str(self.base / "missing-control"),
+            "--expected-control-commit",
+            "d" * 40,
+            "--signature-policy",
+            "required",
+            "--nonce",
+            self.nonce,
+            "--receipt",
+            str(receipt),
+        ]
+        with mock.patch.object(
+            verifier.tempfile,
+            "TemporaryDirectory",
+            side_effect=AssertionError("quota blocker reached temp materialization"),
+        ) as create_temp, mock.patch.object(
+            verifier,
+            "verify_candidate",
+            side_effect=AssertionError("quota blocker reached candidate verification"),
+        ) as verify_candidate, mock.patch.object(
+            verifier,
+            "materialize_snapshot",
+            side_effect=AssertionError("quota blocker reached snapshot materialization"),
+        ) as materialize, mock.patch.object(
+            verifier,
+            "execute_checks",
+            side_effect=AssertionError("quota blocker reached candidate checks"),
+        ) as execute, mock.patch.object(
+            verifier.subprocess,
+            "Popen",
+            side_effect=AssertionError("quota blocker reached candidate spawn"),
+        ) as spawn, mock.patch.object(
+            verifier.sys,
+            "argv",
+            argv,
+        ), mock.patch.dict(
+            verifier.os.environ,
+            {"TMPDIR": str(self.caller_tmpdir)},
+            clear=True,
+        ):
+            with self.assertRaises(SystemExit) as raised:
+                verifier.main()
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertEqual(
+            json.loads(receipt.read_bytes()),
+            {
+                "schema_version": 1,
+                "status": "BLOCKED_ENVIRONMENT",
+                "verdict": "BLOCKED",
+                "promotable": False,
+                "blocker": "UNSUPPORTED_INVOCATION_STORAGE_QUOTA",
+            },
+        )
+        create_temp.assert_not_called()
+        verify_candidate.assert_not_called()
+        materialize.assert_not_called()
+        execute.assert_not_called()
+        spawn.assert_not_called()
+
     def test_non_executable_regular_argv0_fails_before_outputs(self) -> None:
         command = self.root / "not-executable"
         command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -9389,8 +14728,11 @@ class LauncherPolicyC2Test(unittest.TestCase):
         self.assertNotIn("UNTRUSTED_EXTRA", sanitized)
 
 
-@unittest.skipUnless(Path("/usr/bin/sandbox-exec").is_file(), "macOS sandbox required")
 class LauncherDirectC3Test(LauncherContractC1Test):
+    def setUp(self) -> None:
+        self.seatbelt_context = require_real_seatbelt_opt_in()
+        super().setUp()
+
     def _run_direct(
         self,
         command: list[str],
@@ -9730,9 +15072,9 @@ class LauncherInheritedC4ChildOnlyTest(unittest.TestCase):
                 sock.close()
 
 
-@unittest.skipUnless(Path("/usr/bin/sandbox-exec").is_file(), "macOS sandbox required")
 class InheritedLauncherIntegrationFixture(unittest.TestCase):
     def setUp(self) -> None:
+        self.seatbelt_context = require_real_seatbelt_opt_in()
         raw_temp_parent = os.environ.get("TMPDIR")
         if not raw_temp_parent:
             self.fail("trusted bootstrap must provide an invocation-owned TMPDIR")
@@ -10217,7 +15559,6 @@ class LauncherInheritedSupervisionC5Test(InheritedLauncherIntegrationFixture):
         self.assertTrue(denial.is_file())
 
 
-@unittest.skipUnless(Path("/usr/bin/sandbox-exec").is_file(), "macOS sandbox required")
 class LauncherSupervisionC5Test(LauncherDirectC3Test):
     def _matching_processes(self, token: str) -> list[int]:
         result = subprocess.run(
@@ -10637,34 +15978,63 @@ class VerifierGitTimeoutTest(unittest.TestCase):
 
 class ReleaseControlTest(unittest.TestCase):
     @classmethod
+    def _record_runtime_setup_issue(
+        cls, kind: str, status: str, detail: str
+    ) -> None:
+        if cls._runtime_temp is not None:
+            try:
+                cls._runtime_temp.cleanup()
+            except Exception as cleanup_exc:
+                kind = "error"
+                status = "PINNED_RUNTIME_SETUP_CLEANUP_FAILED"
+                detail = (
+                    f"{detail}; runtime fixture cleanup failed: "
+                    f"{type(cleanup_exc).__name__}: {cleanup_exc}"
+                )
+            finally:
+                cls._runtime_temp = None
+        cls._runtime_setup_issue = (kind, status, detail)
+
+    @classmethod
     def setUpClass(cls) -> None:
-        raw_temp_parent = os.environ.get("TMPDIR")
-        if not raw_temp_parent or PINNED_RUNTIME_SOURCE is None:
-            raise unittest.SkipTest(
-                f"set TMPDIR and {PINNED_RUNTIME_SOURCE_ENV} for pinned runtime tests"
+        cls._runtime_temp: tempfile.TemporaryDirectory[str] | None = None
+        cls._runtime_setup_issue: tuple[str, str, str] | None = None
+        try:
+            execution_context = require_copied_runtime_execution()
+            runtime_source = execution_context.pinned_runtime_source
+            temp_parent = execution_context.invocation_tmpdir
+            cls._runtime_temp = tempfile.TemporaryDirectory(
+                prefix="samvil-pinned-runtime-", dir=temp_parent
             )
-        cls._runtime_temp = tempfile.TemporaryDirectory(
-            prefix="samvil-pinned-runtime-",
-            dir=Path(raw_temp_parent).resolve(strict=True),
-        )
-        runtime = Path(cls._runtime_temp.name) / "runtime"
-        copy_pinned_runtime(runtime)
-        cls.pinned_python = (runtime / "bin/python3.12").resolve(strict=True)
-        probe = subprocess.run(
-            [str(cls.pinned_python), "-I", "-m", "pytest", "--version"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if probe.returncode != 0:
-            cls._runtime_temp.cleanup()
-            raise unittest.SkipTest("copied pinned Python lacks isolated pytest")
+            runtime = Path(cls._runtime_temp.name) / "runtime"
+            copy_pinned_runtime(runtime, runtime_source=runtime_source)
+            cls.pinned_python = (runtime / "bin/python3.12").resolve(strict=True)
+            probe_copied_runtime_pytest(
+                cls.pinned_python, execution_context=execution_context
+            )
+        except unittest.SkipTest as exc:
+            cls._record_runtime_setup_issue("skip", "", str(exc))
+        except ReleaseControlConfigurationError as exc:
+            cls._record_runtime_setup_issue("error", exc.status, str(exc))
+        except Exception as exc:
+            cls._record_runtime_setup_issue(
+                "error",
+                "PINNED_RUNTIME_SETUP_FAILED",
+                f"{type(exc).__name__}: {exc}",
+            )
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls._runtime_temp.cleanup()
+        if cls._runtime_temp is not None:
+            cls._runtime_temp.cleanup()
 
     def setUp(self) -> None:
+        issue = self._runtime_setup_issue
+        if issue is not None:
+            kind, status, detail = issue
+            if kind == "skip":
+                self.skipTest(detail)
+            raise ReleaseControlConfigurationError(status, detail)
         raw_temp_parent = os.environ.get("TMPDIR")
         if not raw_temp_parent:
             self.fail("trusted bootstrap must provide an invocation-owned TMPDIR")
@@ -11508,8 +16878,8 @@ class ReleaseControlTest(unittest.TestCase):
         self.assertEqual(receipt["status"], "UNSAFE_CANDIDATE_OBJECT_STORE")
         self.assertFalse(receipt["promotable"])
 
-    @unittest.skipUnless(Path("/usr/bin/sandbox-exec").is_file(), "macOS sandbox required")
     def test_signed_candidate_passes_external_direct_candidate_profile(self) -> None:
+        require_real_seatbelt_opt_in()
         nonce = "e" * 64
         source_python = self.pinned_python
         copied_python = source_python
@@ -12009,8 +17379,8 @@ class ReleaseControlTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(receipt["status"], "AUTHORIZATION_SCHEMA_INVALID")
 
-    @unittest.skipUnless(Path("/usr/bin/sandbox-exec").is_file(), "macOS sandbox required")
     def test_historical_pytest_and_script_shadow_surfaces_are_unreachable(self) -> None:
+        require_real_seatbelt_opt_in()
         control, control_commit = self.make_control_repo()
         marker = self.base / "autoload-shadow-executed"
         candidate = self.make_candidate_repo()

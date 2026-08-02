@@ -145,8 +145,13 @@ EXPECTED_CANDIDATE_RESOURCE_LIMITS = {
     "nofile_count": 32,
     "capture_bytes": 1 * 1024 * 1024,
     "invocation_total_bytes": 32 * 1024 * 1024,
+    "invocation_entries": 20_000,
+    "invocation_depth": 32,
+    "vm_regions": 65_536,
     "rss_bytes": 192 * 1024 * 1024,
 }
+INVOCATION_STORAGE_QUOTA_BLOCKER = "UNSUPPORTED_INVOCATION_STORAGE_QUOTA"
+BLOCKED_ENVIRONMENT = "BLOCKED_ENVIRONMENT"
 CANDIDATE_GIT_OVERRIDES = (
     "-c",
     "core.fsmonitor=false",
@@ -296,6 +301,12 @@ def receipt(status: str, **extra: object) -> dict[str, object]:
 def stop(path: Path, status: str, code: int = 2, **extra: object) -> NoReturn:
     write_json(path, receipt(status, **extra))
     raise SystemExit(code)
+
+
+def _invocation_storage_quota_supported() -> bool:
+    """Return whether an invocation-exclusive fixed-capacity store is active."""
+
+    return False
 
 
 def is_within(path: Path, parent: Path) -> bool:
@@ -1662,6 +1673,12 @@ def main() -> int:
     args.receipt = receipt_path
     if not isinstance(args.nonce, str) or HEX64.fullmatch(args.nonce) is None:
         stop(args.receipt, "INVALID_NONCE")
+    if not _invocation_storage_quota_supported():
+        stop(
+            args.receipt,
+            BLOCKED_ENVIRONMENT,
+            blocker=INVOCATION_STORAGE_QUOTA_BLOCKER,
+        )
     try:
         candidate = args.candidate.resolve(strict=True)
         authorization_path = args.authorization.resolve(strict=True)
