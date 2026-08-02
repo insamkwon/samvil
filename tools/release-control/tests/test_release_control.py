@@ -80,6 +80,7 @@ ENABLE_REAL_SEATBELT_TESTS_ENV = "SAMVIL_ENABLE_REAL_SEATBELT_TESTS"
 ENABLE_DARWIN_COPIED_RUNTIME_TESTS_ENV = (
     "SAMVIL_ENABLE_DARWIN_COPIED_RUNTIME_TESTS"
 )
+ENABLE_REAL_LINUX_PROC_TESTS_ENV = "SAMVIL_ENABLE_REAL_LINUX_PROC_TESTS"
 PINNED_PYTEST_COMPONENTS = (
     "_pytest",
     "iniconfig",
@@ -1713,7 +1714,9 @@ class PinnedRuntimeFixtureResolutionTest(unittest.TestCase):
         ]
         suite = unittest.TestSuite(suites)
         result = unittest.TestResult()
-        with mock.patch.dict(
+        with mock.patch.object(
+            platform, "system", return_value="Linux"
+        ), mock.patch.dict(
             os.environ,
             {"SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1"},
             clear=True,
@@ -6670,6 +6673,9 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
             prefix="samvil-full-gate-execution-", dir=temp_parent
         )
         self.base = Path(self._temp.name).resolve(strict=True)
+        self.sandbox_executable = self.base / "sandbox-exec"
+        self.sandbox_executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+        self.sandbox_executable.chmod(0o555)
 
     def tearDown(self) -> None:
         self._temp.cleanup()
@@ -6975,13 +6981,13 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
             "a" * 64,
             scratch,
             environment,
-            sandbox_executable=Path("/usr/bin/sandbox-exec"),
+            sandbox_executable=self.sandbox_executable,
             authority_fd=17,
             nonce="b" * 64,
         )
-        self.assertEqual(argv[0], "/usr/bin/sandbox-exec")
-        self.assertEqual(argv.count("/usr/bin/sandbox-exec"), 1)
-        self.assertEqual(argv[0], "/usr/bin/sandbox-exec")
+        self.assertEqual(argv[0], str(self.sandbox_executable))
+        self.assertEqual(argv.count(str(self.sandbox_executable)), 1)
+        self.assertEqual(argv[0], str(self.sandbox_executable))
         self.assertEqual(argv[1], "-p")
         self.assertNotIn("/usr/bin/env", argv)
         self.assertNotIn("-i", argv)
@@ -7137,6 +7143,192 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
                 process.wait(timeout=2)
         with self.assertRaises(ProcessLookupError):
             os.killpg(process.pid, 0)
+
+    def test_linux_group_inventory_distinguishes_live_members_from_zombies(self) -> None:
+        live = subprocess.CompletedProcess(
+            args=(), returncode=0, stdout=b"4201 4242 S 1\n", stderr=b""
+        )
+        zombie = subprocess.CompletedProcess(
+            args=(), returncode=0, stdout=b"4201 4242 Z 1\n", stderr=b""
+        )
+        with mock.patch.object(
+            full_gate.subprocess, "run", side_effect=(live, zombie)
+        ):
+            self.assertIsNone(full_gate._linux_quiescent_process_group_snapshot(4242))
+            self.assertEqual(
+                full_gate._linux_quiescent_process_group_snapshot(4242),
+                (4201,),
+            )
+
+    def test_linux_group_inventory_uses_nlwp_for_zombie_leader_workers(self) -> None:
+        zombie_leader_with_worker = subprocess.CompletedProcess(
+            args=(), returncode=0, stdout=b"4201 4242 Z 2\n", stderr=b""
+        )
+        with mock.patch.object(
+            full_gate.subprocess, "run", return_value=zombie_leader_with_worker
+        ) as run:
+            self.assertIsNone(full_gate._linux_quiescent_process_group_snapshot(4242))
+
+        self.assertEqual(
+            run.call_args.args[0],
+            ["/bin/ps", "-axo", "pid=,pgid=,stat=,nlwp="],
+        )
+
+    def test_linux_group_cleanup_requires_sigkill_before_accepting_zombies(self) -> None:
+        pgid = 4242
+        zombie = subprocess.CompletedProcess(
+            args=(), returncode=0, stdout=b"4201 4242 Z 1\n", stderr=b""
+        )
+        observed_signals: list[int] = []
+
+        def observe_signal(_pgid: int, sig: int) -> None:
+            self.assertEqual(_pgid, pgid)
+            observed_signals.append(sig)
+
+        with mock.patch.object(
+            full_gate.sys, "platform", "linux"
+        ), mock.patch.object(
+            full_gate.subprocess, "run", return_value=zombie
+        ) as inventory, mock.patch.object(
+            full_gate.os, "killpg", side_effect=observe_signal
+        ), mock.patch.object(
+            full_gate.time,
+            "monotonic",
+            side_effect=(0.0, 0.1, 0.3, 0.3, 0.4, 0.5),
+        ), mock.patch.object(full_gate.time, "sleep"):
+            cleaned = full_gate._terminate_process_group(pgid)
+
+        self.assertTrue(cleaned)
+        self.assertEqual(inventory.call_count, 2)
+        self.assertEqual(
+            observed_signals,
+            [
+                signal.SIGTERM,
+                0,
+                signal.SIGKILL,
+                0,
+                signal.SIGKILL,
+                0,
+                0,
+            ],
+        )
+
+    def test_linux_group_cleanup_rejects_zombie_then_live_snapshot(self) -> None:
+        snapshots = (
+            subprocess.CompletedProcess(
+                args=(), returncode=0, stdout=b"4201 4242 Z 1\n", stderr=b""
+            ),
+            subprocess.CompletedProcess(
+                args=(), returncode=0, stdout=b"4201 4242 S 1\n", stderr=b""
+            ),
+        )
+        with mock.patch.object(
+            full_gate.sys, "platform", "linux"
+        ), mock.patch.object(
+            full_gate.subprocess, "run", side_effect=snapshots
+        ), mock.patch.object(
+            full_gate.os, "killpg"
+        ), mock.patch.object(
+            full_gate.time,
+            "monotonic",
+            side_effect=(0.0, 0.3, 0.3, 0.4, 0.5, 1.4),
+        ), mock.patch.object(full_gate.time, "sleep"), self.assertRaises(
+            full_gate.FullGateError
+        ) as raised:
+            full_gate._terminate_process_group(4242)
+
+        self.assertEqual(raised.exception.status, "CHILD_CLEANUP_FAILED")
+
+    def test_linux_group_cleanup_requires_stable_target_pid_set(self) -> None:
+        snapshots = tuple(
+            subprocess.CompletedProcess(
+                args=(), returncode=0, stdout=payload, stderr=b""
+            )
+            for payload in (
+                b"4201 4242 Z 1\n",
+                b"4202 4242 Z 1\n",
+                b"4202 4242 Z 1\n",
+            )
+        )
+        with mock.patch.object(
+            full_gate.sys, "platform", "linux"
+        ), mock.patch.object(
+            full_gate.subprocess, "run", side_effect=snapshots
+        ) as inventory, mock.patch.object(
+            full_gate.os, "killpg"
+        ), mock.patch.object(
+            full_gate.time,
+            "monotonic",
+            side_effect=(0.0, 0.3, 0.3, 0.4, 0.5, 0.6),
+        ), mock.patch.object(full_gate.time, "sleep"):
+            cleaned = full_gate._terminate_process_group(4242)
+
+        self.assertTrue(cleaned)
+        self.assertEqual(inventory.call_count, 3)
+
+    def test_process_group_probe_permission_error_fails_closed(self) -> None:
+        cases = (
+            ("term", (0.0, 0.1), [signal.SIGTERM, 0]),
+            ("kill", (0.0, 0.3, 0.3, 0.4), [signal.SIGTERM, signal.SIGKILL, 0]),
+        )
+        for phase, monotonic_values, expected_signals in cases:
+            observed_signals: list[int] = []
+
+            def reject_probe(_pgid: int, sig: int) -> None:
+                self.assertEqual(_pgid, 4242)
+                observed_signals.append(sig)
+                if sig == 0:
+                    raise PermissionError
+
+            with self.subTest(phase=phase):
+                with mock.patch.object(
+                    full_gate.os,
+                    "killpg",
+                    side_effect=reject_probe,
+                ), mock.patch.object(
+                    full_gate.sys,
+                    "platform",
+                    "linux",
+                ), mock.patch.object(
+                    full_gate.time,
+                    "monotonic",
+                    side_effect=monotonic_values,
+                ), mock.patch.object(
+                    full_gate.time,
+                    "sleep",
+                ), self.assertRaises(full_gate.FullGateError) as raised:
+                    full_gate._terminate_process_group(4242)
+
+                self.assertEqual(raised.exception.status, "CHILD_CLEANUP_FAILED")
+                self.assertEqual(observed_signals, expected_signals)
+
+    def test_linux_group_inventory_omission_remains_fail_closed(self) -> None:
+        empty = subprocess.CompletedProcess(
+            args=(), returncode=0, stdout=b"", stderr=b""
+        )
+        with mock.patch.object(
+            full_gate.subprocess, "run", return_value=empty
+        ):
+            self.assertIsNone(full_gate._linux_quiescent_process_group_snapshot(4242))
+
+    def test_linux_group_inventory_rejects_malformed_or_duplicate_rows(self) -> None:
+        payloads = (
+            b"4201 4242 Z\n",
+            b"4201 4242 Z 0\n",
+            b"4201 4242 Z nope\n",
+            b"4201 4242 Z 1\n4202 nope S 1\n",
+            b"4201 4242 Z 1\n4201 4243 Z 1\n",
+        )
+        for payload in payloads:
+            with self.subTest(payload=payload), mock.patch.object(
+                full_gate.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess(
+                    args=(), returncode=0, stdout=payload, stderr=b""
+                ),
+            ), self.assertRaises(full_gate.FullGateError) as raised:
+                full_gate._linux_quiescent_process_group_snapshot(4242)
+            self.assertEqual(raised.exception.status, "CHILD_CLEANUP_FAILED")
 
     def test_process_snapshot_binds_ps_rows_to_strong_native_birth_identity(
         self,
@@ -8258,6 +8450,13 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
     def test_platform_mapping_inventory_observes_raw_mmap_after_unlink_and_close(
         self,
     ) -> None:
+        if sys.platform.startswith("linux") and not _strict_opt_in(
+            os.environ, ENABLE_REAL_LINUX_PROC_TESTS_ENV
+        ):
+            self.skipTest(
+                "REAL_LINUX_PROC_OPT_IN_REQUIRED: set "
+                f"{ENABLE_REAL_LINUX_PROC_TESTS_ENV}=1"
+            )
         inspect_mappings = getattr(
             full_gate, "_inspect_unlinked_regular_mappings", None
         )
@@ -9551,7 +9750,7 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
                 "a" * 64,
                 paths["scratch"],
                 {"TMPDIR": str(paths["tmpdir"])},
-                sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                sandbox_executable=self.sandbox_executable,
                 timeout=10,
                 limits=full_gate.DEFAULT_RESOURCE_LIMITS,
                 nonce="b" * 64,
@@ -9880,7 +10079,7 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
                 "a" * 64,
                 scratch,
                 environment,
-                sandbox_executable=Path("/usr/bin/sandbox-exec"),
+                sandbox_executable=self.sandbox_executable,
                 timeout=10,
                 limits=full_gate.DEFAULT_RESOURCE_LIMITS,
                 nonce="b" * 64,
@@ -9894,7 +10093,7 @@ class FullGateExecutionAndReceiptTest(unittest.TestCase):
         self.assertTrue(call.kwargs["close_fds"])
         self.assertEqual(len(call.kwargs["pass_fds"]), 1)
         self.assertEqual(supervise.call_count, 1)
-        self.assertEqual(call.args[0].count("/usr/bin/sandbox-exec"), 1)
+        self.assertEqual(call.args[0].count(str(self.sandbox_executable)), 1)
 
 
 class FullGateTrustedWrapperProtocolTest(unittest.TestCase):
@@ -9923,6 +10122,9 @@ class FullGateTrustedWrapperProtocolTest(unittest.TestCase):
             path.mkdir(parents=True, exist_ok=True)
         (self.runtime / "bin/python3.12").write_bytes(b"python")
         (self.runtime / "bin/python3.12").chmod(0o555)
+        self.sandbox_executable = self.base / "sandbox-exec"
+        self.sandbox_executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+        self.sandbox_executable.chmod(0o555)
 
     def tearDown(self) -> None:
         self._temp.cleanup()
@@ -9983,11 +10185,11 @@ class FullGateTrustedWrapperProtocolTest(unittest.TestCase):
             "b" * 64,
             self.scratch,
             environment,
-            sandbox_executable=Path("/usr/bin/sandbox-exec"),
+            sandbox_executable=self.sandbox_executable,
             authority_fd=17,
             nonce="a" * 64,
         )
-        self.assertEqual(argv.count("/usr/bin/sandbox-exec"), 1)
+        self.assertEqual(argv.count(str(self.sandbox_executable)), 1)
         self.assertEqual(
             argv[-22:],
             (
@@ -11312,6 +11514,13 @@ class PortableFullGateOrchestrationTest(unittest.TestCase):
             self._portable_stack.enter_context(
                 mock.patch.object(
                     full_gate,
+                    "_detached_process_signal_supported",
+                    return_value=True,
+                )
+            )
+            self._portable_stack.enter_context(
+                mock.patch.object(
+                    full_gate,
                     "_acquire_invocation_storage_quota_authority",
                     return_value=quota_authority_fixture(),
                 )
@@ -11700,6 +11909,8 @@ sys.stdout.buffer.write(
             stdout=b"",
             stderr=b"",
             authority_frames=frames,
+            wrapper_pid=4242,
+            wrapper_start_identity="linux-proc-start:1",
         )
 
     def test_original_and_precommit_portable_orchestration_is_deterministic_and_clean(
@@ -12017,8 +12228,6 @@ class InheritedContextProtocolTest(unittest.TestCase):
             prefix="samvil-inherited-context-test-", dir=temp_parent
         )
         self.base = Path(self._temp.name).resolve(strict=True)
-        home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=True)
-        self.protected_roots = (home, (home / ".codex").resolve(strict=True))
         self.invocation = self.base / "invocation"
         self.execution = self.invocation / "execution"
         self.tmpdir = self.invocation / "tmp"
@@ -13657,8 +13866,10 @@ class LauncherContractC1Test(unittest.TestCase):
             prefix="samvil-launcher-c1-", dir=temp_parent
         )
         self.base = Path(self._temp.name).resolve(strict=True)
-        home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=True)
-        self.protected_roots = (home, (home / ".codex").resolve(strict=True))
+        protected_home = self.base / "protected-home"
+        protected_codex = protected_home / ".codex"
+        protected_codex.mkdir(parents=True)
+        self.protected_roots = (protected_home, protected_codex)
         self.root = self.base / "snapshot"
         self.root.mkdir()
         self.nonce = "c" * 64
@@ -14477,8 +14688,10 @@ class LauncherPolicyC2Test(unittest.TestCase):
             dir=Path(raw_temp_parent).resolve(strict=True),
         )
         self.base = Path(self._temp.name).resolve(strict=True)
-        home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve(strict=True)
-        self.protected_roots = (home, (home / ".codex").resolve(strict=True))
+        protected_home = self.base / "protected-home"
+        protected_codex = protected_home / ".codex"
+        protected_codex.mkdir(parents=True)
+        self.protected_roots = (protected_home, protected_codex)
 
     def tearDown(self) -> None:
         self._temp.cleanup()

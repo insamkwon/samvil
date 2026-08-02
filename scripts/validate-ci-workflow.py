@@ -59,12 +59,13 @@ REQUIRED_PORTABLE_EXPORTS = {
     "GIT_TERMINAL_PROMPT": "0",
     "PYTHONNOUSERSITE": "1",
     "PYTHONDONTWRITEBYTECODE": "1",
-    "SAMVIL_PINNED_RUNTIME_SOURCE": "${pythonLocation}",
-    "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1",
 }
-FORBIDDEN_PORTABLE_OPT_INS = (
+FORBIDDEN_PORTABLE_HOST_BOUND_ENV = (
+    "SAMVIL_PINNED_RUNTIME_SOURCE",
+    "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL",
     "SAMVIL_ENABLE_REAL_SEATBELT_TESTS",
     "SAMVIL_ENABLE_DARWIN_COPIED_RUNTIME_TESTS",
+    "SAMVIL_ENABLE_REAL_LINUX_PROC_TESTS",
 )
 
 
@@ -194,7 +195,7 @@ def _validate_portable_release_control_step(
     commands = _logical_shell_commands(portable_script)
     if commands.count(PORTABLE_RELEASE_CONTROL_COMMAND) != 1:
         raise AssertionError(
-            "portable release-control step must run the complete suite exactly once with -B"
+            "portable release-control step must run the contract test module exactly once with -B"
         )
     for required_command in ("set -euo pipefail", "umask 077"):
         if required_command not in commands:
@@ -216,11 +217,15 @@ def _validate_portable_release_control_step(
         _mapping(job.get("env") or {}, "jobs.release-checks.env"),
         _mapping(portable_step.get("env") or {}, f"{PORTABLE_RELEASE_CONTROL_STEP} env"),
     )
-    for opt_in in FORBIDDEN_PORTABLE_OPT_INS:
-        if opt_in in workflow_text or opt_in in exports:
-            raise AssertionError(f"portable CI must not export real-host opt-in {opt_in}")
-        if any(opt_in in env_scope for env_scope in env_scopes):
-            raise AssertionError(f"portable CI must not configure real-host opt-in {opt_in}")
+    for name in FORBIDDEN_PORTABLE_HOST_BOUND_ENV:
+        if name in workflow_text or name in exports:
+            raise AssertionError(
+                f"portable CI must not configure host-bound release-control env {name}"
+            )
+        if any(name in env_scope for env_scope in env_scopes):
+            raise AssertionError(
+                f"portable CI must not configure host-bound release-control env {name}"
+            )
 
 
 def validate_workflow() -> list[str]:
@@ -265,7 +270,10 @@ def validate_workflow() -> list[str]:
         *(f"pinned fixture: {requirement}" for requirement in PINNED_PYTEST_FIXTURE_COMPONENTS),
         f"portable step: {PORTABLE_RELEASE_CONTROL_STEP}",
         *(f"portable export: {name}={value}" for name, value in REQUIRED_PORTABLE_EXPORTS.items()),
-        *(f"portable opt-in forbidden: {name}" for name in FORBIDDEN_PORTABLE_OPT_INS),
+        *(
+            f"portable host-bound env forbidden: {name}"
+            for name in FORBIDDEN_PORTABLE_HOST_BOUND_ENV
+        ),
     ]
 
 

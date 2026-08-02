@@ -37,12 +37,13 @@ REQUIRED_PORTABLE_EXPORTS = {
     "GIT_TERMINAL_PROMPT": "0",
     "PYTHONNOUSERSITE": "1",
     "PYTHONDONTWRITEBYTECODE": "1",
-    "SAMVIL_PINNED_RUNTIME_SOURCE": "${pythonLocation}",
-    "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL": "1",
 }
-FORBIDDEN_PORTABLE_OPT_INS = (
+FORBIDDEN_PORTABLE_HOST_BOUND_ENV = (
+    "SAMVIL_PINNED_RUNTIME_SOURCE",
+    "SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL",
     "SAMVIL_ENABLE_REAL_SEATBELT_TESTS",
     "SAMVIL_ENABLE_DARWIN_COPIED_RUNTIME_TESTS",
+    "SAMVIL_ENABLE_REAL_LINUX_PROC_TESTS",
 )
 
 
@@ -159,20 +160,18 @@ def test_release_checks_workflow_contract() -> None:
     portable_exports = _shell_exports(portable_script)
     for name, expected_value in REQUIRED_PORTABLE_EXPORTS.items():
         assert portable_exports.get(name) == expected_value
-    assert portable_exports["SAMVIL_PINNED_RUNTIME_SOURCE"] != (
-        "${GITHUB_WORKSPACE}/mcp/.venv"
-    )
 
     workflow_env = data.get("env") or {}
     job_env = job.get("env") or {}
     step_env = portable_step.get("env") or {}
     for env_scope in (workflow_env, job_env, step_env):
         assert isinstance(env_scope, dict)
-    for opt_in in FORBIDDEN_PORTABLE_OPT_INS:
-        assert opt_in not in text
-        assert opt_in not in workflow_env
-        assert opt_in not in job_env
-        assert opt_in not in step_env
+    for name in FORBIDDEN_PORTABLE_HOST_BOUND_ENV:
+        assert name not in portable_exports
+        assert name not in text
+        assert name not in workflow_env
+        assert name not in job_env
+        assert name not in step_env
 
 
 def test_ci_workflow_validator_script_passes() -> None:

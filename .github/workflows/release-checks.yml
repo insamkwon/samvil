@@ -78,8 +78,6 @@ jobs:
           export GIT_TERMINAL_PROMPT=0
           export PYTHONNOUSERSITE=1
           export PYTHONDONTWRITEBYTECODE=1
-          export SAMVIL_PINNED_RUNTIME_SOURCE="${pythonLocation}"
-          export SAMVIL_REQUIRE_COMPLETE_RELEASE_CONTROL=1
 
           mcp/.venv/bin/python -B tools/release-control/tests/test_release_control.py
 

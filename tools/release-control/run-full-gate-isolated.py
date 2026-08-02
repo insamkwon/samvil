@@ -3398,6 +3398,63 @@ def build_sandbox_argv(
     )
 
 
+def _linux_quiescent_process_group_snapshot(pgid: int) -> tuple[int, ...] | None:
+    if type(pgid) is not int or pgid <= 0:
+        _raise("CHILD_CLEANUP_FAILED")
+    try:
+        result = subprocess.run(
+            ["/bin/ps", "-axo", "pid=,pgid=,stat=,nlwp="],
+            env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=0.25,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        _raise("CHILD_CLEANUP_FAILED")
+    if result.returncode != 0 or len(result.stdout) > 16 * 1024 * 1024:
+        _raise("CHILD_CLEANUP_FAILED")
+    try:
+        rows = result.stdout.decode("ascii", "strict").splitlines()
+    except UnicodeDecodeError:
+        _raise("CHILD_CLEANUP_FAILED")
+    observed_pids: set[int] = set()
+    target_rows: list[tuple[int, str, int]] = []
+    for raw in rows:
+        fields = raw.split()
+        if not fields:
+            continue
+        if len(fields) != 4:
+            _raise("CHILD_CLEANUP_FAILED")
+        try:
+            observed_pid = int(fields[0])
+            observed_pgid = int(fields[1])
+            thread_count = int(fields[3])
+        except ValueError:
+            _raise("CHILD_CLEANUP_FAILED")
+        state = fields[2]
+        if (
+            observed_pid <= 0
+            or observed_pgid < 0
+            or not state
+            or not state[0].isalpha()
+            or thread_count <= 0
+            or observed_pid in observed_pids
+        ):
+            _raise("CHILD_CLEANUP_FAILED")
+        observed_pids.add(observed_pid)
+        if observed_pgid != pgid:
+            continue
+        target_rows.append((observed_pid, state[0], thread_count))
+    if not target_rows or any(
+        state not in {"Z", "X"} or thread_count != 1
+        for _pid, state, thread_count in target_rows
+    ):
+        return None
+    return tuple(sorted(pid for pid, _state, _thread_count in target_rows))
+
+
 def _terminate_process_group(pgid: int) -> bool:
     try:
         os.killpg(pgid, signal.SIGTERM)
@@ -3412,6 +3469,8 @@ def _terminate_process_group(pgid: int) -> bool:
         except ProcessLookupError:
             return True
         except PermissionError:
+            if sys.platform.startswith("linux"):
+                _raise("CHILD_CLEANUP_FAILED")
             return True
         time.sleep(0.01)
     try:
@@ -3421,13 +3480,33 @@ def _terminate_process_group(pgid: int) -> bool:
     except PermissionError:
         _raise("CHILD_CLEANUP_FAILED")
     deadline = time.monotonic() + 1.0
+    stable_linux_snapshot: tuple[int, ...] | None = None
     while time.monotonic() < deadline:
         try:
             os.killpg(pgid, 0)
         except ProcessLookupError:
             return True
         except PermissionError:
+            if sys.platform.startswith("linux"):
+                _raise("CHILD_CLEANUP_FAILED")
             return True
+        if sys.platform.startswith("linux"):
+            snapshot = _linux_quiescent_process_group_snapshot(pgid)
+            if snapshot is not None and snapshot == stable_linux_snapshot:
+                return True
+            stable_linux_snapshot = snapshot
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                return True
+            except PermissionError:
+                _raise("CHILD_CLEANUP_FAILED")
+            try:
+                os.killpg(pgid, 0)
+            except ProcessLookupError:
+                return True
+            except PermissionError:
+                _raise("CHILD_CLEANUP_FAILED")
         time.sleep(0.01)
     _raise("CHILD_CLEANUP_FAILED")
 
