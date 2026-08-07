@@ -33,8 +33,9 @@ repositories for ref-transaction rehearsal. No new runtime dependencies.
 - Original branch name: `main`
 - Fuse manifest version: `4.32.2`
 - Public default branch setting remains `main`.
-- Design evidence branch:
-  `codex/v433-safe-upgrade-design`
+- Historical design evidence branch:
+  `codex/v433-safe-upgrade-design` (provenance only during the current bridge
+  execution; do not check it out or rewrite it)
 - Implementation branch:
   `codex/v4.32.2-quarantine-fuse`
 - Public remote mutation: forbidden in F0.
@@ -71,6 +72,41 @@ results validate schema and orchestration contracts, not an actual supported-
 host canonical end-to-end gate. A Linux test that replaces the platform parser,
 host tool or quota adapter with a mock is never reported as a real external-
 parser or real OS-boundary result.
+
+### 1.1 Current v4.32.3 bridge execution mapping
+
+The Task -2/Task -1 branch-history commands below record how PR #14's
+fail-closed foundation was originally produced. For the current v4.32.3 bridge
+run they are historical acceptance context, not executable steps. The binding
+current procedure is:
+
+- Preserve frozen PR #14 head
+  `141da457a98b552047f0388b9967664e11aff8b1` and every ancestor byte/commit.
+  Do not fixup, amend, autosquash, rebase, or otherwise rewrite
+  `f6d50644a01c925b7910c494e2160bbac504dbd8`, PR #14, or the historical design
+  branch.
+- Create the reviewed v4.32.3 plan commit as one direct child of PR #14 on
+  `codex/v4.32.3-release-bridge-plan`. Add the current implementation plan's
+  P0/P1/P3 trusted-control prerequisites only as descendants of that preserved
+  plan/control ancestry.
+- P0 must supply and review the missing invocation-exclusive kernel-quota and
+  detached-process authority, then rerun PR #14's exact committed control
+  suite. This closes the old Task -2/Task -1 acceptance blockers without
+  replaying their obsolete history-rewrite procedure.
+- Unit 0's candidate ancestry starts independently at exact original
+  `81c0c3468ed8757513fc4bf76b028736197bc556` and executes only Tasks 0–6 of
+  this document. Any later phrase such as “exact amended control commit” means
+  the exact descriptor-pinned, reviewed current trusted-control commit/receipt
+  on the v4.32.3 plan ancestry; it never means rerun the old fixup/autosquash.
+- The Unit 0 candidate result remains exactly one direct fuse commit above the
+  original. No plan/control commit enters that ancestry. All Task -2/Task -1
+  security invariants remain acceptance requirements; only their obsolete
+  branch names and history-rewrite mechanics are superseded by this mapping.
+
+If a later historical instruction conflicts with this subsection on branch,
+commit, ref, or rewrite mechanics, this subsection controls. Safety,
+isolation, fail-closed, receipt, and external-authority requirements are never
+weakened.
 
 ---
 
@@ -181,12 +217,23 @@ eligible for Stage A.
 | File | Action | Responsibility |
 |---|---|---|
 | `release/quarantine/v4322-policy.json` | Create | Canonical surface classifications, pinned original identity, forbidden operations, expected passive message and landing URL |
+| `release/quarantine/v4322-topology-guard-policy.json` | Create | Protected-base topology/check/ruleset contract for the dormant explicit stable-PR guard and later bridge publisher |
+| `release/quarantine/v4322-workflow-actions.lock.json` | Create | Exact full-SHA Actions/runtime allowlist used by the protected-base workflow; candidate units cannot widen it |
 | `scripts/quarantine-fuse.py` | Create | Deterministically render or verify a candidate tree; render requires an explicit output root and refuses repository/profile roots |
 | `scripts/rehearse-quarantine-refs.py` | Create | Create-only local Stage R commit and disposable-mirror Stage A/R rehearsal; never contacts a remote |
+| `scripts/check-release-topology.py` | Create | Thin descriptor-safe CLI over the single protected topology evaluator; it owns no duplicate policy logic |
+| `tools/__init__.py` | Create if absent | Fixed package root required for descriptor-pinned topology imports |
+| `tools/release_topology_guard/__init__.py` | Create | Protected topology package marker with no import-time mutation |
+| `tools/release_topology_guard/guard.py` | Create | Single evaluator for stable base/head/tree, default-main fuse, rulesets, bypass actors, and exact check-run producer/source identity |
+| `tools/release_topology_guard/tests/__init__.py` | Create | Test package marker with no runtime behavior |
+| `tools/release_topology_guard/tests/test_guard.py` | Create | Pure evaluator tests including forged candidate authority, implicit refs, and wrong producer/source identities |
 | `mcp/tests/test_quarantine_fuse.py` | Create | Policy, renderer, passive content, no-write, collision and Stage R contract tests |
+| `mcp/tests/test_release_topology_guard.py` | Create | Candidate-tree integration tests proving the protected guard is dormant on default main and exact on explicit stable PRs |
 | `mcp/tests/test_update_smoke.py` | Modify | In quarantine mode replace the documented interactive-only updater gap with passive/no-subprocess assertions |
 | `mcp/tests/test_sync_cache_smoke.py` | Modify | Prove quarantine sync and post-commit paths are no-write and do not infer either conflicting cache topology |
-| `mcp/tests/test_ci_workflow.py` | Modify | Prove default-main workflows are contained and only the approved monitor remains active |
+| `mcp/tests/test_ci_workflow.py` | Modify | Prove the legacy monitor is the only active default-main schedule and the protected topology guard is dormant except for explicit PRs targeting `release/v4-stable` |
+| `.github/workflows/legacy-feed-monitor.yml` | Create | Reviewed read-only active default-main schedule; no release mutation authority |
+| `.github/workflows/release-topology-guard.yml` | Create | Dormant-on-main read-only PR guard that runs only for explicit `release/v4-stable` targets from protected-base source |
 | `scripts/pre-commit-check.sh` | Modify | Select normal or quarantine gate by validated policy/manifest identity; never silently skip both |
 
 ### Fuse runtime and discovery surfaces
@@ -206,7 +253,7 @@ eligible for Stage A.
 | historically user-invokable setup/update/cache/hook paths in policy | executable no-write guard that prints the passive receipt and exits successfully |
 | `.githooks/post-commit` and installed-hook-visible sync paths | passive no-write guard; no cache topology discovery |
 | MCP package entry points in policy | passive/no-tool server or explicit deferred exit; no project/profile/cache mutation |
-| `.github/workflows/*` | no implicit development/release workflow on default `main`; only reviewed read-only legacy-feed monitor remains active |
+| `.github/workflows/*` | no implicit development/release workflow on default `main`; the reviewed read-only legacy-feed monitor is the only active default-main schedule, while `release-topology-guard` is dormant on main and runs only for an explicit pull request targeting `release/v4-stable` from exact protected-base source |
 
 The policy inventory is allowlist-based. A new auto-loaded or executable path
 found in the original tree but absent from the policy is a render and verify
@@ -260,6 +307,11 @@ included in this commit.
 ---
 
 ## 5. Task -2 — Bootstrap the first trusted execution boundary
+
+> **Current bridge run:** historical prerequisite context only. Do not execute
+> its old branch/bootstrap history mechanics; satisfy its unresolved acceptance
+> requirements through the current plan's P0 on preserved PR #14 ancestry, as
+> fixed by section 1.1.
 
 Task -1 cannot trust code that Task -1 is itself creating. Its first RED/GREEN,
 review and control-foundation operations therefore run through a minimal
@@ -1289,6 +1341,11 @@ application while preserving the same denial boundary.
 
 ## 6. Task -1 — Build and pin the trusted release-control verifier
 
+> **Current bridge run:** PR #14 already freezes this five-file fail-closed
+> foundation. Do not run the `f6d50644...` fixup/autosquash procedure below.
+> Audit and extend the preserved foundation only through current P0/P1/P3
+> descendant commits as fixed by section 1.1.
+
 This task runs on `codex/v433-safe-upgrade-design` before the implementation
 worktree is created. It is a control-plane commit, not a fuse implementation
 commit.
@@ -1704,13 +1761,29 @@ depend on the mutable `origin/main` name after capture.
 
 - Create: `release/quarantine/v4322-policy.json`
 - Create: `release/quarantine/v4322-passive-surface-manifest.json`
+- Create: `release/quarantine/v4322-topology-guard-policy.json`
+- Create: `release/quarantine/v4322-workflow-actions.lock.json`
 - Create: `scripts/quarantine-fuse.py`
+- Create: `scripts/check-release-topology.py`
+- Create: `tools/__init__.py` if absent
+- Create: `tools/release_topology_guard/__init__.py`
+- Create: `tools/release_topology_guard/guard.py`
+- Create: `tools/release_topology_guard/tests/__init__.py`
+- Create: `tools/release_topology_guard/tests/test_guard.py`
 - Create: `mcp/tests/test_quarantine_fuse.py`
+- Create: `mcp/tests/test_release_topology_guard.py`
+- Create: `.github/workflows/legacy-feed-monitor.yml`
+- Create: `.github/workflows/release-topology-guard.yml`
 
 - [ ] Write focused tests that fail against the untouched original tree for:
   installable marketplace row, registered plugin hooks/MCP, active updater,
   active setup/cache scripts, active root/host instructions, active historical
   skills, implicit-default workflows, and absent Stage R contract.
+- [ ] Write topology RED tests that reject wrong GitHub App/check producer,
+  wrong protected workflow source SHA, a PR-modified same-name workflow or
+  evaluator, implicit/default refs, wrong default-main fuse, wrong stable
+  base/head/synthetic tree, wrong ruleset or bypass actor, and any candidate
+  field that attempts to select/configure topology authority.
 - [ ] Run only the focused tests and verify each failure names the forbidden
   active surface rather than failing from import, fixture, or syntax errors.
 - [ ] Add a strict policy schema with explicit original identity, surface
@@ -1730,6 +1803,13 @@ depend on the mutable `origin/main` name after capture.
   auto-loaded documents, and unexpected executable bits.
 - [ ] Verify policy paths using Git index/tree identity, not filesystem display
   names or caller-provided labels.
+- [ ] Implement `verify_release_freeze()`, `verify_check_run_identity()`, and
+  `scan_implicit_default_refs()` only in
+  `tools.release_topology_guard.guard`. The CLI and workflow import that exact
+  module; neither duplicates policy. The workflow has no default-main
+  push/schedule/manual trigger, no secret/write permission, uses only the
+  exact full-SHA action lock, checks out/executes protected-base bytes, and
+  accepts only an explicit pull request whose base is `release/v4-stable`.
 
 Focused command:
 
@@ -1744,7 +1824,9 @@ Focused command:
   -- <PINNED_PYTHON> -I -m pytest \
   -p no:cacheprovider --noconftest -c <TRUSTED_PYTEST_CONFIG> \
   --rootdir=. --import-mode=importlib \
-  mcp/tests/test_quarantine_fuse.py -q
+  mcp/tests/test_quarantine_fuse.py \
+  mcp/tests/test_release_topology_guard.py \
+  tools/release_topology_guard/tests/test_guard.py -q
 ```
 
 Every placeholder above resolves before launch to an absolute, canonical,
@@ -1765,7 +1847,7 @@ implementation and contains exactly these argv tails after the absolute pinned
 Python executable:
 
 ```text
-quarantine-tests: -I -m pytest -p no:cacheprovider --noconftest -c __SAMVIL_TRUSTED_PYTEST_CONFIG__ --rootdir=. --import-mode=importlib mcp/tests/test_quarantine_fuse.py -q
+quarantine-tests: -I -m pytest -p no:cacheprovider --noconftest -c __SAMVIL_TRUSTED_PYTEST_CONFIG__ --rootdir=. --import-mode=importlib mcp/tests/test_quarantine_fuse.py mcp/tests/test_release_topology_guard.py tools/release_topology_guard/tests/test_guard.py -q
 quarantine-gate: -I scripts/quarantine-fuse.py verify --policy release/quarantine/v4322-policy.json
 ```
 
@@ -1788,13 +1870,28 @@ only the descriptor-validated trusted config path immediately before launch.
 The external authorization also binds these exact semantic roles to candidate
 inventory paths and SHA-256 values: `policy`, `plugin_manifest`,
 `marketplace_manifest`, `mcp_manifest`, `passive_surface_manifest`, `gate`,
-`validator` and `focused_test`. Their paths are respectively
+`validator`, `focused_test`, `topology_policy`, `workflow_action_lock`,
+`tools_package_marker`, `topology_package_marker`, `topology_wrapper`,
+`topology_evaluator`, `topology_test_package_marker`, `topology_unit_test`,
+`topology_integration_test`, `topology_workflow`, and `legacy_monitor`. Their
+paths are respectively:
 `release/quarantine/v4322-policy.json`, `.claude-plugin/plugin.json`,
 `.claude-plugin/marketplace.json`, `.mcp.json`,
 `release/quarantine/v4322-passive-surface-manifest.json`,
-`scripts/pre-commit-check.sh`, `scripts/quarantine-fuse.py` and
-`mcp/tests/test_quarantine_fuse.py`. Whole-tree identity cannot substitute for
-an omitted or misbound semantic role.
+`scripts/pre-commit-check.sh`, `scripts/quarantine-fuse.py`,
+`mcp/tests/test_quarantine_fuse.py`,
+`release/quarantine/v4322-topology-guard-policy.json`,
+`release/quarantine/v4322-workflow-actions.lock.json`,
+`tools/__init__.py`,
+`tools/release_topology_guard/__init__.py`,
+`scripts/check-release-topology.py`,
+`tools/release_topology_guard/guard.py`,
+`tools/release_topology_guard/tests/__init__.py`,
+`tools/release_topology_guard/tests/test_guard.py`,
+`mcp/tests/test_release_topology_guard.py`,
+`.github/workflows/release-topology-guard.yml`, and
+`.github/workflows/legacy-feed-monitor.yml`. Whole-tree identity cannot
+substitute for an omitted or misbound semantic role.
 
 ---
 
@@ -1839,9 +1936,12 @@ an omitted or misbound semantic role.
   missing/mismatched or if any normal production check is merely relabeled as
   executed.
 - [ ] Re-run focused tests and obtain GREEN.
-- [ ] Keep publisher/remote release-guard files unreachable from passive root
-  instructions and workflows, but do not refactor them in F0. Focused tests
-  must prove the rehearsal path never invokes the existing publisher.
+- [ ] Keep publisher/remote mutation files unreachable from passive root
+  instructions and workflows, but do not refactor them in F0. The sole
+  exception is the newly added read-only protected topology guard defined by
+  Task 1; it has no mutation authority and is dormant on default main. Focused
+  tests must prove the rehearsal and topology paths never invoke the existing
+  publisher.
 
 ---
 
@@ -1882,7 +1982,10 @@ an omitted or misbound semantic role.
 - [ ] Verify protected directory entry list, bytes, mode, xattrs where
   available, symlink targets, settings, selection, cache, project state, Git
   refs, and process list have mutation cardinality zero.
-- [ ] Repeat every invocation twice and require byte-identical receipts.
+- [ ] Repeat every invocation twice with distinct signed run envelopes,
+  nonces, run IDs, and observer identities. Require equality only for the
+  policy-defined normalized deterministic projection; separately require
+  byte-identical whole receipts for same-nonce response-loss replay.
 - [ ] Inject SIGTERM and timeout around passive commands and require no partial
   artifact or background child.
 - [ ] Scan passive text and scripts for destructive/update commands and shell
