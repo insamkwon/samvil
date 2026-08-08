@@ -189,6 +189,23 @@ task2_execution_entry_gate() {
 task2_candidate_snapshot_gate() {
   task2_control_commit="$(task2_git rev-parse HEAD)" || return $?
   task2_control_tree="$(task2_git rev-parse 'HEAD^{tree}')" || return $?
+  case "${task2_precommit_mode:-}" in
+    staged)
+      task2_snapshot_mode_requirements=(
+        --require-staged-descriptor-exact-base-to-candidate-path-set
+        --require-no-unlisted-tree-diff
+      )
+      ;;
+    clean)
+      task2_snapshot_mode_requirements=(
+        --require-clean-receipt-without-descriptor-or-commit-authorization
+      )
+      ;;
+    *)
+      echo "TASK2_PORTABLE_FULL_GATE_UNAVAILABLE: unknown precommit mode" >&2
+      return 78
+      ;;
+  esac
   run_task2_portable /usr/local/libexec/samvil-task2-candidate-snapshot run-full-precommit \
     --schema samvil.task2-candidate-snapshot.v1 \
     --gate-profile samvil.task2-full-precommit.v1 \
@@ -200,8 +217,7 @@ task2_candidate_snapshot_gate() {
     --require-atomic-attestation-snapshot-venv-gate-transaction \
     --require-approved-task2-plan-ancestor \
     --require-dedicated-uid-readonly-control-source-and-host-profile-deny \
-    --require-staged-descriptor-exact-base-to-candidate-path-set \
-    --require-no-unlisted-tree-diff \
+    "${task2_snapshot_mode_requirements[@]}" \
     --require-root-owned-readonly-index-tree-snapshot \
     --require-directory-nodes-and-regular-leaves-only \
     --require-beneath-snapshot-nofollow-resolution \
@@ -234,7 +250,11 @@ task2_commit_snapshot_receipt() {
 }
 
 task2_full_precommit() {
-  case "${1:---staged}" in
+  if test "$#" -ne 1; then
+    echo "TASK2_PORTABLE_FULL_GATE_UNAVAILABLE: exactly one mode is required" >&2
+    return 78
+  fi
+  case "$1" in
     --clean) task2_precommit_mode=clean ;;
     --staged) task2_precommit_mode=staged ;;
     *)
@@ -495,6 +515,8 @@ task2_execution_entry_gate
 - [ ] **Step 1: Admit an isolated verification runtime**
 
 The external provisioner first creates the sealed `samvil.task2-venv-provenance.v1` record and install recipe for this clean Task 0 base, then queues exactly one new `task2_full_precommit` sandbox attestation for the clean candidate tree; a previous review, Task, failure, expired challenge, or older base commit cannot be reused. Without the independently verified disposable VM/OS sandbox attestation, `task2_full_precommit` is unavailable and no implementation commit is authorized. Inside its one root-owned transaction, the snapshot coordinator's provenance verifier pins CPython 3.12.x base-interpreter digest, base source commit/tree and unchanged `mcp/pyproject.toml` blob, signed offline wheelhouse/requirements-lock digest, exact `pytest`/`pytest-asyncio` distribution digests, expected snapshot-local install layout/output digest, expiry, and signature; it verifies the recipe before creating any snapshot and revalidates the actual result afterward. The root-owned snapshot helper, not the execution worktree, creates its fresh `mcp/.venv` with that CPython using `python -m venv --copies`, installs only from the signed wheelhouse with no network or user index, and places it in the immutable candidate snapshot. That snapshot-local `.venv`, `.venv/bin/python`, and `pyvenv.cfg` must be non-symlinks; Python must report exactly that snapshot-local venv as `sys.prefix`, report Python `3.12.x`, import both `pytest` and `pytest_asyncio`, use a base prefix/executable only below `/System`, `/Library/Developer`, or `/usr/bin`, and have root-owned non-group/world-writable base-executable ancestors. `/opt`, a user-owned framework, HOME, CODEX_HOME, a Claude profile, cache, an execution-worktree venv, or any project outside the snapshot is rejected. Otherwise `task2_full_precommit` returns 78. The runtime is only a full-pre-commit prerequisite; it is not the R0 receipt-pinned Python 3.12 closure and cannot issue P0 evidence.
+
+Before any sandbox-attestation queue lookup or receipt consumption, an implementation-level wrapper test must prove that `task2_full_precommit` accepts exactly one argument and only `--clean` or `--staged`. Zero arguments, an unknown argument, or two-or-more arguments return 78 without invoking the snapshot coordinator. The valid clean path must request a clean receipt with no staged descriptor or commit authorization; the valid staged path alone may request the descriptor/path-status checks and one-shot commit authorization.
 
 - [ ] **Step 2: Prove the complete repository gate before any Task 1-3 commit**
 
@@ -1138,7 +1160,11 @@ terminal_details = {
 }
 ~~~
 
-The fixture's top level is exactly `schema`, `request_fields`, `response_fields`, `replay_resume_request_fields`, `replay_resume_response_fields`, `status_request_fields`, `status_response_fields`, `process_request_fields`, `process_response_fields`, `secret_delivery_ack_fields`, `secret_delivery_ack_response_fields`, `client_reject_fields`, `terminal_response_fields`, `process_operations`, `process_states`, `status_values`, `terminal_request_kinds`, `client_reject_classes`, `outer_verifier_assertion_fields`, `lease_receipt_fields`, `run_envelope_evidence_fields`, `observer_evidence_fields`, `fd_identity_encoding`, `channel_record_framing`, `secret_delivery_frame_encoding`, `denial_transport`, `response_verification`, `channel_binding_encoding`, `process_status_binding`, `process_state_transitions`, `admission_idempotency`, `lease_receipt_binding`, `signature_encoding`, `schema_values`, `terminal_detail_mapping`, `client_reject_detail_mapping`, and `terminal`. Its `terminal` object has exactly `terminal_object_fields`, `schema == "samvil.task2-admission-terminal.v1"`, `outer_terminal == "BLOCKED_ENVIRONMENT"`, and `details == terminal_details`; both terminal mappings must be exactly as above. The test also requires initial `directory_fd_count == 1` and `secret_attachment_count == 1`, replay `directory_fd_count == 0` and `secret_attachment_count == 0`, `manifest_schema == "samvil.full-gate-manifest.v2"`, and a literal `channel_contract_sha256 = <sha256 of canonical fixture bytes>` in the handoff document. It rejects any field name/value containing raw PID, start-time, process-group, polling, signal-name, or a path. It verifies the exact outer-verifier assertion, lease receipt and response-copy/digest/signature/evidence-projection bindings, run-envelope/observer evidence, FD-identity/channel-binding and received-FD-transcript encoding, the exact initial four-record success/ACK sequence and separate capability-proven replay-resume sequence, exact packet framing/ancillary rejection/FD-close behavior, all response-verification fields, signed zero-FD denial transport, signature encoding, admission idempotency and delivery-ack recovery, status-proof/process-state rules, process-command, and process-response field sets listed in Step 4. It must table-drive all three post-auth denial classes (`quota_or_fd_identity`, `opaque_handle_or_process_state`, and `assertion_signature_channel_status_or_controller_recovery`) plus every `client_reject_class`, prove each exact correlated request ID/kind/detail, signed terminal shape, zero FD, and zero secret fields, and prove that an unsent client rejection follows the deadline-revocation rule; native socket behavior itself remains a Task -2B integration proof. The trust-root document declares the fixture only a portable test vector.
+The fixture's top level is exactly `schema`, `request_fields`, `response_fields`, `replay_resume_request_fields`, `replay_resume_response_fields`, `status_request_fields`, `status_response_fields`, `process_request_fields`, `process_response_fields`, `secret_delivery_ack_fields`, `secret_delivery_ack_response_fields`, `client_reject_fields`, `terminal_response_fields`, `process_operations`, `process_states`, `status_values`, `terminal_request_kinds`, `client_reject_classes`, `outer_verifier_assertion_fields`, `lease_receipt_fields`, `run_envelope_evidence_fields`, `observer_evidence_fields`, `fd_identity_encoding`, `channel_record_framing`, `secret_delivery_frame_encoding`, `denial_transport`, `response_verification`, `channel_binding_encoding`, `process_status_binding`, `process_state_transitions`, `admission_idempotency`, `lease_receipt_binding`, `signature_encoding`, `schema_values`, `terminal_detail_mapping`, `client_reject_detail_mapping`, and `terminal`. Its `terminal` object has exactly `terminal_object_fields`, `schema == "samvil.task2-admission-terminal.v1"`, `outer_terminal == "BLOCKED_ENVIRONMENT"`, and `details == terminal_details`; both terminal mappings must be exactly as above. The test also requires initial `directory_fd_count == 1` and `secret_attachment_count == 1`, replay `directory_fd_count == 0` and `secret_attachment_count == 0`, `manifest_schema == "samvil.full-gate-manifest.v2"`, and a literal `channel_contract_sha256 = <sha256 of canonical fixture bytes>` in the handoff document. It rejects any field name/value containing raw PID, start-time, process-group, polling, signal-name, or a path.
+
+The static test verifies only portable contract declarations: exact field sets; canonical UTF-8 and fixture/document digests; outer-verifier assertion, lease-receipt, response-copy, evidence-projection, FD-identity, channel-binding, signature, idempotency, status/process-state, terminal-mapping, and zero-FD/zero-secret **values**; and literal framing, sequence, rejection, and recovery rules encoded in the fixture. It table-drives the three post-auth denial classes and every `client_reject_class` only to assert their declared request-kind/detail/terminal-field mappings. It does not claim that a declared sequence or terminal mapping occurred at runtime.
+
+This test must not open an `AF_UNIX` socket, call `recvmsg`, receive or close `SCM_RIGHTS`, create or zeroize a secret, advance a trusted clock, invoke a controller journal or recovery path, send a client rejection, or prove deadline revocation. Those native transport, FD, secret, journal, recovery, and autonomous-expiry behaviors remain mandatory Task -2B integration proofs in the external packet and the Task -2B requirements below. The trust-root document declares the fixture only a portable test vector.
 
 - [ ] **Step 2: Confirm RED**
 
