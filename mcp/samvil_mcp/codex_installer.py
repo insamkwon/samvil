@@ -23,10 +23,12 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from .ssot_io import atomic_write_text
 from .runtime_layout import RuntimeLayoutError, safe_child_directory
 
-_FRONTMATTER_NAME = re.compile(r"^name:\s*([^\n#]+?)\s*$", re.MULTILINE)
+_FRONTMATTER_NAME = re.compile(r"^name:\s*(.+?)\s*$", re.MULTILINE)
 _LEGACY_AGENTS_TEMPLATE_SHA256 = frozenset(
     {
         # Exact AGENTS.md templates that the retired global installer shipped.
@@ -146,8 +148,35 @@ def validate_marketplace_root(
 
 
 def _frontmatter_name(path: Path) -> str:
-    match = _FRONTMATTER_NAME.search(path.read_text(encoding="utf-8"))
-    return match.group(1).strip() if match else path.parent.name
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    parsed_name: object
+    if lines and lines[0].strip() == "---":
+        try:
+            closing_index = next(
+                index
+                for index, line in enumerate(lines[1:], start=1)
+                if line.strip() == "---"
+            )
+        except StopIteration as exc:
+            raise ValueError(f"skill frontmatter is not closed: {path}") from exc
+        try:
+            frontmatter = yaml.safe_load("\n".join(lines[1:closing_index])) or {}
+        except yaml.YAMLError as exc:
+            raise ValueError(f"invalid skill frontmatter: {path}") from exc
+        if not isinstance(frontmatter, dict):
+            raise ValueError(f"skill frontmatter must be a mapping: {path}")
+        parsed_name = frontmatter.get("name", path.parent.name)
+    else:
+        match = _FRONTMATTER_NAME.search(text)
+        raw_name = match.group(1).strip() if match else path.parent.name
+        try:
+            parsed_name = yaml.safe_load(raw_name)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"invalid skill frontmatter name: {path}") from exc
+    if not isinstance(parsed_name, str) or not parsed_name.strip():
+        raise ValueError(f"skill frontmatter name must be a non-empty string: {path}")
+    return parsed_name.strip()
 
 
 def _skill_tree_hash(skill_root: Path) -> str:
@@ -608,7 +637,7 @@ def _personal_skill_inventory_reason(candidate: Path) -> str | None:
     try:
         declared_name = _frontmatter_name(manifest)
         _skill_tree_hash(path)
-    except (OSError, UnicodeError) as exc:
+    except (OSError, UnicodeError, ValueError) as exc:
         return f"personal skill cannot be inventoried safely: {exc}"
     normalized_name = unicodedata.normalize("NFKC", declared_name).casefold()
     if normalized_name.startswith("samvil:"):
@@ -1090,7 +1119,7 @@ def build_legacy_migration_plan(
                 for entry in inventory_personal_skills(skills_root)
                 if entry.path not in generated_legacy_paths
             )
-        except (OSError, UnicodeError) as exc:
+        except (OSError, UnicodeError, ValueError) as exc:
             blockers.append(f"personal skill inventory failed safely: {exc}")
     return LegacyMigrationPlan(
         canonical_root=canonical,

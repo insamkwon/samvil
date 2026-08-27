@@ -1233,6 +1233,8 @@ def test_legacy_migration_dry_run_blocks_unsafe_personal_skill_links(
         "SAMVIL:private",
         "ſamvil:private",
         "ＳＡＭＶＩＬ:private",
+        '"samvil:private"',
+        "'samvil:private'",
     ),
 )
 def test_legacy_migration_dry_run_blocks_personal_skill_claiming_samvil_namespace(
