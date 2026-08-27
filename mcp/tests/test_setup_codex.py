@@ -1148,6 +1148,25 @@ def test_legacy_migration_dry_run_blocks_unsafe_profile_and_skill_roots(
     )
 
 
+def test_legacy_migration_dry_run_blocks_filesystem_root_profile(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=Path(tmp_path.anchor),
+    )
+
+    assert plan.to_dict()["ready"] is False
+    assert any(
+        artifact.artifact_kind == "codex_profile_root"
+        and "filesystem root" in artifact.reason
+        for artifact in plan.artifacts
+    )
+
+
 def test_legacy_migration_dry_run_blocks_symlinked_profile_ancestor(
     tmp_path: Path,
 ) -> None:
@@ -1205,6 +1224,42 @@ def test_legacy_migration_dry_run_blocks_unsafe_personal_skill_links(
         for artifact in plan.artifacts
     )
     assert outside.read_text(encoding="utf-8") == "keep outside\n"
+
+
+@pytest.mark.parametrize(
+    "claimed_name",
+    (
+        "samvil:private",
+        "SAMVIL:private",
+        "ſamvil:private",
+        "ＳＡＭＶＩＬ:private",
+    ),
+)
+def test_legacy_migration_dry_run_blocks_personal_skill_claiming_samvil_namespace(
+    tmp_path: Path,
+    claimed_name: str,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    personal = codex_home / "skills" / "personal-review"
+    personal.mkdir(parents=True)
+    (personal / "SKILL.md").write_text(
+        f"---\nname: {claimed_name}\n---\nkeep\n",
+        encoding="utf-8",
+    )
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is False
+    assert any(
+        artifact.artifact_kind == "personal_skill_tree"
+        and "reserved SAMVIL namespace" in artifact.reason
+        for artifact in plan.artifacts
+    )
 
 
 def test_legacy_migration_dry_run_reports_unreadable_personal_manifest(

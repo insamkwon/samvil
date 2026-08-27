@@ -527,6 +527,8 @@ def _unsafe_directory_path_reason(path: Path, *, label: str) -> str | None:
     """Reject existing symlink or non-directory components without resolving them."""
 
     candidate = _lexical_absolute(path)
+    if candidate == Path(candidate.anchor):
+        return f"{label} root must not be a filesystem root"
     current = Path(candidate.anchor)
     for part in candidate.parts[1:]:
         current /= part
@@ -604,10 +606,13 @@ def _personal_skill_inventory_reason(candidate: Path) -> str | None:
     if manifest.is_symlink() or not manifest.is_file():
         return None
     try:
-        _frontmatter_name(manifest)
+        declared_name = _frontmatter_name(manifest)
         _skill_tree_hash(path)
     except (OSError, UnicodeError) as exc:
         return f"personal skill cannot be inventoried safely: {exc}"
+    normalized_name = unicodedata.normalize("NFKC", declared_name).casefold()
+    if normalized_name.startswith("samvil:"):
+        return "personal skill claims the reserved SAMVIL namespace"
     return None
 
 
