@@ -17,6 +17,7 @@ import stat
 import subprocess
 import tempfile
 import tomllib
+import unicodedata
 from datetime import datetime, timezone
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -552,6 +553,12 @@ def _bytes_sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def _is_samvil_prefixed(name: str) -> bool:
+    """Treat case/compatibility-equivalent SAMVIL names as one namespace."""
+
+    return unicodedata.normalize("NFKC", name).casefold().startswith("samvil")
+
+
 def _unsafe_tree_reason(root: Path) -> str | None:
     try:
         if root.is_symlink():
@@ -1010,14 +1017,14 @@ def build_legacy_migration_plan(
             )
         else:
             for candidate in sorted(
-                (entry for entry in entries if entry.name.startswith("samvil")),
+                (entry for entry in entries if _is_samvil_prefixed(entry.name)),
                 key=lambda entry: entry.name,
             ):
                 artifacts.append(
                     _legacy_skill_artifact(candidate, canonical / "skills" / candidate.name)
                 )
             for candidate in sorted(
-                (entry for entry in entries if not entry.name.startswith("samvil")),
+                (entry for entry in entries if not _is_samvil_prefixed(entry.name)),
                 key=lambda entry: entry.name,
             ):
                 unsafe_personal_reason = _personal_skill_inventory_reason(candidate)

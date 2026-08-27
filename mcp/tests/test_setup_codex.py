@@ -1331,13 +1331,18 @@ def test_legacy_migration_dry_run_rejects_repo_inside_profile(
     assert any("unsafe Codex marketplace root" in blocker for blocker in plan.blockers)
 
 
+@pytest.mark.parametrize(
+    "skill_name",
+    ("samvil-private", "SAMVIL-private", "ſamvil-private", "ＳＡＭＶＩＬ-private"),
+)
 def test_legacy_migration_dry_run_blocks_unknown_samvil_skill(
     tmp_path: Path,
+    skill_name: str,
 ) -> None:
     repo = tmp_path / "repo"
     (repo / "skills").mkdir(parents=True)
     codex_home = tmp_path / "profile" / ".codex"
-    unknown = codex_home / "skills" / "samvil-private"
+    unknown = codex_home / "skills" / skill_name
     unknown.mkdir(parents=True)
     (unknown / "SKILL.md").write_text("user owned\n", encoding="utf-8")
 
