@@ -106,6 +106,15 @@ bash scripts/setup-codex.sh codex --install
 스크립트는 저장소의 상대 경로 manifest/MCP launcher를 점검하고 Codex native
 marketplace/plugin만 등록합니다. 전역 `AGENTS.md`를 덮어쓰거나 절대 경로 MCP
 설정을 추가하지 않으며, 기존 marketplace와 개인 스킬 inventory를 보존합니다.
+점검 결과가 기존 SAMVIL 전역 스킬·`AGENTS.md`·직접 MCP 등록을 발견하면 설치 대신
+`bash scripts/setup-codex.sh codex --migrate`를 한 번 실행하세요. 스크립트가 먼저
+읽기 전용 계획 해시를 고정하고, SAMVIL이 생성한 것으로 증명된 항목만 시간 표시
+백업으로 옮긴 뒤 네이티브 플러그인을 설치합니다. 사용자 수정 항목은 건드리지 않고
+차단합니다. 네이티브 활성화가 완료되기 전의 일반적인 설치 실패는 옮긴 항목을 원래
+위치로 복구합니다. 활성화 성공 뒤 최종 검증이 불확실해진 경우에는 중복 등록을 만들 수
+있는 추측성 복구 대신 백업과 복구 저널을 보존하고 안전하게 중단합니다.
+`git pull`만으로 기존 설치가 바뀌지는 않습니다. 위 명령은 명시된 단일 `CODEX_HOME`
+프로필만 점검·전환하며, 다른 프로필을 자동으로 순회하지 않습니다.
 
 **3단계 — 호스트 재시작 후 시작!**
 
@@ -316,7 +325,9 @@ SAMVIL 자체는 완전 무료예요.
 cd ~/samvil   # 설치한 폴더
 git pull
 bash scripts/setup-codex.sh codex --check
-bash scripts/setup-codex.sh codex --install
+bash scripts/setup-codex.sh codex --install  # clean profile
+# 기존 전역 SAMVIL 설치가 감지되면 위 install 대신:
+bash scripts/setup-codex.sh codex --migrate
 ```
 
 새 버전이 있으면 자동으로 알려주고, 업데이트할지 물어봐요.

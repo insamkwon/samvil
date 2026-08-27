@@ -31,10 +31,32 @@ installer passes an explicit `CODEX_HOME` to every child command, preserves
 unrelated marketplace/plugin entries, backs up the registry, and verifies that
 personal skill names and hashes are unchanged.
 
-Legacy `--migrate` is fail-closed in this candidate until the CLI can construct
-provenance-backed actions for generated AGENTS, direct MCP blocks, and legacy
-skills. Do not move those files manually; ambiguous user-modified files must
-remain byte-identical.
+If `--check` reports `legacy migration required`, use the explicit migration
+mode once instead of manually moving files:
+
+```bash
+bash scripts/setup-codex.sh codex --migrate
+```
+
+The wrapper first performs a read-only inventory and seals its SHA-256, then
+applies that exact plan under an exclusive profile lock. Only byte-identical
+legacy SAMVIL skill trees, a known generated global `AGENTS.md`, and the exact
+installer-generated direct MCP block are eligible. Originals move to
+`backups/legacy-migrations/<timestamp>-<plan>-<id>/`; unrelated config meaning,
+comments, and personal skill bytes stay unchanged. Codex may normalize config
+line endings during a successful registry update. A normal failure before native
+activation completes restores every staged legacy object and restores exact
+config bytes when safe. If activation completed but final proof is uncertain, or
+unrelated config changed concurrently, the installer preserves the current state,
+backup, and recovery journal instead of guessing. Ambiguous or user-modified state
+blocks before artifact mutation. Repeating the same sealed plan returns the stored
+receipt without running Codex commands again.
+
+Migration reads the actual `codex plugin marketplace list --json` and
+`codex plugin list --json` state before profile writes and again after taking the
+profile lock. Missing CLI evidence or any of its three integrity digests blocks
+the operation. Only the explicitly selected `CODEX_HOME` is handled; repeat the
+check separately for each profile you intentionally manage.
 
 ## `invalid_grant: Invalid refresh token`
 

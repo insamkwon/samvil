@@ -18,9 +18,10 @@ The plugin surface, shared transition controller, idempotent receipt replay,
 journal recovery, safe native installer, and Desktop MCP retry have been
 implemented. The candidate remains evidence-limited: Codex CLI runtime is
 `blocked_auth`, Claude has plugin/MCP smoke only, and the full host scenario
-matrices are not implemented. The actual installer supports checked native install
-and marketplace-root correction, while legacy `--migrate` remains explicitly
-blocked until provenance actions are wired. Deploy approval also remains
+matrices are not implemented. The actual installer supports checked native install,
+marketplace-root correction, and explicit provenance-sealed legacy migration with
+timestamped backups, profile locking, idempotent receipts, and compensating rollback.
+Deploy approval also remains
 fail-closed without trusted host attestation, so the native default PASS route is
 Retro rather than deployment. These gaps block a claim of complete native parity
 but do not invalidate the controller and Desktop manual evidence.
@@ -309,16 +310,16 @@ plugin skill과 충돌하면 path와 hash를 보고하고 설치를 차단한다
 
 ```text
 capability probe
-  → personal skill inventory snapshot
-  → current marketplace root inspect
-  → legacy registration diagnosis
-  → reversible backup
+  → read-only CLI registry snapshot + three integrity digests
+  → sealed legacy plan and canonical plugin contract
+  → profile lock + plan/registry re-read
+  → personal skill inventory snapshot + reversible backup
   → public skills/controller readiness verify
-  → correct repository marketplace add
-  → samvil@samvil-codex install/enable
-  → MCP import/stdio smoke
-  → namespace inventory compare
-  → Codex plugin/skill/status smoke
+  → isolated samvil-codex marketplace add
+  → samvil@samvil-codex install/enable + readback
+  → legacy plugin then marketplace retirement
+  → final registry/config/personal-skill readback
+  → durable journal + no-replace receipt publication
 ```
 
 설치 구현은 두 시점으로 분리한다. 초반에는 read-only planner와 격리된 fake Codex
@@ -345,11 +346,17 @@ probe한다.
 
 Codex registry의 `samvil` marketplace root가 canonical root와 다르면:
 
-1. 현재 marketplace/plugin inventory를 JSON receipt로 backup
-2. 기존 Codex `samvil` 등록이 있으면 `codex plugin marketplace remove samvil`
+1. 실제 CLI marketplace/plugin inventory와 unrelated fingerprint를 봉인
+2. 기존 `samvil` source가 독립된 exact legacy manifest인지 증명
 3. canonical repository를 가리키는 격리 wrapper를 `samvil-codex` marketplace로 등록
-4. `codex plugin add samvil@samvil-codex`
-5. resolved plugin path와 version 검증
+4. `codex plugin add samvil@samvil-codex` 후 source/enabled 상태를 readback
+5. 새 plugin 활성화가 증명된 뒤 `samvil@samvil`, 이어서 `samvil` marketplace 제거
+6. 최종 registry/config/personal-skill/canonical contract를 재검증하고 receipt 게시
+
+새 등록을 먼저 활성화하므로 정상 전환 중 사용 가능한 plugin이 사라지는 구간이 없다.
+네이티브 활성화 전 실패는 staged legacy object와 config를 안전하게 복구한다. 활성화 후
+상태가 불확실하거나 unrelated 동시 변경이 발견되면 추측성 broad rollback을 하지 않고
+backup과 journal을 보존한 `recovery-required` 상태로 중단한다.
 
 원본 `~/.claude-plugin/marketplace.json` 파일 자체는 Codex migration이 삭제하거나
 수정하지 않는다. Codex registry reference만 교정한다.
