@@ -152,6 +152,25 @@ def test_personal_skill_inventory_compare_detects_name_or_hash_drift(tmp_path: P
     assert compare_skill_inventories(before, after) is False
 
 
+def test_personal_skill_inventory_compare_detects_directory_replacement(
+    tmp_path: Path,
+) -> None:
+    skills = tmp_path / "skills"
+    original = skills / "original"
+    replacement = skills / "replacement"
+    original.mkdir(parents=True)
+    manifest = original / "SKILL.md"
+    manifest.write_text("---\nname: personal\n---\nkeep\n", encoding="utf-8")
+    before = inventory_personal_skills(skills)
+
+    original.rename(replacement)
+    after = inventory_personal_skills(skills)
+
+    assert before[0].name == after[0].name
+    assert before[0].content_hash == after[0].content_hash
+    assert compare_skill_inventories(before, after) is False
+
+
 def test_personal_skill_inventory_detects_support_file_loss(tmp_path: Path) -> None:
     skills = tmp_path / "skills"
     skill = skills / "custom-review"
@@ -168,6 +187,24 @@ def test_personal_skill_inventory_detects_support_file_loss(tmp_path: Path) -> N
     after = inventory_personal_skills(skills)
 
     assert compare_skill_inventories(before, after) is False
+
+
+def test_personal_skill_inventory_does_not_follow_symlinked_root_ancestor(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path / "outside"
+    personal = outside / "skills" / "personal"
+    personal.mkdir(parents=True)
+    (personal / "SKILL.md").write_text(
+        "---\nname: personal\n---\nkeep\n",
+        encoding="utf-8",
+    )
+    linked_parent = tmp_path / "linked"
+    linked_parent.symlink_to(outside, target_is_directory=True)
+
+    inventory = inventory_personal_skills(linked_parent / "skills")
+
+    assert inventory == ()
 
 
 def test_legacy_skill_classification_requires_byte_identity(tmp_path: Path) -> None:
@@ -188,6 +225,65 @@ def test_legacy_skill_classification_requires_byte_identity(tmp_path: Path) -> N
     assert modified.blocks_mutation is True
 
 
+def test_legacy_skill_classifier_checks_the_whole_tree_and_rejects_links(
+    tmp_path: Path,
+) -> None:
+    canonical = tmp_path / "canonical" / "samvil-run"
+    legacy = tmp_path / "legacy" / "samvil-run"
+    (canonical / "scripts").mkdir(parents=True)
+    (canonical / "SKILL.md").write_text("same\n", encoding="utf-8")
+    (canonical / "scripts" / "helper.py").write_text("safe\n", encoding="utf-8")
+    shutil.copytree(canonical, legacy)
+    (legacy / "scripts" / "helper.py").write_text("changed\n", encoding="utf-8")
+
+    changed = classify_legacy_skill(
+        legacy / "SKILL.md", canonical / "SKILL.md"
+    )
+
+    assert changed.classification == "user_modified"
+    assert "tree" in changed.reason
+
+    linked = tmp_path / "linked-skill"
+    linked.symlink_to(canonical, target_is_directory=True)
+    result = classify_legacy_skill(linked / "SKILL.md", canonical / "SKILL.md")
+    assert result.classification == "user_modified"
+    assert result.blocks_mutation is True
+
+
+def test_legacy_skill_tree_hash_frames_file_content_and_following_entries(
+    tmp_path: Path,
+) -> None:
+    canonical = tmp_path / "canonical" / "samvil-run"
+    legacy = tmp_path / "legacy" / "samvil-run"
+    canonical.mkdir(parents=True)
+    legacy.mkdir(parents=True)
+    canonical_manifest = canonical / "SKILL.md"
+    legacy_manifest = legacy / "SKILL.md"
+    canonical_manifest.write_bytes(b"canonical\n")
+    legacy_manifest.write_bytes(b"canonical\n")
+
+    # Without an explicit content boundary, these bytes can impersonate the
+    # serialization of the following empty file and make two different trees
+    # hash to the same input stream before SHA-256 is applied.
+    trailing = canonical / "z"
+    trailing.write_bytes(b"")
+    forged_entry = (
+        len(b"z").to_bytes(8, "big")
+        + b"z"
+        + (trailing.stat().st_mode & 0o7777).to_bytes(4, "big")
+        + b"F"
+    )
+    legacy_manifest.write_bytes(legacy_manifest.read_bytes() + forged_entry)
+
+    result = classify_legacy_skill(
+        legacy_manifest,
+        canonical_manifest,
+    )
+
+    assert result.classification == "user_modified"
+    assert result.blocks_mutation is True
+
+
 def test_generated_file_classifier_distinguishes_ambiguous_content(tmp_path: Path) -> None:
     file = tmp_path / "AGENTS.md"
     expected = "generated\n"
@@ -198,6 +294,79 @@ def test_generated_file_classifier_distinguishes_ambiguous_content(tmp_path: Pat
     result = classify_generated_file(file, expected)
     assert result.classification == "user_modified"
     assert result.blocks_mutation is True
+
+
+def test_generated_file_classifier_rejects_symlink_even_when_target_matches(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target.md"
+    target.write_text("generated\n", encoding="utf-8")
+    linked = tmp_path / "AGENTS.md"
+    linked.symlink_to(target)
+
+    result = classify_generated_file(linked, "generated\n")
+
+    assert result.classification == "user_modified"
+    assert result.blocks_mutation is True
+    assert result.path == linked.absolute()
+
+
+def test_generated_file_classifier_fails_closed_on_invalid_utf8(
+    tmp_path: Path,
+) -> None:
+    candidate = tmp_path / "AGENTS.md"
+    candidate.write_bytes(b"\xff\xfe")
+
+    result = classify_generated_file(candidate, "generated\n")
+
+    assert result.classification == "user_modified"
+    assert result.blocks_mutation is True
+    assert "UTF-8" in result.reason
+
+
+def test_legacy_skill_classifier_fails_closed_on_non_regular_candidate(
+    tmp_path: Path,
+) -> None:
+    canonical = tmp_path / "canonical" / "SKILL.md"
+    candidate = tmp_path / "legacy" / "SKILL.md"
+    canonical.parent.mkdir(parents=True)
+    candidate.mkdir(parents=True)
+    canonical.write_text("generated\n", encoding="utf-8")
+
+    result = classify_legacy_skill(candidate, canonical)
+
+    assert result.classification == "user_modified"
+    assert result.blocks_mutation is True
+
+
+def test_legacy_classifiers_reject_symlinked_parent_without_following_it(
+    tmp_path: Path,
+) -> None:
+    canonical = tmp_path / "canonical" / "skill" / "SKILL.md"
+    canonical.parent.mkdir(parents=True)
+    canonical.write_text("generated\n", encoding="utf-8")
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    (real_parent / "skill" / "SKILL.md").parent.mkdir()
+    (real_parent / "skill" / "SKILL.md").write_text(
+        "generated\n", encoding="utf-8"
+    )
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+    skill_result = classify_legacy_skill(
+        linked_parent / "skill" / "SKILL.md",
+        canonical,
+    )
+    generated_result = classify_generated_file(
+        linked_parent / "AGENTS.md",
+        "generated\n",
+    )
+
+    assert skill_result.blocks_mutation is True
+    assert "ancestor" in skill_result.reason
+    assert generated_result.blocks_mutation is True
+    assert "symbolic link" in generated_result.reason
 
 
 def test_install_plan_is_deterministic_and_read_only(tmp_path: Path) -> None:
@@ -805,6 +974,639 @@ def test_setup_shell_routes_codex_to_native_installer_without_legacy_global_writ
     assert script.index("[1/5] Python") < script.index('if [[ "$HOST" == "codex" ]]')
     assert '_install_agents "$HOME/.codex"' not in script
     assert "[mcp_servers.samvil-mcp]" not in script
+
+
+def _generated_legacy_agents(repo: Path, installed_root: Path | None = None) -> str:
+    source = (repo / "AGENTS.md").read_text(encoding="utf-8")
+    root = installed_root or repo
+    return source.replace("references/", f"{root}/references/").replace(
+        "scripts/", f"{root}/scripts/"
+    )
+
+
+def test_legacy_migration_dry_run_classifies_exact_skill_tree_without_writes(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    canonical = repo / "skills" / "samvil-example"
+    (canonical / "scripts").mkdir(parents=True)
+    (canonical / "SKILL.md").write_text(
+        "---\nname: samvil-example\n---\ncanonical\n", encoding="utf-8"
+    )
+    (canonical / "scripts" / "helper.py").write_text(
+        "print('canonical')\n", encoding="utf-8"
+    )
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-example"
+    shutil.copytree(canonical, legacy)
+    personal = codex_home / "skills" / "personal-review"
+    personal.mkdir()
+    personal_file = personal / "SKILL.md"
+    personal_file.write_text(
+        "---\nname: personal-review\n---\nkeep\n", encoding="utf-8"
+    )
+    before = {
+        path.relative_to(codex_home).as_posix(): path.read_bytes()
+        for path in codex_home.rglob("*")
+        if path.is_file()
+    }
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    payload = plan.to_dict()
+    assert payload["ready"] is True
+    assert len(payload["plan_sha256"]) == 64
+    assert [item["name"] for item in payload["personal_skills"]] == [
+        "personal-review"
+    ]
+    assert [item["artifact_kind"] for item in payload["artifacts"]] == [
+        "legacy_skill_tree"
+    ]
+    assert payload["artifacts"][0]["classification"] == "generated_legacy"
+    assert payload["actions"] == [
+        {
+            "kind": "migrate_generated",
+            "path": str(legacy.resolve()),
+            "reason": "legacy skill tree is byte-identical to canonical source",
+            "artifact_kind": "legacy_skill_tree",
+            "expected_hash": payload["artifacts"][0]["content_hash"],
+        }
+    ]
+    assert plan.to_dict() == installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    ).to_dict()
+    after = {
+        path.relative_to(codex_home).as_posix(): path.read_bytes()
+        for path in codex_home.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
+
+
+def test_legacy_migration_dry_run_matches_historical_repo_skill_tree(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    canonical = repo / "skills" / "samvil-resume"
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / canonical.name
+    shutil.copytree(canonical, legacy)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = plan.artifacts[0]
+    assert artifact.artifact_kind == "legacy_skill_tree"
+    assert artifact.classification == "generated_legacy"
+    assert artifact.expected_hash == artifact.content_hash
+    assert plan.to_dict()["ready"] is True
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("content", "file_mode", "directory_mode", "symlink", "hardlink"),
+)
+def test_legacy_migration_dry_run_blocks_ambiguous_skill_tree(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    repo = tmp_path / "repo"
+    canonical = repo / "skills" / "samvil-example"
+    canonical.mkdir(parents=True)
+    (canonical / "SKILL.md").write_text("canonical\n", encoding="utf-8")
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-example"
+    shutil.copytree(canonical, legacy)
+    if mutation == "content":
+        (legacy / "SKILL.md").write_text("changed\n", encoding="utf-8")
+    elif mutation == "file_mode":
+        (legacy / "SKILL.md").chmod(0o600)
+    elif mutation == "directory_mode":
+        legacy.chmod(0o700)
+    elif mutation == "symlink":
+        outside = tmp_path / "outside"
+        outside.write_text("outside\n", encoding="utf-8")
+        (legacy / "outside-link").symlink_to(outside)
+    else:
+        outside = tmp_path / "outside"
+        outside.write_text("outside\n", encoding="utf-8")
+        (legacy / "outside-hardlink").hardlink_to(outside)
+    before = legacy.lstat()
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = plan.to_dict()["artifacts"][0]
+    assert artifact["classification"] == "user_modified"
+    assert artifact["blocks_mutation"] is True
+    assert plan.to_dict()["ready"] is False
+    assert not any(action.kind == "migrate_generated" for action in plan.actions)
+    assert legacy.lstat().st_ino == before.st_ino
+
+
+def test_legacy_migration_dry_run_blocks_unsafe_profile_and_skill_roots(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    real_profile = tmp_path / "real-profile"
+    real_profile.mkdir()
+    linked_profile = tmp_path / "linked-profile"
+    linked_profile.symlink_to(real_profile, target_is_directory=True)
+
+    linked_plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=linked_profile,
+    )
+
+    assert linked_plan.to_dict()["ready"] is False
+    assert any(
+        artifact.artifact_kind == "codex_profile_root"
+        for artifact in linked_plan.artifacts
+    )
+
+    profile = tmp_path / "profile" / ".codex"
+    profile.mkdir(parents=True)
+    (profile / "skills").write_text("not a directory\n", encoding="utf-8")
+    skills_plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=profile,
+    )
+
+    assert skills_plan.to_dict()["ready"] is False
+    assert any(
+        artifact.artifact_kind == "legacy_skill_root"
+        for artifact in skills_plan.artifacts
+    )
+
+
+def test_legacy_migration_dry_run_blocks_symlinked_profile_ancestor(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    profile_parent = tmp_path / "profile-parent"
+    profile_parent.symlink_to(real_parent, target_is_directory=True)
+    profile = profile_parent / ".codex"
+    (real_parent / ".codex" / "skills" / "samvil-example").mkdir(parents=True)
+    (real_parent / ".codex" / "skills" / "samvil-example" / "SKILL.md").write_text(
+        "user content\n", encoding="utf-8"
+    )
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=profile,
+    )
+
+    assert plan.to_dict()["ready"] is False
+    assert any(
+        artifact.artifact_kind == "codex_profile_root"
+        and "ancestor" in artifact.reason
+        for artifact in plan.artifacts
+    )
+
+
+def test_legacy_migration_dry_run_blocks_unsafe_personal_skill_links(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    personal = codex_home / "skills" / "personal-review"
+    personal.mkdir(parents=True)
+    (personal / "SKILL.md").write_text(
+        "---\nname: personal-review\n---\nkeep\n",
+        encoding="utf-8",
+    )
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep outside\n", encoding="utf-8")
+    (personal / "outside-link").symlink_to(outside)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is False
+    assert any(
+        artifact.artifact_kind == "personal_skill_tree"
+        and artifact.path == personal.absolute()
+        and artifact.blocks_mutation
+        for artifact in plan.artifacts
+    )
+    assert outside.read_text(encoding="utf-8") == "keep outside\n"
+
+
+def test_legacy_migration_dry_run_reports_unreadable_personal_manifest(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    personal = codex_home / "skills" / "personal-review"
+    personal.mkdir(parents=True)
+    manifest = personal / "SKILL.md"
+    manifest.write_bytes(b"\xff\xfe")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item for item in plan.artifacts if item.artifact_kind == "personal_skill_tree"
+    )
+    assert plan.to_dict()["ready"] is False
+    assert "cannot be inventoried safely" in artifact.reason
+    assert manifest.read_bytes() == b"\xff\xfe"
+
+
+@pytest.mark.parametrize("filename", ("AGENTS.md", "config.toml"))
+def test_legacy_migration_dry_run_reports_unreadable_profile_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    profile_file = codex_home / filename
+    profile_file.write_text("placeholder\n", encoding="utf-8")
+    original_read_bytes = Path.read_bytes
+
+    def fail_profile_read(path: Path) -> bytes:
+        if path == profile_file:
+            raise PermissionError("injected unreadable profile file")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", fail_profile_read)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is False
+    assert any(
+        artifact.path == profile_file.absolute()
+        and "cannot be read safely" in artifact.reason
+        for artifact in plan.artifacts
+    )
+
+
+def test_legacy_migration_dry_run_reports_unreadable_skills_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    skills_root = codex_home / "skills"
+    skills_root.mkdir(parents=True)
+    original_iterdir = Path.iterdir
+
+    def fail_skills_iteration(path: Path):
+        if path == skills_root:
+            raise PermissionError("injected unreadable skills directory")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", fail_skills_iteration)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is False
+    assert any(
+        artifact.artifact_kind == "legacy_skill_root"
+        and "cannot be inventoried safely" in artifact.reason
+        for artifact in plan.artifacts
+    )
+
+
+def test_legacy_migration_dry_run_requires_skill_manifest(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    canonical = repo / "skills" / "samvil-example"
+    canonical.mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-example"
+    legacy.mkdir(parents=True)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is False
+    assert "SKILL.md" in plan.artifacts[0].reason
+
+
+def test_legacy_migration_dry_run_rejects_repo_inside_profile(
+    tmp_path: Path,
+) -> None:
+    codex_home = tmp_path / "profile" / ".codex"
+    repo = codex_home / "skills" / "samvil-source"
+    repo.mkdir(parents=True)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is False
+    assert any("unsafe Codex marketplace root" in blocker for blocker in plan.blockers)
+
+
+def test_legacy_migration_dry_run_blocks_unknown_samvil_skill(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    unknown = codex_home / "skills" / "samvil-private"
+    unknown.mkdir(parents=True)
+    (unknown / "SKILL.md").write_text("user owned\n", encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = plan.to_dict()["artifacts"][0]
+    assert artifact["path"] == str(unknown.resolve())
+    assert artifact["classification"] == "user_modified"
+    assert "canonical source is unavailable" in artifact["reason"]
+    assert plan.blockers
+
+
+def test_legacy_migration_dry_run_recognizes_generated_global_agents(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    agents = codex_home / "AGENTS.md"
+    agents.write_text(
+        _generated_legacy_agents(repo, tmp_path / "old-samvil-clone"),
+        encoding="utf-8",
+    )
+    before = agents.read_bytes()
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item for item in plan.to_dict()["artifacts"] if item["artifact_kind"] == "global_agents"
+    )
+    assert artifact["classification"] == "generated_legacy"
+    assert any(
+        action.kind == "migrate_generated" and action.path == agents.resolve()
+        for action in plan.actions
+    )
+    assert agents.read_bytes() == before
+
+
+def test_legacy_migration_dry_run_blocks_global_agents_with_mixed_roots(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    agents = codex_home / "AGENTS.md"
+    original = _generated_legacy_agents(repo, tmp_path / "old-one")
+    original = original.replace(
+        f"{tmp_path / 'old-one'}/scripts/",
+        f"{tmp_path / 'old-two'}/scripts/",
+        1,
+    )
+    agents.write_text(original, encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item for item in plan.artifacts if item.artifact_kind == "global_agents"
+    )
+    assert artifact.classification == "user_modified"
+    assert artifact.blocks_mutation is True
+    assert plan.to_dict()["ready"] is False
+    assert agents.read_text(encoding="utf-8") == original
+
+
+def test_legacy_migration_dry_run_blocks_modified_global_agents(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    agents = codex_home / "AGENTS.md"
+    original = _generated_legacy_agents(repo) + "\n## My personal instructions\nKeep this.\n"
+    agents.write_text(original, encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item for item in plan.to_dict()["artifacts"] if item["artifact_kind"] == "global_agents"
+    )
+    assert artifact["classification"] == "user_modified"
+    assert artifact["blocks_mutation"] is True
+    assert agents.read_text(encoding="utf-8") == original
+
+
+def test_legacy_migration_dry_run_recognizes_exact_direct_mcp_table(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        '[marketplaces.other]\nsource = "/other"\n\n'
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args    = ["-m", "samvil_mcp.server"]\n'
+        "env     = {}\n"
+    )
+    config.write_text(original, encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item for item in plan.to_dict()["artifacts"] if item["artifact_kind"] == "direct_mcp_table"
+    )
+    assert artifact["classification"] == "generated_legacy"
+    assert any(
+        action.kind == "remove_generated_mcp_table"
+        and action.expected_hash == artifact["content_hash"]
+        for action in plan.actions
+    )
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_legacy_migration_dry_run_recognizes_direct_mcp_from_old_repo_root(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "new-repo"
+    repo.mkdir()
+    old_repo = tmp_path / "old-repo"
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    config.write_text(
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{old_repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args    = ["-m", "samvil_mcp.server"]\n'
+        "env     = {}\n",
+        encoding="utf-8",
+    )
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item for item in plan.to_dict()["artifacts"] if item["artifact_kind"] == "direct_mcp_table"
+    )
+    assert artifact["classification"] == "generated_legacy"
+    assert plan.to_dict()["ready"] is True
+
+
+def test_legacy_migration_dry_run_blocks_modified_direct_mcp_table(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args    = ["-m", "samvil_mcp.server"]\n'
+        'env     = { USER_FLAG = "keep" }\n'
+    )
+    config.write_text(original, encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item for item in plan.to_dict()["artifacts"] if item["artifact_kind"] == "direct_mcp_table"
+    )
+    assert artifact["classification"] == "user_modified"
+    assert artifact["blocks_mutation"] is True
+    assert not any(action.kind == "remove_generated_mcp_table" for action in plan.actions)
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_legacy_migration_dry_run_blocks_reformatted_direct_mcp_table(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        '[mcp_servers."samvil-mcp"]\n'
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args = ["-m", "samvil_mcp.server"]\n'
+        "env = {}\n"
+    )
+    config.write_text(original, encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item for item in plan.to_dict()["artifacts"] if item["artifact_kind"] == "direct_mcp_table"
+    )
+    assert artifact["classification"] == "user_modified"
+    assert "exact installer-generated text" in artifact["reason"]
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_migrate_dry_run_cli_is_read_only_and_keeps_apply_blocked(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+
+    result = installer._main(
+        [
+            "--migrate",
+            "--dry-run",
+            "--repo-root",
+            str(repo),
+            "--codex-home",
+            str(codex_home),
+            "--json",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert payload["mode"] == "migration_dry_run"
+    assert payload["ready"] is True
+    assert not codex_home.exists()
+
+    with pytest.raises(InstallBlocked, match="legacy migration is unavailable"):
+        installer._main(
+            [
+                "--migrate",
+                "--repo-root",
+                str(repo),
+                "--codex-home",
+                str(codex_home),
+            ]
+        )
+
+
+def test_dry_run_flag_is_rejected_outside_migrate(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[2]
+
+    with pytest.raises(SystemExit):
+        installer._main(
+            [
+                "--check",
+                "--dry-run",
+                "--repo-root",
+                str(repo),
+                "--codex-home",
+                str(tmp_path / ".codex"),
+            ]
+        )
 
 
 def test_migrate_cli_fails_closed_until_legacy_actions_are_classified(tmp_path: Path) -> None:
