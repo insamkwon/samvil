@@ -84,6 +84,27 @@ def test_cli_environment_check_requires_codex_uvx_and_plugin_commands(tmp_path: 
     assert ready["plugin_commands_supported"] is True
 
 
+def test_cli_environment_check_blocks_symlinked_profile_before_command(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path / "user-owned-profile"
+    codex_home = tmp_path / "profile-link"
+    outside.mkdir()
+    codex_home.symlink_to(outside, target_is_directory=True)
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+    result = validate_cli_environment(
+        codex_home,
+        which=lambda name: f"/fake/{name}",
+        command_runner=lambda command, env: commands.append((command, env)),
+    )
+
+    assert result["ready"] is False
+    assert "Codex profile root is a symbolic link" in result["blockers"]
+    assert commands == []
+    assert list(outside.iterdir()) == []
+
+
 def test_marketplace_root_must_not_claim_user_owned_codex_paths(tmp_path: Path) -> None:
     home = tmp_path / "home"
     skills = home / ".codex" / "skills"
@@ -391,6 +412,239 @@ def test_install_plan_is_deterministic_and_read_only(tmp_path: Path) -> None:
     assert any(action.kind == "report_blocker" for action in plan.actions)
     json.dumps(plan.to_dict())
     assert personal.read_bytes() == before
+
+
+def test_personal_skill_inventory_preserves_yaml_scalar_like_names(
+    tmp_path: Path,
+) -> None:
+    skills = tmp_path / "profile" / ".codex" / "skills"
+    expected = ("on", "off", "yes", "no", "null", "123")
+    for index, name in enumerate(expected):
+        manifest = skills / f"personal-{index}" / "SKILL.md"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            f"---\nname: {name}\n---\nkeep\n",
+            encoding="utf-8",
+        )
+
+    inventory = inventory_personal_skills(skills)
+
+    assert tuple(item.name for item in inventory) == expected
+
+
+def test_check_and_install_admit_legacy_inventory_before_activation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    reserved = codex_home / "skills" / "personal-review" / "SKILL.md"
+    reserved.parent.mkdir(parents=True)
+    reserved.write_text(
+        '---\nname: "ＳＡＭＶＩＬ:private"\n---\nkeep\n',
+        encoding="utf-8",
+    )
+    config = codex_home / "config.toml"
+    config.write_text(
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args    = ["-m", "samvil_mcp.server"]\n'
+        "env     = {}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        installer,
+        "validate_cli_environment",
+        lambda _root: pytest.fail(
+            "legacy admission must precede the Codex CLI environment check"
+        ),
+    )
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+    monkeypatch.setattr(
+        installer,
+        "_subprocess_runner",
+        lambda command, env: commands.append((command, env)),
+    )
+
+    result = installer._main(
+        [
+            "--check",
+            "--repo-root",
+            str(repo),
+            "--codex-home",
+            str(codex_home),
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert result == 1
+    assert payload["ready"] is False
+    assert payload["legacy_migration"]["ready"] is False
+    assert any("reserved SAMVIL namespace" in item for item in payload["blockers"])
+    assert any("legacy migration required" in item for item in payload["blockers"])
+
+    with pytest.raises(InstallBlocked, match="reserved SAMVIL namespace"):
+        installer._main(
+            [
+                "--install",
+                "--repo-root",
+                str(repo),
+                "--codex-home",
+                str(codex_home),
+            ]
+        )
+    assert commands == []
+
+
+def test_install_rechecks_legacy_inventory_immediately_before_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    late_skill = codex_home / "skills" / "late-personal" / "SKILL.md"
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+    def change_profile_during_capability_check(_root: Path) -> dict[str, object]:
+        late_skill.parent.mkdir(parents=True)
+        late_skill.write_text(
+            "---\nname: samvil:late-personal\n---\nkeep\n",
+            encoding="utf-8",
+        )
+        return {"ready": True, "blockers": []}
+
+    monkeypatch.setattr(
+        installer,
+        "validate_cli_environment",
+        change_profile_during_capability_check,
+    )
+    monkeypatch.setattr(
+        installer,
+        "_subprocess_runner",
+        lambda command, env: commands.append((command, env)),
+    )
+
+    with pytest.raises(InstallBlocked, match="profile changed during install admission"):
+        installer._main(
+            [
+                "--install",
+                "--repo-root",
+                str(repo),
+                "--codex-home",
+                str(codex_home),
+            ]
+        )
+
+    assert late_skill.read_text(encoding="utf-8").endswith("keep\n")
+    assert commands == []
+    assert not (codex_home / "marketplaces").exists()
+
+
+def test_direct_executor_admits_legacy_inventory_before_writes(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    personal = codex_home / "skills" / "personal-review" / "SKILL.md"
+    personal.parent.mkdir(parents=True)
+    personal.write_text(
+        "---\nname: samvil:private\n---\nkeep\n",
+        encoding="utf-8",
+    )
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    with pytest.raises(InstallBlocked, match="reserved SAMVIL namespace"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda command, env: commands.append((command, env)),
+        )
+
+    assert personal.read_text(encoding="utf-8").endswith("keep\n")
+    assert commands == []
+    assert not (codex_home / "marketplaces").exists()
+
+
+def test_direct_executor_blocks_generated_legacy_action_before_writes(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy)
+    before = {
+        path.relative_to(codex_home).as_posix(): path.read_bytes()
+        for path in codex_home.rglob("*")
+        if path.is_file()
+    }
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    with pytest.raises(InstallBlocked, match="legacy migration required"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda command, env: commands.append((command, env)),
+        )
+
+    after = {
+        path.relative_to(codex_home).as_posix(): path.read_bytes()
+        for path in codex_home.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
+    assert commands == []
+    assert not (codex_home / "marketplaces").exists()
+
+
+def test_clean_cli_install_rechecks_and_activates_only_the_supplied_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "isolated-profile" / ".codex"
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+    monkeypatch.setattr(
+        installer,
+        "validate_cli_environment",
+        lambda _root: {"ready": True, "blockers": []},
+    )
+    monkeypatch.setattr(
+        installer,
+        "_subprocess_runner",
+        lambda command, env: commands.append((command, env)),
+    )
+
+    result = installer._main(
+        [
+            "--install",
+            "--repo-root",
+            str(repo),
+            "--codex-home",
+            str(codex_home),
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert result == 0
+    assert payload["mode"] == "install"
+    assert [command for command, _env in commands] == [
+        (
+            "codex",
+            "plugin",
+            "marketplace",
+            "add",
+            str((codex_home / "marketplaces" / "samvil-codex").resolve()),
+        ),
+        ("codex", "plugin", "add", "samvil@samvil-codex"),
+    ]
+    assert all(env["CODEX_HOME"] == str(codex_home.resolve()) for _cmd, env in commands)
+    assert (codex_home / "marketplaces" / "samvil-codex" / "samvil").resolve() == repo
 
 
 def test_isolated_executor_backups_config_and_preserves_personal_skills(tmp_path: Path) -> None:
@@ -784,6 +1038,58 @@ def test_isolated_executor_blocks_skills_parent_symlink_without_touching_target(
     assert sorted(path.name for path in outside.iterdir()) == ["personal"]
 
 
+def test_direct_executor_blocks_symlinked_codex_profile_before_any_write(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    outside = tmp_path / "user-owned-profile"
+    codex_home = tmp_path / "profile-link"
+    repo.mkdir()
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep\n", encoding="utf-8")
+    codex_home.symlink_to(outside, target_is_directory=True)
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+    with pytest.raises(InstallBlocked, match="Codex profile root is a symbolic link"):
+        execute_isolated_install(
+            CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+            codex_home=codex_home,
+            command_runner=lambda command, env: commands.append((command, env)),
+        )
+
+    assert commands == []
+    assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+    assert sorted(path.name for path in outside.iterdir()) == ["keep.txt"]
+
+
+def test_direct_executor_blocks_symlinked_codex_profile_ancestor_before_any_write(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    outside = tmp_path / "user-owned-parent"
+    linked_parent = tmp_path / "linked-parent"
+    codex_home = linked_parent / ".codex"
+    repo.mkdir()
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep\n", encoding="utf-8")
+    linked_parent.symlink_to(outside, target_is_directory=True)
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+    with pytest.raises(
+        InstallBlocked,
+        match="Codex profile path contains symbolic-link ancestor",
+    ):
+        execute_isolated_install(
+            CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+            codex_home=codex_home,
+            command_runner=lambda command, env: commands.append((command, env)),
+        )
+
+    assert commands == []
+    assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep\n"
+    assert sorted(path.name for path in outside.iterdir()) == ["keep.txt"]
+
+
 def test_isolated_executor_blocks_ambiguous_codex_wrapper_before_commands(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     codex_home = tmp_path / "codex-home" / ".codex"
@@ -955,15 +1261,52 @@ def test_isolated_migrate_moves_only_explicit_generated_action_to_backup(tmp_pat
         actions=(MigrationAction("migrate_generated", legacy.resolve(), "hash match"),),
     )
 
-    receipt = execute_isolated_install(
-        plan,
-        codex_home=codex_home,
-        command_runner=lambda command, env: commands.append((command, env)),
-        migrate=True,
+    with pytest.raises(InstallBlocked, match="legacy migration apply is unavailable"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda command, env: commands.append((command, env)),
+            migrate=True,
+        )
+
+    assert legacy.read_text(encoding="utf-8") == "generated legacy\n"
+    assert commands == []
+
+
+def test_isolated_migrate_rejects_external_or_stale_actions_before_any_write(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    external = tmp_path / "user-owned.txt"
+    repo.mkdir()
+    external.write_text("keep\n", encoding="utf-8")
+    plan = CodexInstallPlan(
+        canonical_root=repo.resolve(),
+        capability=CodexCapabilityProbe(True, True),
+        actions=(
+            MigrationAction(
+                "migrate_generated",
+                external.resolve(),
+                "forged action",
+                "legacy_skill_tree",
+                "0" * 64,
+            ),
+        ),
     )
 
-    assert not legacy.exists()
-    assert any(path.name.startswith("samvil-run-") for path in receipt.backup_paths)
+    with pytest.raises(InstallBlocked, match="legacy migration apply is unavailable"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: pytest.fail(
+                "migration blocker must precede commands"
+            ),
+            migrate=True,
+        )
+
+    assert external.read_text(encoding="utf-8") == "keep\n"
+    assert not codex_home.exists()
 
 
 def test_setup_shell_routes_codex_to_native_installer_without_legacy_global_writes() -> None:

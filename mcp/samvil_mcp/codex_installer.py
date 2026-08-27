@@ -161,7 +161,16 @@ def _frontmatter_name(path: Path) -> str:
         except StopIteration as exc:
             raise ValueError(f"skill frontmatter is not closed: {path}") from exc
         try:
-            frontmatter = yaml.safe_load("\n".join(lines[1:closing_index])) or {}
+            # Skill names are identifiers, not YAML booleans/numbers. The base
+            # loader preserves legacy unquoted values such as ``on``, ``null``
+            # and ``123`` as source strings while parsing the mapping shape.
+            frontmatter = (
+                yaml.load(
+                    "\n".join(lines[1:closing_index]),
+                    Loader=yaml.BaseLoader,
+                )
+                or {}
+            )
         except yaml.YAMLError as exc:
             raise ValueError(f"invalid skill frontmatter: {path}") from exc
         if not isinstance(frontmatter, dict):
@@ -171,7 +180,7 @@ def _frontmatter_name(path: Path) -> str:
         match = _FRONTMATTER_NAME.search(text)
         raw_name = match.group(1).strip() if match else path.parent.name
         try:
-            parsed_name = yaml.safe_load(raw_name)
+            parsed_name = yaml.load(raw_name, Loader=yaml.BaseLoader)
         except yaml.YAMLError as exc:
             raise ValueError(f"invalid skill frontmatter name: {path}") from exc
     if not isinstance(parsed_name, str) or not parsed_name.strip():
@@ -1131,6 +1140,17 @@ def build_legacy_migration_plan(
     )
 
 
+def _legacy_install_blockers(plan: LegacyMigrationPlan) -> list[str]:
+    blockers = list(plan.blockers)
+    if plan.actions:
+        action_kinds = ", ".join(sorted({action.kind for action in plan.actions}))
+        blockers.append(
+            "legacy migration required before native installation: "
+            f"{action_kinds}"
+        )
+    return blockers
+
+
 def validate_activation_readiness(repo_root: Path) -> dict[str, Any]:
     """Prove the repository is complete enough for actual-profile activation."""
     root = Path(repo_root).expanduser().resolve(strict=False)
@@ -1186,7 +1206,20 @@ def validate_cli_environment(
     command_runner: Any = _capability_probe_runner,
 ) -> dict[str, Any]:
     """Read-only proof that native Codex and the relative MCP launcher can run."""
-    root = Path(codex_home).expanduser().resolve(strict=False)
+    lexical_root = _lexical_absolute(codex_home)
+    unsafe_profile_reason = _unsafe_directory_path_reason(
+        lexical_root,
+        label="Codex profile",
+    )
+    if unsafe_profile_reason is not None:
+        return {
+            "ready": False,
+            "blockers": [unsafe_profile_reason],
+            "codex_binary": "",
+            "uvx_binary": "",
+            "plugin_commands_supported": False,
+        }
+    root = lexical_root.resolve(strict=False)
     blockers: list[str] = []
     codex_binary = which("codex") or ""
     uvx_binary = which("uvx") or ""
@@ -1335,6 +1368,7 @@ def execute_isolated_install(
     codex_home: Path,
     command_runner: Any,
     migrate: bool = False,
+    expected_legacy_plan_sha256: str | None = None,
 ) -> InstallReceipt:
     """Execute only inside an explicitly supplied isolated Codex root.
 
@@ -1342,12 +1376,23 @@ def execute_isolated_install(
     an explicit root and the runner receives a pinned ``CODEX_HOME`` environment.
     """
 
+    if migrate:
+        raise InstallBlocked(
+            "legacy migration apply is unavailable until every planned action "
+            "is revalidated at the mutation boundary"
+        )
     if plan.blockers:
         raise InstallBlocked("; ".join(plan.blockers))
-    root = Path(codex_home).expanduser().resolve(strict=False)
+    lexical_root = _lexical_absolute(codex_home)
+    unsafe_profile_reason = _unsafe_directory_path_reason(
+        lexical_root,
+        label="Codex profile",
+    )
+    if unsafe_profile_reason is not None:
+        raise InstallBlocked(unsafe_profile_reason)
+    root = lexical_root.resolve(strict=False)
     if root == Path(root.anchor):
         raise InstallBlocked(f"isolated Codex root must not be a filesystem root: {root}")
-    root.mkdir(parents=True, exist_ok=True)
     try:
         backups_root = safe_child_directory(root, "backups", label="backups")
     except RuntimeLayoutError as exc:
@@ -1371,15 +1416,24 @@ def execute_isolated_install(
     wrapper_path = root / "marketplaces" / "samvil-codex"
     if wrapper_path.exists():
         _codex_marketplace_wrapper(root, plan.canonical_root)
+    legacy_admission = build_legacy_migration_plan(
+        repo_root=plan.canonical_root,
+        codex_home=codex_home,
+    )
+    legacy_payload = legacy_admission.to_dict()
+    if (
+        expected_legacy_plan_sha256 is not None
+        and legacy_payload["plan_sha256"] != expected_legacy_plan_sha256
+    ):
+        raise InstallBlocked(
+            "legacy Codex profile changed during install admission; rerun the check"
+        )
+    legacy_blockers = _legacy_install_blockers(legacy_admission)
+    if legacy_blockers:
+        raise InstallBlocked("; ".join(legacy_blockers))
 
-    before = inventory_personal_skills(personal_root)
-    migrated_paths = set()
-    for action in plan.actions:
-        if action.kind != "migrate_generated":
-            continue
-        candidate = action.path.expanduser().resolve(strict=False)
-        migrated_paths.add(candidate.parent if candidate.name == "SKILL.md" else candidate)
-    protected_before = tuple(entry for entry in before if entry.path not in migrated_paths)
+    root.mkdir(parents=True, exist_ok=True)
+    protected_before = inventory_personal_skills(personal_root)
     backup_paths: list[Path] = []
     commands: list[tuple[str, ...]] = []
     personal_snapshot_root: Path | None = None
@@ -1389,7 +1443,6 @@ def execute_isolated_install(
     remove_legacy_marketplace = ("codex", "plugin", "marketplace", "remove", "samvil")
     remove_marketplace = ("codex", "plugin", "marketplace", "remove", "samvil-codex")
     command_env = {"CODEX_HOME": str(root), "HOME": str(root.parent)}
-    moved_paths: list[tuple[Path, Path]] = []
     personal_snapshot_ready = False
     unexpected_quarantine: Path | None = None
     preserve_personal_snapshot = False
@@ -1403,8 +1456,7 @@ def execute_isolated_install(
             ) from exc
         if _unsafe_personal_skill_links(personal_root):
             raise InstallBlocked("unsafe personal skill symlink detected")
-        current = inventory_personal_skills(personal_root)
-        return tuple(entry for entry in current if entry.path not in migrated_paths)
+        return inventory_personal_skills(personal_root)
 
     def quarantine_root() -> Path:
         nonlocal unexpected_quarantine
@@ -1470,10 +1522,6 @@ def execute_isolated_install(
                 shutil.rmtree(restore_root, ignore_errors=True)
 
     def rollback_install() -> None:
-        for backup, source in reversed(moved_paths):
-            if backup.exists() and not source.exists():
-                source.parent.mkdir(parents=True, exist_ok=True)
-                backup.replace(source)
         if config_backup is not None:
             _atomic_copy(config_backup, config)
         elif not config_existed:
@@ -1528,18 +1576,6 @@ def execute_isolated_install(
                 raise InstallBlocked(
                     "personal Codex skill inventory changed during isolated install"
                 )
-
-        if migrate:
-            for action in plan.actions:
-                if action.kind != "migrate_generated":
-                    continue
-                source = action.path
-                label = source.parent.name if source.name == "SKILL.md" else source.name
-                backup = backups_root / f"{label}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                source.replace(backup)
-                moved_paths.append((backup, source))
-                backup_paths.append(backup)
 
         protected_after = protected_inventory()
         if not compare_skill_inventories(protected_before, protected_after):
@@ -1677,14 +1713,37 @@ def _main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0 if plan.to_dict()["ready"] else 1
 
-    readiness = validate_activation_readiness(args.repo_root)
     if args.migrate:
         raise InstallBlocked(
             "legacy migration is unavailable until generated artifacts are classified"
         )
-    environment = validate_cli_environment(args.codex_home)
+    readiness = validate_activation_readiness(args.repo_root)
+    legacy_migration = build_legacy_migration_plan(
+        repo_root=args.repo_root,
+        codex_home=args.codex_home,
+    )
+    legacy_payload = legacy_migration.to_dict()
+    legacy_blockers = _legacy_install_blockers(legacy_migration)
+    readiness["legacy_migration"] = legacy_payload
+    if legacy_blockers:
+        environment = {
+            "ready": False,
+            "blockers": [
+                "Codex CLI environment check skipped because legacy profile "
+                "admission failed"
+            ],
+            "codex_binary": "",
+            "uvx_binary": "",
+            "plugin_commands_supported": False,
+        }
+    else:
+        environment = validate_cli_environment(args.codex_home)
     readiness["environment"] = environment
-    readiness["blockers"] = [*readiness["blockers"], *environment["blockers"]]
+    readiness["blockers"] = [
+        *readiness["blockers"],
+        *legacy_blockers,
+        *environment["blockers"],
+    ]
     readiness["ready"] = not readiness["blockers"]
     if args.check:
         print(json.dumps(readiness, ensure_ascii=False, indent=2))
@@ -1706,6 +1765,7 @@ def _main(argv: list[str] | None = None) -> int:
         codex_home=args.codex_home,
         command_runner=_subprocess_runner,
         migrate=args.migrate,
+        expected_legacy_plan_sha256=legacy_payload["plan_sha256"],
     )
     payload = receipt.to_dict()
     print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json else f"Codex native plugin activated: {canonical}")
