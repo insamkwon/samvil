@@ -122,6 +122,45 @@ def _open_pinned_directory(
     return descriptor
 
 
+def _open_profile_lock_file(root_descriptor: int, lock_name: str) -> int:
+    """Open one persistent lock inode despite a concurrent first creation.
+
+    Darwin/APFS can report ``ENOENT`` when two processes race on the same
+    ``O_CREAT`` open.  Electing one creator with ``O_EXCL`` avoids that race;
+    the bounded retry covers the existing entry disappearing between the
+    losing process's create and open calls.  Later descriptor/path checks
+    remain the authority for rejecting replacement attacks.
+    """
+
+    installer = _installer()
+    common_flags = os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        common_flags |= os.O_NOFOLLOW
+    create_flags = common_flags | os.O_CREAT | os.O_EXCL
+    for _attempt in range(3):
+        try:
+            return os.open(
+                lock_name,
+                create_flags,
+                0o600,
+                dir_fd=root_descriptor,
+            )
+        except FileExistsError:
+            try:
+                return os.open(
+                    lock_name,
+                    common_flags,
+                    dir_fd=root_descriptor,
+                )
+            except FileNotFoundError:
+                continue
+        except FileNotFoundError:
+            continue
+    raise installer.InstallBlocked(
+        "legacy migration lock path changed repeatedly during acquisition"
+    )
+
+
 def _write_json_at(
     parent_descriptor: int,
     name: str,
@@ -543,11 +582,8 @@ def _profile_lock(root: Path) -> Iterator[ProfileIdentity]:
         raise _installer().InstallBlocked("Codex migration root must be a directory")
     lock_name = ".samvil-legacy-migration.lock"
     lock_path = root / lock_name
-    flags = os.O_CREAT | os.O_RDWR
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
     try:
-        descriptor = os.open(lock_name, flags, 0o600, dir_fd=root_descriptor)
+        descriptor = _open_profile_lock_file(root_descriptor, lock_name)
     except BaseException:
         os.close(root_descriptor)
         raise

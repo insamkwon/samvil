@@ -2960,6 +2960,40 @@ def test_isolated_migrate_fails_closed_without_profile_locking_support(
     assert legacy.exists()
 
 
+def test_profile_lock_retries_transient_concurrent_create_enoent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / ".codex"
+    root.mkdir()
+    real_open = os.open
+    transient_failures = 0
+
+    def transient_open(
+        path: os.PathLike[str] | str,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal transient_failures
+        if (
+            path == ".samvil-legacy-migration.lock"
+            and flags & os.O_CREAT
+            and transient_failures == 0
+        ):
+            transient_failures += 1
+            raise FileNotFoundError(2, "simulated concurrent create race", path)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(migration.os, "open", transient_open)
+
+    with migration._profile_lock(root):
+        assert transient_failures == 1
+
+    assert (root / ".samvil-legacy-migration.lock").is_file()
+
+
 def test_isolated_migrate_concurrent_processes_share_one_receipt_and_command_set(
     tmp_path: Path,
 ) -> None:
