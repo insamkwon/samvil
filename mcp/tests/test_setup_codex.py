@@ -60,6 +60,122 @@ def test_activation_readiness_blocks_incomplete_copy(tmp_path: Path) -> None:
     assert result["blockers"]
 
 
+_UNSET = object()
+
+
+def _write_ready_activation_files(
+    repo: Path,
+    *,
+    manifest: object = _UNSET,
+    launcher: object = _UNSET,
+) -> None:
+    (repo / ".codex-plugin").mkdir()
+    skills_root = repo / "codex" / "skills"
+    for name in ("resume", "run", "status"):
+        skill = skills_root / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("---\nname: test\n---\n", encoding="utf-8")
+    if manifest is _UNSET:
+        manifest = {
+            "skills": "./codex/skills/",
+            "mcpServers": "./.codex-mcp.json",
+        }
+    if launcher is _UNSET:
+        launcher = {
+            "mcpServers": {
+                "samvil-mcp": {
+                    "command": "bash",
+                    "args": ["./scripts/start-codex-mcp.sh"],
+                }
+            }
+        }
+    (repo / ".codex-plugin" / "plugin.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+    (repo / ".codex-mcp.json").write_text(json.dumps(launcher), encoding="utf-8")
+    launcher_script = repo / "scripts" / "start-codex-mcp.sh"
+    launcher_script.parent.mkdir()
+    launcher_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("document", [[], None, "not-an-object"])
+def test_activation_readiness_rejects_non_object_manifest_json(
+    tmp_path: Path, document: object
+) -> None:
+    _write_ready_activation_files(tmp_path, manifest=document)
+
+    result = validate_activation_readiness(tmp_path)
+
+    assert result["ready"] is False
+    assert "Codex plugin manifest JSON must be an object" in result["blockers"]
+    assert "Codex manifest does not use relative public surfaces" in result["blockers"]
+
+
+@pytest.mark.parametrize("document", [[], None, "not-an-object"])
+def test_activation_readiness_rejects_non_object_launcher_json(
+    tmp_path: Path, document: object
+) -> None:
+    _write_ready_activation_files(tmp_path, launcher=document)
+
+    result = validate_activation_readiness(tmp_path)
+
+    assert result["ready"] is False
+    assert "relative Codex MCP launcher JSON must be an object" in result["blockers"]
+    assert "Codex MCP launcher is not the relative package launcher" in result["blockers"]
+
+
+@pytest.mark.parametrize("mcp_servers", [["samvil-mcp"], True, 1, "samvil-mcp"])
+def test_activation_readiness_rejects_non_object_launcher_mcp_servers(
+    tmp_path: Path, mcp_servers: object
+) -> None:
+    _write_ready_activation_files(tmp_path, launcher={"mcpServers": mcp_servers})
+
+    result = validate_activation_readiness(tmp_path)
+
+    assert result["ready"] is False
+    assert "Codex MCP launcher mcpServers must be an object" in result["blockers"]
+    assert "Codex MCP launcher is not the relative package launcher" in result["blockers"]
+
+
+def test_activation_readiness_retains_public_surface_blockers_after_wrong_json_shape(
+    tmp_path: Path,
+) -> None:
+    _write_ready_activation_files(tmp_path, manifest=[])
+    (tmp_path / "codex" / "skills" / "private").mkdir()
+    (tmp_path / "codex" / "skills" / "status" / "SKILL.md").unlink()
+
+    result = validate_activation_readiness(tmp_path)
+
+    assert result["ready"] is False
+    assert "Codex plugin manifest JSON must be an object" in result["blockers"]
+    assert "Codex public skill surface must be exactly run/resume/status" in result["blockers"]
+    assert "missing public Codex skill: status" in result["blockers"]
+
+
+def test_activation_readiness_retains_invalid_json_blocker(tmp_path: Path) -> None:
+    _write_ready_activation_files(tmp_path)
+    (tmp_path / ".codex-plugin" / "plugin.json").write_text("{", encoding="utf-8")
+
+    result = validate_activation_readiness(tmp_path)
+
+    assert result["ready"] is False
+    assert "Codex manifest or launcher is invalid JSON" in result["blockers"]
+
+
+def test_activation_readiness_preserves_successful_return_schema(tmp_path: Path) -> None:
+    _write_ready_activation_files(tmp_path)
+
+    result = validate_activation_readiness(tmp_path)
+
+    assert result == {
+        "ready": True,
+        "blockers": [],
+        "public_skills": ["resume", "run", "status"],
+        "manifest": str(tmp_path / ".codex-plugin" / "plugin.json"),
+        "launcher": str(tmp_path / ".codex-mcp.json"),
+    }
+
+
 def test_cli_environment_check_requires_codex_uvx_and_plugin_commands(tmp_path: Path) -> None:
     missing = validate_cli_environment(
         tmp_path / ".codex",

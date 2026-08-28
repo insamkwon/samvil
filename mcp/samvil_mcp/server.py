@@ -88,6 +88,7 @@ from .scaffold_targets import (
 )
 from .ssot_io import atomic_write_text
 from .runtime_layout import RuntimeLayoutError, safe_child_directory
+from .runtime_policy import gate_requires_runtime_receipt
 from .event_sanitizer import (
     redact_sensitive_text,
     sanitize_event_data,
@@ -102,6 +103,14 @@ from .build_phase_b import (
 )
 from .build_phase_z import (
     finalize_build_phase_z as _finalize_build_phase_z,
+)
+from .gate_snapshot import (
+    GateInputBundle,
+    capture_gate_input_bundle,
+    capture_gate_input_snapshot,
+    json_projection_from_bundle,
+    materialized_gate_input_bundle,
+    snapshot_sha256,
 )
 from .qa_boot import (
     aggregate_qa_boot_context as _aggregate_qa_boot_context,
@@ -188,7 +197,7 @@ from .orchestrator import (
     stage_can_proceed as _orchestrator_stage_can_proceed,
 )
 from .event_store import EventStore
-from .transition_lock import stage_transition_lock
+from .transition_lock import stage_transition_lock, verification_execution_lock
 from .gates import (
     DEFAULT_CONFIG as GATE_DEFAULT_CONFIG,
     GateName,
@@ -3988,6 +3997,45 @@ def _mechanical_gate_evidence(
     )
 
 
+def _evaluate_captured_gate_inputs(
+    gate_inputs: GateInputBundle,
+    gate_name: str,
+    trusted_runtime_receipt: dict[str, Any] | None,
+    evidence_mode: str,
+    display_root: Path,
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+]:
+    """Evaluate only the immutable bytes represented by a gate snapshot."""
+    with materialized_gate_input_bundle(gate_inputs) as captured_root:
+        cfg_path = _config_path_for(str(captured_root))
+        cfg = _load_gate_config(cfg_path) if cfg_path else _load_gate_config(None)
+        if not evidence_mode:
+            return cfg, {}, {}, {}
+        metrics, thresholds, evidence = _mechanical_gate_evidence(
+            str(captured_root),
+            gate_name,
+            trusted_runtime_receipt,
+        )
+
+        def restore_display_paths(value: Any) -> Any:
+            if isinstance(value, str):
+                return value.replace(str(captured_root), str(display_root))
+            if isinstance(value, list):
+                return [restore_display_paths(item) for item in value]
+            if isinstance(value, dict):
+                return {
+                    key: restore_display_paths(item)
+                    for key, item in value.items()
+                }
+            return value
+
+        return cfg, metrics, thresholds, restore_display_paths(evidence)
+
+
 async def _active_session_for_project(store: EventStore, root: Path):
     inspection = inspect_chain_marker(str(root))
     if inspection.classification == "valid":
@@ -5112,6 +5160,49 @@ def _terminate_verification_processes(
         process.kill()
 
 
+def _canonical_json_hash(value: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+async def _await_verification_command(
+    command_task: asyncio.Task[tuple[int, str]],
+) -> tuple[int, str]:
+    """Retrieve the runner result before propagating caller cancellation."""
+    caller_cancelled = False
+    while True:
+        try:
+            await asyncio.shield(command_task)
+        except asyncio.CancelledError:
+            if command_task.cancelled():
+                break
+            caller_cancelled = True
+            if command_task.done():
+                break
+            continue
+        except BaseException:
+            break
+        else:
+            break
+    try:
+        result = command_task.result()
+    except asyncio.CancelledError:
+        raise
+    except BaseException:
+        if caller_cancelled:
+            raise asyncio.CancelledError from None
+        raise
+    if caller_cancelled:
+        raise asyncio.CancelledError
+    return result
+
+
 @mcp.tool()
 async def run_stage_verification(
     project_root: str,
@@ -5126,57 +5217,117 @@ async def run_stage_verification(
         normalized = stage if stage.startswith("samvil-") else f"samvil-{stage}"
         if normalized not in {"samvil-build", "samvil-qa"}:
             raise ValueError("stage must be samvil-build or samvil-qa")
-        command, command_profile = _mechanical_verification_command(root, normalized)
         requested_command = json.loads(command_json or "[]")
-        if requested_command and requested_command != command:
-            raise ValueError("requested command does not match mechanical contract")
+        if not isinstance(requested_command, list):
+            raise ValueError("command_json must encode an array")
         timeout = min(max(float(timeout_seconds), 1.0), 900.0)
-        try:
-            samvil_root = safe_child_directory(root, ".samvil", label=".samvil")
-            receipt_root = safe_child_directory(
-                root, ".samvil/runtime-receipts", label="runtime receipts"
-            )
-        except RuntimeLayoutError as exc:
-            raise ValueError(str(exc)) from exc
         store = await get_store()
-        session = await store.get_session(run_id)
-        if (
-            session is None
-            or Path(session.project_root).expanduser().resolve(strict=False) != root
-            or session.current_stage.value != normalized.removeprefix("samvil-")
-        ):
-            raise ValueError("run_id does not own the requested project stage")
-        claim_context = await _active_claim_context(
-            store, root, session, expected_stage=normalized
-        )
-        if claim_context is None:
-            raise ValueError("runtime verification requires the active stage claim")
-        marker_revision, claim = claim_context
-        exit_code, output = await asyncio.to_thread(
-            _run_verification_command, root, command, timeout
-        )
-        output = redact_sensitive_text(output)
-        log_name = "build.log" if normalized == "samvil-build" else "qa.log"
-        log_path = samvil_root / log_name
-        atomic_write_text(log_path, f"{output}\nSAMVIL_EXIT:{exit_code}\n")
-        receipt = {
-            "kind": "runtime_receipt",
-            "stage": normalized,
-            "status": "passed" if exit_code == 0 else "failed",
-            "trusted_by": "samvil_mcp_subprocess",
-            "command_profile": command_profile,
-            "exit_code": exit_code,
-            "authority_path": f".samvil/{log_name}",
-            "authority_sha256": hashlib.sha256(log_path.read_bytes()).hexdigest(),
-            "marker_revision": marker_revision,
-            "claim_id": claim["claim_id"],
-        }
-        projected_receipt = {**receipt, "session_id": run_id, "stage": normalized}
-        atomic_write_text(
-            receipt_root / f"{normalized.removeprefix('samvil-')}.json",
-            json.dumps(projected_receipt, indent=2, ensure_ascii=False),
-        )
-        receipt = await store.save_runtime_receipt(run_id, normalized, receipt)
+        async with verification_execution_lock(store, run_id, normalized):
+            try:
+                samvil_root = safe_child_directory(root, ".samvil", label=".samvil")
+                receipt_root = safe_child_directory(
+                    root, ".samvil/runtime-receipts", label="runtime receipts"
+                )
+            except RuntimeLayoutError as exc:
+                raise ValueError(str(exc)) from exc
+            async with stage_transition_lock(store, run_id):
+                command, command_profile = _mechanical_verification_command(
+                    root, normalized
+                )
+                if requested_command and requested_command != command:
+                    raise ValueError("requested command does not match mechanical contract")
+                session = await store.get_session(run_id)
+                if (
+                    session is None
+                    or Path(session.project_root).expanduser().resolve(strict=False) != root
+                    or session.current_stage.value != normalized.removeprefix("samvil-")
+                ):
+                    raise ValueError("run_id does not own the requested project stage")
+                claim_context = await _active_claim_context(
+                    store, root, session, expected_stage=normalized
+                )
+                if claim_context is None:
+                    raise ValueError(
+                        "runtime verification requires the active stage claim"
+                    )
+                marker_revision, claim = claim_context
+                await store.mark_runtime_verification_required(
+                    run_id,
+                    normalized,
+                    str(claim["claim_id"]),
+                    marker_revision,
+                )
+
+            command_task = asyncio.create_task(
+                asyncio.to_thread(_run_verification_command, root, command, timeout)
+            )
+            exit_code, output = await _await_verification_command(command_task)
+            output = redact_sensitive_text(output)
+            async with stage_transition_lock(store, run_id):
+                try:
+                    samvil_root = safe_child_directory(root, ".samvil", label=".samvil")
+                    receipt_root = safe_child_directory(
+                        root, ".samvil/runtime-receipts", label="runtime receipts"
+                    )
+                except RuntimeLayoutError as exc:
+                    raise ValueError(str(exc)) from exc
+                current_session = await store.get_session(run_id)
+                current_context = (
+                    await _active_claim_context(
+                        store, root, current_session, expected_stage=normalized
+                    )
+                    if current_session is not None
+                    else None
+                )
+                try:
+                    current_command, current_profile = (
+                        _mechanical_verification_command(root, normalized)
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        "stale runtime verification: mechanical contract changed"
+                    ) from exc
+                if (
+                    current_session is None
+                    or Path(current_session.project_root).expanduser().resolve(strict=False) != root
+                    or current_session.current_stage.value != normalized.removeprefix("samvil-")
+                    or current_context is None
+                    or current_context[0] != marker_revision
+                    or current_context[1].get("claim_id") != claim.get("claim_id")
+                    or current_command != command
+                    or current_profile != command_profile
+                ):
+                    raise ValueError(
+                        "stale runtime verification: ownership or mechanical "
+                        "contract changed"
+                    )
+                log_name = "build.log" if normalized == "samvil-build" else "qa.log"
+                log_path = samvil_root / log_name
+                atomic_write_text(log_path, f"{output}\nSAMVIL_EXIT:{exit_code}\n")
+                receipt = {
+                    "kind": "runtime_receipt",
+                    "stage": normalized,
+                    "status": "passed" if exit_code == 0 else "failed",
+                    "trusted_by": "samvil_mcp_subprocess",
+                    "command_profile": command_profile,
+                    "exit_code": exit_code,
+                    "authority_path": f".samvil/{log_name}",
+                    "authority_sha256": hashlib.sha256(
+                        log_path.read_bytes()
+                    ).hexdigest(),
+                    "marker_revision": marker_revision,
+                    "claim_id": claim["claim_id"],
+                }
+                projected_receipt = {
+                    **receipt,
+                    "session_id": run_id,
+                    "stage": normalized,
+                }
+                atomic_write_text(
+                    receipt_root / f"{normalized.removeprefix('samvil-')}.json",
+                    json.dumps(projected_receipt, indent=2, ensure_ascii=False),
+                )
+                receipt = await store.save_runtime_receipt(run_id, normalized, receipt)
         _log_mcp_health("ok" if exit_code == 0 else "fail", "run_stage_verification")
         return json.dumps(receipt, ensure_ascii=False)
     except Exception as exc:
@@ -5194,7 +5345,56 @@ async def gate_check(
     allow_warn: bool = False,
     evidence_mode: str = "",
 ) -> str:
-    """Evaluate a stage gate. Returns the verdict as JSON.
+    """Evaluate and publish a gate against one serialized runtime snapshot."""
+    try:
+        root = Path(project_root).expanduser().resolve(strict=False)
+        store = await get_store()
+        session = await _active_session_for_project(store, root)
+        runtime_stage = {
+            "build_to_qa": "samvil-build",
+            "qa_to_evolve": "samvil-qa",
+            "qa_to_deploy": "samvil-qa",
+            "any_to_retro": "samvil-qa",
+        }.get(gate_name, "")
+        if session is not None and runtime_stage:
+            async with verification_execution_lock(store, session.id, runtime_stage):
+                async with stage_transition_lock(store, session.id):
+                    current_session = await _active_session_for_project(store, root)
+                    if current_session is None or current_session.id != session.id:
+                        raise ValueError("stale gate evaluation: active session changed")
+                    return await _gate_check_with_snapshot(
+                        gate_name,
+                        samvil_tier,
+                        metrics_json,
+                        project_root,
+                        subject,
+                        allow_warn,
+                        evidence_mode,
+                    )
+        return await _gate_check_with_snapshot(
+            gate_name,
+            samvil_tier,
+            metrics_json,
+            project_root,
+            subject,
+            allow_warn,
+            evidence_mode,
+        )
+    except Exception as exc:
+        _log_mcp_health("fail", "gate_check", str(exc))
+        return json.dumps({"error": str(exc)})
+
+
+async def _gate_check_with_snapshot(
+    gate_name: str,
+    samvil_tier: str,
+    metrics_json: str,
+    project_root: str = ".",
+    subject: str = "",
+    allow_warn: bool = False,
+    evidence_mode: str = "",
+) -> str:
+    """Evaluate a stage gate while the caller owns any required locks.
 
     Verdict schema:
       {
@@ -5216,12 +5416,16 @@ async def gate_check(
         if gate_name in {"build_to_qa", "qa_to_evolve", "qa_to_deploy"}:
             evidence_mode = "mechanical"
         metrics = dict(reported_metrics)
-        cfg_path = _config_path_for(project_root)
-        cfg = _load_gate_config(cfg_path) if cfg_path else _load_gate_config(None)
+        root = Path(project_root).expanduser().resolve(strict=False)
+        gate_inputs = await asyncio.to_thread(
+            capture_gate_input_bundle,
+            root,
+            gate_name,
+        )
+        gate_input_snapshot = gate_inputs.snapshot
         mechanical_metrics: dict[str, Any] = {}
         metric_mismatches: list[dict[str, Any]] = []
         stage_evidence: dict[str, Any] = {}
-        root = Path(project_root).expanduser().resolve(strict=False)
         store = await get_store()
         session = await _active_session_for_project(store, root)
         claim_context = (
@@ -5233,25 +5437,89 @@ async def gate_check(
             "build_to_qa": "samvil-build",
             "qa_to_evolve": "samvil-qa",
             "qa_to_deploy": "samvil-qa",
+            "any_to_retro": "samvil-qa",
         }.get(gate_name, "")
-        trusted_runtime_receipt = (
+        persisted_runtime_receipt = (
             await store.get_runtime_receipt(session.id, runtime_stage)
             if session is not None and runtime_stage
             else None
         )
-        if not _receipt_matches_claim(trusted_runtime_receipt, claim_context):
-            trusted_runtime_receipt = None
-        if evidence_mode:
-            if evidence_mode != "mechanical":
-                raise ValueError("evidence_mode must be empty or 'mechanical'")
-            mechanical_metrics, mechanical_thresholds, stage_evidence = (
-                await asyncio.to_thread(
-                    _mechanical_gate_evidence,
-                    project_root,
-                    gate_name,
-                    trusted_runtime_receipt,
+        runtime_verification_started = bool(
+            session is not None
+            and runtime_stage
+            and await store.has_runtime_verification_requirement(
+                session.id,
+                runtime_stage,
+            )
+        )
+        runtime_receipt_required = bool(
+            session is not None and gate_requires_runtime_receipt(gate_name)
+        )
+        runtime_projection_relative = (
+            f".samvil/runtime-receipts/"
+            f"{runtime_stage.removeprefix('samvil-')}.json"
+        )
+        projection_exists, projected_runtime_receipt = (
+            json_projection_from_bundle(gate_inputs, runtime_projection_relative)
+            if runtime_stage
+            else (False, None)
+        )
+        runtime_receipt_inconsistent = bool(
+            runtime_stage
+            and (
+                (persisted_runtime_receipt is None) != (not projection_exists)
+                or (
+                    (runtime_receipt_required or runtime_verification_started)
+                    and persisted_runtime_receipt is None
+                    and not projection_exists
+                )
+                or (
+                    persisted_runtime_receipt is not None
+                    and (
+                        projected_runtime_receipt is None
+                        or _canonical_json_hash(persisted_runtime_receipt)
+                        != _canonical_json_hash(projected_runtime_receipt)
+                        or not _receipt_matches_claim(
+                            persisted_runtime_receipt,
+                            claim_context,
+                        )
+                    )
                 )
             )
+        )
+        trusted_runtime_receipt = (
+            persisted_runtime_receipt
+            if not runtime_receipt_inconsistent
+            and _receipt_matches_claim(persisted_runtime_receipt, claim_context)
+            else None
+        )
+        if evidence_mode and evidence_mode != "mechanical":
+            raise ValueError("evidence_mode must be empty or 'mechanical'")
+        (
+            cfg,
+            captured_mechanical_metrics,
+            mechanical_thresholds,
+            stage_evidence,
+        ) = await asyncio.to_thread(
+            _evaluate_captured_gate_inputs,
+            gate_inputs,
+            gate_name,
+            trusted_runtime_receipt,
+            evidence_mode,
+            root,
+        )
+        gate_config_sha256 = _canonical_json_hash(cfg)
+        if evidence_mode:
+            mechanical_metrics = captured_mechanical_metrics
+            if (
+                trusted_runtime_receipt is not None
+                and trusted_runtime_receipt.get("status") != "passed"
+            ):
+                mechanical_metrics["current_runtime_passed"] = False
+                mechanical_thresholds["current_runtime_passed"] = True
+            if runtime_receipt_inconsistent:
+                mechanical_metrics["runtime_receipt_consistent"] = False
+                mechanical_thresholds["runtime_receipt_consistent"] = True
             for key, mechanical in mechanical_metrics.items():
                 if key in reported_metrics and reported_metrics[key] != mechanical:
                     metric_mismatches.append(
@@ -5269,6 +5537,11 @@ async def gate_check(
                 .setdefault(samvil_tier, {})
             )
             tier_thresholds.update(mechanical_thresholds)
+        elif runtime_receipt_inconsistent:
+            metrics["runtime_receipt_consistent"] = False
+            cfg.setdefault("gates", {}).setdefault(gate_name, {}).setdefault(
+                "thresholds", {}
+            ).setdefault(samvil_tier, {})["runtime_receipt_consistent"] = True
         verdict = _gate_check_core(
             gate_name,
             samvil_tier=samvil_tier,
@@ -5304,20 +5577,38 @@ async def gate_check(
             "any_to_retro": qa_path,
         }
         authority_path = authority_paths.get(gate_name)
+        current_gate_input_snapshot = await asyncio.to_thread(
+            capture_gate_input_snapshot,
+            root,
+            gate_name,
+        )
+        if current_gate_input_snapshot != gate_input_snapshot:
+            raise ValueError("gate authority changed during evaluation")
+        qa_results_sha256 = snapshot_sha256(
+            gate_input_snapshot,
+            ".samvil/qa-results.json",
+        )
+        authority_relative = (
+            str(authority_path.relative_to(root))
+            if authority_path is not None
+            else ""
+        )
         receipt = {
             "kind": "gate_receipt",
             "gate": gate_name,
             "verdict": result.get("verdict"),
             "samvil_tier": samvil_tier,
-            "qa_results_sha256": hashlib.sha256(qa_path.read_bytes()).hexdigest()
-            if qa_path.is_file()
-            else "",
-            "authority_path": str(authority_path.relative_to(root))
-            if authority_path is not None
-            else "",
-            "authority_sha256": hashlib.sha256(authority_path.read_bytes()).hexdigest()
-            if authority_path is not None and authority_path.is_file()
-            else "",
+            "qa_results_sha256": qa_results_sha256,
+            "authority_path": authority_relative,
+            "authority_sha256": snapshot_sha256(
+                gate_input_snapshot,
+                authority_relative,
+            ),
+            "gate_input_snapshot": gate_input_snapshot,
+            "gate_input_snapshot_sha256": _canonical_json_hash(
+                gate_input_snapshot
+            ),
+            "gate_config_sha256": gate_config_sha256,
             "result_sha256": hashlib.sha256(
                 json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")
             ).hexdigest(),
@@ -5328,6 +5619,25 @@ async def gate_check(
                 if claim_context is not None
                 else ""
             ),
+            "runtime_receipt_sha256": _canonical_json_hash(
+                trusted_runtime_receipt
+            )
+            if trusted_runtime_receipt is not None
+            else "",
+            "runtime_authority_path": str(
+                (trusted_runtime_receipt or {}).get("authority_path") or ""
+            ),
+            "runtime_authority_sha256": str(
+                (trusted_runtime_receipt or {}).get("authority_sha256") or ""
+            ),
+            "runtime_claim_id": str(
+                (trusted_runtime_receipt or {}).get("claim_id") or ""
+            ),
+            "runtime_stage": str(
+                (trusted_runtime_receipt or {}).get("stage") or runtime_stage
+            )
+            if trusted_runtime_receipt is not None
+            else "",
         }
         try:
             receipt_root = safe_child_directory(

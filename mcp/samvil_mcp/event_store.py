@@ -110,6 +110,24 @@ CREATE TABLE IF NOT EXISTS runtime_receipts (
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
+CREATE TABLE IF NOT EXISTS runtime_verification_requirements (
+    session_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    marker_revision INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, stage, claim_id, marker_revision),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_verification_requirements_session
+ON runtime_verification_requirements(session_id, stage, marker_revision);
+
+CREATE TABLE IF NOT EXISTS event_store_migrations (
+    migration_key TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS gate_receipts (
     session_id TEXT NOT NULL,
     gate TEXT NOT NULL,
@@ -158,6 +176,8 @@ PROJECT_ROOT_UPDATED_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_sessions_project_root_updated
 ON sessions(project_root, updated_at DESC)
 """
+RUNTIME_REQUIREMENTS_BACKFILL = "runtime_verification_requirements_v1"
+RUNTIME_REQUIREMENT_UNKNOWN_CLAIM = "receipt-backfill-unverified"
 
 
 def _migration_plan(
@@ -194,6 +214,37 @@ def _now() -> str:
 
 def _uuid() -> str:
     return uuid.uuid4().hex[:12]
+
+
+def _runtime_requirement_identity(
+    receipt: dict[str, Any] | None,
+) -> tuple[str, int]:
+    """Extract audit metadata without weakening the stage-level requirement."""
+    claim_id = RUNTIME_REQUIREMENT_UNKNOWN_CLAIM
+    marker_revision: Any = None
+    if isinstance(receipt, dict):
+        if str(receipt.get("claim_id") or ""):
+            claim_id = str(receipt["claim_id"])
+        marker_revision = receipt.get("marker_revision")
+    return claim_id, marker_revision if type(marker_revision) is int else -1
+
+
+async def _persist_runtime_requirement(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    stage: str,
+    claim_id: str,
+    marker_revision: int,
+    created_at: str,
+) -> None:
+    """Record one audit identity without weakening the sticky stage lookup."""
+    await db.execute(
+        """INSERT OR IGNORE INTO runtime_verification_requirements
+        (session_id, stage, claim_id, marker_revision, created_at)
+        VALUES (?, ?, ?, ?, ?)""",
+        (session_id, stage, claim_id, marker_revision, created_at),
+    )
 
 
 def _restore_legacy_recovery_files(
@@ -318,6 +369,37 @@ class EventStore:
                 trusted_transition_added = TRUSTED_TRANSITION_MIGRATION in migrations
                 for migration in migrations:
                     await db.execute(migration)
+                backfill_cursor = await db.execute(
+                    """SELECT 1 FROM event_store_migrations
+                    WHERE migration_key = ?""",
+                    (RUNTIME_REQUIREMENTS_BACKFILL,),
+                )
+                if await backfill_cursor.fetchone() is None:
+                    receipt_cursor = await db.execute(
+                        """SELECT session_id, stage, receipt_json, created_at
+                        FROM runtime_receipts"""
+                    )
+                    async for receipt_row in receipt_cursor:
+                        try:
+                            receipt = json.loads(str(receipt_row[2]))
+                        except (json.JSONDecodeError, TypeError, UnicodeError):
+                            receipt = None
+                        claim_id, marker_revision = _runtime_requirement_identity(
+                            receipt
+                        )
+                        await _persist_runtime_requirement(
+                            db,
+                            session_id=str(receipt_row[0]),
+                            stage=str(receipt_row[1]),
+                            claim_id=claim_id,
+                            marker_revision=marker_revision,
+                            created_at=str(receipt_row[3]),
+                        )
+                    await db.execute(
+                        """INSERT INTO event_store_migrations
+                        (migration_key, applied_at) VALUES (?, ?)""",
+                        (RUNTIME_REQUIREMENTS_BACKFILL, _now()),
+                    )
                 if trusted_transition_added:
                     # Legacy JSON flags cannot prove provenance. Rewind only
                     # once, while adding the provenance column, so existing
@@ -746,8 +828,17 @@ class EventStore:
     ) -> dict[str, Any]:
         now = _now()
         payload = {**receipt, "session_id": session_id, "stage": stage}
+        claim_id, marker_revision = _runtime_requirement_identity(payload)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("BEGIN IMMEDIATE")
+            await _persist_runtime_requirement(
+                db,
+                session_id=session_id,
+                stage=stage,
+                claim_id=claim_id,
+                marker_revision=marker_revision,
+                created_at=now,
+            )
             await db.execute(
                 """INSERT INTO runtime_receipts
                 (session_id, stage, receipt_json, created_at, updated_at)
@@ -772,6 +863,63 @@ class EventStore:
             )
             row = await cursor.fetchone()
         return json.loads(str(row[0])) if row is not None else None
+
+    async def mark_runtime_verification_required(
+        self,
+        session_id: str,
+        stage: str,
+        claim_id: str,
+        marker_revision: int,
+    ) -> None:
+        """Begin native verification and invalidate any older stage receipt."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            claim_cursor = await db.execute(
+                """SELECT 1 FROM stage_claims
+                WHERE session_id = ? AND stage = ? AND claim_id = ?
+                  AND marker_revision = ? AND status = 'in_progress'
+                LIMIT 1""",
+                (session_id, stage, claim_id, marker_revision),
+            )
+            if await claim_cursor.fetchone() is None:
+                await db.rollback()
+                raise ValueError(
+                    "runtime verification requires the active stage claim"
+                )
+            await _persist_runtime_requirement(
+                db,
+                session_id=session_id,
+                stage=stage,
+                claim_id=claim_id,
+                marker_revision=marker_revision,
+                created_at=_now(),
+            )
+            await db.execute(
+                "DELETE FROM runtime_receipts WHERE session_id = ? AND stage = ?",
+                (session_id, stage),
+            )
+            await db.commit()
+
+    async def has_runtime_verification_requirement(
+        self,
+        session_id: str,
+        stage: str,
+    ) -> bool:
+        """Return whether this stage ever entered native verification.
+
+        The requirement is deliberately monotonic across replacement claims. Once
+        native verification starts, missing receipts can never be reinterpreted as
+        a legacy absence by issuing a new claim or marker revision.
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT 1 FROM runtime_verification_requirements
+                WHERE session_id = ? AND stage = ?
+                LIMIT 1""",
+                (session_id, stage),
+            )
+            row = await cursor.fetchone()
+        return row is not None
 
     async def save_gate_receipt(
         self,
@@ -1152,6 +1300,17 @@ class EventStore:
                     ),
                 )
                 if runtime_receipt is not None:
+                    runtime_claim_id, runtime_revision = (
+                        _runtime_requirement_identity(runtime_receipt)
+                    )
+                    await _persist_runtime_requirement(
+                        db,
+                        session_id=session_id,
+                        stage=str(runtime_receipt["stage"]),
+                        claim_id=runtime_claim_id,
+                        marker_revision=runtime_revision,
+                        created_at=event_timestamp,
+                    )
                     await db.execute(
                         """INSERT INTO runtime_receipts
                         (session_id, stage, receipt_json, created_at, updated_at)

@@ -28,6 +28,24 @@ def test_codex_harness_receipt_is_bound_to_clean_revision():
     assert result["localhost_bind"] is True
 
 
+def test_codex_harness_receipt_fails_closed_when_localhost_probe_is_unavailable(monkeypatch):
+    harness = _load("codex_native_e2e_localhost_probe", "codex-native-e2e.py")
+
+    def unavailable_probe():
+        raise OSError("address already in use")
+
+    monkeypatch.setattr(harness, "localhost_probe", unavailable_probe)
+
+    result = harness.readiness()
+
+    assert result["localhost_bind"] is False
+    assert result["ready"] is False
+    assert any(
+        blocker == "localhost bind probe is unavailable: address already in use"
+        for blocker in result["blockers"]
+    )
+
+
 def test_codex_harness_fails_closed_when_runtime_scenario_is_not_implemented():
     harness = _load("codex_native_e2e_scenario", "codex-native-e2e.py")
     result = harness.evaluate_mode(harness.readiness(), check=False, scenario="fresh", repeat=2)

@@ -1169,6 +1169,12 @@ def validate_activation_readiness(repo_root: Path) -> dict[str, Any]:
         manifest_data = {}
         launcher_data = {}
         blockers.append("Codex manifest or launcher is invalid JSON")
+    if not isinstance(manifest_data, dict):
+        manifest_data = {}
+        blockers.append("Codex plugin manifest JSON must be an object")
+    if not isinstance(launcher_data, dict):
+        launcher_data = {}
+        blockers.append("relative Codex MCP launcher JSON must be an object")
     public_skills = sorted(path.name for path in skills_root.iterdir() if path.is_dir()) if skills_root.is_dir() else []
     if public_skills != ["resume", "run", "status"]:
         blockers.append("Codex public skill surface must be exactly run/resume/status")
@@ -1177,7 +1183,11 @@ def validate_activation_readiness(repo_root: Path) -> dict[str, Any]:
             blockers.append(f"missing public Codex skill: {name}")
     if manifest_data.get("skills") != "./codex/skills/" or manifest_data.get("mcpServers") != "./.codex-mcp.json":
         blockers.append("Codex manifest does not use relative public surfaces")
-    server = (launcher_data.get("mcpServers") or {}).get("samvil-mcp")
+    mcp_servers = launcher_data.get("mcpServers")
+    if "mcpServers" in launcher_data and not isinstance(mcp_servers, dict):
+        mcp_servers = {}
+        blockers.append("Codex MCP launcher mcpServers must be an object")
+    server = (mcp_servers or {}).get("samvil-mcp")
     launcher_script = root / "scripts" / "start-codex-mcp.sh"
     if (
         not isinstance(server, dict)

@@ -14,12 +14,32 @@ from samvil_mcp.chain_markers import (
     build_driver_marker,
     inspect_chain_marker,
     write_driver_marker,
+    _validate_driver_marker,
     MARKER_FILENAME,
     SAMVIL_DIR,
 )
 
 
 class TestDriverMarkerV11:
+    @pytest.mark.parametrize("next_skill", [None, False, 0, [], {}, pytest.param("__missing__")])
+    def test_v11_rejects_non_string_next_skill(self, next_skill):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=0,
+            status="in_progress",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="samvil-qa",
+            reason="stage started",
+        )
+        if next_skill == "__missing__":
+            del marker["next_skill"]
+        else:
+            marker["next_skill"] = next_skill
+
+        with pytest.raises(ValueError, match="^next_skill must be a string$"):
+            _validate_driver_marker(marker)
+
     def test_v10_reader_remains_compatible(self, project_root):
         write_chain_marker(project_root, "codex_cli", "samvil-build")
         inspection = inspect_chain_marker(project_root)
