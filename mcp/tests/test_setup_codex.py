@@ -3238,7 +3238,10 @@ def test_isolated_migrate_ignores_ambient_codex_home_and_mutates_only_explicit_p
     assert sentinel.read_text(encoding="utf-8") == "keep\n"
     assert list(ambient.iterdir()) == [sentinel]
     assert command_environments
-    assert all(env["CODEX_HOME"] == str(codex_home) for env in command_environments)
+    assert all(
+        env["CODEX_HOME"] == str(codex_home.resolve())
+        for env in command_environments
+    )
 
 
 def test_setup_shell_routes_codex_to_native_installer_without_legacy_global_writes() -> (
