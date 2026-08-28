@@ -5112,6 +5112,49 @@ def _terminate_verification_processes(
         process.kill()
 
 
+def _canonical_json_hash(value: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+async def _await_verification_command(
+    command_task: asyncio.Task[tuple[int, str]],
+) -> tuple[int, str]:
+    """Retrieve the runner result before propagating caller cancellation."""
+    caller_cancelled = False
+    while True:
+        try:
+            await asyncio.shield(command_task)
+        except asyncio.CancelledError:
+            if command_task.cancelled():
+                break
+            caller_cancelled = True
+            if command_task.done():
+                break
+            continue
+        except BaseException:
+            break
+        else:
+            break
+    try:
+        result = command_task.result()
+    except asyncio.CancelledError:
+        raise
+    except BaseException:
+        if caller_cancelled:
+            raise asyncio.CancelledError from None
+        raise
+    if caller_cancelled:
+        raise asyncio.CancelledError
+    return result
+
+
 @mcp.tool()
 async def run_stage_verification(
     project_root: str,
@@ -5164,21 +5207,7 @@ async def run_stage_verification(
             command_task = asyncio.create_task(
                 asyncio.to_thread(_run_verification_command, root, command, timeout)
             )
-            cancelled = False
-            try:
-                while True:
-                    try:
-                        exit_code, output = await asyncio.shield(command_task)
-                        break
-                    except asyncio.CancelledError:
-                        cancelled = True
-                        continue
-            except BaseException:
-                if cancelled:
-                    raise asyncio.CancelledError from None
-                raise
-            if cancelled:
-                raise asyncio.CancelledError
+            exit_code, output = await _await_verification_command(command_task)
             output = redact_sensitive_text(output)
             async with stage_transition_lock(store, run_id):
                 try:
@@ -5262,7 +5291,55 @@ async def gate_check(
     allow_warn: bool = False,
     evidence_mode: str = "",
 ) -> str:
-    """Evaluate a stage gate. Returns the verdict as JSON.
+    """Evaluate and publish a gate against one serialized runtime snapshot."""
+    try:
+        root = Path(project_root).expanduser().resolve(strict=False)
+        store = await get_store()
+        session = await _active_session_for_project(store, root)
+        runtime_stage = {
+            "build_to_qa": "samvil-build",
+            "qa_to_evolve": "samvil-qa",
+            "qa_to_deploy": "samvil-qa",
+        }.get(gate_name, "")
+        if session is not None and runtime_stage:
+            async with verification_execution_lock(store, session.id, runtime_stage):
+                async with stage_transition_lock(store, session.id):
+                    current_session = await _active_session_for_project(store, root)
+                    if current_session is None or current_session.id != session.id:
+                        raise ValueError("stale gate evaluation: active session changed")
+                    return await _gate_check_with_snapshot(
+                        gate_name,
+                        samvil_tier,
+                        metrics_json,
+                        project_root,
+                        subject,
+                        allow_warn,
+                        evidence_mode,
+                    )
+        return await _gate_check_with_snapshot(
+            gate_name,
+            samvil_tier,
+            metrics_json,
+            project_root,
+            subject,
+            allow_warn,
+            evidence_mode,
+        )
+    except Exception as exc:
+        _log_mcp_health("fail", "gate_check", str(exc))
+        return json.dumps({"error": str(exc)})
+
+
+async def _gate_check_with_snapshot(
+    gate_name: str,
+    samvil_tier: str,
+    metrics_json: str,
+    project_root: str = ".",
+    subject: str = "",
+    allow_warn: bool = False,
+    evidence_mode: str = "",
+) -> str:
+    """Evaluate a stage gate while the caller owns any required locks.
 
     Verdict schema:
       {
@@ -5320,6 +5397,12 @@ async def gate_check(
                     trusted_runtime_receipt,
                 )
             )
+            if (
+                trusted_runtime_receipt is not None
+                and trusted_runtime_receipt.get("status") != "passed"
+            ):
+                mechanical_metrics["current_runtime_passed"] = False
+                mechanical_thresholds["current_runtime_passed"] = True
             for key, mechanical in mechanical_metrics.items():
                 if key in reported_metrics and reported_metrics[key] != mechanical:
                     metric_mismatches.append(
@@ -5396,6 +5479,25 @@ async def gate_check(
                 if claim_context is not None
                 else ""
             ),
+            "runtime_receipt_sha256": _canonical_json_hash(
+                trusted_runtime_receipt
+            )
+            if trusted_runtime_receipt is not None
+            else "",
+            "runtime_authority_path": str(
+                (trusted_runtime_receipt or {}).get("authority_path") or ""
+            ),
+            "runtime_authority_sha256": str(
+                (trusted_runtime_receipt or {}).get("authority_sha256") or ""
+            ),
+            "runtime_claim_id": str(
+                (trusted_runtime_receipt or {}).get("claim_id") or ""
+            ),
+            "runtime_stage": str(
+                (trusted_runtime_receipt or {}).get("stage") or runtime_stage
+            )
+            if trusted_runtime_receipt is not None
+            else "",
         }
         try:
             receipt_root = safe_child_directory(

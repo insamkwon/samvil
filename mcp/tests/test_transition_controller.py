@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import hashlib
 import os
 import stat
 import tempfile
@@ -844,15 +845,50 @@ async def test_db_loss_recovery_restores_signed_build_receipts(
         encoding="utf-8",
     )
     claim = await controller.begin_stage(str(project), session.id, "samvil-build", 0)
+    samvil = project / ".samvil"
+    (samvil / "runtime-receipts").mkdir(parents=True, exist_ok=True)
+    (samvil / "gate-receipts").mkdir(parents=True, exist_ok=True)
+    build_log = samvil / "build.log"
+    build_log.write_text("compiled\nSAMVIL_EXIT:0\n", encoding="utf-8")
+    build_hash = hashlib.sha256(build_log.read_bytes()).hexdigest()
     runtime_receipt = await store.save_runtime_receipt(
         session.id,
         "samvil-build",
-        {"claim_id": claim["claim_id"], "verdict": "pass"},
+        {
+            "kind": "runtime_receipt",
+            "status": "passed",
+            "trusted_by": "samvil_mcp_subprocess",
+            "exit_code": 0,
+            "authority_path": ".samvil/build.log",
+            "authority_sha256": build_hash,
+            "marker_revision": 0,
+            "claim_id": claim["claim_id"],
+        },
     )
+    (samvil / "runtime-receipts" / "build.json").write_text(
+        json.dumps(runtime_receipt), encoding="utf-8"
+    )
+    runtime_hash = controller._json_hash(runtime_receipt)
     gate_receipt = await store.save_gate_receipt(
         session.id,
         "build_to_qa",
-        {"claim_id": claim["claim_id"], "marker_revision": 0, "verdict": "pass"},
+        {
+            "kind": "gate_receipt",
+            "verdict": "pass",
+            "trusted_by": "samvil_mcp_gate_check",
+            "authority_path": ".samvil/build.log",
+            "authority_sha256": build_hash,
+            "claim_id": claim["claim_id"],
+            "marker_revision": 0,
+            "runtime_receipt_sha256": runtime_hash,
+            "runtime_authority_path": ".samvil/build.log",
+            "runtime_authority_sha256": build_hash,
+            "runtime_claim_id": claim["claim_id"],
+            "runtime_stage": "samvil-build",
+        },
+    )
+    (samvil / "gate-receipts" / "build_to_qa.json").write_text(
+        json.dumps(gate_receipt), encoding="utf-8"
     )
     monkeypatch.setattr(
         server,
@@ -1362,10 +1398,12 @@ async def test_qa_commit_without_evidence_stays_blocked(controller, tmp_path):
         '{"synthesis":{"verdict":"PASS"}}\n',
         encoding="utf-8",
     )
-    committed = await controller.commit_stage_transition(
-        str(project), session.id, claim["claim_id"], "samvil-qa", "samvil-deploy", 0,
-        transition_id=transition_id,
-    )
+    with pytest.raises(TransitionError, match="trusted gate receipt"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-qa", "samvil-deploy", 0,
+            transition_id=transition_id,
+        )
 
-    assert committed["status"] == "committed"
-    assert committed["transition_id"] == transition_id
+    assert await controller.store.get_events(session.id) == []
+    assert not (project / ".samvil" / "transition-journal.json").exists()

@@ -30,6 +30,7 @@ def test_verification_execution_lock_serializes_across_processes(
 ) -> None:
     db_path = tmp_path / "cross-process.db"
     holder_entered = tmp_path / "holder-entered"
+    contender_ready = tmp_path / "contender-ready"
     contender_entered = tmp_path / "contender-entered"
     release_holder = tmp_path / "release-holder"
     mcp_root = Path(__file__).resolve().parents[1]
@@ -64,8 +65,9 @@ from samvil_mcp.transition_lock import verification_execution_lock
 
 async def main():
     store = SimpleNamespace(db_path=sys.argv[1])
+    Path(sys.argv[2]).write_text("ready", encoding="utf-8")
     async with verification_execution_lock(store, "run-1", "samvil-build"):
-        Path(sys.argv[2]).write_text("entered", encoding="utf-8")
+        Path(sys.argv[3]).write_text("entered", encoding="utf-8")
 
 asyncio.run(main())
 """
@@ -92,6 +94,7 @@ asyncio.run(main())
                 "-c",
                 contender_script,
                 str(db_path),
+                str(contender_ready),
                 str(contender_entered),
             ],
             env=environment,
@@ -99,7 +102,7 @@ asyncio.run(main())
             stderr=subprocess.PIPE,
             text=True,
         )
-        time.sleep(0.2)
+        _wait_for_path(contender_ready, contender)
         assert not contender_entered.exists()
         release_holder.write_text("release", encoding="utf-8")
         holder_stdout, holder_stderr = holder.communicate(timeout=5)

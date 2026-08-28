@@ -625,6 +625,134 @@ class TransitionController:
             ).encode("utf-8")
         ).hexdigest()
 
+    async def _current_transition_receipts(
+        self,
+        root: Path,
+        run_id: str,
+        claim_id: str,
+        from_stage: str,
+        to_stage: str,
+        expected_revision: int,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Validate the current gate/runtime bundle while holding the stage lock."""
+        gate_name = {
+            ("samvil-build", "samvil-qa"): "build_to_qa",
+            ("samvil-qa", "samvil-evolve"): "qa_to_evolve",
+            ("samvil-qa", "samvil-retro"): "any_to_retro",
+            ("samvil-qa", "samvil-deploy"): "qa_to_deploy",
+        }.get((from_stage, to_stage), "")
+        runtime_receipt = await self.store.get_runtime_receipt(run_id, from_stage)
+        if not gate_name:
+            return runtime_receipt, None
+
+        gate_receipt = await self.store.get_gate_receipt(run_id, gate_name)
+        if gate_receipt is None:
+            raise TransitionError(f"trusted gate receipt for {gate_name} is required")
+        try:
+            gate_root = safe_child_directory(
+                root, ".samvil/gate-receipts", label="gate receipts"
+            )
+        except RuntimeLayoutError as exc:
+            raise TransitionError(str(exc)) from exc
+        projected_gate = self._read_json(gate_root / f"{gate_name}.json")
+        expected_authority = (
+            ".samvil/build.log"
+            if gate_name == "build_to_qa"
+            else ".samvil/qa-results.json"
+        )
+        authority_path = root / expected_authority
+        authority_hash = (
+            hashlib.sha256(authority_path.read_bytes()).hexdigest()
+            if authority_path.is_file()
+            else ""
+        )
+        if (
+            not projected_gate
+            or self._json_hash(projected_gate) != self._json_hash(gate_receipt)
+            or gate_receipt.get("kind") != "gate_receipt"
+            or gate_receipt.get("gate") != gate_name
+            or gate_receipt.get("session_id") != run_id
+            or gate_receipt.get("verdict") != "pass"
+            or gate_receipt.get("trusted_by") != "samvil_mcp_gate_check"
+            or gate_receipt.get("claim_id") != claim_id
+            or gate_receipt.get("marker_revision") != expected_revision
+            or gate_receipt.get("authority_path") != expected_authority
+            or not authority_hash
+            or gate_receipt.get("authority_sha256") != authority_hash
+            or (
+                gate_name != "build_to_qa"
+                and gate_receipt.get("qa_results_sha256") != authority_hash
+            )
+        ):
+            raise TransitionError(
+                f"trusted gate receipt for {gate_name} or current runtime receipt "
+                "is not current"
+            )
+
+        if gate_name == "any_to_retro":
+            return runtime_receipt, gate_receipt
+
+        runtime_required = gate_name in {"build_to_qa", "qa_to_deploy"}
+        if runtime_receipt is None:
+            if runtime_required:
+                raise TransitionError("current runtime receipt must be passed")
+            if any(
+                gate_receipt.get(key)
+                for key in (
+                    "runtime_receipt_sha256",
+                    "runtime_authority_path",
+                    "runtime_authority_sha256",
+                    "runtime_claim_id",
+                    "runtime_stage",
+                )
+            ):
+                raise TransitionError(
+                    "trusted gate receipt does not match current runtime receipt"
+                )
+            return None, gate_receipt
+
+        try:
+            runtime_root = safe_child_directory(
+                root, ".samvil/runtime-receipts", label="runtime receipts"
+            )
+        except RuntimeLayoutError as exc:
+            raise TransitionError(str(exc)) from exc
+        runtime_name = from_stage.removeprefix("samvil-")
+        projected_runtime = self._read_json(runtime_root / f"{runtime_name}.json")
+        runtime_authority = f".samvil/{runtime_name}.log"
+        runtime_authority_path = root / runtime_authority
+        runtime_authority_hash = (
+            hashlib.sha256(runtime_authority_path.read_bytes()).hexdigest()
+            if runtime_authority_path.is_file()
+            else ""
+        )
+        runtime_hash = self._json_hash(runtime_receipt)
+        if (
+            not projected_runtime
+            or self._json_hash(projected_runtime) != runtime_hash
+            or runtime_receipt.get("kind") != "runtime_receipt"
+            or runtime_receipt.get("session_id") != run_id
+            or runtime_receipt.get("stage") != from_stage
+            or runtime_receipt.get("status") != "passed"
+            or runtime_receipt.get("exit_code") != 0
+            or runtime_receipt.get("trusted_by") != "samvil_mcp_subprocess"
+            or runtime_receipt.get("claim_id") != claim_id
+            or runtime_receipt.get("marker_revision") != expected_revision
+            or runtime_receipt.get("authority_path") != runtime_authority
+            or not runtime_authority_hash
+            or runtime_receipt.get("authority_sha256") != runtime_authority_hash
+            or gate_receipt.get("runtime_receipt_sha256") != runtime_hash
+            or gate_receipt.get("runtime_authority_path") != runtime_authority
+            or gate_receipt.get("runtime_authority_sha256")
+            != runtime_authority_hash
+            or gate_receipt.get("runtime_claim_id") != claim_id
+            or gate_receipt.get("runtime_stage") != from_stage
+        ):
+            raise TransitionError(
+                "trusted gate receipt does not match current runtime receipt"
+            )
+        return runtime_receipt, gate_receipt
+
     @staticmethod
     def _event_evidence(root: Path, event_id: str) -> str:
         path = root / ".samvil" / "events.jsonl"
@@ -1255,6 +1383,17 @@ class TransitionController:
                     "marker_revision": expected_revision,
                 }
 
+        runtime_receipt_snapshot, gate_receipt_snapshot = (
+            await self._current_transition_receipts(
+                root,
+                run_id,
+                claim_id,
+                from_stage,
+                to_stage,
+                expected_revision,
+            )
+        )
+
         event_payload = sanitize_event_data(dict(data or {}))
         event_payload.update(
             {
@@ -1308,21 +1447,6 @@ class TransitionController:
             "created_at": session.created_at,
         }
         claim_snapshot = dict(claim)
-        runtime_stage = from_stage
-        runtime_receipt_snapshot = await self.store.get_runtime_receipt(
-            run_id, runtime_stage
-        )
-        gate_name = {
-            ("samvil-build", "samvil-qa"): "build_to_qa",
-            ("samvil-qa", "samvil-evolve"): "qa_to_evolve",
-            ("samvil-qa", "samvil-retro"): "any_to_retro",
-            ("samvil-qa", "samvil-deploy"): "qa_to_deploy",
-        }.get((from_stage, to_stage), "")
-        gate_receipt_snapshot = (
-            await self.store.get_gate_receipt(run_id, gate_name)
-            if gate_name
-            else None
-        )
         journal = {
             "transition_id": transition_id,
             "run_id": run_id,
