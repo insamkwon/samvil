@@ -30,9 +30,18 @@ def readiness() -> dict[str, object]:
     from samvil_mcp.codex_installer import validate_activation_readiness
 
     result = validate_activation_readiness(ROOT)
+    try:
+        localhost_bind = localhost_probe()
+    except OSError as error:
+        localhost_bind = False
+        result["blockers"] = [
+            *result["blockers"],
+            f"localhost bind probe is unavailable: {error}",
+        ]
+        result["ready"] = False
     result.update({
         "host_binary": shutil.which("codex") or "",
-        "localhost_bind": localhost_probe(),
+        "localhost_bind": localhost_bind,
         "tested_commit": _git("rev-parse", "HEAD"),
         "tested_tree": _git("rev-parse", "HEAD^{tree}"),
     })
