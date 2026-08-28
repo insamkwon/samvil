@@ -15,6 +15,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -1156,6 +1157,476 @@ def test_runtime_receipt_projection_failure_does_not_leave_trusted_db_pass(
     assert runtime["status"] == "blocked"
     assert _run(store.get_runtime_receipt(session.id, "samvil-build")) is None
     assert gate["verdict"] == "block"
+
+
+def test_older_pass_cannot_overwrite_newer_failed_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "serialized-runtime-verification"
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, "build", command)
+    _write_passing_build_seed(project)
+    store = EventStore(str(tmp_path / "serialized-runtime-verification.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("serialized", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    first_started = threading.Event()
+    release_first = threading.Event()
+    second_finished = threading.Event()
+    calls_lock = threading.Lock()
+    calls = 0
+
+    def controlled_runner(*_args):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+            invocation = calls
+        if invocation == 1:
+            first_started.set()
+            assert release_first.wait(5), "first verifier was never released"
+            return 0, "OLDER PASS"
+        second_finished.set()
+        return 1, "NEWER FAIL"
+
+    monkeypatch.setattr(server, "_run_verification_command", controlled_runner)
+
+    async def overlap():
+        first = asyncio.create_task(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+        assert await asyncio.to_thread(first_started.wait, 2)
+        second = asyncio.create_task(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+        second_completed_before_release = await asyncio.to_thread(
+            second_finished.wait, 1
+        )
+        release_first.set()
+        first_result, second_result = await asyncio.gather(first, second)
+        return (
+            json.loads(first_result),
+            json.loads(second_result),
+            second_completed_before_release,
+        )
+
+    first_result, second_result, second_completed_before_release = _run(overlap())
+    log_text = (project / ".samvil" / "build.log").read_text(encoding="utf-8")
+    projection = json.loads(
+        (project / ".samvil" / "runtime-receipts" / "build.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    persisted = _run(store.get_runtime_receipt(session.id, "samvil-build"))
+    gate = json.loads(
+        _run(
+            gate_check(
+                "build_to_qa",
+                "minimal",
+                '{"implementation_rate":1.0}',
+                str(project),
+            )
+        )
+    )
+
+    assert first_result["status"] == "passed"
+    assert second_result["status"] == "failed"
+    assert "NEWER FAIL" in log_text
+    assert projection["status"] == "failed"
+    assert persisted is not None and persisted["status"] == "failed"
+    assert projection == persisted
+    assert gate["verdict"] == "block"
+    assert second_completed_before_release is False
+
+
+def test_stale_claim_verification_writes_no_runtime_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.chain_markers import build_driver_marker, write_driver_marker
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "stale-runtime-verification"
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, "build", command)
+    store = EventStore(str(tmp_path / "stale-runtime-verification.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("stale", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    original_claim = json.loads(
+        _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    )
+    command_started = threading.Event()
+    release_command = threading.Event()
+
+    def controlled_runner(*_args):
+        command_started.set()
+        assert release_command.wait(5), "stale verifier was never released"
+        return 0, "STALE PASS"
+
+    monkeypatch.setattr(server, "_run_verification_command", controlled_runner)
+
+    async def replace_claim():
+        verifier = asyncio.create_task(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+        assert await asyncio.to_thread(command_started.wait, 2)
+        assert await store.mark_stage_claim_completed(
+            original_claim["claim_id"], "replacement-transition"
+        )
+        replacement = await store.create_stage_claim(
+            session.id, "samvil-build", 2
+        )
+        write_driver_marker(
+            str(project),
+            build_driver_marker(
+                run_id=session.id,
+                revision=2,
+                status="in_progress",
+                host_name="codex_cli",
+                from_stage="samvil-build",
+                next_skill="",
+                reason="build claim replaced",
+            ),
+        )
+        release_command.set()
+        return json.loads(await verifier), replacement
+
+    result, replacement = _run(replace_claim())
+
+    assert result["status"] == "blocked"
+    assert "stale" in result["error"]
+    assert replacement["marker_revision"] == 2
+    assert not (project / ".samvil" / "build.log").exists()
+    assert not (project / ".samvil" / "runtime-receipts" / "build.json").exists()
+    assert _run(store.get_runtime_receipt(session.id, "samvil-build")) is None
+
+
+def test_stage_transition_lock_remains_available_while_verification_command_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+    from samvil_mcp.transition_lock import stage_transition_lock
+
+    project = tmp_path / "verification-transition-progress"
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, "build", command)
+    store = EventStore(str(tmp_path / "verification-transition-progress.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("progress", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    command_started = threading.Event()
+    release_command = threading.Event()
+
+    def controlled_runner(*_args):
+        command_started.set()
+        assert release_command.wait(5), "progress verifier was never released"
+        return 0, "PASS"
+
+    monkeypatch.setattr(server, "_run_verification_command", controlled_runner)
+
+    async def check_progress():
+        verifier = asyncio.create_task(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+        assert await asyncio.to_thread(command_started.wait, 2)
+        acquired = asyncio.Event()
+
+        async def transition_user():
+            async with stage_transition_lock(store, session.id):
+                acquired.set()
+
+        transition = asyncio.create_task(transition_user())
+        await asyncio.wait_for(acquired.wait(), timeout=1)
+        release_command.set()
+        await transition
+        return json.loads(await verifier)
+
+    result = _run(check_progress())
+
+    assert result["status"] == "passed"
+
+
+def test_runtime_verification_rejects_mechanical_command_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "runtime-command-drift"
+    original_command = [sys.executable, "-c", "print('original')"]
+    changed_command = [sys.executable, "-c", "print('changed')"]
+    _write_mechanical_command(project, "build", original_command)
+    store = EventStore(str(tmp_path / "runtime-command-drift.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("command-drift", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    command_started = threading.Event()
+    release_command = threading.Event()
+
+    def controlled_runner(*_args):
+        command_started.set()
+        assert release_command.wait(5), "drift verifier was never released"
+        return 0, "OBSOLETE PASS"
+
+    monkeypatch.setattr(server, "_run_verification_command", controlled_runner)
+
+    async def drift_contract():
+        verifier = asyncio.create_task(
+            server.run_stage_verification(
+                str(project),
+                session.id,
+                "samvil-build",
+                json.dumps(original_command),
+            )
+        )
+        assert await asyncio.to_thread(command_started.wait, 2)
+        _write_mechanical_command(project, "build", changed_command)
+        release_command.set()
+        return json.loads(await verifier)
+
+    result = _run(drift_contract())
+
+    assert result["status"] == "blocked"
+    assert "stale" in result["error"]
+    assert not (project / ".samvil" / "build.log").exists()
+    assert not (project / ".samvil" / "runtime-receipts" / "build.json").exists()
+    assert _run(store.get_runtime_receipt(session.id, "samvil-build")) is None
+
+
+def test_runtime_verification_revalidates_receipt_containment_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "runtime-receipt-path-swap"
+    outside = tmp_path / "outside-receipts"
+    outside.mkdir()
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, "build", command)
+    store = EventStore(str(tmp_path / "runtime-receipt-path-swap.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("path-swap", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    command_started = threading.Event()
+    release_command = threading.Event()
+
+    def controlled_runner(*_args):
+        command_started.set()
+        assert release_command.wait(5), "path-swap verifier was never released"
+        return 0, "OBSOLETE PASS"
+
+    monkeypatch.setattr(server, "_run_verification_command", controlled_runner)
+
+    async def swap_receipt_path():
+        verifier = asyncio.create_task(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+        assert await asyncio.to_thread(command_started.wait, 2)
+        (project / ".samvil" / "runtime-receipts").symlink_to(
+            outside, target_is_directory=True
+        )
+        release_command.set()
+        return json.loads(await verifier)
+
+    result = _run(swap_receipt_path())
+
+    assert result["status"] == "blocked"
+    assert "unsafe runtime receipts path" in result["error"]
+    assert not (outside / "build.json").exists()
+    assert _run(store.get_runtime_receipt(session.id, "samvil-build")) is None
+
+
+def test_cancelled_verifier_keeps_execution_serialized_until_cleanup_finishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "cancelled-runtime-verification"
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, "build", command)
+    store = EventStore(str(tmp_path / "cancelled-runtime-verification.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("cancelled", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    first_started = threading.Event()
+    release_first = threading.Event()
+    second_started = threading.Event()
+    calls_lock = threading.Lock()
+    calls = 0
+
+    def controlled_runner(*_args):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+            invocation = calls
+        if invocation == 1:
+            first_started.set()
+            assert release_first.wait(5), "cancelled verifier was never released"
+            return 0, "CANCELLED PASS"
+        second_started.set()
+        return 1, "FOLLOW-UP FAIL"
+
+    monkeypatch.setattr(server, "_run_verification_command", controlled_runner)
+
+    async def cancel_and_retry():
+        first = asyncio.create_task(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+        assert await asyncio.to_thread(first_started.wait, 2)
+        first.cancel()
+        await asyncio.sleep(0.05)
+        first.cancel()
+        second = asyncio.create_task(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+        second_started_before_cleanup = await asyncio.to_thread(
+            second_started.wait, 1
+        )
+        release_first.set()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        second_result = json.loads(await second)
+        return second_started_before_cleanup, second_result
+
+    second_started_before_cleanup, second_result = _run(cancel_and_retry())
+
+    assert second_started_before_cleanup is False
+    assert second_result["status"] == "failed"
+    assert "CANCELLED PASS" not in (
+        project / ".samvil" / "build.log"
+    ).read_text(encoding="utf-8")
+
+
+def test_cancelled_verifier_propagates_cancellation_after_runner_error_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "cancelled-runtime-error"
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, "build", command)
+    store = EventStore(str(tmp_path / "cancelled-runtime-error.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("cancelled-error", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    command_started = threading.Event()
+    release_command = threading.Event()
+
+    def controlled_runner(*_args):
+        command_started.set()
+        assert release_command.wait(5), "cancelled verifier was never released"
+        raise RuntimeError("cleanup failed after cancellation")
+
+    monkeypatch.setattr(server, "_run_verification_command", controlled_runner)
+
+    async def cancel_erroring_runner():
+        loop = asyncio.get_running_loop()
+        orphaned_exceptions = []
+        loop.set_exception_handler(
+            lambda _loop, context: orphaned_exceptions.append(context)
+        )
+        verifier = asyncio.create_task(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+        assert await asyncio.to_thread(command_started.wait, 2)
+        verifier.cancel()
+        await asyncio.sleep(0.05)
+        verifier.cancel()
+        release_command.set()
+        with pytest.raises(asyncio.CancelledError):
+            await verifier
+        await asyncio.sleep(0)
+        return orphaned_exceptions
+
+    orphaned_exceptions = _run(cancel_erroring_runner())
+
+    assert orphaned_exceptions == []
+    assert not (project / ".samvil" / "build.log").exists()
+    assert _run(store.get_runtime_receipt(session.id, "samvil-build")) is None
+
+
+def test_timed_out_verifier_releases_execution_lock_for_follow_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "timed-out-runtime-verification"
+    timeout_command = [sys.executable, "-c", "import time; time.sleep(30)"]
+    follow_up_command = [sys.executable, "-c", "print('FOLLOW-UP PASS')"]
+    _write_mechanical_command(project, "build", timeout_command)
+    store = EventStore(str(tmp_path / "timed-out-runtime-verification.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("timed-out", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+
+    timed_out = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project),
+                session.id,
+                "samvil-build",
+                json.dumps(timeout_command),
+                1,
+            )
+        )
+    )
+    _write_mechanical_command(project, "build", follow_up_command)
+    followed_up = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project),
+                session.id,
+                "samvil-build",
+                json.dumps(follow_up_command),
+            )
+        )
+    )
+
+    assert timed_out["status"] == "failed"
+    assert timed_out["exit_code"] == 124
+    assert followed_up["status"] == "passed"
+    assert "FOLLOW-UP PASS" in (
+        project / ".samvil" / "build.log"
+    ).read_text(encoding="utf-8")
 
 
 def test_runtime_verification_rejects_command_outside_mechanical_contract(

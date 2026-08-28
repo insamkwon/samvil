@@ -188,7 +188,7 @@ from .orchestrator import (
     stage_can_proceed as _orchestrator_stage_can_proceed,
 )
 from .event_store import EventStore
-from .transition_lock import stage_transition_lock
+from .transition_lock import stage_transition_lock, verification_execution_lock
 from .gates import (
     DEFAULT_CONFIG as GATE_DEFAULT_CONFIG,
     GateName,
@@ -5126,57 +5126,125 @@ async def run_stage_verification(
         normalized = stage if stage.startswith("samvil-") else f"samvil-{stage}"
         if normalized not in {"samvil-build", "samvil-qa"}:
             raise ValueError("stage must be samvil-build or samvil-qa")
-        command, command_profile = _mechanical_verification_command(root, normalized)
         requested_command = json.loads(command_json or "[]")
-        if requested_command and requested_command != command:
-            raise ValueError("requested command does not match mechanical contract")
+        if not isinstance(requested_command, list):
+            raise ValueError("command_json must encode an array")
         timeout = min(max(float(timeout_seconds), 1.0), 900.0)
-        try:
-            samvil_root = safe_child_directory(root, ".samvil", label=".samvil")
-            receipt_root = safe_child_directory(
-                root, ".samvil/runtime-receipts", label="runtime receipts"
-            )
-        except RuntimeLayoutError as exc:
-            raise ValueError(str(exc)) from exc
         store = await get_store()
-        session = await store.get_session(run_id)
-        if (
-            session is None
-            or Path(session.project_root).expanduser().resolve(strict=False) != root
-            or session.current_stage.value != normalized.removeprefix("samvil-")
-        ):
-            raise ValueError("run_id does not own the requested project stage")
-        claim_context = await _active_claim_context(
-            store, root, session, expected_stage=normalized
-        )
-        if claim_context is None:
-            raise ValueError("runtime verification requires the active stage claim")
-        marker_revision, claim = claim_context
-        exit_code, output = await asyncio.to_thread(
-            _run_verification_command, root, command, timeout
-        )
-        output = redact_sensitive_text(output)
-        log_name = "build.log" if normalized == "samvil-build" else "qa.log"
-        log_path = samvil_root / log_name
-        atomic_write_text(log_path, f"{output}\nSAMVIL_EXIT:{exit_code}\n")
-        receipt = {
-            "kind": "runtime_receipt",
-            "stage": normalized,
-            "status": "passed" if exit_code == 0 else "failed",
-            "trusted_by": "samvil_mcp_subprocess",
-            "command_profile": command_profile,
-            "exit_code": exit_code,
-            "authority_path": f".samvil/{log_name}",
-            "authority_sha256": hashlib.sha256(log_path.read_bytes()).hexdigest(),
-            "marker_revision": marker_revision,
-            "claim_id": claim["claim_id"],
-        }
-        projected_receipt = {**receipt, "session_id": run_id, "stage": normalized}
-        atomic_write_text(
-            receipt_root / f"{normalized.removeprefix('samvil-')}.json",
-            json.dumps(projected_receipt, indent=2, ensure_ascii=False),
-        )
-        receipt = await store.save_runtime_receipt(run_id, normalized, receipt)
+        async with verification_execution_lock(store, run_id, normalized):
+            try:
+                samvil_root = safe_child_directory(root, ".samvil", label=".samvil")
+                receipt_root = safe_child_directory(
+                    root, ".samvil/runtime-receipts", label="runtime receipts"
+                )
+            except RuntimeLayoutError as exc:
+                raise ValueError(str(exc)) from exc
+            async with stage_transition_lock(store, run_id):
+                command, command_profile = _mechanical_verification_command(
+                    root, normalized
+                )
+                if requested_command and requested_command != command:
+                    raise ValueError("requested command does not match mechanical contract")
+                session = await store.get_session(run_id)
+                if (
+                    session is None
+                    or Path(session.project_root).expanduser().resolve(strict=False) != root
+                    or session.current_stage.value != normalized.removeprefix("samvil-")
+                ):
+                    raise ValueError("run_id does not own the requested project stage")
+                claim_context = await _active_claim_context(
+                    store, root, session, expected_stage=normalized
+                )
+                if claim_context is None:
+                    raise ValueError(
+                        "runtime verification requires the active stage claim"
+                    )
+                marker_revision, claim = claim_context
+
+            command_task = asyncio.create_task(
+                asyncio.to_thread(_run_verification_command, root, command, timeout)
+            )
+            cancelled = False
+            try:
+                while True:
+                    try:
+                        exit_code, output = await asyncio.shield(command_task)
+                        break
+                    except asyncio.CancelledError:
+                        cancelled = True
+                        continue
+            except BaseException:
+                if cancelled:
+                    raise asyncio.CancelledError from None
+                raise
+            if cancelled:
+                raise asyncio.CancelledError
+            output = redact_sensitive_text(output)
+            async with stage_transition_lock(store, run_id):
+                try:
+                    samvil_root = safe_child_directory(root, ".samvil", label=".samvil")
+                    receipt_root = safe_child_directory(
+                        root, ".samvil/runtime-receipts", label="runtime receipts"
+                    )
+                except RuntimeLayoutError as exc:
+                    raise ValueError(str(exc)) from exc
+                current_session = await store.get_session(run_id)
+                current_context = (
+                    await _active_claim_context(
+                        store, root, current_session, expected_stage=normalized
+                    )
+                    if current_session is not None
+                    else None
+                )
+                try:
+                    current_command, current_profile = (
+                        _mechanical_verification_command(root, normalized)
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        "stale runtime verification: mechanical contract changed"
+                    ) from exc
+                if (
+                    current_session is None
+                    or Path(current_session.project_root).expanduser().resolve(strict=False) != root
+                    or current_session.current_stage.value != normalized.removeprefix("samvil-")
+                    or current_context is None
+                    or current_context[0] != marker_revision
+                    or current_context[1].get("claim_id") != claim.get("claim_id")
+                    or current_command != command
+                    or current_profile != command_profile
+                ):
+                    raise ValueError(
+                        "stale runtime verification: ownership or mechanical "
+                        "contract changed"
+                    )
+                log_name = "build.log" if normalized == "samvil-build" else "qa.log"
+                log_path = samvil_root / log_name
+                atomic_write_text(log_path, f"{output}\nSAMVIL_EXIT:{exit_code}\n")
+                receipt = {
+                    "kind": "runtime_receipt",
+                    "stage": normalized,
+                    "status": "passed" if exit_code == 0 else "failed",
+                    "trusted_by": "samvil_mcp_subprocess",
+                    "command_profile": command_profile,
+                    "exit_code": exit_code,
+                    "authority_path": f".samvil/{log_name}",
+                    "authority_sha256": hashlib.sha256(
+                        log_path.read_bytes()
+                    ).hexdigest(),
+                    "marker_revision": marker_revision,
+                    "claim_id": claim["claim_id"],
+                }
+                projected_receipt = {
+                    **receipt,
+                    "session_id": run_id,
+                    "stage": normalized,
+                }
+                atomic_write_text(
+                    receipt_root / f"{normalized.removeprefix('samvil-')}.json",
+                    json.dumps(projected_receipt, indent=2, ensure_ascii=False),
+                )
+                receipt = await store.save_runtime_receipt(run_id, normalized, receipt)
         _log_mcp_health("ok" if exit_code == 0 else "fail", "run_stage_verification")
         return json.dumps(receipt, ensure_ascii=False)
     except Exception as exc:
