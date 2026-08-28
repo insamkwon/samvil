@@ -1363,6 +1363,17 @@ def _direct_mcp_artifact(config_path: Path) -> LegacyArtifact | None:
             path,
             "legacy MCP tool overrides have no server parent",
         )
+    if isinstance(table, dict):
+        tools = table.get("tools")
+        if tools is not None and (
+            not isinstance(tools, dict)
+            or any(not isinstance(value, dict) for value in tools.values())
+        ):
+            return _artifact(
+                "direct_mcp_table",
+                path,
+                "legacy MCP tool overrides are not TOML tables",
+            )
     normalized_expected = {
         "command": "{{SAMVIL_ROOT}}/mcp/.venv/bin/python",
         "args": ["-m", "samvil_mcp.server"],

@@ -4219,6 +4219,39 @@ def test_legacy_migration_dry_run_recognizes_codex_normalized_mcp_table_and_pres
     assert config.read_text(encoding="utf-8") == original
 
 
+def test_legacy_migration_dry_run_blocks_array_mcp_tool_overrides(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args = ["-m", "samvil_mcp.server"]\n\n'
+        "[[mcp_servers.samvil-mcp.tools.begin_stage]]\n"
+        'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item
+        for item in plan.artifacts
+        if item.artifact_kind == "direct_mcp_table"
+    )
+    assert artifact.classification == "user_modified"
+    assert artifact.blocks_mutation is True
+    assert "not TOML tables" in artifact.reason
+    assert plan.to_dict()["ready"] is False
+    assert config.read_text(encoding="utf-8") == original
+
+
 def test_legacy_migration_dry_run_recognizes_direct_mcp_from_old_repo_root(
     tmp_path: Path,
 ) -> None:

@@ -688,6 +688,15 @@ def _remove_generated_direct_mcp_table(content: bytes) -> bytes:
     command = table.get("command") if isinstance(table, dict) else None
     if not isinstance(command, str):
         raise installer.InstallBlocked("generated direct MCP table disappeared")
+    if isinstance(table, dict):
+        tools = table.get("tools")
+        if tools is not None and (
+            not isinstance(tools, dict)
+            or any(not isinstance(value, dict) for value in tools.values())
+        ):
+            raise installer.InstallBlocked(
+                "legacy MCP tool overrides are not TOML tables"
+            )
     lines = text.splitlines(keepends=True)
 
     def body(line: str) -> str:
