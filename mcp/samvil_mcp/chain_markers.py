@@ -136,7 +136,7 @@ def _validate_driver_marker(marker: dict[str, Any]) -> None:
         if not isinstance(marker.get(field), str) or not marker[field].strip():
             raise ValueError(f"{field} is required")
     get_stage_spec(marker["from_stage"])
-    next_skill = marker.get("next_skill") or ""
+    next_skill = marker.get("next_skill")
     if not isinstance(next_skill, str):
         raise ValueError("next_skill must be a string")
     if next_skill and not validate_stage_transition(marker["from_stage"], next_skill):
