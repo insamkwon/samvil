@@ -78,6 +78,20 @@ The current persisted CLI evidence is intentionally classified `blocked_auth` in
    is invalid.
 4. A marker or receipt owned by another run/session must fail closed.
 
+Native stage transitions and runtime verification require an operating-system
+interprocess file-lock backend. The current trusted runtime path supports the
+`flock` backend used by macOS and Linux; when that backend is unavailable, SAMVIL
+returns a blocked error before entering the protected state change instead of
+silently weakening the lock to one process.
+
+Native `build_to_qa`, `qa_to_evolve`, and `qa_to_deploy` transitions always
+require a current subprocess runtime receipt. An in-flight project upgraded from
+an older release is not rewritten or discarded; rerun the Build or QA mechanical
+verification once before retrying the gate. The `any_to_retro` recovery route may
+start without a receipt only when runtime verification never began. Once it has
+begun for that session stage, the requirement remains in trusted storage across
+replacement claims and missing projections.
+
 ## Duplicate commit or event concern
 
 Retry the exact same transition with the same fixed `transition_id`. The second

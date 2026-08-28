@@ -1553,6 +1553,12 @@ def validate_activation_readiness(repo_root: Path) -> dict[str, Any]:
         manifest_data = {}
         launcher_data = {}
         blockers.append("Codex manifest or launcher is invalid JSON")
+    if not isinstance(manifest_data, dict):
+        manifest_data = {}
+        blockers.append("Codex plugin manifest JSON must be an object")
+    if not isinstance(launcher_data, dict):
+        launcher_data = {}
+        blockers.append("relative Codex MCP launcher JSON must be an object")
     skills_reason = _unsafe_tree_reason(skills_root)
     if skills_reason is not None:
         blockers.append(f"Codex public skill surface is unsafe: {skills_reason}")
@@ -1564,18 +1570,25 @@ def validate_activation_readiness(repo_root: Path) -> dict[str, Any]:
     if public_skills != ["resume", "run", "status"]:
         blockers.append("Codex public skill surface must be exactly run/resume/status")
     for name in ("run", "resume", "status"):
+        skill_manifest = skills_root / name / "SKILL.md"
         reason = _independent_regular_file_reason(
-            skills_root / name / "SKILL.md",
+            skill_manifest,
             label=f"public Codex skill {name}",
         )
         if reason is not None:
+            if not skill_manifest.exists() and not skill_manifest.is_symlink():
+                blockers.append(f"missing public Codex skill: {name}")
             blockers.append(reason)
     if (
         manifest_data.get("skills") != "./codex/skills/"
         or manifest_data.get("mcpServers") != "./.codex-mcp.json"
     ):
         blockers.append("Codex manifest does not use relative public surfaces")
-    server = (launcher_data.get("mcpServers") or {}).get("samvil-mcp")
+    mcp_servers = launcher_data.get("mcpServers")
+    if "mcpServers" in launcher_data and not isinstance(mcp_servers, dict):
+        mcp_servers = {}
+        blockers.append("Codex MCP launcher mcpServers must be an object")
+    server = (mcp_servers or {}).get("samvil-mcp")
     launcher_script = root / "scripts" / "start-codex-mcp.sh"
     launcher_script_reason = _independent_regular_file_reason(
         launcher_script,

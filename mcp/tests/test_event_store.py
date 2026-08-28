@@ -10,7 +10,11 @@ import pytest
 import pytest_asyncio
 import aiosqlite
 
-from samvil_mcp.event_store import EventStore, _migration_plan
+from samvil_mcp.event_store import (
+    RUNTIME_REQUIREMENTS_BACKFILL,
+    EventStore,
+    _migration_plan,
+)
 from samvil_mcp.models import EventType, Stage
 
 
@@ -36,6 +40,186 @@ async def test_create_and_get_session(store: EventStore):
     fetched = await store.get_session(session.id)
     assert fetched is not None
     assert fetched.project_name == "test-app"
+
+
+@pytest.mark.asyncio
+async def test_runtime_verification_requirement_is_idempotent_and_stage_monotonic(
+    store: EventStore,
+) -> None:
+    session = await store.create_session("runtime-policy", "minimal")
+    claim = await store.create_stage_claim(session.id, "samvil-qa", 7)
+    await store.save_runtime_receipt(
+        session.id,
+        "samvil-qa",
+        {"kind": "runtime_receipt", "status": "passed"},
+    )
+
+    await store.mark_runtime_verification_required(
+        session.id,
+        "samvil-qa",
+        claim["claim_id"],
+        7,
+    )
+    await store.mark_runtime_verification_required(
+        session.id,
+        "samvil-qa",
+        claim["claim_id"],
+        7,
+    )
+
+    assert await store.has_runtime_verification_requirement(
+        session.id, "samvil-qa"
+    ) is True
+    assert await store.get_runtime_receipt(session.id, "samvil-qa") is None
+    assert await store.mark_stage_claim_completed(
+        claim["claim_id"], "claim-replacement"
+    ) is True
+    replacement = await store.create_stage_claim(
+        session.id, "samvil-qa", 8, claim_id="claim-next"
+    )
+    assert replacement["claim_id"] == "claim-next"
+    await store.mark_runtime_verification_required(
+        session.id,
+        "samvil-qa",
+        replacement["claim_id"],
+        8,
+    )
+    assert await store.has_runtime_verification_requirement(
+        session.id, "samvil-qa"
+    ) is True
+    assert await store.has_runtime_verification_requirement(
+        session.id, "samvil-build"
+    ) is False
+    with sqlite3.connect(store.db_path) as db:
+        rows = db.execute(
+            """SELECT claim_id, marker_revision, created_at
+            FROM runtime_verification_requirements"""
+        ).fetchall()
+    identities = {(row[0], row[1]) for row in rows}
+    assert identities == {
+        ("receipt-backfill-unverified", -1),
+        (claim["claim_id"], 7),
+        (replacement["claim_id"], 8),
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtime_requirement_rejects_a_non_current_claim_without_invalidation(
+    store: EventStore,
+) -> None:
+    session = await store.create_session("runtime-policy-invalid", "minimal")
+    receipt = await store.save_runtime_receipt(
+        session.id,
+        "samvil-build",
+        {"kind": "runtime_receipt", "status": "passed"},
+    )
+
+    with pytest.raises(ValueError, match="active stage claim"):
+        await store.mark_runtime_verification_required(
+            session.id,
+            "samvil-build",
+            "missing-claim",
+            0,
+        )
+
+    assert await store.get_runtime_receipt(session.id, "samvil-build") == receipt
+
+
+@pytest.mark.asyncio
+async def test_initialize_seals_existing_native_runtime_receipts(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "runtime-policy-upgrade.db"
+    store = EventStore(str(db_path))
+    await store.initialize()
+    session = await store.create_session("upgraded-runtime", "minimal")
+    await store.save_runtime_receipt(
+        session.id,
+        "samvil-qa",
+        {
+            "kind": "runtime_receipt",
+            "status": "passed",
+            "claim_id": "claim-before-upgrade",
+            "marker_revision": 4,
+        },
+    )
+    with sqlite3.connect(db_path) as db:
+        db.execute("DROP TABLE runtime_verification_requirements")
+        db.execute(
+            "DELETE FROM event_store_migrations WHERE migration_key = ?",
+            (RUNTIME_REQUIREMENTS_BACKFILL,),
+        )
+
+    await EventStore(str(db_path)).initialize()
+
+    assert await store.has_runtime_verification_requirement(
+        session.id, "samvil-qa"
+    ) is True
+
+
+@pytest.mark.asyncio
+async def test_initialize_seals_malformed_runtime_receipt_as_native_history(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "malformed-runtime-upgrade.db"
+    store = EventStore(str(db_path))
+    await store.initialize()
+    session = await store.create_session("malformed-runtime", "minimal")
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            """INSERT INTO runtime_receipts
+            (session_id, stage, receipt_json, created_at, updated_at)
+            VALUES (?, 'samvil-qa', '{broken', '2026-08-28', '2026-08-28')""",
+            (session.id,),
+        )
+        db.execute(
+            "DELETE FROM event_store_migrations WHERE migration_key = ?",
+            (RUNTIME_REQUIREMENTS_BACKFILL,),
+        )
+
+    await EventStore(str(db_path)).initialize()
+
+    assert await store.has_runtime_verification_requirement(
+        session.id, "samvil-qa"
+    ) is True
+    with pytest.raises(json.JSONDecodeError):
+        await store.get_runtime_receipt(session.id, "samvil-qa")
+    with sqlite3.connect(db_path) as db:
+        applied = db.execute(
+            """SELECT COUNT(*) FROM event_store_migrations
+            WHERE migration_key = ?""",
+            (RUNTIME_REQUIREMENTS_BACKFILL,),
+        ).fetchone()[0]
+    assert applied == 1
+
+
+@pytest.mark.asyncio
+async def test_initialize_does_not_reparse_receipts_after_backfill(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from samvil_mcp import event_store as event_store_module
+
+    db_path = tmp_path / "runtime-policy-backfill-once.db"
+    store = EventStore(str(db_path))
+    await store.initialize()
+    session = await store.create_session("backfill-once", "minimal")
+    await store.save_runtime_receipt(
+        session.id,
+        "samvil-build",
+        {"kind": "runtime_receipt", "status": "passed"},
+    )
+
+    def unexpected_reparse(_receipt):
+        raise AssertionError("completed runtime receipt backfill must not rerun")
+
+    monkeypatch.setattr(
+        event_store_module,
+        "_runtime_requirement_identity",
+        unexpected_reparse,
+    )
+
+    await EventStore(str(db_path)).initialize()
 
 
 @pytest.mark.asyncio

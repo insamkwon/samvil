@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import hmac
 import json
 import os
 import re
 import secrets
+import stat
 import uuid
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,15 @@ from .chain_markers import (
 )
 from .event_store import EventStore
 from .event_sanitizer import sanitize_event_data
+from .gate_snapshot import (
+    GateInputBundle,
+    capture_gate_input_bundle,
+    json_projection_from_bundle,
+    materialized_gate_input_bundle,
+    read_json_projection,
+    snapshot_sha256,
+)
+from .gates import load_config as load_gate_config
 from .claim_ledger import ClaimLedger
 from .models import EventType, Stage
 from .runtime_layout import (
@@ -27,6 +38,7 @@ from .runtime_layout import (
     discover_repository_root,
     safe_child_directory,
 )
+from .runtime_policy import gate_requires_runtime_receipt
 from .ssot_io import atomic_write_text
 from .stage_catalog import (
     get_stage_spec,
@@ -35,7 +47,7 @@ from .stage_catalog import (
     state_stage_for,
     validate_stage_transition,
 )
-from .transition_lock import stage_transition_lock
+from .transition_lock import stage_transition_lock, verification_execution_lock
 
 
 _SAFE_TRANSITION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -428,33 +440,132 @@ class TransitionController:
             raise TransitionError(f"invalid JSON object: {path}")
         return parsed
 
+    @staticmethod
+    def _open_key_directory(path: Path) -> int:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        return os.open(str(path), flags)
+
+    @staticmethod
+    def _read_key_at(directory_descriptor: int, name: str) -> bytes | None:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            entry_metadata = os.stat(
+                name,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+            if not stat.S_ISREG(entry_metadata.st_mode):
+                raise TransitionError(
+                    "transition journal authentication key is unavailable"
+                )
+            descriptor = os.open(name, flags, dir_fd=directory_descriptor)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise TransitionError(
+                "transition journal authentication key is unavailable"
+            ) from exc
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or (metadata.st_dev, metadata.st_ino)
+                != (entry_metadata.st_dev, entry_metadata.st_ino)
+            ):
+                raise TransitionError("transition journal authentication key is unavailable")
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(descriptor, 65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks)
+        except OSError as exc:
+            raise TransitionError(
+                "transition journal authentication key is unavailable"
+            ) from exc
+        finally:
+            os.close(descriptor)
+
     def _journal_auth_key(self) -> bytes:
         """Return one host-private key that survives loss of the SQLite file."""
         db_path = Path(self.store.db_path).expanduser().resolve(strict=False)
         key_path = db_path.parent / ".transition-journal.key"
         key_path.parent.mkdir(parents=True, exist_ok=True)
         try:
+            directory_descriptor = self._open_key_directory(key_path.parent)
+        except OSError as exc:
+            raise TransitionError(
+                "transition journal authentication key is unavailable"
+            ) from exc
+        try:
+            existing_key = self._read_key_at(directory_descriptor, key_path.name)
+            if existing_key is not None:
+                if len(existing_key) < 32:
+                    raise TransitionError("transition journal authentication key is invalid")
+                return existing_key
+
+            key = secrets.token_bytes(32)
+            temporary_name = f".{key_path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}"
             descriptor = os.open(
-                key_path,
+                temporary_name,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL,
                 0o600,
+                dir_fd=directory_descriptor,
             )
-        except FileExistsError:
-            descriptor = None
-        if descriptor is not None:
             try:
-                key = secrets.token_bytes(32)
-                os.write(descriptor, key)
+                written = 0
+                while written < len(key):
+                    count = os.write(descriptor, key[written:])
+                    if count <= 0:
+                        raise OSError(
+                            "transition journal authentication key write made no progress"
+                        )
+                    written += count
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-        try:
-            key = key_path.read_bytes()
-        except OSError as exc:
-            raise TransitionError("transition journal authentication key is unavailable") from exc
-        if len(key) < 32:
-            raise TransitionError("transition journal authentication key is invalid")
-        return key
+
+            try:
+                os.link(
+                    temporary_name,
+                    key_path.name,
+                    src_dir_fd=directory_descriptor,
+                    dst_dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                winner = self._read_key_at(directory_descriptor, key_path.name)
+                if winner is None:
+                    raise TransitionError(
+                        "transition journal authentication key is unavailable"
+                    )
+                if len(winner) < 32:
+                    raise TransitionError(
+                        "transition journal authentication key is invalid"
+                    )
+                return winner
+
+            try:
+                os.fsync(directory_descriptor)
+            except OSError as exc:
+                if exc.errno not in {
+                    errno.EINVAL,
+                    errno.ENOTSUP,
+                    getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
+                }:
+                    raise
+            return key
+        finally:
+            try:
+                if "temporary_name" in locals():
+                    try:
+                        os.unlink(temporary_name, dir_fd=directory_descriptor)
+                    except FileNotFoundError:
+                        pass
+            finally:
+                os.close(directory_descriptor)
 
     def _journal_authentication(self, journal: dict[str, Any]) -> str:
         payload = {key: value for key, value in journal.items() if key != "journal_authentication"}
@@ -523,6 +634,179 @@ class TransitionController:
                 ensure_ascii=False,
             ).encode("utf-8")
         ).hexdigest()
+
+    @classmethod
+    def _gate_config_hash(
+        cls,
+        root: Path,
+        gate_name: str = "build_to_qa",
+        gate_inputs: GateInputBundle | None = None,
+    ) -> str:
+        inputs = gate_inputs or capture_gate_input_bundle(root, gate_name)
+        with materialized_gate_input_bundle(inputs) as captured_root:
+            candidates = (
+                captured_root / ".samvil" / "gate_config.yaml",
+                captured_root / "gate_config.yaml",
+            )
+            config_path = next((path for path in candidates if path.exists()), None)
+            if config_path is None:
+                packaged = (
+                    Path(__file__).resolve().parents[2]
+                    / "references"
+                    / "gate_config.yaml"
+                )
+                config_path = packaged if packaged.exists() else None
+            return cls._json_hash(load_gate_config(config_path))
+
+    async def _current_transition_receipts(
+        self,
+        root: Path,
+        run_id: str,
+        claim_id: str,
+        from_stage: str,
+        to_stage: str,
+        expected_revision: int,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Validate the current gate/runtime bundle while holding the stage lock."""
+        gate_name = {
+            ("samvil-build", "samvil-qa"): "build_to_qa",
+            ("samvil-qa", "samvil-evolve"): "qa_to_evolve",
+            ("samvil-qa", "samvil-retro"): "any_to_retro",
+            ("samvil-qa", "samvil-deploy"): "qa_to_deploy",
+        }.get((from_stage, to_stage), "")
+        runtime_receipt = await self.store.get_runtime_receipt(run_id, from_stage)
+        if not gate_name:
+            return runtime_receipt, None
+
+        gate_receipt = await self.store.get_gate_receipt(run_id, gate_name)
+        if gate_receipt is None:
+            raise TransitionError(f"trusted gate receipt for {gate_name} is required")
+        projected_gate_exists, projected_gate = await asyncio.to_thread(
+            read_json_projection,
+            root,
+            f".samvil/gate-receipts/{gate_name}.json",
+        )
+        gate_inputs = await asyncio.to_thread(
+            capture_gate_input_bundle,
+            root,
+            gate_name,
+        )
+        current_gate_input_snapshot = gate_inputs.snapshot
+        persisted_gate_input_snapshot = gate_receipt.get("gate_input_snapshot")
+        gate_config_hash = await asyncio.to_thread(
+            self._gate_config_hash,
+            root,
+            gate_name,
+            gate_inputs,
+        )
+        expected_authority = (
+            ".samvil/build.log"
+            if gate_name == "build_to_qa"
+            else ".samvil/qa-results.json"
+        )
+        authority_hash = snapshot_sha256(
+            current_gate_input_snapshot,
+            expected_authority,
+        )
+        if (
+            not projected_gate_exists
+            or not projected_gate
+            or self._json_hash(projected_gate) != self._json_hash(gate_receipt)
+            or gate_receipt.get("kind") != "gate_receipt"
+            or gate_receipt.get("gate") != gate_name
+            or gate_receipt.get("session_id") != run_id
+            or gate_receipt.get("verdict") != "pass"
+            or gate_receipt.get("trusted_by") != "samvil_mcp_gate_check"
+            or gate_receipt.get("claim_id") != claim_id
+            or gate_receipt.get("marker_revision") != expected_revision
+            or not isinstance(persisted_gate_input_snapshot, dict)
+            or gate_receipt.get("gate_input_snapshot_sha256")
+            != self._json_hash(persisted_gate_input_snapshot)
+            or persisted_gate_input_snapshot != current_gate_input_snapshot
+            or gate_receipt.get("gate_config_sha256") != gate_config_hash
+            or gate_receipt.get("authority_path") != expected_authority
+            or not authority_hash
+            or gate_receipt.get("authority_sha256") != authority_hash
+            or (
+                gate_name != "build_to_qa"
+                and gate_receipt.get("qa_results_sha256") != authority_hash
+            )
+        ):
+            raise TransitionError(
+                f"trusted gate receipt for {gate_name} or current runtime receipt "
+                "is not current"
+            )
+
+        runtime_required = gate_requires_runtime_receipt(gate_name)
+        runtime_name = from_stage.removeprefix("samvil-")
+        runtime_verification_started = (
+            await self.store.has_runtime_verification_requirement(
+                run_id, from_stage
+            )
+        )
+        projection_exists, projected_runtime = json_projection_from_bundle(
+            gate_inputs,
+            f".samvil/runtime-receipts/{runtime_name}.json",
+        )
+        if runtime_receipt is None:
+            if runtime_required or runtime_verification_started:
+                raise TransitionError("current runtime receipt must be passed")
+            if projection_exists:
+                raise TransitionError(
+                    "runtime receipt projection does not match trusted storage"
+                )
+            if any(
+                gate_receipt.get(key)
+                for key in (
+                    "runtime_receipt_sha256",
+                    "runtime_authority_path",
+                    "runtime_authority_sha256",
+                    "runtime_claim_id",
+                    "runtime_stage",
+                )
+            ):
+                raise TransitionError(
+                    "trusted gate receipt does not match current runtime receipt"
+                )
+            return None, gate_receipt
+
+        runtime_authority = f".samvil/{runtime_name}.log"
+        runtime_authority_hash = snapshot_sha256(
+            current_gate_input_snapshot,
+            runtime_authority,
+        )
+        runtime_hash = self._json_hash(runtime_receipt)
+        if (
+            not projected_runtime
+            or self._json_hash(projected_runtime) != runtime_hash
+            or runtime_receipt.get("kind") != "runtime_receipt"
+            or runtime_receipt.get("session_id") != run_id
+            or runtime_receipt.get("stage") != from_stage
+            or runtime_receipt.get("status") not in {"passed", "failed"}
+            or (
+                gate_name != "any_to_retro"
+                and (
+                    runtime_receipt.get("status") != "passed"
+                    or runtime_receipt.get("exit_code") != 0
+                )
+            )
+            or runtime_receipt.get("trusted_by") != "samvil_mcp_subprocess"
+            or runtime_receipt.get("claim_id") != claim_id
+            or runtime_receipt.get("marker_revision") != expected_revision
+            or runtime_receipt.get("authority_path") != runtime_authority
+            or not runtime_authority_hash
+            or runtime_receipt.get("authority_sha256") != runtime_authority_hash
+            or gate_receipt.get("runtime_receipt_sha256") != runtime_hash
+            or gate_receipt.get("runtime_authority_path") != runtime_authority
+            or gate_receipt.get("runtime_authority_sha256")
+            != runtime_authority_hash
+            or gate_receipt.get("runtime_claim_id") != claim_id
+            or gate_receipt.get("runtime_stage") != from_stage
+        ):
+            raise TransitionError(
+                "trusted gate receipt does not match current runtime receipt"
+            )
+        return runtime_receipt, gate_receipt
 
     @staticmethod
     def _event_evidence(root: Path, event_id: str) -> str:
@@ -1010,19 +1294,29 @@ class TransitionController:
         """Materialize one trusted transition in a fixed, recoverable order."""
         resolved_transition_id = transition_id or f"transition-{uuid.uuid4().hex}"
         self._validate_transition_id(resolved_transition_id)
-        async with stage_transition_lock(self.store, run_id):
-            return await self._commit_stage_transition_locked(
-                project_root,
+        async def commit_under_stage_lock() -> dict[str, Any]:
+            async with stage_transition_lock(self.store, run_id):
+                return await self._commit_stage_transition_locked(
+                    project_root,
+                    run_id,
+                    claim_id,
+                    from_stage,
+                    to_stage,
+                    expected_revision,
+                    event_type=event_type,
+                    data=data,
+                    transition_id=resolved_transition_id,
+                    host_name=host_name,
+                )
+
+        if from_stage in {"samvil-build", "samvil-qa"}:
+            async with verification_execution_lock(
+                self.store,
                 run_id,
-                claim_id,
                 from_stage,
-                to_stage,
-                expected_revision,
-                event_type=event_type,
-                data=data,
-                transition_id=resolved_transition_id,
-                host_name=host_name,
-            )
+            ):
+                return await commit_under_stage_lock()
+        return await commit_under_stage_lock()
 
     async def _commit_stage_transition_locked(
         self,
@@ -1154,6 +1448,17 @@ class TransitionController:
                     "marker_revision": expected_revision,
                 }
 
+        runtime_receipt_snapshot, gate_receipt_snapshot = (
+            await self._current_transition_receipts(
+                root,
+                run_id,
+                claim_id,
+                from_stage,
+                to_stage,
+                expected_revision,
+            )
+        )
+
         event_payload = sanitize_event_data(dict(data or {}))
         event_payload.update(
             {
@@ -1207,21 +1512,6 @@ class TransitionController:
             "created_at": session.created_at,
         }
         claim_snapshot = dict(claim)
-        runtime_stage = from_stage
-        runtime_receipt_snapshot = await self.store.get_runtime_receipt(
-            run_id, runtime_stage
-        )
-        gate_name = {
-            ("samvil-build", "samvil-qa"): "build_to_qa",
-            ("samvil-qa", "samvil-evolve"): "qa_to_evolve",
-            ("samvil-qa", "samvil-retro"): "any_to_retro",
-            ("samvil-qa", "samvil-deploy"): "qa_to_deploy",
-        }.get((from_stage, to_stage), "")
-        gate_receipt_snapshot = (
-            await self.store.get_gate_receipt(run_id, gate_name)
-            if gate_name
-            else None
-        )
         journal = {
             "transition_id": transition_id,
             "run_id": run_id,

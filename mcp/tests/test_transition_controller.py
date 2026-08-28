@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import errno
+import hashlib
 import os
+import stat
 import tempfile
 import json
+import secrets
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
 
 import pytest
 import pytest_asyncio
 
 from samvil_mcp.event_store import EventStore
+from samvil_mcp.gate_snapshot import capture_gate_input_snapshot
 from samvil_mcp.models import Stage
 from samvil_mcp.transition_controller import TransitionController, TransitionError
 
@@ -21,6 +28,257 @@ async def controller(tmp_path: Path):
     store = EventStore(str(tmp_path / "events.db"))
     await store.initialize()
     return TransitionController(store)
+
+
+def test_journal_auth_key_does_not_publish_path_when_generation_fails(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_token_bytes = secrets.token_bytes
+
+    def fail_generation(_size: int) -> bytes:
+        raise OSError("injected random generation failure")
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.secrets.token_bytes", fail_generation
+    )
+
+    with pytest.raises(OSError, match="random generation failure"):
+        controller._journal_auth_key()
+
+    assert not key_path.exists()
+    assert not list(tmp_path.glob("..transition-journal.key.tmp-*"))
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.secrets.token_bytes", original_token_bytes
+    )
+    assert len(controller._journal_auth_key()) == 32
+    assert key_path.read_bytes() == controller._journal_auth_key()
+
+
+def test_journal_auth_key_completes_short_writes_before_publishing(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_write = os.write
+
+    def partial_write(descriptor: int, data: bytes) -> int:
+        return original_write(descriptor, data[: min(8, len(data))])
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.write", partial_write
+    )
+    key = controller._journal_auth_key()
+
+    assert key_path.read_bytes() == key
+    assert len(key) == 32
+
+    monkeypatch.setattr("samvil_mcp.transition_controller.os.write", original_write)
+    assert len(controller._journal_auth_key()) == 32
+    assert key_path.read_bytes() == controller._journal_auth_key()
+
+
+def test_journal_auth_key_removes_private_zero_write_failure_before_retry(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_write = os.write
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.write", lambda _fd, _data: 0
+    )
+    with pytest.raises(OSError, match="write"):
+        controller._journal_auth_key()
+
+    assert not key_path.exists()
+    assert not list(tmp_path.glob("..transition-journal.key.tmp-*"))
+
+    monkeypatch.setattr("samvil_mcp.transition_controller.os.write", original_write)
+    assert len(controller._journal_auth_key()) == 32
+    assert key_path.read_bytes() == controller._journal_auth_key()
+
+
+def test_journal_auth_key_rejects_existing_short_key_without_rotating(
+    controller, tmp_path
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    key_path.write_bytes(b"x" * 31)
+
+    with pytest.raises(TransitionError, match="key is invalid"):
+        controller._journal_auth_key()
+
+    assert key_path.read_bytes() == b"x" * 31
+
+
+def test_journal_auth_key_preserves_existing_complete_key(controller, tmp_path) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    existing_key = b"x" * 48
+    key_path.write_bytes(existing_key)
+    os.chmod(key_path, 0o600)
+
+    assert controller._journal_auth_key() == existing_key
+    assert key_path.read_bytes() == existing_key
+    assert key_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_journal_auth_key_rejects_final_symlink(controller, tmp_path) -> None:
+    target = tmp_path / "attacker-key"
+    target.write_bytes(b"attacker-controlled-journal-key-material" * 2)
+    key_path = tmp_path / ".transition-journal.key"
+    key_path.symlink_to(target)
+
+    with pytest.raises(TransitionError, match="key is unavailable"):
+        controller._journal_auth_key()
+
+    assert key_path.is_symlink()
+    assert target.read_bytes().startswith(b"attacker-controlled")
+
+
+def test_journal_auth_key_propagates_parent_fsync_eio_after_publication(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_fsync = os.fsync
+    parent_fsyncs: list[int] = []
+
+    def fail_parent_fsync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            parent_fsyncs.append(descriptor)
+            raise OSError(errno.EIO, "injected directory fsync failure")
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.fsync", fail_parent_fsync
+    )
+    with pytest.raises(OSError, match="injected directory fsync failure"):
+        controller._journal_auth_key()
+
+    assert parent_fsyncs
+    assert key_path.read_bytes()
+    assert len(key_path.read_bytes()) == 32
+    assert not list(tmp_path.glob("..transition-journal.key.tmp-*"))
+
+    monkeypatch.setattr("samvil_mcp.transition_controller.os.fsync", original_fsync)
+    assert controller._journal_auth_key() == key_path.read_bytes()
+
+
+def test_journal_auth_key_new_file_has_restrictive_mode_and_fsyncs_parent(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_fsync = os.fsync
+    parent_fsyncs: list[int] = []
+
+    def record_fsync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            parent_fsyncs.append(descriptor)
+        original_fsync(descriptor)
+
+    monkeypatch.setattr("samvil_mcp.transition_controller.os.fsync", record_fsync)
+    assert len(controller._journal_auth_key()) == 32
+
+    assert key_path.stat().st_mode & 0o777 == 0o600
+    assert parent_fsyncs
+
+
+def test_journal_auth_key_surfaces_private_temp_cleanup_failure(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_unlink = os.unlink
+
+    def fail_temp_unlink(path, *args, **kwargs) -> None:
+        if ".transition-journal.key.tmp-" in str(path):
+            raise OSError("injected private temp cleanup failure")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.unlink", fail_temp_unlink
+    )
+    with pytest.raises(OSError, match="private temp cleanup failure"):
+        controller._journal_auth_key()
+
+    assert len(key_path.read_bytes()) == 32
+    temp_paths = list(tmp_path.glob("..transition-journal.key.tmp-*"))
+    assert len(temp_paths) == 1
+    original_unlink(temp_paths[0])
+
+
+def test_journal_auth_key_cleans_private_file_when_publication_fails(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.link",
+        lambda _source, _target, **_kwargs: (_ for _ in ()).throw(
+            OSError("injected publication failure")
+        ),
+    )
+    with pytest.raises(OSError, match="publication failure"):
+        controller._journal_auth_key()
+
+    assert not key_path.exists()
+    assert not list(tmp_path.glob("..transition-journal.key.tmp-*"))
+
+
+def test_journal_auth_key_concurrent_first_creation_returns_one_complete_key(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_link = os.link
+    contender_count = 8
+    all_contenders_ready = threading.Event()
+    release_link = threading.Event()
+    link_lock = threading.Lock()
+    ready_count = 0
+    link_successes = 0
+    link_losers = 0
+    relative_link_descriptors: list[tuple[int | None, int | None]] = []
+
+    def gate_link(*args, **kwargs):
+        nonlocal ready_count, link_successes, link_losers
+        with link_lock:
+            ready_count += 1
+            if ready_count == contender_count:
+                all_contenders_ready.set()
+        assert release_link.wait(timeout=2)
+        relative_link_descriptors.append(
+            (kwargs.get("src_dir_fd"), kwargs.get("dst_dir_fd"))
+        )
+        try:
+            result = original_link(*args, **kwargs)
+        except FileExistsError:
+            with link_lock:
+                link_losers += 1
+            raise
+        with link_lock:
+            link_successes += 1
+        return result
+
+    monkeypatch.setattr("samvil_mcp.transition_controller.os.link", gate_link)
+
+    def create_key() -> bytes:
+        # Independent controllers emulate separate hosts sharing one DB directory.
+        return TransitionController(EventStore(str(tmp_path / "events.db")))._journal_auth_key()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        callers = [pool.submit(create_key) for _ in range(contender_count)]
+        assert all_contenders_ready.wait(timeout=2)
+        release_link.set()
+        keys = [caller.result(timeout=2) for caller in callers]
+
+    assert ready_count == contender_count
+    assert link_successes == 1
+    assert link_losers == contender_count - 1
+    assert all(
+        source is not None and source == destination
+        for source, destination in relative_link_descriptors
+    )
+    assert len(set(keys)) == 1
+    assert len(keys[0]) == 32
+    assert key_path.read_bytes() == keys[0]
+    assert len(key_path.read_bytes()) == 32
 
 
 @pytest.mark.asyncio
@@ -588,15 +846,56 @@ async def test_db_loss_recovery_restores_signed_build_receipts(
         encoding="utf-8",
     )
     claim = await controller.begin_stage(str(project), session.id, "samvil-build", 0)
+    samvil = project / ".samvil"
+    (samvil / "runtime-receipts").mkdir(parents=True, exist_ok=True)
+    (samvil / "gate-receipts").mkdir(parents=True, exist_ok=True)
+    build_log = samvil / "build.log"
+    build_log.write_text("compiled\nSAMVIL_EXIT:0\n", encoding="utf-8")
+    build_hash = hashlib.sha256(build_log.read_bytes()).hexdigest()
     runtime_receipt = await store.save_runtime_receipt(
         session.id,
         "samvil-build",
-        {"claim_id": claim["claim_id"], "verdict": "pass"},
+        {
+            "kind": "runtime_receipt",
+            "status": "passed",
+            "trusted_by": "samvil_mcp_subprocess",
+            "exit_code": 0,
+            "authority_path": ".samvil/build.log",
+            "authority_sha256": build_hash,
+            "marker_revision": 0,
+            "claim_id": claim["claim_id"],
+        },
     )
+    (samvil / "runtime-receipts" / "build.json").write_text(
+        json.dumps(runtime_receipt), encoding="utf-8"
+    )
+    runtime_hash = controller._json_hash(runtime_receipt)
+    gate_input_snapshot = capture_gate_input_snapshot(project, "build_to_qa")
     gate_receipt = await store.save_gate_receipt(
         session.id,
         "build_to_qa",
-        {"claim_id": claim["claim_id"], "marker_revision": 0, "verdict": "pass"},
+        {
+            "kind": "gate_receipt",
+            "verdict": "pass",
+            "trusted_by": "samvil_mcp_gate_check",
+            "authority_path": ".samvil/build.log",
+            "authority_sha256": build_hash,
+            "claim_id": claim["claim_id"],
+            "marker_revision": 0,
+            "gate_input_snapshot": gate_input_snapshot,
+            "gate_input_snapshot_sha256": controller._json_hash(
+                gate_input_snapshot
+            ),
+            "gate_config_sha256": controller._gate_config_hash(project),
+            "runtime_receipt_sha256": runtime_hash,
+            "runtime_authority_path": ".samvil/build.log",
+            "runtime_authority_sha256": build_hash,
+            "runtime_claim_id": claim["claim_id"],
+            "runtime_stage": "samvil-build",
+        },
+    )
+    (samvil / "gate-receipts" / "build_to_qa.json").write_text(
+        json.dumps(gate_receipt), encoding="utf-8"
     )
     monkeypatch.setattr(
         server,
@@ -1106,10 +1405,12 @@ async def test_qa_commit_without_evidence_stays_blocked(controller, tmp_path):
         '{"synthesis":{"verdict":"PASS"}}\n',
         encoding="utf-8",
     )
-    committed = await controller.commit_stage_transition(
-        str(project), session.id, claim["claim_id"], "samvil-qa", "samvil-deploy", 0,
-        transition_id=transition_id,
-    )
+    with pytest.raises(TransitionError, match="trusted gate receipt"):
+        await controller.commit_stage_transition(
+            str(project), session.id, claim["claim_id"],
+            "samvil-qa", "samvil-deploy", 0,
+            transition_id=transition_id,
+        )
 
-    assert committed["status"] == "committed"
-    assert committed["transition_id"] == transition_id
+    assert await controller.store.get_events(session.id) == []
+    assert not (project / ".samvil" / "transition-journal.json").exists()
