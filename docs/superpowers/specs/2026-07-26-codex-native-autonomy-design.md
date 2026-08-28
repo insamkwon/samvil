@@ -288,11 +288,14 @@ Codex hook이 설치되지 않아도 stage correctness가 달라지면 안 된�
 `~/.codex/skills/samvil*`에 기존 stage copy가 남아 있을 수 있다.
 
 - repo canonical copy와 byte-for-byte/hash 일치: SAMVIL-generated legacy candidate
+- 이전 설치의 canonical SAMVIL 파일 링크 트리도 전체 lexical 구조와 각 대상이
+  canonical 파일에 정확히 대응하면 SAMVIL-generated legacy candidate
 - 내용이 다름: user-modified candidate
 
 기본 설치는 어느 쪽도 삭제하지 않는다. exact legacy candidate는 reversible
-`--migrate` 경로에서만 timestamped backup으로 이동한다. user-modified candidate가
-plugin skill과 충돌하면 path와 hash를 보고하고 설치를 차단한다.
+`--migrate` 경로에서만 timestamped backup으로 이동한다. 외부·혼합 링크와
+user-modified candidate가 plugin skill과 충돌하면 path와 hash를 보고하고 설치를
+차단한다.
 
 ---
 
@@ -379,6 +382,9 @@ backup과 journal을 보존한 `recovery-required` 상태로 중단한다.
 plugin-owned MCP와 기존 `[mcp_servers.samvil-mcp]`가 동시에 등록되지 않게 한다.
 기존 block이 installer가 생성한 known shape와 일치할 때만 reversible migration
 대상으로 삼는다. 사용자 수정 block은 자동 편집하지 않는다.
+Codex가 parent block 아래에 정규화한 도구별 승인 table이 있으면 parent 제거와
+동시에 `[plugins."samvil@samvil-codex".tools.*]`로 이동하며 값은 보존한다. orphan
+된 도구 table만 남은 구성은 유효한 server transport가 아니므로 blocker다.
 
 ---
 

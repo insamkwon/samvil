@@ -1,8 +1,8 @@
-# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.33.0`
+# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.33.1`
 
 > **코딩 몰라도 괜찮아요. AI가 대신 만들어드려요.**
 
-[![버전](https://img.shields.io/badge/버전-v4.33.0-blue)](CHANGELOG.md)
+[![버전](https://img.shields.io/badge/버전-v4.33.1-blue)](CHANGELOG.md)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-네이티브-green)](https://claude.ai/code)
 [![Codex CLI](https://img.shields.io/badge/Codex_CLI-네이티브_후보-orange)](https://github.com/openai/codex)
 [![Gemini CLI](https://img.shields.io/badge/Gemini_CLI-실험적_stub-lightgrey)](https://github.com/google-gemini/gemini-cli)
@@ -12,7 +12,7 @@
 
 ## 이게 뭐예요?
 
-SAMVIL은 Claude Code와 Codex를 위한 AI 앱 개발 도우미예요. v4.33.0은 Codex
+SAMVIL은 Claude Code와 Codex를 위한 AI 앱 개발 도우미예요. v4.33.1은 Codex
 플러그인, `samvil:run`/`resume`/`status`, 그리고 재시도 가능한 단계 전이
 컨트롤러를 제공합니다. 다만 실제 Codex CLI 전체 시나리오는 로컬 OAuth 재인증이
 필요해 아직 PASS가 아니며, Gemini CLI 어댑터는 실험적 stub 단계입니다.
@@ -115,6 +115,14 @@ marketplace/plugin만 등록합니다. 전역 `AGENTS.md`를 덮어쓰거나 절
 있는 추측성 복구 대신 백업과 복구 저널을 보존하고 안전하게 중단합니다.
 `git pull`만으로 기존 설치가 바뀌지는 않습니다. 위 명령은 명시된 단일 `CODEX_HOME`
 프로필만 점검·전환하며, 다른 프로필을 자동으로 순회하지 않습니다.
+
+이전 설치가 canonical SAMVIL 저장소의 파일을 가리키는 심볼릭 링크 형태였더라도
+링크의 전체 구조와 대상이 정확히 일치하면 생성된 legacy 항목으로 판정해 백업으로
+옮길 수 있습니다. 외부·혼합·사용자 수정 링크나 개인 스킬 링크는 그대로 보존하고
+마이그레이션을 차단합니다.
+기존 Codex가 직접 MCP 서버 아래에 저장한 도구별 승인 설정은 네이티브 플러그인
+namespace로 같은 값 그대로 옮겨 설정 유실이나 잘못된 `mcp_servers` 전송 구성을
+남기지 않습니다.
 
 **3단계 — 호스트 재시작 후 시작!**
 
@@ -401,6 +409,7 @@ bash scripts/pre-commit-check.sh   # 모두 PASS 떠야 정상
 | 버전 | 주요 변경 |
 |---|---|
 | **v4.33.0** | **Codex native autonomy 후보** — run/resume/status, durable transition controller, 안전한 native installer, Desktop idempotency 증거. |
+| **v4.33.1** | 기존 Codex 설치의 심볼릭 링크 스킬 트리와 정규화된 MCP 도구 승인을 보존하며 네이티브 플러그인으로 안전하게 이전. |
 | **v4.9.0** | **딥 인터뷰 엔진** — 10차원 모호함 채점 + tier별 최소 질문 수 (5/10/20/30/40). 수렴 전 무제한 질문. |
 | **v4.8.5** | README에 인터뷰 대화 스니펫·AI 팀 회의 스니펫·수치 비교표 추가. |
 | **v4.8.4** | Claude Code + Codex CLI 동등 지원 명시. README 시작하기 섹션 양분. |

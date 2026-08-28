@@ -897,6 +897,12 @@ def _native_registry_profile_contract(
         if not isinstance(raw_entry, dict):
             blockers.append(f"Codex plugin entry is not a table: {label}")
             continue
+        # During migration, legacy per-tool approval tables are rewritten into
+        # the native plugin namespace before the CLI registers the plugin.  A
+        # tools-only table is an intentional pending fragment, not a registry
+        # entry that can be judged enabled/disabled yet.
+        if label == "samvil@samvil-codex" and set(raw_entry) == {"tools"}:
+            continue
         contract.append((f"plugin:{label}", _canonical_entry_json(raw_entry)))
         if label == "samvil@samvil":
             if not legacy_marketplace_owned:
@@ -962,6 +968,79 @@ def _unsafe_tree_reason(root: Path) -> str | None:
     return None
 
 
+def _canonical_link_skill_tree_matches(path: Path, canonical: Path) -> bool:
+    """Recognize a legacy skill tree made only of exact canonical file links.
+
+    Older local setups sometimes represented the generated skill files as links
+    back into the checked-out SAMVIL repository.  Such a tree is safe to retire
+    only when its complete lexical shape matches the canonical tree and every
+    linked file points directly at its corresponding canonical file.  A link
+    to another location, an extra entry, or a canonical link is ambiguous.
+    """
+
+    legacy = _lexical_absolute(path)
+    source = _lexical_absolute(canonical)
+    if (
+        legacy.is_symlink()
+        or not legacy.is_dir()
+        or source.is_symlink()
+        or not source.is_dir()
+    ):
+        return False
+
+    def lexical_target(link: Path) -> Path:
+        try:
+            target = Path(os.readlink(link))
+        except OSError as exc:
+            raise ValueError(f"cannot read symbolic link: {link}") from exc
+        if not target.is_absolute():
+            target = link.parent / target
+        return Path(os.path.abspath(os.fspath(target)))
+
+    def matches(legacy_root: Path, source_root: Path) -> bool:
+        try:
+            legacy_entries = {
+                entry.name: entry for entry in legacy_root.iterdir()
+            }
+            source_entries = {
+                entry.name: entry for entry in source_root.iterdir()
+            }
+        except OSError:
+            return False
+        if set(legacy_entries) != set(source_entries):
+            return False
+        for name, source_entry in source_entries.items():
+            legacy_entry = legacy_entries[name]
+            try:
+                source_metadata = source_entry.lstat()
+                legacy_metadata = legacy_entry.lstat()
+            except OSError:
+                return False
+            if stat.S_ISDIR(source_metadata.st_mode):
+                if (
+                    stat.S_ISLNK(legacy_metadata.st_mode)
+                    or not stat.S_ISDIR(legacy_metadata.st_mode)
+                    or not matches(legacy_entry, source_entry)
+                ):
+                    return False
+                continue
+            if not stat.S_ISREG(source_metadata.st_mode):
+                return False
+            if source_metadata.st_nlink != 1:
+                return False
+            if not stat.S_ISLNK(legacy_metadata.st_mode):
+                return False
+            try:
+                target = lexical_target(legacy_entry)
+            except ValueError:
+                return False
+            if target != _lexical_absolute(source_entry):
+                return False
+        return True
+
+    return matches(legacy, source)
+
+
 def _personal_skill_inventory_reason(candidate: Path) -> str | None:
     """Return a blocker when a personal skill cannot be hashed/read safely."""
 
@@ -994,6 +1073,27 @@ def _legacy_skill_artifact(candidate: Path, canonical: Path) -> LegacyArtifact:
         return _artifact("legacy_skill_tree", path, unsafe_parent)
     unsafe_reason = _unsafe_tree_reason(path)
     if unsafe_reason is not None:
+        if (
+            "symbolic link" in unsafe_reason
+            and _canonical_link_skill_tree_matches(path, canonical)
+        ):
+            try:
+                content_hash = _skill_tree_hash(path)
+            except (OSError, UnicodeError) as exc:
+                return _artifact(
+                    "legacy_skill_link_tree",
+                    path,
+                    f"legacy skill link tree cannot be hashed safely: {exc}",
+                )
+            return LegacyArtifact(
+                "legacy_skill_link_tree",
+                path,
+                "generated_legacy",
+                content_hash,
+                content_hash,
+                False,
+                "legacy skill tree links exactly to canonical source",
+            )
         return _artifact("legacy_skill_tree", path, unsafe_reason)
     skill_manifest = path / "SKILL.md"
     if skill_manifest.is_symlink() or not skill_manifest.is_file():
@@ -1254,6 +1354,15 @@ def _direct_mcp_artifact(config_path: Path) -> LegacyArtifact | None:
     if not isinstance(servers, dict) or "samvil-mcp" not in servers:
         return None
     table = servers.get("samvil-mcp")
+    # An orphaned nested table is not a valid Codex server definition.  It can
+    # only be observed after an interrupted/manual edit, so leave it as an
+    # explicit blocker instead of silently accepting an invalid config.
+    if isinstance(table, dict) and set(table) == {"tools"}:
+        return _artifact(
+            "direct_mcp_table",
+            path,
+            "legacy MCP tool overrides have no server parent",
+        )
     normalized_expected = {
         "command": "{{SAMVIL_ROOT}}/mcp/.venv/bin/python",
         "args": ["-m", "samvil_mcp.server"],
@@ -1275,9 +1384,9 @@ def _direct_mcp_artifact(config_path: Path) -> LegacyArtifact | None:
     )
     table_has_generated_shape = (
         isinstance(table, dict)
-        and set(table) == {"command", "args", "env"}
+        and set(table).issubset({"command", "args", "env", "tools"})
         and table.get("args") == ["-m", "samvil_mcp.server"]
-        and table.get("env") == {}
+        and ("env" not in table or table.get("env") == {})
         and command_has_generated_shape
     )
     exact_table_text = False
@@ -1294,16 +1403,32 @@ def _direct_mcp_artifact(config_path: Path) -> LegacyArtifact | None:
                     end_index = index
                     break
             command_text = str(table["command"])
-            expected_lines = (
-                "[mcp_servers.samvil-mcp]",
-                f'command = "{command_text}"',
-                'args    = ["-m", "samvil_mcp.server"]',
-                "env     = {}",
-            )
             block_lines = lines[header_index:end_index]
             while block_lines and not block_lines[-1]:
                 block_lines.pop()
-            exact_table_text = tuple(block_lines) == expected_lines
+            assignments: dict[str, str] = {}
+            for line in block_lines[1:]:
+                stripped = line.strip()
+                if not stripped or "=" not in stripped:
+                    exact_table_text = False
+                    break
+                key, _, value = stripped.partition("=")
+                key = key.strip()
+                if key in assignments:
+                    exact_table_text = False
+                    break
+                assignments[key] = value.strip()
+            else:
+                expected_assignments = {
+                    "command": f'"{command_text}"',
+                    "args": '["-m", "samvil_mcp.server"]',
+                }
+                if "env" in table:
+                    expected_assignments["env"] = "{}"
+                exact_table_text = (
+                    set(assignments) == set(expected_assignments)
+                    and assignments == expected_assignments
+                )
     if not exact_table_text:
         return LegacyArtifact(
             "direct_mcp_table",
