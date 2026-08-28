@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
+import stat
 import tempfile
 import json
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
 
 import pytest
 import pytest_asyncio
@@ -116,6 +119,89 @@ def test_journal_auth_key_preserves_existing_complete_key(controller, tmp_path) 
     assert key_path.stat().st_mode & 0o777 == 0o600
 
 
+def test_journal_auth_key_rejects_final_symlink(controller, tmp_path) -> None:
+    target = tmp_path / "attacker-key"
+    target.write_bytes(b"attacker-controlled-journal-key-material" * 2)
+    key_path = tmp_path / ".transition-journal.key"
+    key_path.symlink_to(target)
+
+    with pytest.raises(TransitionError, match="key is unavailable"):
+        controller._journal_auth_key()
+
+    assert key_path.is_symlink()
+    assert target.read_bytes().startswith(b"attacker-controlled")
+
+
+def test_journal_auth_key_propagates_parent_fsync_eio_after_publication(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_fsync = os.fsync
+    parent_fsyncs: list[int] = []
+
+    def fail_parent_fsync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            parent_fsyncs.append(descriptor)
+            raise OSError(errno.EIO, "injected directory fsync failure")
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.fsync", fail_parent_fsync
+    )
+    with pytest.raises(OSError, match="injected directory fsync failure"):
+        controller._journal_auth_key()
+
+    assert parent_fsyncs
+    assert key_path.read_bytes()
+    assert len(key_path.read_bytes()) == 32
+    assert not list(tmp_path.glob("..transition-journal.key.tmp-*"))
+
+    monkeypatch.setattr("samvil_mcp.transition_controller.os.fsync", original_fsync)
+    assert controller._journal_auth_key() == key_path.read_bytes()
+
+
+def test_journal_auth_key_new_file_has_restrictive_mode_and_fsyncs_parent(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_fsync = os.fsync
+    parent_fsyncs: list[int] = []
+
+    def record_fsync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            parent_fsyncs.append(descriptor)
+        original_fsync(descriptor)
+
+    monkeypatch.setattr("samvil_mcp.transition_controller.os.fsync", record_fsync)
+    assert len(controller._journal_auth_key()) == 32
+
+    assert key_path.stat().st_mode & 0o777 == 0o600
+    assert parent_fsyncs
+
+
+def test_journal_auth_key_surfaces_private_temp_cleanup_failure(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_unlink = os.unlink
+
+    def fail_temp_unlink(path, *args, **kwargs) -> None:
+        if ".transition-journal.key.tmp-" in str(path):
+            raise OSError("injected private temp cleanup failure")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.unlink", fail_temp_unlink
+    )
+    with pytest.raises(OSError, match="private temp cleanup failure"):
+        controller._journal_auth_key()
+
+    assert len(key_path.read_bytes()) == 32
+    temp_paths = list(tmp_path.glob("..transition-journal.key.tmp-*"))
+    assert len(temp_paths) == 1
+    original_unlink(temp_paths[0])
+
+
 def test_journal_auth_key_cleans_private_file_when_publication_fails(
     controller, tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -123,7 +209,7 @@ def test_journal_auth_key_cleans_private_file_when_publication_fails(
 
     monkeypatch.setattr(
         "samvil_mcp.transition_controller.os.link",
-        lambda _source, _target: (_ for _ in ()).throw(
+        lambda _source, _target, **_kwargs: (_ for _ in ()).throw(
             OSError("injected publication failure")
         ),
     )
@@ -137,40 +223,56 @@ def test_journal_auth_key_cleans_private_file_when_publication_fails(
 def test_journal_auth_key_concurrent_first_creation_returns_one_complete_key(
     controller, tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import threading
-
     key_path = tmp_path / ".transition-journal.key"
-    original_write = os.write
-    first_write_started = threading.Event()
-    release_first_write = threading.Event()
-    first_writer: list[int] = []
-    first_writer_lock = threading.Lock()
+    original_link = os.link
+    contender_count = 8
+    all_contenders_ready = threading.Event()
+    release_link = threading.Event()
+    link_lock = threading.Lock()
+    ready_count = 0
+    link_successes = 0
+    link_losers = 0
+    relative_link_descriptors: list[tuple[int | None, int | None]] = []
 
-    def pause_first_write(descriptor: int, data: bytes) -> int:
-        with first_writer_lock:
-            is_first_writer = not first_writer
-            if is_first_writer:
-                first_writer.append(threading.get_ident())
-        if is_first_writer:
-            first_write_started.set()
-            assert release_first_write.wait(timeout=2)
-        return original_write(descriptor, data)
+    def gate_link(*args, **kwargs):
+        nonlocal ready_count, link_successes, link_losers
+        with link_lock:
+            ready_count += 1
+            if ready_count == contender_count:
+                all_contenders_ready.set()
+        assert release_link.wait(timeout=2)
+        relative_link_descriptors.append(
+            (kwargs.get("src_dir_fd"), kwargs.get("dst_dir_fd"))
+        )
+        try:
+            result = original_link(*args, **kwargs)
+        except FileExistsError:
+            with link_lock:
+                link_losers += 1
+            raise
+        with link_lock:
+            link_successes += 1
+        return result
 
-    monkeypatch.setattr(
-        "samvil_mcp.transition_controller.os.write", pause_first_write
-    )
+    monkeypatch.setattr("samvil_mcp.transition_controller.os.link", gate_link)
 
     def create_key() -> bytes:
         # Independent controllers emulate separate hosts sharing one DB directory.
         return TransitionController(EventStore(str(tmp_path / "events.db")))._journal_auth_key()
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        first = pool.submit(create_key)
-        assert first_write_started.wait(timeout=2)
-        callers = [pool.submit(create_key) for _ in range(7)]
-        release_first_write.set()
-        keys = [first.result(timeout=2), *(caller.result(timeout=2) for caller in callers)]
+        callers = [pool.submit(create_key) for _ in range(contender_count)]
+        assert all_contenders_ready.wait(timeout=2)
+        release_link.set()
+        keys = [caller.result(timeout=2) for caller in callers]
 
+    assert ready_count == contender_count
+    assert link_successes == 1
+    assert link_losers == contender_count - 1
+    assert all(
+        source is not None and source == destination
+        for source, destination in relative_link_descriptors
+    )
     assert len(set(keys)) == 1
     assert len(keys[0]) == 32
     assert key_path.read_bytes() == keys[0]

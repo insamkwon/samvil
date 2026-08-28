@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import hmac
 import json
 import os
 import re
 import secrets
+import stat
 import uuid
 from pathlib import Path
 from typing import Any
@@ -428,34 +430,79 @@ class TransitionController:
             raise TransitionError(f"invalid JSON object: {path}")
         return parsed
 
+    @staticmethod
+    def _open_key_directory(path: Path) -> int:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        return os.open(str(path), flags)
+
+    @staticmethod
+    def _read_key_at(directory_descriptor: int, name: str) -> bytes | None:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            entry_metadata = os.stat(
+                name,
+                dir_fd=directory_descriptor,
+                follow_symlinks=False,
+            )
+            if not stat.S_ISREG(entry_metadata.st_mode):
+                raise TransitionError(
+                    "transition journal authentication key is unavailable"
+                )
+            descriptor = os.open(name, flags, dir_fd=directory_descriptor)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise TransitionError(
+                "transition journal authentication key is unavailable"
+            ) from exc
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or (metadata.st_dev, metadata.st_ino)
+                != (entry_metadata.st_dev, entry_metadata.st_ino)
+            ):
+                raise TransitionError("transition journal authentication key is unavailable")
+            chunks: list[bytes] = []
+            while True:
+                chunk = os.read(descriptor, 65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks)
+        except OSError as exc:
+            raise TransitionError(
+                "transition journal authentication key is unavailable"
+            ) from exc
+        finally:
+            os.close(descriptor)
+
     def _journal_auth_key(self) -> bytes:
         """Return one host-private key that survives loss of the SQLite file."""
         db_path = Path(self.store.db_path).expanduser().resolve(strict=False)
         key_path = db_path.parent / ".transition-journal.key"
         key_path.parent.mkdir(parents=True, exist_ok=True)
-
         try:
-            existing_key = key_path.read_bytes()
-        except FileNotFoundError:
-            existing_key = None
+            directory_descriptor = self._open_key_directory(key_path.parent)
         except OSError as exc:
             raise TransitionError(
                 "transition journal authentication key is unavailable"
             ) from exc
-        if existing_key is not None:
-            if len(existing_key) < 32:
-                raise TransitionError("transition journal authentication key is invalid")
-            return existing_key
-
-        key = secrets.token_bytes(32)
-        temporary_path = key_path.with_name(
-            f".{key_path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}"
-        )
         try:
+            existing_key = self._read_key_at(directory_descriptor, key_path.name)
+            if existing_key is not None:
+                if len(existing_key) < 32:
+                    raise TransitionError("transition journal authentication key is invalid")
+                return existing_key
+
+            key = secrets.token_bytes(32)
+            temporary_name = f".{key_path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}"
             descriptor = os.open(
-                temporary_path,
+                temporary_name,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL,
                 0o600,
+                dir_fd=directory_descriptor,
             )
             try:
                 written = 0
@@ -471,9 +518,19 @@ class TransitionController:
                 os.close(descriptor)
 
             try:
-                os.link(temporary_path, key_path)
+                os.link(
+                    temporary_name,
+                    key_path.name,
+                    src_dir_fd=directory_descriptor,
+                    dst_dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
             except FileExistsError:
-                winner = key_path.read_bytes()
+                winner = self._read_key_at(directory_descriptor, key_path.name)
+                if winner is None:
+                    raise TransitionError(
+                        "transition journal authentication key is unavailable"
+                    )
                 if len(winner) < 32:
                     raise TransitionError(
                         "transition journal authentication key is invalid"
@@ -481,23 +538,24 @@ class TransitionController:
                 return winner
 
             try:
-                directory_descriptor = os.open(str(key_path.parent), os.O_RDONLY)
-            except OSError:
-                directory_descriptor = None
-            if directory_descriptor is not None:
-                try:
-                    try:
-                        os.fsync(directory_descriptor)
-                    except OSError:
-                        pass
-                finally:
-                    os.close(directory_descriptor)
+                os.fsync(directory_descriptor)
+            except OSError as exc:
+                if exc.errno not in {
+                    errno.EINVAL,
+                    errno.ENOTSUP,
+                    getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
+                }:
+                    raise
             return key
         finally:
             try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+                if "temporary_name" in locals():
+                    try:
+                        os.unlink(temporary_name, dir_fd=directory_descriptor)
+                    except FileNotFoundError:
+                        pass
+            finally:
+                os.close(directory_descriptor)
 
     def _journal_authentication(self, journal: dict[str, Any]) -> str:
         payload = {key: value for key, value in journal.items() if key != "journal_authentication"}
