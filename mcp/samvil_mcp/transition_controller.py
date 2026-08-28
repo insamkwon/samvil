@@ -433,28 +433,71 @@ class TransitionController:
         db_path = Path(self.store.db_path).expanduser().resolve(strict=False)
         key_path = db_path.parent / ".transition-journal.key"
         key_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            existing_key = key_path.read_bytes()
+        except FileNotFoundError:
+            existing_key = None
+        except OSError as exc:
+            raise TransitionError(
+                "transition journal authentication key is unavailable"
+            ) from exc
+        if existing_key is not None:
+            if len(existing_key) < 32:
+                raise TransitionError("transition journal authentication key is invalid")
+            return existing_key
+
+        key = secrets.token_bytes(32)
+        temporary_path = key_path.with_name(
+            f".{key_path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}"
+        )
         try:
             descriptor = os.open(
-                key_path,
+                temporary_path,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL,
                 0o600,
             )
-        except FileExistsError:
-            descriptor = None
-        if descriptor is not None:
             try:
-                key = secrets.token_bytes(32)
-                os.write(descriptor, key)
+                written = 0
+                while written < len(key):
+                    count = os.write(descriptor, key[written:])
+                    if count <= 0:
+                        raise OSError(
+                            "transition journal authentication key write made no progress"
+                        )
+                    written += count
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-        try:
-            key = key_path.read_bytes()
-        except OSError as exc:
-            raise TransitionError("transition journal authentication key is unavailable") from exc
-        if len(key) < 32:
-            raise TransitionError("transition journal authentication key is invalid")
-        return key
+
+            try:
+                os.link(temporary_path, key_path)
+            except FileExistsError:
+                winner = key_path.read_bytes()
+                if len(winner) < 32:
+                    raise TransitionError(
+                        "transition journal authentication key is invalid"
+                    )
+                return winner
+
+            try:
+                directory_descriptor = os.open(str(key_path.parent), os.O_RDONLY)
+            except OSError:
+                directory_descriptor = None
+            if directory_descriptor is not None:
+                try:
+                    try:
+                        os.fsync(directory_descriptor)
+                    except OSError:
+                        pass
+                finally:
+                    os.close(directory_descriptor)
+            return key
+        finally:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def _journal_authentication(self, journal: dict[str, Any]) -> str:
         payload = {key: value for key, value in journal.items() if key != "journal_authentication"}

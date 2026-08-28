@@ -6,6 +6,8 @@ import asyncio
 import os
 import tempfile
 import json
+import secrets
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,158 @@ async def controller(tmp_path: Path):
     store = EventStore(str(tmp_path / "events.db"))
     await store.initialize()
     return TransitionController(store)
+
+
+def test_journal_auth_key_does_not_publish_path_when_generation_fails(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_token_bytes = secrets.token_bytes
+
+    def fail_generation(_size: int) -> bytes:
+        raise OSError("injected random generation failure")
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.secrets.token_bytes", fail_generation
+    )
+
+    with pytest.raises(OSError, match="random generation failure"):
+        controller._journal_auth_key()
+
+    assert not key_path.exists()
+    assert not list(tmp_path.glob("..transition-journal.key.tmp-*"))
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.secrets.token_bytes", original_token_bytes
+    )
+    assert len(controller._journal_auth_key()) == 32
+    assert key_path.read_bytes() == controller._journal_auth_key()
+
+
+def test_journal_auth_key_completes_short_writes_before_publishing(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_write = os.write
+
+    def partial_write(descriptor: int, data: bytes) -> int:
+        return original_write(descriptor, data[: min(8, len(data))])
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.write", partial_write
+    )
+    key = controller._journal_auth_key()
+
+    assert key_path.read_bytes() == key
+    assert len(key) == 32
+
+    monkeypatch.setattr("samvil_mcp.transition_controller.os.write", original_write)
+    assert len(controller._journal_auth_key()) == 32
+    assert key_path.read_bytes() == controller._journal_auth_key()
+
+
+def test_journal_auth_key_removes_private_zero_write_failure_before_retry(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    original_write = os.write
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.write", lambda _fd, _data: 0
+    )
+    with pytest.raises(OSError, match="write"):
+        controller._journal_auth_key()
+
+    assert not key_path.exists()
+    assert not list(tmp_path.glob("..transition-journal.key.tmp-*"))
+
+    monkeypatch.setattr("samvil_mcp.transition_controller.os.write", original_write)
+    assert len(controller._journal_auth_key()) == 32
+    assert key_path.read_bytes() == controller._journal_auth_key()
+
+
+def test_journal_auth_key_rejects_existing_short_key_without_rotating(
+    controller, tmp_path
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    key_path.write_bytes(b"x" * 31)
+
+    with pytest.raises(TransitionError, match="key is invalid"):
+        controller._journal_auth_key()
+
+    assert key_path.read_bytes() == b"x" * 31
+
+
+def test_journal_auth_key_preserves_existing_complete_key(controller, tmp_path) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+    existing_key = b"x" * 48
+    key_path.write_bytes(existing_key)
+    os.chmod(key_path, 0o600)
+
+    assert controller._journal_auth_key() == existing_key
+    assert key_path.read_bytes() == existing_key
+    assert key_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_journal_auth_key_cleans_private_file_when_publication_fails(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / ".transition-journal.key"
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.link",
+        lambda _source, _target: (_ for _ in ()).throw(
+            OSError("injected publication failure")
+        ),
+    )
+    with pytest.raises(OSError, match="publication failure"):
+        controller._journal_auth_key()
+
+    assert not key_path.exists()
+    assert not list(tmp_path.glob("..transition-journal.key.tmp-*"))
+
+
+def test_journal_auth_key_concurrent_first_creation_returns_one_complete_key(
+    controller, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    key_path = tmp_path / ".transition-journal.key"
+    original_write = os.write
+    first_write_started = threading.Event()
+    release_first_write = threading.Event()
+    first_writer: list[int] = []
+    first_writer_lock = threading.Lock()
+
+    def pause_first_write(descriptor: int, data: bytes) -> int:
+        with first_writer_lock:
+            is_first_writer = not first_writer
+            if is_first_writer:
+                first_writer.append(threading.get_ident())
+        if is_first_writer:
+            first_write_started.set()
+            assert release_first_write.wait(timeout=2)
+        return original_write(descriptor, data)
+
+    monkeypatch.setattr(
+        "samvil_mcp.transition_controller.os.write", pause_first_write
+    )
+
+    def create_key() -> bytes:
+        # Independent controllers emulate separate hosts sharing one DB directory.
+        return TransitionController(EventStore(str(tmp_path / "events.db")))._journal_auth_key()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        first = pool.submit(create_key)
+        assert first_write_started.wait(timeout=2)
+        callers = [pool.submit(create_key) for _ in range(7)]
+        release_first_write.set()
+        keys = [first.result(timeout=2), *(caller.result(timeout=2) for caller in callers)]
+
+    assert len(set(keys)) == 1
+    assert len(keys[0]) == 32
+    assert key_path.read_bytes() == keys[0]
+    assert len(key_path.read_bytes()) == 32
 
 
 @pytest.mark.asyncio
