@@ -34,7 +34,9 @@ controller ownership/gating/idempotency, journal recovery, installer isolation,
 and fail-closed evidence harnesses. The release is a v4.33.0 candidate rather
 than a completed parity claim because Codex CLI authentication is blocked and
 the full Codex/Claude scenario matrices remain unexecuted. Legacy profile
-`--migrate` is also fail-closed until provenance-backed actions are constructed.
+`--migrate` now requires a read-only sealed plan and applies only internally
+reconstructed provenance-backed actions under a profile lock, with durable backup,
+receipt replay, and compensating rollback.
 The Definition of Done checkboxes below intentionally remain unchecked where
 persisted runtime evidence does not exist.
 
