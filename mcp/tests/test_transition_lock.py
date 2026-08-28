@@ -11,6 +11,68 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.parametrize(
+    "lock_name",
+    ["stage_transition_lock", "verification_execution_lock"],
+)
+def test_transition_locks_fail_closed_without_interprocess_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lock_name: str,
+) -> None:
+    import samvil_mcp.transition_lock as locks
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(locks, "_HAS_INTERPROCESS_LOCK", False)
+    store = SimpleNamespace(db_path=str(tmp_path / "unsupported-lock.db"))
+    entered = False
+
+    async def exercise() -> None:
+        nonlocal entered
+        lock = getattr(locks, lock_name)
+        arguments = (store, "run-1", "samvil-build") if "verification" in lock_name else (store, "run-1")
+        with pytest.raises(
+            locks.InterprocessLockUnavailable,
+            match="interprocess file locking is unavailable",
+        ):
+            async with lock(*arguments):
+                entered = True
+
+    asyncio.run(exercise())
+    assert entered is False
+
+
+def test_transition_lock_does_not_fallback_after_kernel_lock_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import errno
+    import samvil_mcp.transition_lock as locks
+    from types import SimpleNamespace
+
+    class UnsupportedContext:
+        def __enter__(self):
+            raise OSError(errno.ENOTSUP, "flock is unsupported")
+
+        def __exit__(self, *_args):
+            pytest.fail("an unacquired lock must not be released")
+
+    monkeypatch.setattr(locks, "_HAS_INTERPROCESS_LOCK", True)
+    monkeypatch.setattr(locks, "_file_locked", lambda _path: UnsupportedContext())
+    store = SimpleNamespace(db_path=str(tmp_path / "unsupported-kernel-lock.db"))
+    entered = False
+
+    async def exercise() -> None:
+        nonlocal entered
+        with pytest.raises(OSError) as error:
+            async with locks.stage_transition_lock(store, "run-1"):
+                entered = True
+        assert error.value.errno == errno.ENOTSUP
+
+    asyncio.run(exercise())
+    assert entered is False
+
+
 def _wait_for_path(path: Path, process: subprocess.Popen[str]) -> None:
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
@@ -25,6 +87,7 @@ def _wait_for_path(path: Path, process: subprocess.Popen[str]) -> None:
     raise AssertionError(f"timed out waiting for {path}")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="kernel flock probe requires POSIX")
 def test_verification_execution_lock_serializes_across_processes(
     tmp_path: Path,
 ) -> None:
@@ -58,13 +121,30 @@ asyncio.run(main())
 """
     contender_script = """
 import asyncio
+import fcntl
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from samvil_mcp.transition_lock import verification_execution_lock
+from samvil_mcp.transition_lock import (
+    verification_execution_lock,
+    verification_execution_lock_path,
+)
 
 async def main():
     store = SimpleNamespace(db_path=sys.argv[1])
+    lock_target = verification_execution_lock_path(store, "run-1", "samvil-build")
+    lock_file = lock_target.with_suffix(lock_target.suffix + ".lock")
+    descriptor = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            pass
+        else:
+            raise AssertionError("holder did not own the expected OS file lock")
+    finally:
+        os.close(descriptor)
     Path(sys.argv[2]).write_text("ready", encoding="utf-8")
     async with verification_execution_lock(store, "run-1", "samvil-build"):
         Path(sys.argv[3]).write_text("entered", encoding="utf-8")

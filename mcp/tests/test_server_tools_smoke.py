@@ -56,6 +56,18 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro) if False else asyncio.run(coro)
 
 
+@pytest.fixture(autouse=True)
+def isolate_server_event_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep direct server-tool tests out of the user's live SAMVIL database."""
+    import samvil_mcp.server as server
+
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "server-tools.db")
+    monkeypatch.setattr(server, "_store", None)
+
+
 def _write_mechanical_command(project: Path, field: str, argv: list[str]) -> None:
     samvil_root = project / ".samvil"
     samvil_root.mkdir(parents=True, exist_ok=True)
@@ -1595,6 +1607,857 @@ def test_cancelled_verification_command_task_is_retrieved_without_spin(
         assert command_task.done()
 
     _run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("stage", "gate_name", "requested_next", "artifact"),
+    [
+        ("samvil-build", "build_to_qa", "", ".samvil/build.log:1"),
+        (
+            "samvil-qa",
+            "qa_to_evolve",
+            "samvil-evolve",
+            ".samvil/qa-results.json:1",
+        ),
+    ],
+)
+def test_transition_waits_for_inflight_verification_and_observes_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    gate_name: str,
+    requested_next: str,
+    artifact: str,
+) -> None:
+    import samvil_mcp.server as server
+    import samvil_mcp.transition_controller as transition_controller
+    from contextlib import asynccontextmanager
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / f"inflight-{stage}"
+    command_field = "build" if stage == "samvil-build" else "test"
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, command_field, command)
+    if stage == "samvil-build":
+        _write_passing_build_seed(project)
+        db_stage = Stage.BUILD
+    else:
+        db_stage = Stage.QA
+        (project / ".samvil" / "qa-results.json").write_text(
+            json.dumps(
+                {
+                    "synthesis": {
+                        "verdict": "PASS",
+                        "pass1": {"status": "PASS"},
+                        "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                        "pass3": {"verdict": "PASS"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+    store = EventStore(str(tmp_path / f"inflight-{stage}.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("inflight", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, db_stage))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, stage, 0)))
+    monkeypatch.setattr(
+        server, "_run_verification_command", lambda *_args: (0, "INITIAL PASS")
+    )
+    initial = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project), session.id, stage, json.dumps(command)
+            )
+        )
+    )
+    gate = json.loads(_run(gate_check(gate_name, "minimal", "{}", str(project))))
+    failure_started = threading.Event()
+    release_failure = threading.Event()
+
+    def delayed_failure(*_args):
+        failure_started.set()
+        assert release_failure.wait(5), "failed verifier was never released"
+        return 1, "NEW FAIL"
+
+    monkeypatch.setattr(server, "_run_verification_command", delayed_failure)
+    lock_attempted = asyncio.Event()
+    original_transition_lock = transition_controller.verification_execution_lock
+
+    @asynccontextmanager
+    async def observed_transition_lock(*args, **kwargs):
+        lock_attempted.set()
+        async with original_transition_lock(*args, **kwargs):
+            yield
+
+    monkeypatch.setattr(
+        transition_controller,
+        "verification_execution_lock",
+        observed_transition_lock,
+    )
+
+    async def overlap():
+        verification = asyncio.create_task(
+            server.run_stage_verification(
+                str(project), session.id, stage, json.dumps(command)
+            )
+        )
+        assert await asyncio.to_thread(failure_started.wait, 2)
+        transition = asyncio.create_task(
+            commit_stage_transition(
+                str(project),
+                session.id,
+                stage,
+                0,
+                claim["claim_id"],
+                "PASS",
+                json.dumps({"artifact": artifact}),
+                requested_next,
+                f"inflight-{stage}-transition",
+            )
+        )
+        await asyncio.wait_for(lock_attempted.wait(), timeout=2)
+        transition_finished_while_verifier_running = transition.done()
+        release_failure.set()
+        failed, committed = await asyncio.gather(verification, transition)
+        return (
+            json.loads(failed),
+            json.loads(committed),
+            transition_finished_while_verifier_running,
+        )
+
+    failed, transition, early = _run(overlap())
+
+    assert initial["status"] == "passed"
+    assert gate["verdict"] == "pass"
+    assert early is False
+    assert failed["status"] == "failed"
+    assert transition["status"] == "blocked"
+    assert _run(store.get_events(session.id)) == []
+    assert not (project / ".samvil" / "transition-journal.json").exists()
+
+
+@pytest.mark.parametrize("mutation", ["qa", "seed"])
+def test_gate_rejects_authority_mutation_during_evaluation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / f"gate-mutation-{mutation}"
+    command = [sys.executable, "-c", "print('unused')"]
+    if mutation == "seed":
+        stage = "samvil-build"
+        gate_name = "build_to_qa"
+        _write_mechanical_command(project, "build", command)
+        _write_passing_build_seed(project)
+        db_stage = Stage.BUILD
+        authority = project / "project.seed.json"
+        replacement = {"features": [{"name": "new", "acceptance_criteria": []}]}
+    else:
+        stage = "samvil-qa"
+        gate_name = "qa_to_evolve"
+        _write_mechanical_command(project, "test", command)
+        db_stage = Stage.QA
+        authority = project / ".samvil" / "qa-results.json"
+        authority.write_text(
+            json.dumps(
+                {
+                    "synthesis": {
+                        "verdict": "PASS",
+                        "pass1": {"status": "PASS"},
+                        "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                        "pass3": {"verdict": "PASS"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        replacement = {"synthesis": {"verdict": "FAIL"}}
+    store = EventStore(str(tmp_path / f"gate-mutation-{mutation}.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("mutation", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, db_stage))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, stage, 0))
+    monkeypatch.setattr(
+        server, "_run_verification_command", lambda *_args: (0, "PASS")
+    )
+    runtime = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project), session.id, stage, json.dumps(command)
+            )
+        )
+    )
+    original_evidence = server._mechanical_gate_evidence
+
+    def mutating_evidence(*args, **kwargs):
+        result = original_evidence(*args, **kwargs)
+        authority.write_text(json.dumps(replacement), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(server, "_mechanical_gate_evidence", mutating_evidence)
+    gate = json.loads(_run(gate_check(gate_name, "minimal", "{}", str(project))))
+
+    assert runtime["status"] == "passed"
+    assert "changed during evaluation" in gate["error"]
+    assert _run(store.get_gate_receipt(session.id, gate_name)) is None
+
+
+def test_build_gate_uses_the_same_captured_bytes_as_its_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "aba-project"
+    passing_project = tmp_path / "aba-passing-project"
+    parked_project = tmp_path / "aba-parked-project"
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, "build", command)
+    (project / "project.seed.json").write_text(
+        json.dumps(
+            {
+                "features": [
+                    {
+                        "name": "original failure",
+                        "acceptance_criteria": [
+                            {"id": "AC-1", "status": "fail"}
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = EventStore(str(tmp_path / "aba-gate.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("aba", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    monkeypatch.setattr(
+        server, "_run_verification_command", lambda *_args: (0, "PASS")
+    )
+    runtime = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+    )
+
+    _write_mechanical_command(passing_project, "build", command)
+    _write_passing_build_seed(passing_project)
+    (passing_project / ".samvil" / "build.log").write_bytes(
+        (project / ".samvil" / "build.log").read_bytes()
+    )
+    original_evidence = server._mechanical_gate_evidence
+
+    def evaluate_against_temporary_tree(*args, **kwargs):
+        project.rename(parked_project)
+        passing_project.rename(project)
+        try:
+            return original_evidence(*args, **kwargs)
+        finally:
+            project.rename(passing_project)
+            parked_project.rename(project)
+
+    monkeypatch.setattr(
+        server,
+        "_mechanical_gate_evidence",
+        evaluate_against_temporary_tree,
+    )
+
+    gate = json.loads(
+        _run(gate_check("build_to_qa", "minimal", "{}", str(project)))
+    )
+
+    assert runtime["status"] == "passed"
+    assert gate["verdict"] == "block"
+    assert "implementation_rate" in gate["failed_checks"]
+
+
+@pytest.mark.parametrize("mutation", ["qa", "seed", "state", "config", "events"])
+def test_transition_rejects_gate_input_changed_after_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / f"post-gate-mutation-{mutation}"
+    command = [sys.executable, "-c", "print('unused')"]
+    if mutation != "qa":
+        stage = "samvil-build"
+        gate_name = "build_to_qa"
+        requested_next = ""
+        artifact = ".samvil/build.log:1"
+        _write_mechanical_command(project, "build", command)
+        _write_passing_build_seed(project)
+        db_stage = Stage.BUILD
+        authority = project / {
+            "seed": "project.seed.json",
+            "state": "project.state.json",
+            "config": "project.config.json",
+            "events": ".samvil/events.jsonl",
+        }[mutation]
+        replacement = {"features": [{"name": "new", "acceptance_criteria": []}]}
+    else:
+        stage = "samvil-qa"
+        gate_name = "qa_to_evolve"
+        requested_next = "samvil-evolve"
+        artifact = ".samvil/qa-results.json:1"
+        _write_mechanical_command(project, "test", command)
+        db_stage = Stage.QA
+        authority = project / ".samvil" / "qa-results.json"
+        authority.write_text(
+            json.dumps(
+                {
+                    "synthesis": {
+                        "verdict": "PASS",
+                        "pass1": {"status": "PASS"},
+                        "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                        "pass3": {"verdict": "PASS"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        replacement = {"synthesis": {"verdict": "FAIL"}}
+    store = EventStore(str(tmp_path / f"post-gate-{mutation}.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("mutation", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, db_stage))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, stage, 0)))
+    monkeypatch.setattr(
+        server, "_run_verification_command", lambda *_args: (0, "PASS")
+    )
+    runtime = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project), session.id, stage, json.dumps(command)
+            )
+        )
+    )
+    gate = json.loads(_run(gate_check(gate_name, "minimal", "{}", str(project))))
+    if mutation == "qa":
+        from samvil_mcp.transition_controller import TransitionController
+
+        original_commit = TransitionController.commit_stage_transition
+        decision_complete = asyncio.Event()
+        release_controller = asyncio.Event()
+
+        async def delayed_commit(controller, *args, **kwargs):
+            decision_complete.set()
+            await release_controller.wait()
+            return await original_commit(controller, *args, **kwargs)
+
+        monkeypatch.setattr(
+            TransitionController,
+            "commit_stage_transition",
+            delayed_commit,
+        )
+
+        async def mutate_after_route_decision():
+            task = asyncio.create_task(
+                commit_stage_transition(
+                    str(project),
+                    session.id,
+                    stage,
+                    0,
+                    claim["claim_id"],
+                    "PASS",
+                    json.dumps({"artifact": artifact}),
+                    requested_next,
+                    f"post-gate-{mutation}-transition",
+                )
+            )
+            await asyncio.wait_for(decision_complete.wait(), timeout=2)
+            authority.write_text(json.dumps(replacement), encoding="utf-8")
+            release_controller.set()
+            return json.loads(await task)
+
+        transition = _run(mutate_after_route_decision())
+    else:
+        authority.write_text(json.dumps(replacement), encoding="utf-8")
+        transition = json.loads(
+            _run(
+                commit_stage_transition(
+                    str(project),
+                    session.id,
+                    stage,
+                    0,
+                    claim["claim_id"],
+                    "PASS",
+                    json.dumps({"artifact": artifact}),
+                    requested_next,
+                    f"post-gate-{mutation}-transition",
+                )
+            )
+        )
+
+    assert runtime["status"] == "passed"
+    assert gate["verdict"] == "pass"
+    assert transition["status"] == "blocked"
+    assert _run(store.get_events(session.id)) == []
+    assert not (project / ".samvil" / "transition-journal.json").exists()
+
+
+def test_qa_projection_without_db_receipt_is_not_legacy_runtime_absence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "qa-projection-db-failure"
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, "test", command)
+    (project / ".samvil" / "qa-results.json").write_text(
+        json.dumps(
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass1": {"status": "PASS"},
+                    "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                    "pass3": {"verdict": "PASS"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = EventStore(str(tmp_path / "qa-projection-db-failure.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("projection", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.QA))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-qa", 0)))
+    monkeypatch.setattr(
+        server, "_run_verification_command", lambda *_args: (1, "QA FAIL")
+    )
+
+    async def fail_db_save(*_args, **_kwargs):
+        raise OSError("injected runtime receipt DB failure")
+
+    monkeypatch.setattr(store, "save_runtime_receipt", fail_db_save)
+    runtime = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-qa", json.dumps(command)
+            )
+        )
+    )
+    projection_path = project / ".samvil" / "runtime-receipts" / "qa.json"
+    projection = json.loads(projection_path.read_text())
+    projection_path.unlink()
+    gate = json.loads(
+        _run(gate_check("qa_to_evolve", "minimal", "{}", str(project)))
+    )
+    transition = json.loads(
+        _run(
+            commit_stage_transition(
+                str(project),
+                session.id,
+                "samvil-qa",
+                0,
+                claim["claim_id"],
+                "PASS",
+                '{"artifact":".samvil/qa-results.json:1"}',
+                "samvil-evolve",
+                "projection-db-failure-transition",
+            )
+        )
+    )
+
+    assert runtime["status"] == "blocked"
+    assert projection["status"] == "failed"
+    assert _run(store.get_runtime_receipt(session.id, "samvil-qa")) is None
+    assert _run(
+        store.has_runtime_verification_requirement(
+            session.id, "samvil-qa"
+        )
+    ) is True
+    assert gate["verdict"] == "block"
+    assert transition["status"] == "blocked"
+    assert _run(store.get_events(session.id)) == []
+    assert not (project / ".samvil" / "transition-journal.json").exists()
+
+
+def test_runtime_verification_does_not_launch_when_requirement_cannot_persist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "runtime-policy-write-failure"
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, "build", command)
+    store = EventStore(str(tmp_path / "runtime-policy-write-failure.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("policy-failure", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.BUILD))
+    monkeypatch.setattr(server, "_store", store)
+    _run(begin_stage(str(project), session.id, "samvil-build", 0))
+    launched = False
+
+    async def fail_requirement(*_args, **_kwargs):
+        raise OSError("injected runtime policy DB failure")
+
+    def runner(*_args):
+        nonlocal launched
+        launched = True
+        return 0, "PASS"
+
+    monkeypatch.setattr(store, "mark_runtime_verification_required", fail_requirement)
+    monkeypatch.setattr(server, "_run_verification_command", runner)
+
+    result = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-build", json.dumps(command)
+            )
+        )
+    )
+
+    assert result["status"] == "blocked"
+    assert "runtime policy DB failure" in result["error"]
+    assert launched is False
+    assert not (project / ".samvil" / "build.log").exists()
+
+
+def test_runtime_requirement_invalidates_a_preexisting_retro_recovery_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "runtime-policy-invalidates-retro-gate"
+    (project / ".samvil").mkdir(parents=True)
+    (project / ".samvil" / "qa-results.json").write_text(
+        json.dumps(
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass1": {"status": "PASS"},
+                    "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                    "pass3": {"verdict": "PASS"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = EventStore(str(tmp_path / "runtime-policy-invalidates-retro-gate.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("legacy-gate", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.QA))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-qa", 0)))
+    gate = json.loads(
+        _run(
+            gate_check(
+                "any_to_retro",
+                "minimal",
+                '{"always_run":true}',
+                str(project),
+            )
+        )
+    )
+    _run(
+        store.mark_runtime_verification_required(
+            session.id,
+            "samvil-qa",
+            claim["claim_id"],
+            0,
+        )
+    )
+
+    transition = json.loads(
+        _run(
+            commit_stage_transition(
+                str(project),
+                session.id,
+                "samvil-qa",
+                0,
+                claim["claim_id"],
+                "PASS",
+                '{"artifact":".samvil/qa-results.json:1"}',
+                "samvil-retro",
+                "invalidated-retro-gate-transition",
+            )
+        )
+    )
+
+    assert gate["verdict"] == "pass"
+    assert transition["status"] == "blocked"
+    assert _run(store.get_events(session.id)) == []
+    assert not (project / ".samvil" / "transition-journal.json").exists()
+
+
+def test_replacement_claim_cannot_reopen_retro_runtime_absence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.chain_markers import build_driver_marker, write_driver_marker
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "retro-replacement-claim"
+    (project / ".samvil").mkdir(parents=True)
+    (project / ".samvil" / "qa-results.json").write_text(
+        json.dumps(
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass1": {"status": "PASS"},
+                    "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                    "pass3": {"verdict": "PASS"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = EventStore(str(tmp_path / "retro-replacement-claim.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("retro-replacement", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.QA))
+    monkeypatch.setattr(server, "_store", store)
+    original = json.loads(_run(begin_stage(str(project), session.id, "samvil-qa", 0)))
+    _run(
+        store.mark_runtime_verification_required(
+            session.id,
+            "samvil-qa",
+            original["claim_id"],
+            0,
+        )
+    )
+    assert _run(
+        store.mark_stage_claim_completed(
+            original["claim_id"], "replacement-transition"
+        )
+    ) is True
+    replacement = _run(store.create_stage_claim(session.id, "samvil-qa", 2))
+    write_driver_marker(
+        str(project),
+        build_driver_marker(
+            run_id=session.id,
+            revision=2,
+            status="in_progress",
+            host_name="codex_cli",
+            from_stage="samvil-qa",
+            next_skill="",
+            reason="QA claim replaced",
+        ),
+    )
+
+    gate = json.loads(
+        _run(
+            gate_check(
+                "any_to_retro",
+                "minimal",
+                '{"always_run":true}',
+                str(project),
+            )
+        )
+    )
+
+    assert replacement["marker_revision"] == 2
+    assert _run(
+        store.has_runtime_verification_requirement(session.id, "samvil-qa")
+    ) is True
+    assert gate["verdict"] == "block"
+
+
+def test_new_qa_verification_attempt_cannot_fall_back_to_an_old_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "qa-retry-invalidates-old-pass"
+    command = [sys.executable, "-c", "print('unused')"]
+    _write_mechanical_command(project, "test", command)
+    (project / ".samvil" / "qa-results.json").write_text(
+        json.dumps(
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass1": {"status": "PASS"},
+                    "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                    "pass3": {"verdict": "PASS"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = EventStore(str(tmp_path / "qa-retry-invalidates-old-pass.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("qa-retry", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.QA))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-qa", 0)))
+    monkeypatch.setattr(
+        server,
+        "_run_verification_command",
+        lambda *_args: (0, "INITIAL PASS"),
+    )
+    initial = json.loads(
+        _run(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-qa", json.dumps(command)
+            )
+        )
+    )
+    retry_started = threading.Event()
+    release_retry = threading.Event()
+
+    def delayed_retry(*_args):
+        retry_started.set()
+        assert release_retry.wait(5), "QA retry was never released"
+        return 0, "CANCELLED NEW PASS"
+
+    monkeypatch.setattr(server, "_run_verification_command", delayed_retry)
+
+    async def cancel_retry() -> None:
+        retry = asyncio.create_task(
+            server.run_stage_verification(
+                str(project), session.id, "samvil-qa", json.dumps(command)
+            )
+        )
+        assert await asyncio.to_thread(retry_started.wait, 2)
+        assert await store.get_runtime_receipt(session.id, "samvil-qa") is None
+        retry.cancel()
+        release_retry.set()
+        with pytest.raises(asyncio.CancelledError):
+            await retry
+
+    _run(cancel_retry())
+    (project / ".samvil" / "runtime-receipts" / "qa.json").unlink()
+    gate = json.loads(
+        _run(gate_check("qa_to_evolve", "minimal", "{}", str(project)))
+    )
+
+    assert initial["status"] == "passed"
+    assert _run(
+        store.has_runtime_verification_requirement(
+            session.id, "samvil-qa"
+        )
+    ) is True
+    assert gate["verdict"] == "block"
+
+
+def test_native_qa_evolve_rejects_missing_runtime_receipt_even_without_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "qa-missing-native-runtime"
+    (project / ".samvil").mkdir(parents=True)
+    (project / ".samvil" / "qa-results.json").write_text(
+        json.dumps(
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass1": {"status": "PASS"},
+                    "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                    "pass3": {"verdict": "PASS"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = EventStore(str(tmp_path / "qa-missing-native-runtime.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("native", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.QA))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-qa", 0)))
+    gate = json.loads(
+        _run(gate_check("qa_to_evolve", "minimal", "{}", str(project)))
+    )
+    transition = json.loads(
+        _run(
+            commit_stage_transition(
+                str(project),
+                session.id,
+                "samvil-qa",
+                0,
+                claim["claim_id"],
+                "PASS",
+                '{"artifact":".samvil/qa-results.json:1"}',
+                "samvil-evolve",
+                "missing-native-runtime-transition",
+            )
+        )
+    )
+
+    assert gate["verdict"] == "block"
+    assert transition["status"] == "blocked"
+    assert _run(store.get_events(session.id)) == []
+    assert not (project / ".samvil" / "transition-journal.json").exists()
+
+
+def test_native_qa_evolve_transition_rejects_a_pre_policy_gate_without_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.server as server
+    from samvil_mcp.models import Stage
+
+    project = tmp_path / "qa-pre-policy-gate"
+    (project / ".samvil").mkdir(parents=True)
+    (project / ".samvil" / "qa-results.json").write_text(
+        json.dumps(
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass1": {"status": "PASS"},
+                    "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                    "pass3": {"verdict": "PASS"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = EventStore(str(tmp_path / "qa-pre-policy-gate.db"))
+    _run(store.initialize())
+    session = _run(store.create_session("native", "minimal", str(project)))
+    _run(store.update_session_stage(session.id, Stage.QA))
+    monkeypatch.setattr(server, "_store", store)
+    claim = json.loads(_run(begin_stage(str(project), session.id, "samvil-qa", 0)))
+    monkeypatch.setattr(server, "gate_requires_runtime_receipt", lambda _gate: False)
+    gate = json.loads(
+        _run(gate_check("qa_to_evolve", "minimal", "{}", str(project)))
+    )
+
+    transition = json.loads(
+        _run(
+            commit_stage_transition(
+                str(project),
+                session.id,
+                "samvil-qa",
+                0,
+                claim["claim_id"],
+                "PASS",
+                '{"artifact":".samvil/qa-results.json:1"}',
+                "samvil-evolve",
+                "pre-policy-gate-transition",
+            )
+        )
+    )
+
+    assert gate["verdict"] == "pass"
+    assert transition["status"] == "blocked"
+    assert "current runtime receipt" in transition.get(
+        "error", transition.get("reason", "")
+    )
+    assert _run(store.get_events(session.id)) == []
+    assert not (project / ".samvil" / "transition-journal.json").exists()
 
 
 def test_stale_claim_verification_writes_no_runtime_evidence(

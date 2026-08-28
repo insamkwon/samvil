@@ -88,6 +88,7 @@ from .scaffold_targets import (
 )
 from .ssot_io import atomic_write_text
 from .runtime_layout import RuntimeLayoutError, safe_child_directory
+from .runtime_policy import gate_requires_runtime_receipt
 from .event_sanitizer import (
     redact_sensitive_text,
     sanitize_event_data,
@@ -102,6 +103,14 @@ from .build_phase_b import (
 )
 from .build_phase_z import (
     finalize_build_phase_z as _finalize_build_phase_z,
+)
+from .gate_snapshot import (
+    GateInputBundle,
+    capture_gate_input_bundle,
+    capture_gate_input_snapshot,
+    json_projection_from_bundle,
+    materialized_gate_input_bundle,
+    snapshot_sha256,
 )
 from .qa_boot import (
     aggregate_qa_boot_context as _aggregate_qa_boot_context,
@@ -3988,6 +3997,45 @@ def _mechanical_gate_evidence(
     )
 
 
+def _evaluate_captured_gate_inputs(
+    gate_inputs: GateInputBundle,
+    gate_name: str,
+    trusted_runtime_receipt: dict[str, Any] | None,
+    evidence_mode: str,
+    display_root: Path,
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+]:
+    """Evaluate only the immutable bytes represented by a gate snapshot."""
+    with materialized_gate_input_bundle(gate_inputs) as captured_root:
+        cfg_path = _config_path_for(str(captured_root))
+        cfg = _load_gate_config(cfg_path) if cfg_path else _load_gate_config(None)
+        if not evidence_mode:
+            return cfg, {}, {}, {}
+        metrics, thresholds, evidence = _mechanical_gate_evidence(
+            str(captured_root),
+            gate_name,
+            trusted_runtime_receipt,
+        )
+
+        def restore_display_paths(value: Any) -> Any:
+            if isinstance(value, str):
+                return value.replace(str(captured_root), str(display_root))
+            if isinstance(value, list):
+                return [restore_display_paths(item) for item in value]
+            if isinstance(value, dict):
+                return {
+                    key: restore_display_paths(item)
+                    for key, item in value.items()
+                }
+            return value
+
+        return cfg, metrics, thresholds, restore_display_paths(evidence)
+
+
 async def _active_session_for_project(store: EventStore, root: Path):
     inspection = inspect_chain_marker(str(root))
     if inspection.classification == "valid":
@@ -5203,6 +5251,12 @@ async def run_stage_verification(
                         "runtime verification requires the active stage claim"
                     )
                 marker_revision, claim = claim_context
+                await store.mark_runtime_verification_required(
+                    run_id,
+                    normalized,
+                    str(claim["claim_id"]),
+                    marker_revision,
+                )
 
             command_task = asyncio.create_task(
                 asyncio.to_thread(_run_verification_command, root, command, timeout)
@@ -5300,6 +5354,7 @@ async def gate_check(
             "build_to_qa": "samvil-build",
             "qa_to_evolve": "samvil-qa",
             "qa_to_deploy": "samvil-qa",
+            "any_to_retro": "samvil-qa",
         }.get(gate_name, "")
         if session is not None and runtime_stage:
             async with verification_execution_lock(store, session.id, runtime_stage):
@@ -5361,12 +5416,16 @@ async def _gate_check_with_snapshot(
         if gate_name in {"build_to_qa", "qa_to_evolve", "qa_to_deploy"}:
             evidence_mode = "mechanical"
         metrics = dict(reported_metrics)
-        cfg_path = _config_path_for(project_root)
-        cfg = _load_gate_config(cfg_path) if cfg_path else _load_gate_config(None)
+        root = Path(project_root).expanduser().resolve(strict=False)
+        gate_inputs = await asyncio.to_thread(
+            capture_gate_input_bundle,
+            root,
+            gate_name,
+        )
+        gate_input_snapshot = gate_inputs.snapshot
         mechanical_metrics: dict[str, Any] = {}
         metric_mismatches: list[dict[str, Any]] = []
         stage_evidence: dict[str, Any] = {}
-        root = Path(project_root).expanduser().resolve(strict=False)
         store = await get_store()
         session = await _active_session_for_project(store, root)
         claim_context = (
@@ -5378,31 +5437,89 @@ async def _gate_check_with_snapshot(
             "build_to_qa": "samvil-build",
             "qa_to_evolve": "samvil-qa",
             "qa_to_deploy": "samvil-qa",
+            "any_to_retro": "samvil-qa",
         }.get(gate_name, "")
-        trusted_runtime_receipt = (
+        persisted_runtime_receipt = (
             await store.get_runtime_receipt(session.id, runtime_stage)
             if session is not None and runtime_stage
             else None
         )
-        if not _receipt_matches_claim(trusted_runtime_receipt, claim_context):
-            trusted_runtime_receipt = None
-        if evidence_mode:
-            if evidence_mode != "mechanical":
-                raise ValueError("evidence_mode must be empty or 'mechanical'")
-            mechanical_metrics, mechanical_thresholds, stage_evidence = (
-                await asyncio.to_thread(
-                    _mechanical_gate_evidence,
-                    project_root,
-                    gate_name,
-                    trusted_runtime_receipt,
+        runtime_verification_started = bool(
+            session is not None
+            and runtime_stage
+            and await store.has_runtime_verification_requirement(
+                session.id,
+                runtime_stage,
+            )
+        )
+        runtime_receipt_required = bool(
+            session is not None and gate_requires_runtime_receipt(gate_name)
+        )
+        runtime_projection_relative = (
+            f".samvil/runtime-receipts/"
+            f"{runtime_stage.removeprefix('samvil-')}.json"
+        )
+        projection_exists, projected_runtime_receipt = (
+            json_projection_from_bundle(gate_inputs, runtime_projection_relative)
+            if runtime_stage
+            else (False, None)
+        )
+        runtime_receipt_inconsistent = bool(
+            runtime_stage
+            and (
+                (persisted_runtime_receipt is None) != (not projection_exists)
+                or (
+                    (runtime_receipt_required or runtime_verification_started)
+                    and persisted_runtime_receipt is None
+                    and not projection_exists
+                )
+                or (
+                    persisted_runtime_receipt is not None
+                    and (
+                        projected_runtime_receipt is None
+                        or _canonical_json_hash(persisted_runtime_receipt)
+                        != _canonical_json_hash(projected_runtime_receipt)
+                        or not _receipt_matches_claim(
+                            persisted_runtime_receipt,
+                            claim_context,
+                        )
+                    )
                 )
             )
+        )
+        trusted_runtime_receipt = (
+            persisted_runtime_receipt
+            if not runtime_receipt_inconsistent
+            and _receipt_matches_claim(persisted_runtime_receipt, claim_context)
+            else None
+        )
+        if evidence_mode and evidence_mode != "mechanical":
+            raise ValueError("evidence_mode must be empty or 'mechanical'")
+        (
+            cfg,
+            captured_mechanical_metrics,
+            mechanical_thresholds,
+            stage_evidence,
+        ) = await asyncio.to_thread(
+            _evaluate_captured_gate_inputs,
+            gate_inputs,
+            gate_name,
+            trusted_runtime_receipt,
+            evidence_mode,
+            root,
+        )
+        gate_config_sha256 = _canonical_json_hash(cfg)
+        if evidence_mode:
+            mechanical_metrics = captured_mechanical_metrics
             if (
                 trusted_runtime_receipt is not None
                 and trusted_runtime_receipt.get("status") != "passed"
             ):
                 mechanical_metrics["current_runtime_passed"] = False
                 mechanical_thresholds["current_runtime_passed"] = True
+            if runtime_receipt_inconsistent:
+                mechanical_metrics["runtime_receipt_consistent"] = False
+                mechanical_thresholds["runtime_receipt_consistent"] = True
             for key, mechanical in mechanical_metrics.items():
                 if key in reported_metrics and reported_metrics[key] != mechanical:
                     metric_mismatches.append(
@@ -5420,6 +5537,11 @@ async def _gate_check_with_snapshot(
                 .setdefault(samvil_tier, {})
             )
             tier_thresholds.update(mechanical_thresholds)
+        elif runtime_receipt_inconsistent:
+            metrics["runtime_receipt_consistent"] = False
+            cfg.setdefault("gates", {}).setdefault(gate_name, {}).setdefault(
+                "thresholds", {}
+            ).setdefault(samvil_tier, {})["runtime_receipt_consistent"] = True
         verdict = _gate_check_core(
             gate_name,
             samvil_tier=samvil_tier,
@@ -5455,20 +5577,38 @@ async def _gate_check_with_snapshot(
             "any_to_retro": qa_path,
         }
         authority_path = authority_paths.get(gate_name)
+        current_gate_input_snapshot = await asyncio.to_thread(
+            capture_gate_input_snapshot,
+            root,
+            gate_name,
+        )
+        if current_gate_input_snapshot != gate_input_snapshot:
+            raise ValueError("gate authority changed during evaluation")
+        qa_results_sha256 = snapshot_sha256(
+            gate_input_snapshot,
+            ".samvil/qa-results.json",
+        )
+        authority_relative = (
+            str(authority_path.relative_to(root))
+            if authority_path is not None
+            else ""
+        )
         receipt = {
             "kind": "gate_receipt",
             "gate": gate_name,
             "verdict": result.get("verdict"),
             "samvil_tier": samvil_tier,
-            "qa_results_sha256": hashlib.sha256(qa_path.read_bytes()).hexdigest()
-            if qa_path.is_file()
-            else "",
-            "authority_path": str(authority_path.relative_to(root))
-            if authority_path is not None
-            else "",
-            "authority_sha256": hashlib.sha256(authority_path.read_bytes()).hexdigest()
-            if authority_path is not None and authority_path.is_file()
-            else "",
+            "qa_results_sha256": qa_results_sha256,
+            "authority_path": authority_relative,
+            "authority_sha256": snapshot_sha256(
+                gate_input_snapshot,
+                authority_relative,
+            ),
+            "gate_input_snapshot": gate_input_snapshot,
+            "gate_input_snapshot_sha256": _canonical_json_hash(
+                gate_input_snapshot
+            ),
+            "gate_config_sha256": gate_config_sha256,
             "result_sha256": hashlib.sha256(
                 json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")
             ).hexdigest(),

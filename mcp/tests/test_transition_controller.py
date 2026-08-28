@@ -18,6 +18,7 @@ import pytest
 import pytest_asyncio
 
 from samvil_mcp.event_store import EventStore
+from samvil_mcp.gate_snapshot import capture_gate_input_snapshot
 from samvil_mcp.models import Stage
 from samvil_mcp.transition_controller import TransitionController, TransitionError
 
@@ -869,6 +870,7 @@ async def test_db_loss_recovery_restores_signed_build_receipts(
         json.dumps(runtime_receipt), encoding="utf-8"
     )
     runtime_hash = controller._json_hash(runtime_receipt)
+    gate_input_snapshot = capture_gate_input_snapshot(project, "build_to_qa")
     gate_receipt = await store.save_gate_receipt(
         session.id,
         "build_to_qa",
@@ -880,6 +882,11 @@ async def test_db_loss_recovery_restores_signed_build_receipts(
             "authority_sha256": build_hash,
             "claim_id": claim["claim_id"],
             "marker_revision": 0,
+            "gate_input_snapshot": gate_input_snapshot,
+            "gate_input_snapshot_sha256": controller._json_hash(
+                gate_input_snapshot
+            ),
+            "gate_config_sha256": controller._gate_config_hash(project),
             "runtime_receipt_sha256": runtime_hash,
             "runtime_authority_path": ".samvil/build.log",
             "runtime_authority_sha256": build_hash,

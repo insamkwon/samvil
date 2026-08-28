@@ -8,10 +8,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Any
 
+from .claim_ledger import _HAS_FLOCK as _HAS_INTERPROCESS_LOCK
 from .claim_ledger import _locked as _file_locked
 
 
 _PROCESS_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+class InterprocessLockUnavailable(RuntimeError):
+    """Raised instead of silently weakening a cross-process state lock."""
 
 
 def stage_transition_lock_path(store: Any, session_id: str) -> Path:
@@ -75,6 +80,10 @@ async def _release_file_lock(context: Any) -> None:
 
 @asynccontextmanager
 async def _shared_lock(path: Path) -> AsyncIterator[None]:
+    if not _HAS_INTERPROCESS_LOCK:
+        raise InterprocessLockUnavailable(
+            "interprocess file locking is unavailable on this platform"
+        )
     process_lock = _PROCESS_LOCKS.setdefault(str(path), asyncio.Lock())
     async with process_lock:
         context = _file_locked(path)

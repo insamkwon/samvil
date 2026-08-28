@@ -22,6 +22,15 @@ from .chain_markers import (
 )
 from .event_store import EventStore
 from .event_sanitizer import sanitize_event_data
+from .gate_snapshot import (
+    GateInputBundle,
+    capture_gate_input_bundle,
+    json_projection_from_bundle,
+    materialized_gate_input_bundle,
+    read_json_projection,
+    snapshot_sha256,
+)
+from .gates import load_config as load_gate_config
 from .claim_ledger import ClaimLedger
 from .models import EventType, Stage
 from .runtime_layout import (
@@ -29,6 +38,7 @@ from .runtime_layout import (
     discover_repository_root,
     safe_child_directory,
 )
+from .runtime_policy import gate_requires_runtime_receipt
 from .ssot_io import atomic_write_text
 from .stage_catalog import (
     get_stage_spec,
@@ -37,7 +47,7 @@ from .stage_catalog import (
     state_stage_for,
     validate_stage_transition,
 )
-from .transition_lock import stage_transition_lock
+from .transition_lock import stage_transition_lock, verification_execution_lock
 
 
 _SAFE_TRANSITION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -625,6 +635,29 @@ class TransitionController:
             ).encode("utf-8")
         ).hexdigest()
 
+    @classmethod
+    def _gate_config_hash(
+        cls,
+        root: Path,
+        gate_name: str = "build_to_qa",
+        gate_inputs: GateInputBundle | None = None,
+    ) -> str:
+        inputs = gate_inputs or capture_gate_input_bundle(root, gate_name)
+        with materialized_gate_input_bundle(inputs) as captured_root:
+            candidates = (
+                captured_root / ".samvil" / "gate_config.yaml",
+                captured_root / "gate_config.yaml",
+            )
+            config_path = next((path for path in candidates if path.exists()), None)
+            if config_path is None:
+                packaged = (
+                    Path(__file__).resolve().parents[2]
+                    / "references"
+                    / "gate_config.yaml"
+                )
+                config_path = packaged if packaged.exists() else None
+            return cls._json_hash(load_gate_config(config_path))
+
     async def _current_transition_receipts(
         self,
         root: Path,
@@ -648,26 +681,36 @@ class TransitionController:
         gate_receipt = await self.store.get_gate_receipt(run_id, gate_name)
         if gate_receipt is None:
             raise TransitionError(f"trusted gate receipt for {gate_name} is required")
-        try:
-            gate_root = safe_child_directory(
-                root, ".samvil/gate-receipts", label="gate receipts"
-            )
-        except RuntimeLayoutError as exc:
-            raise TransitionError(str(exc)) from exc
-        projected_gate = self._read_json(gate_root / f"{gate_name}.json")
+        projected_gate_exists, projected_gate = await asyncio.to_thread(
+            read_json_projection,
+            root,
+            f".samvil/gate-receipts/{gate_name}.json",
+        )
+        gate_inputs = await asyncio.to_thread(
+            capture_gate_input_bundle,
+            root,
+            gate_name,
+        )
+        current_gate_input_snapshot = gate_inputs.snapshot
+        persisted_gate_input_snapshot = gate_receipt.get("gate_input_snapshot")
+        gate_config_hash = await asyncio.to_thread(
+            self._gate_config_hash,
+            root,
+            gate_name,
+            gate_inputs,
+        )
         expected_authority = (
             ".samvil/build.log"
             if gate_name == "build_to_qa"
             else ".samvil/qa-results.json"
         )
-        authority_path = root / expected_authority
-        authority_hash = (
-            hashlib.sha256(authority_path.read_bytes()).hexdigest()
-            if authority_path.is_file()
-            else ""
+        authority_hash = snapshot_sha256(
+            current_gate_input_snapshot,
+            expected_authority,
         )
         if (
-            not projected_gate
+            not projected_gate_exists
+            or not projected_gate
             or self._json_hash(projected_gate) != self._json_hash(gate_receipt)
             or gate_receipt.get("kind") != "gate_receipt"
             or gate_receipt.get("gate") != gate_name
@@ -676,6 +719,11 @@ class TransitionController:
             or gate_receipt.get("trusted_by") != "samvil_mcp_gate_check"
             or gate_receipt.get("claim_id") != claim_id
             or gate_receipt.get("marker_revision") != expected_revision
+            or not isinstance(persisted_gate_input_snapshot, dict)
+            or gate_receipt.get("gate_input_snapshot_sha256")
+            != self._json_hash(persisted_gate_input_snapshot)
+            or persisted_gate_input_snapshot != current_gate_input_snapshot
+            or gate_receipt.get("gate_config_sha256") != gate_config_hash
             or gate_receipt.get("authority_path") != expected_authority
             or not authority_hash
             or gate_receipt.get("authority_sha256") != authority_hash
@@ -689,13 +737,24 @@ class TransitionController:
                 "is not current"
             )
 
-        if gate_name == "any_to_retro":
-            return runtime_receipt, gate_receipt
-
-        runtime_required = gate_name in {"build_to_qa", "qa_to_deploy"}
+        runtime_required = gate_requires_runtime_receipt(gate_name)
+        runtime_name = from_stage.removeprefix("samvil-")
+        runtime_verification_started = (
+            await self.store.has_runtime_verification_requirement(
+                run_id, from_stage
+            )
+        )
+        projection_exists, projected_runtime = json_projection_from_bundle(
+            gate_inputs,
+            f".samvil/runtime-receipts/{runtime_name}.json",
+        )
         if runtime_receipt is None:
-            if runtime_required:
+            if runtime_required or runtime_verification_started:
                 raise TransitionError("current runtime receipt must be passed")
+            if projection_exists:
+                raise TransitionError(
+                    "runtime receipt projection does not match trusted storage"
+                )
             if any(
                 gate_receipt.get(key)
                 for key in (
@@ -711,20 +770,10 @@ class TransitionController:
                 )
             return None, gate_receipt
 
-        try:
-            runtime_root = safe_child_directory(
-                root, ".samvil/runtime-receipts", label="runtime receipts"
-            )
-        except RuntimeLayoutError as exc:
-            raise TransitionError(str(exc)) from exc
-        runtime_name = from_stage.removeprefix("samvil-")
-        projected_runtime = self._read_json(runtime_root / f"{runtime_name}.json")
         runtime_authority = f".samvil/{runtime_name}.log"
-        runtime_authority_path = root / runtime_authority
-        runtime_authority_hash = (
-            hashlib.sha256(runtime_authority_path.read_bytes()).hexdigest()
-            if runtime_authority_path.is_file()
-            else ""
+        runtime_authority_hash = snapshot_sha256(
+            current_gate_input_snapshot,
+            runtime_authority,
         )
         runtime_hash = self._json_hash(runtime_receipt)
         if (
@@ -733,8 +782,14 @@ class TransitionController:
             or runtime_receipt.get("kind") != "runtime_receipt"
             or runtime_receipt.get("session_id") != run_id
             or runtime_receipt.get("stage") != from_stage
-            or runtime_receipt.get("status") != "passed"
-            or runtime_receipt.get("exit_code") != 0
+            or runtime_receipt.get("status") not in {"passed", "failed"}
+            or (
+                gate_name != "any_to_retro"
+                and (
+                    runtime_receipt.get("status") != "passed"
+                    or runtime_receipt.get("exit_code") != 0
+                )
+            )
             or runtime_receipt.get("trusted_by") != "samvil_mcp_subprocess"
             or runtime_receipt.get("claim_id") != claim_id
             or runtime_receipt.get("marker_revision") != expected_revision
@@ -1239,19 +1294,29 @@ class TransitionController:
         """Materialize one trusted transition in a fixed, recoverable order."""
         resolved_transition_id = transition_id or f"transition-{uuid.uuid4().hex}"
         self._validate_transition_id(resolved_transition_id)
-        async with stage_transition_lock(self.store, run_id):
-            return await self._commit_stage_transition_locked(
-                project_root,
+        async def commit_under_stage_lock() -> dict[str, Any]:
+            async with stage_transition_lock(self.store, run_id):
+                return await self._commit_stage_transition_locked(
+                    project_root,
+                    run_id,
+                    claim_id,
+                    from_stage,
+                    to_stage,
+                    expected_revision,
+                    event_type=event_type,
+                    data=data,
+                    transition_id=resolved_transition_id,
+                    host_name=host_name,
+                )
+
+        if from_stage in {"samvil-build", "samvil-qa"}:
+            async with verification_execution_lock(
+                self.store,
                 run_id,
-                claim_id,
                 from_stage,
-                to_stage,
-                expected_revision,
-                event_type=event_type,
-                data=data,
-                transition_id=resolved_transition_id,
-                host_name=host_name,
-            )
+            ):
+                return await commit_under_stage_lock()
+        return await commit_under_stage_lock()
 
     async def _commit_stage_transition_locked(
         self,
