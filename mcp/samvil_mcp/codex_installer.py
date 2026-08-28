@@ -2121,20 +2121,7 @@ def _native_compensation_commands(
     return tuple(commands)
 
 
-def _read_native_registry(
-    registry_reader: Any,
-    command_env: dict[str, str],
-) -> NativeRegistrySnapshot:
-    try:
-        value = registry_reader(command_env)
-    except NativeRecoveryRequired:
-        raise
-    except InstallBlocked:
-        raise
-    except BaseException as exc:
-        raise NativeRecoveryRequired(
-            f"native Codex registry readback failed: {exc}"
-        ) from exc
+def _normalize_native_registry_snapshot(value: Any) -> NativeRegistrySnapshot:
     if isinstance(value, NativeRegistrySnapshot):
         return value
     if isinstance(value, dict):
@@ -2150,9 +2137,35 @@ def _read_native_registry(
         payload = to_dict()
         if isinstance(payload, dict):
             return _registry_snapshot_from_payload(payload)
-    raise NativeRecoveryRequired(
-        "native Codex registry readback returned an invalid value"
-    )
+    raise InstallBlocked("native Codex registry readback returned an invalid value")
+
+
+def _read_native_registry(
+    registry_reader: Any,
+    command_env: dict[str, str],
+    *,
+    mutation_started: bool,
+) -> NativeRegistrySnapshot:
+    try:
+        return _normalize_native_registry_snapshot(registry_reader(command_env))
+    except NativeRecoveryRequired as exc:
+        if mutation_started:
+            raise
+        raise InstallBlocked(
+            f"native Codex registry readback failed before native mutation: {exc}"
+        ) from exc
+    except InstallBlocked as exc:
+        if mutation_started:
+            raise NativeRecoveryRequired(
+                f"native Codex registry readback failed after native mutation: {exc}"
+            ) from exc
+        raise
+    except BaseException as exc:
+        error_type = NativeRecoveryRequired if mutation_started else InstallBlocked
+        phase = "after" if mutation_started else "before"
+        raise error_type(
+            f"native Codex registry readback failed {phase} native mutation: {exc}"
+        ) from exc
 
 
 def _require_cli_registry_evidence(snapshot: NativeRegistrySnapshot) -> None:
@@ -2516,6 +2529,7 @@ def _execute_isolated_install_impl(
     registry_before = _read_native_registry(
         effective_registry_reader,
         {"CODEX_HOME": str(root), "HOME": str(root.parent)},
+        mutation_started=False,
     )
     protected_before = inventory_personal_skills(personal_root)
     backup_paths: list[Path] = []
@@ -2614,6 +2628,7 @@ def _execute_isolated_install_impl(
                 current = _read_native_registry(
                     effective_registry_reader,
                     command_env,
+                    mutation_started=True,
                 )
             except BaseException as exc:
                 raise NativeRecoveryRequired(
@@ -2683,6 +2698,7 @@ def _execute_isolated_install_impl(
         restored = _read_native_registry(
             effective_registry_reader,
             command_env,
+            mutation_started=True,
         )
         if not _registry_related_equal(registry_before, restored):
             raise NativeRecoveryRequired(
@@ -2805,6 +2821,7 @@ def _execute_isolated_install_impl(
                     current_registry = _read_native_registry(
                         effective_registry_reader,
                         command_env,
+                        mutation_started=True,
                     )
                     if not _registry_unrelated_equal(
                         registry_before,
@@ -2835,6 +2852,7 @@ def _execute_isolated_install_impl(
             activation_registry = _read_native_registry(
                 effective_registry_reader,
                 command_env,
+                mutation_started=bool(commands),
             )
             _verify_native_postcondition(
                 activation_registry,
@@ -2855,6 +2873,7 @@ def _execute_isolated_install_impl(
         registry_after = _read_native_registry(
             effective_registry_reader,
             command_env,
+            mutation_started=bool(commands),
         )
         if not _registry_unrelated_equal(registry_before, registry_after):
             raise NativeRecoveryRequired(
@@ -2936,7 +2955,9 @@ def execute_isolated_install(
         raise InstallBlocked("; ".join(readiness["blockers"]))
 
     def verified_registry_reader(env: dict[str, str]) -> NativeRegistrySnapshot:
-        snapshot = _read_native_registry(registry_reader, env)
+        # The outer executor owns mutation phase classification; this wrapper
+        # only normalizes and enforces complete Codex CLI evidence.
+        snapshot = _normalize_native_registry_snapshot(registry_reader(env))
         _require_cli_registry_evidence(snapshot)
         return snapshot
 

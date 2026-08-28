@@ -854,6 +854,33 @@ def test_public_executor_requires_native_readback_before_any_write(
     assert not codex_home.exists()
 
 
+def test_registry_read_failure_before_mutation_is_plain_blocker() -> None:
+    def broken_reader(_env: dict[str, str]) -> installer.NativeRegistrySnapshot:
+        raise RuntimeError("injected pre-mutation readback failure")
+
+    with pytest.raises(InstallBlocked) as raised:
+        installer._read_native_registry(
+            broken_reader,
+            {},
+            mutation_started=False,
+        )
+
+    assert type(raised.value) is InstallBlocked
+    assert "before native mutation" in str(raised.value)
+
+
+def test_registry_read_failure_after_mutation_requires_recovery() -> None:
+    def broken_reader(_env: dict[str, str]) -> installer.NativeRegistrySnapshot:
+        raise RuntimeError("injected post-mutation readback failure")
+
+    with pytest.raises(installer.NativeRecoveryRequired, match="after native mutation"):
+        installer._read_native_registry(
+            broken_reader,
+            {},
+            mutation_started=True,
+        )
+
+
 def test_direct_executor_blocks_generated_legacy_action_before_writes(
     tmp_path: Path,
 ) -> None:

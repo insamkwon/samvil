@@ -1509,6 +1509,7 @@ def _load_committed_receipt(
             current_registry = installer._read_native_registry(
                 registry_reader,
                 {"CODEX_HOME": str(root), "HOME": str(root.parent)},
+                mutation_started=False,
             )
             installer._require_cli_registry_evidence(current_registry)
             if (
@@ -1738,6 +1739,7 @@ def _run_locked_migration(
     locked_registry = installer._read_native_registry(
         registry_reader,
         {"CODEX_HOME": str(root), "HOME": str(root.parent)},
+        mutation_started=False,
     )
     installer._require_cli_registry_evidence(locked_registry)
     sealed_registry_available = True
@@ -2029,6 +2031,7 @@ def execute_legacy_migration(
         registry_preflight = installer._read_native_registry(
             registry_reader,
             {"CODEX_HOME": str(root), "HOME": str(root.parent)},
+            mutation_started=False,
         )
     except installer.InstallBlocked as exc:
         raise installer.InstallBlocked(
