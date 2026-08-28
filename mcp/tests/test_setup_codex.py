@@ -1429,9 +1429,10 @@ def test_legacy_migration_dry_run_blocks_ambiguous_skill_tree(
     if mutation == "content":
         (legacy / "SKILL.md").write_text("changed\n", encoding="utf-8")
     elif mutation == "file_mode":
-        (legacy / "SKILL.md").chmod(0o600)
+        manifest = legacy / "SKILL.md"
+        manifest.chmod((manifest.stat().st_mode & 0o777) ^ 0o111)
     elif mutation == "directory_mode":
-        legacy.chmod(0o700)
+        legacy.chmod((legacy.stat().st_mode & 0o777) ^ 0o011)
     elif mutation == "symlink":
         outside = tmp_path / "outside"
         outside.write_text("outside\n", encoding="utf-8")
