@@ -37,6 +37,39 @@ _setup_codex_native() {
   esac
   echo ""
   echo "Codex native plugin activation (${installer_mode})..."
+  if [[ "$installer_mode" == "--migrate" ]]; then
+    local migration_plan_file
+    local expected_plan_sha256
+    migration_plan_file="$(umask 077 && mktemp "${TMPDIR:-/tmp}/samvil-migration-plan.XXXXXX")"
+    if ! "$PYTHON_BIN" -P -m samvil_mcp.codex_installer \
+        --migrate \
+        --dry-run \
+        --repo-root "$SAMVIL_ROOT" \
+        --codex-home "$codex_profile_root" \
+        --json >"$migration_plan_file"; then
+      cat "$migration_plan_file" >&2
+      rm -f "$migration_plan_file"
+      echo "❌ Legacy Codex profile is not safe to migrate automatically." >&2
+      return 1
+    fi
+    if ! expected_plan_sha256="$(
+      "$PYTHON_BIN" -c \
+        'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["plan_sha256"])' \
+        "$migration_plan_file"
+    )"; then
+      rm -f "$migration_plan_file"
+      echo "❌ Migration dry-run did not produce a valid plan hash." >&2
+      return 1
+    fi
+    rm -f "$migration_plan_file"
+    "$PYTHON_BIN" -P -m samvil_mcp.codex_installer \
+      --migrate \
+      --expected-plan-sha256 "$expected_plan_sha256" \
+      --repo-root "$SAMVIL_ROOT" \
+      --codex-home "$codex_profile_root" \
+      --json
+    return
+  fi
   "$PYTHON_BIN" -P -m samvil_mcp.codex_installer \
     "$installer_mode" \
     --repo-root "$SAMVIL_ROOT" \
