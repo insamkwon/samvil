@@ -3182,6 +3182,40 @@ def test_isolated_migrate_moves_quoted_normalized_mcp_tool_overrides(
     )
 
 
+def test_isolated_migrate_preserves_comments_on_normalized_tool_headers(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n\n'
+        + "[mcp_servers.samvil-mcp.tools.begin_stage] # keep approval note\n"
+        + 'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        '[plugins."samvil@samvil-codex".tools.begin_stage] # keep approval note\n'
+        + 'approval_mode = "approve"\n'
+    )
+
+
 def test_isolated_migrate_never_overwrites_a_concurrent_user_file_during_rollback(
     tmp_path: Path,
 ) -> None:

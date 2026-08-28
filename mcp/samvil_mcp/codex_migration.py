@@ -782,15 +782,23 @@ def _remove_generated_direct_mcp_table(content: bytes) -> bytes:
         for candidate in lines:
             candidate_body = body(candidate)
             stripped = candidate_body.strip()
-            if multiline_delimiter is None and stripped.endswith("]"):
+            if multiline_delimiter is None:
                 for legacy_tools_header in legacy_tools_headers:
                     if not stripped.startswith(legacy_tools_header):
+                        continue
+                    closing_index = stripped.find("]", len(legacy_tools_header))
+                    if closing_index < 0:
+                        continue
+                    trailing = stripped[closing_index + 1 :].strip()
+                    if trailing and not trailing.startswith("#"):
                         continue
                     start = candidate_body.index(legacy_tools_header)
                     candidate_body = (
                         candidate_body[:start]
                         + native_tools_header
-                        + candidate_body[start + len(legacy_tools_header) :]
+                        + candidate_body[
+                            start + len(legacy_tools_header) :
+                        ]
                     )
                     newline = candidate[len(body(candidate)) :]
                     candidate = candidate_body + newline
