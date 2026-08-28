@@ -9,7 +9,7 @@ Ensure build passes (`npm run build` succeeds).
 
 1. Run MCP tool `read_chain_marker(project_root="${PWD}")`.
 2. Read `project.seed.json` for AC tree and acceptance criteria.
-3. **Pass 1 — Mechanical**: Run `npm run build`, lint, typecheck. Record results.
+3. **Pass 1 — Mechanical**: Call `run_stage_verification(project_root=".", run_id=<run_id>, stage="samvil-qa", command_json="")`. The MCP resolves the exact test command from `.samvil/mechanical.toml`; callers cannot substitute another argv. A non-`passed` result halts. Run any additional build, lint, and typecheck checks and record them separately.
 4. **Pass 2 — Semantic**: For each AC leaf, verify implementation matches description.
    Use `grep`/`Read` to find file:line evidence. No evidence = FAIL.
 5. **Pass 3 — Quality**: Check responsive design, accessibility basics, code structure.
@@ -22,10 +22,8 @@ Ensure build passes (`npm run build` succeeds).
    - Retro → `gate_name="any_to_retro"`, `metrics_json='{"always_run":true}'`.
    - QA continue → no cross-stage gate or marker; apply the reported fixes and repeat the Ralph loop.
    Tool error or block halts; no marker is written.
-10. Only after materialize + gate PASS, run `complete_stage(session_id=<sid>, stage="qa", verdict="<pass|fail|blocked>")`: map synthesis PASS→`pass`, FAIL→`fail`, and convergence BLOCKED→`blocked`. Exact `status="ok"` is required. For `samvil-qa` continue, do not complete the stage.
-11. Only after trusted completion for Deploy/Evolve/Retro, run `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-qa", next_skill="<finalize.next_skill_decision.suggested>")`. For `samvil-qa`, remain in the current stage and do not write a marker.
+10. Only after materialize + gate PASS, return `requested_next_skill=<finalize.next_skill_decision.suggested>` and the evidence to the native run driver. The driver owns `commit_stage_transition`; this stage instruction must not call `complete_stage` or write a marker directly. For `samvil-qa` continue, return the revision result without requesting a cross-stage commit.
 
 ## Chain
 
-After completing: read `.samvil/next-skill.json` for the dynamic Deploy/Evolve/Retro route.
-Tell the user the next command to run.
+After the native driver commits, reread the durable envelope for the selected Deploy/Evolve/Retro route.

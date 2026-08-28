@@ -417,6 +417,46 @@ class ClaimLedger:
             "is installed. Halt at the blocked gate."
         )
 
+    def append_transition_claim(
+        self,
+        *,
+        transition_id: str,
+        subject: str,
+        statement: str,
+        authority_file: str,
+        claimed_by: str = "transition-controller",
+        evidence: list[str] | None = None,
+    ) -> Claim:
+        """Append an internal transition receipt exactly once.
+
+        This is deliberately separate from :meth:`post`: callers cannot use
+        it to mint user approvals or gate overrides.  Idempotency is keyed by
+        ``meta.transition_id`` and verified receipts are never rewritten.
+        """
+        if not transition_id:
+            raise ClaimLedgerError("transition_id is required")
+        with _locked(self.path):
+            for current in self._latest_by_id().values():
+                if current.meta.get("transition_id") == transition_id:
+                    return current
+            ts = _now_iso()
+            seq = self._next_seq(self._latest_by_id().keys(), ts)
+            claim = Claim(
+                claim_id=_claim_id(ts, seq),
+                type="evolve_decision",
+                subject=subject,
+                statement=statement,
+                authority_file=authority_file,
+                evidence=list(evidence or []),
+                claimed_by=claimed_by,
+                status="verified",
+                verified_by="transition-controller",
+                ts=ts,
+                meta={"transition_id": transition_id},
+            )
+            self._append(claim)
+            return claim
+
     def consume_gate_override(self, gate: str) -> Claim | None:
         """Return no override until trusted host attestations are implemented."""
         return None

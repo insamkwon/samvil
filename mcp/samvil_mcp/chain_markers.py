@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,9 +32,18 @@ from .host_adapters import (
     get_chain_continuation as _get_chain_continuation,
 )
 from .ssot_io import atomic_write_text
+from .stage_catalog import get_stage_spec, validate_stage_transition
 
 MARKER_FILENAME = "next-skill.json"
 SAMVIL_DIR = ".samvil"
+_DRIVER_STATUSES = {"ready", "in_progress", "waiting_user", "blocked", "terminal"}
+
+
+@dataclass(frozen=True)
+class MarkerInspection:
+    classification: str
+    marker: dict[str, Any] | None = None
+    reason: str = ""
 
 
 def write_chain_marker(
@@ -47,6 +57,15 @@ def write_chain_marker(
     Creates `.samvil/next-skill.json` with chain continuation data.
     Returns the marker dict that was written.
     """
+    inspection = inspect_chain_marker(project_root)
+    if inspection.classification == "valid":
+        existing = dict(inspection.marker or {})
+        if (
+            existing.get("status") in {"ready", "terminal"}
+            and existing.get("from_stage") == current_skill
+        ):
+            return existing
+        raise ValueError("host driver owns transition marker")
     marker = _build_chain_marker(host_name, current_skill, next_skill)
     marker_path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
     atomic_write_text(marker_path, json.dumps(marker, indent=2))
@@ -94,13 +113,91 @@ def read_chain_marker(
     marker_path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
     if not marker_path.exists():
         return None
-
     try:
         data = json.loads(marker_path.read_text())
         return data if isinstance(data, dict) else None
     except (json.JSONDecodeError, OSError):
         return None
 
+
+def _validate_driver_marker(marker: dict[str, Any]) -> None:
+    if marker.get("schema_version") != "1.1":
+        raise ValueError("driver marker must use schema_version 1.1")
+    if not isinstance(marker.get("run_id"), str) or not marker["run_id"].strip():
+        raise ValueError("run_id is required")
+    revision = marker.get("revision")
+    if type(revision) is not int or revision < 0:
+        raise ValueError("revision must be a non-negative integer")
+    if marker.get("status") not in _DRIVER_STATUSES:
+        raise ValueError("invalid driver marker status")
+    if marker.get("chain_via") != "host_driver":
+        raise ValueError("driver marker must use host_driver chaining")
+    for field in ("host_name", "from_stage", "reason", "written_at"):
+        if not isinstance(marker.get(field), str) or not marker[field].strip():
+            raise ValueError(f"{field} is required")
+    get_stage_spec(marker["from_stage"])
+    next_skill = marker.get("next_skill")
+    if not isinstance(next_skill, str):
+        raise ValueError("next_skill must be a string")
+    if next_skill and not validate_stage_transition(marker["from_stage"], next_skill):
+        raise ValueError(f"invalid stage transition: {marker['from_stage']} -> {next_skill}")
+
+
+def build_driver_marker(
+    *,
+    run_id: str,
+    revision: int,
+    status: str,
+    host_name: str,
+    from_stage: str,
+    next_skill: str,
+    reason: str,
+    written_at: str | None = None,
+) -> dict[str, Any]:
+    marker = {
+        "schema_version": "1.1",
+        "run_id": run_id,
+        "revision": revision,
+        "status": status,
+        "chain_via": "host_driver",
+        "host_name": host_name,
+        "next_skill": next_skill,
+        "from_stage": from_stage,
+        "reason": reason,
+        "written_at": written_at or datetime.now(timezone.utc).isoformat(),
+    }
+    _validate_driver_marker(marker)
+    return marker
+
+
+def write_driver_marker(project_root: str, marker: dict[str, Any]) -> dict[str, Any]:
+    _validate_driver_marker(marker)
+    marker_path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
+    atomic_write_text(marker_path, json.dumps(marker, indent=2, ensure_ascii=False))
+    return dict(marker)
+
+
+def inspect_chain_marker(project_root: str) -> MarkerInspection:
+    """Classify marker state without collapsing corrupt/unsupported into missing."""
+    marker_path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
+    if not marker_path.exists():
+        return MarkerInspection("missing", reason="marker does not exist")
+    try:
+        data = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeError) as exc:
+        return MarkerInspection("corrupt", reason=str(exc))
+    if not isinstance(data, dict):
+        return MarkerInspection("corrupt", reason="marker must be an object")
+    schema = data.get("schema_version", "1.0")
+    if schema == "1.0":
+        return MarkerInspection("legacy", marker=data)
+    if schema != "1.1":
+        return MarkerInspection("unsupported", marker=data, reason=f"unknown schema: {schema!r}")
+    try:
+        _validate_driver_marker(data)
+    except (TypeError, ValueError) as exc:
+        return MarkerInspection("corrupt", marker=data, reason=str(exc))
+    return MarkerInspection("valid", marker=data)
 
 def _read_project_json(path: Path) -> dict[str, Any]:
     try:

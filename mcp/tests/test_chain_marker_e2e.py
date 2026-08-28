@@ -138,6 +138,15 @@ class TestCommandFileCorrectness:
     def test_all_codex_md_reference_write_chain_marker(self):
         for md_file in self.CODEX_CMD_DIR.glob("*.md"):
             content = md_file.read_text()
+            if md_file.name in {
+                "samvil-analyze.md",
+                "samvil-build.md",
+                "samvil-pm-interview.md",
+                "samvil-qa.md",
+            }:
+                assert "native run driver" in content
+                assert "write_chain_marker(" not in content
+                continue
             assert "write_chain_marker" in content, (
                 f"{md_file.name} does not reference write_chain_marker"
             )

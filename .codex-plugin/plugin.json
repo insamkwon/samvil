@@ -1,0 +1,14 @@
+{
+  "name": "samvil",
+  "version": "4.33.0",
+  "description": "Codex-first trustworthy app-building harness.",
+  "skills": "./codex/skills/",
+  "mcpServers": "./.codex-mcp.json",
+  "interface": {
+    "displayName": "SAMVIL",
+    "shortDescription": "Interview, build, verify, and resume apps in Codex",
+    "developerName": "insam",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Read", "Write"]
+  }
+}

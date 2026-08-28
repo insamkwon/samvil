@@ -14,9 +14,21 @@ Graceful Degradation (INV-7):
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import hashlib
 import json
 import os
+import select
+import secrets
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +87,10 @@ from .scaffold_targets import (
     evaluate_scaffold_target as _evaluate_scaffold_target,
 )
 from .ssot_io import atomic_write_text
+from .runtime_layout import RuntimeLayoutError, safe_child_directory
+from .runtime_policy import gate_requires_runtime_receipt
 from .event_sanitizer import (
+    redact_sensitive_text,
     sanitize_event_data,
     sanitize_event_label,
     sanitize_stage_label,
@@ -88,6 +103,14 @@ from .build_phase_b import (
 )
 from .build_phase_z import (
     finalize_build_phase_z as _finalize_build_phase_z,
+)
+from .gate_snapshot import (
+    GateInputBundle,
+    capture_gate_input_bundle,
+    capture_gate_input_snapshot,
+    json_projection_from_bundle,
+    materialized_gate_input_bundle,
+    snapshot_sha256,
 )
 from .qa_boot import (
     aggregate_qa_boot_context as _aggregate_qa_boot_context,
@@ -174,6 +197,7 @@ from .orchestrator import (
     stage_can_proceed as _orchestrator_stage_can_proceed,
 )
 from .event_store import EventStore
+from .transition_lock import stage_transition_lock, verification_execution_lock
 from .gates import (
     DEFAULT_CONFIG as GATE_DEFAULT_CONFIG,
     GateName,
@@ -194,6 +218,7 @@ from .chain_markers import (
     advance_chain as _advance_chain,
     clear_chain_marker as _clear_chain_marker,
     get_pipeline_status as _get_pipeline_status,
+    inspect_chain_marker,
     read_chain_marker as _read_chain_marker,
     write_chain_marker as _write_chain_marker,
 )
@@ -267,42 +292,14 @@ mcp = FastMCP("samvil-mcp")
 # Default DB path — can be overridden via environment
 DB_PATH = Path.home() / ".samvil" / "samvil.db"
 _store: EventStore | None = None
-_stage_transition_locks: dict[str, asyncio.Lock] = {}
-
-
-class _AsyncFileLock:
-    """Acquire the existing cross-process flock without blocking the event loop."""
-
-    def __init__(self, path: Path):
-        self._path = path
-        self._context: Any = None
-
-    async def __aenter__(self) -> "_AsyncFileLock":
-        context = _file_locked(self._path)
-        await asyncio.to_thread(context.__enter__)
-        self._context = context
-        return self
-
-    async def __aexit__(self, exc_type, exc, traceback) -> None:
-        context = self._context
-        self._context = None
-        if context is not None:
-            await asyncio.to_thread(context.__exit__, exc_type, exc, traceback)
-
-
-def _stage_transition_lock_path(store: EventStore, session_id: str) -> Path:
-    """Return one stable lock target for a DB/session pair across MCP processes."""
-    db_path = Path(store.db_path).expanduser().resolve()
-    session_key = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
-    return db_path.parent / f".{db_path.name}.stage-transitions" / session_key
-
-
 async def get_store() -> EventStore:
     global _store
     if _store is None:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _store = EventStore(str(DB_PATH))
-        await _store.initialize()
+        candidate = EventStore(str(DB_PATH))
+        await candidate.initialize()
+        if _store is None:
+            _store = candidate
     return _store
 
 
@@ -392,8 +389,9 @@ async def create_session(
     samvil_tier: str = "standard",
     agent_tier: str | None = None,  # glossary-allow: deprecated alias, removed in v3.3
     project_root: str = "",
+    initial_skill: str = "samvil-interview",
 ) -> str:
-    """Create a new SAMVIL session for a project. Returns session ID.
+    """Create a SAMVIL session with an explicit native entry skill.
 
     v3.2: the legacy parameter was renamed to ``samvil_tier`` in the
     glossary sweep. The old parameter name is still accepted for one
@@ -423,13 +421,18 @@ async def create_session(
                 normalized_root = str(inferred_root.resolve())
         store = await get_store()
         session = await store.create_session(
-            project_name, samvil_tier, project_root=normalized_root
+            project_name,
+            samvil_tier,
+            project_root=normalized_root,
+            initial_skill=initial_skill,
         )
         return json.dumps({
             "session_id": session.id,
             "project_name": project_name,
             "project_root": session.project_root,
             "tier": samvil_tier,
+            "initial_skill": session.active_skill,
+            "current_stage": session.current_stage.value,
         })
     except Exception as e:
         _log_mcp_health("fail", "create_session", str(e))
@@ -448,6 +451,7 @@ async def get_session(session_id: str) -> str:
         "project_name": session.project_name,
         "project_root": session.project_root,
         "current_stage": session.current_stage,
+        "active_skill": session.active_skill,
         "seed_version": session.seed_version,
         "samvil_tier": session.samvil_tier,
         "created_at": session.created_at,
@@ -713,7 +717,7 @@ async def _reconcile_pending_project_events(
     project_path: Path,
 ) -> list[dict[str, Any]]:
     reconciled: list[dict[str, Any]] = []
-    async with _AsyncFileLock(_stage_transition_lock_path(store, session_id)):
+    async with stage_transition_lock(store, session_id):
         pending = await store.get_pending_project_events(session_id)
         if not pending:
             return reconciled
@@ -786,17 +790,23 @@ def _append_project_event_rows(
     index_path = path.with_suffix(path.suffix + ".index")
     path.parent.mkdir(parents=True, exist_ok=True)
     with _file_locked(path):
-        _validate_existing_event_log(path)
+        trusted_line_count = _trusted_event_line_count(path, index_path)
+        if trusted_line_count is None:
+            _validate_existing_event_log(path)
         current_size: int | None = None
         try:
             with path.open("a+", encoding="utf-8") as handle:
                 handle.seek(0, os.SEEK_END)
                 current_size = handle.tell()
                 needs_separator = _event_file_needs_separator(path)
-                line_count = _indexed_event_line_count(
-                    handle,
-                    index_path,
-                    current_size=current_size,
+                line_count = (
+                    trusted_line_count
+                    if trusted_line_count is not None
+                    else _indexed_event_line_count(
+                        handle,
+                        index_path,
+                        current_size=current_size,
+                    )
                 )
                 if needs_separator:
                     handle.write("\n")
@@ -822,7 +832,7 @@ def _append_project_event_rows(
         try:
             atomic_write_text(
                 index_path,
-                json.dumps({"size": new_size, "line_count": final_line_count}),
+                json.dumps(_event_index_payload(path, final_line_count)),
             )
         except OSError as exc:
             _log_mcp_health("warn", "save_event.events_index", str(exc))
@@ -844,6 +854,43 @@ def _event_file_needs_separator(path: Path) -> bool:
 def _scan_event_line_count(handle: Any) -> int:
     handle.seek(0)
     return sum(1 for _ in handle)
+
+
+def _event_index_payload(path: Path, line_count: int) -> dict[str, int]:
+    stat = path.stat()
+    return {
+        "size": int(stat.st_size),
+        "line_count": int(line_count),
+        "mtime_ns": int(stat.st_mtime_ns),
+        "ctime_ns": int(stat.st_ctime_ns),
+        "device": int(stat.st_dev),
+        "inode": int(stat.st_ino),
+    }
+
+
+def _trusted_event_line_count(path: Path, index_path: Path) -> int | None:
+    """Trust an index only while the exact indexed file identity is unchanged."""
+    if not path.exists():
+        return 0
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        stat = path.stat()
+        fingerprint = {
+            "size": int(stat.st_size),
+            "mtime_ns": int(stat.st_mtime_ns),
+            "ctime_ns": int(stat.st_ctime_ns),
+            "device": int(stat.st_dev),
+            "inode": int(stat.st_ino),
+        }
+        if (
+            isinstance(index, dict)
+            and int(index.get("line_count", -1)) >= 0
+            and all(int(index.get(key, -1)) == value for key, value in fingerprint.items())
+        ):
+            return int(index["line_count"])
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return None
 
 
 def _indexed_event_line_count(
@@ -1214,6 +1261,276 @@ async def get_orchestration_state(
 
 
 @mcp.tool()
+async def get_stage_envelope(project_root: str, host_name: str = "codex_cli") -> str:
+    """Read the durable stage envelope without creating or mutating state."""
+    from .transition_controller import TransitionController
+
+    try:
+        result = await TransitionController(await get_store()).get_stage_envelope(project_root, host_name)
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as exc:
+        _log_mcp_health("fail", "get_stage_envelope", str(exc))
+        return json.dumps({"status": "blocked", "error": str(exc)})
+
+
+@mcp.tool()
+async def begin_stage(project_root: str, run_id: str, stage: str, expected_revision: int) -> str:
+    """Create or reuse one durable stage claim through the shared controller."""
+    from .transition_controller import TransitionController
+
+    try:
+        if type(expected_revision) is not int:
+            raise ValueError("expected_revision must be an integer")
+        result = await TransitionController(await get_store()).begin_stage(project_root, run_id, stage, expected_revision)
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as exc:
+        _log_mcp_health("fail", "begin_stage", str(exc))
+        return json.dumps({"status": "blocked", "error": str(exc)})
+
+
+@mcp.tool()
+async def commit_stage_transition(
+    project_root: str,
+    run_id: str,
+    stage: str,
+    expected_revision: int,
+    claim_id: str,
+    verdict: str,
+    evidence_json: str = "{}",
+    requested_next_skill: str = "",
+    transition_id: str = "",
+) -> str:
+    """Commit one trusted stage transition; caller choice never overrides a gate."""
+    from .transition_controller import TransitionController
+
+    try:
+        if type(expected_revision) is not int:
+            raise ValueError("expected_revision must be an integer")
+        evidence = json.loads(evidence_json or "{}")
+        if not isinstance(evidence, dict):
+            raise ValueError("evidence_json must encode an object")
+        controller = TransitionController(await get_store())
+        recovery_retry = bool(
+            transition_id
+            and await controller.matches_transition_retry(
+                project_root,
+                transition_id=transition_id,
+                run_id=run_id,
+                claim_id=claim_id,
+                from_stage=stage,
+                expected_revision=expected_revision,
+            )
+        )
+        if transition_id:
+            existing_record = await controller.store.get_transition_receipt_record(transition_id)
+            if existing_record is not None:
+                owner, existing = existing_record
+                if owner != run_id:
+                    raise ValueError("transition receipt belongs to another run")
+                root = Path(project_root).expanduser().resolve(strict=False)
+                session = await controller.store.get_session(run_id)
+                if (
+                    session is None
+                    or Path(session.project_root).expanduser().resolve(strict=False) != root
+                ):
+                    raise ValueError("run_id does not own project root")
+                if any(
+                    existing.get(key) != expected
+                    for key, expected in (
+                        ("claim_id", claim_id),
+                        ("from_stage", stage),
+                        ("marker_revision", expected_revision + 1),
+                    )
+                ):
+                    raise ValueError("transition id conflicts with a different transition")
+                to_stage = str(existing.get("to_stage") or "")
+                event = await controller.store.get_event_by_id(str(existing.get("event_id") or ""))
+                if (
+                    (requested_next_skill and requested_next_skill != to_stage)
+                    or (
+                        event is not None
+                        and bool(event.data.get("user_choice"))
+                        and not requested_next_skill
+                    )
+                ):
+                    raise ValueError("transition id conflicts with a different route")
+                expected_data = sanitize_event_data(
+                    {
+                        "verdict": verdict,
+                        "evidence": evidence,
+                    }
+                )
+                if (
+                    event is None
+                    or event.session_id != run_id
+                    or any(event.data.get(key) != value for key, value in expected_data.items())
+                ):
+                    raise ValueError("transition id conflicts with different commit inputs")
+                replayed = await controller.commit_stage_transition(
+                    project_root,
+                    run_id,
+                    claim_id,
+                    stage,
+                    to_stage,
+                    expected_revision,
+                    data=expected_data,
+                    transition_id=transition_id,
+                )
+                return json.dumps(replayed, ensure_ascii=False)
+        if (
+            not recovery_retry
+            and str(verdict or "").upper()
+            in {"PASS", "PASSED", "OK", "COMPLETE"}
+        ):
+            from .evidence_validator import parse_evidence, validate_evidence_list
+
+            def evidence_strings(value: Any) -> list[str]:
+                if isinstance(value, str):
+                    return [value]
+                if isinstance(value, dict):
+                    return [item for nested in value.values() for item in evidence_strings(nested)]
+                if isinstance(value, list):
+                    return [item for nested in value for item in evidence_strings(nested)]
+                return []
+
+            references = [item for item in evidence_strings(evidence) if parse_evidence(item)]
+            validation = validate_evidence_list(references, project_root)
+            required_artifacts = {
+                "samvil-interview": {"interview-summary.md"},
+                "samvil-seed": {"project.seed.json"},
+                "samvil-council": {".samvil/council-results.md"},
+                "samvil-design": {"project.blueprint.json"},
+                "samvil-scaffold": {".samvil/scaffold-results.json"},
+                "samvil-build": {".samvil/build.log"},
+                "samvil-qa": {".samvil/qa-results.json"},
+                "samvil-deploy": {".samvil/deploy-results.json"},
+                "samvil-evolve": {"project.seed.json"},
+                "samvil-retro": {".samvil/retro-results.md"},
+            }.get(stage, set())
+            cited_paths = set()
+            for item in references:
+                parsed = parse_evidence(item)
+                if not parsed:
+                    continue
+                cited = str(parsed["file"])
+                cited_paths.add(cited[2:] if cited.startswith("./") else cited)
+            artifact_valid = not required_artifacts or bool(required_artifacts & cited_paths)
+            if not references or not validation["all_valid"] or not artifact_valid:
+                return json.dumps(
+                    {
+                        "status": "blocked",
+                        "stage": stage,
+                        "reason": "trusted stage artifact file:line evidence is required",
+                        "required_artifacts": sorted(required_artifacts),
+                        "evidence_validation": validation,
+                    },
+                    ensure_ascii=False,
+                )
+        envelope = await controller.get_stage_envelope(project_root, "codex_cli")
+        if envelope.get("status") in {"waiting_user", "blocked", "complete"}:
+            return json.dumps({"status": envelope["status"], "stop_reason": envelope.get("stop_reason", "")})
+        qa_results = None
+        if stage == "samvil-qa":
+            qa_results = controller._read_json(
+                Path(project_root).expanduser().resolve(strict=False)
+                / ".samvil"
+                / "qa-results.json"
+            )
+        decision = controller.decide_next_stage(
+            stage,
+            verdict,
+            requested_next_skill=requested_next_skill,
+            qa_results=qa_results,
+        )
+        next_skill = str(decision.get("next_skill") or "")
+        if decision.get("status") != "ready" or next_skill == stage or not next_skill:
+            return json.dumps(
+                {
+                    **decision,
+                    "stage": stage,
+                    "marker_revision": expected_revision,
+                },
+                ensure_ascii=False,
+            )
+        if stage == "samvil-build":
+            root = Path(project_root).expanduser().resolve(strict=False)
+            build_path = root / ".samvil" / "build.log"
+            build_hash = hashlib.sha256(build_path.read_bytes()).hexdigest() if build_path.is_file() else ""
+            receipt = controller._read_json(
+                root / ".samvil" / "gate-receipts" / "build_to_qa.json"
+            )
+            db_receipt = await controller.store.get_gate_receipt(
+                run_id, "build_to_qa"
+            ) or {}
+            if (
+                receipt.get("verdict") != "pass"
+                or receipt.get("authority_path") != ".samvil/build.log"
+                or receipt.get("authority_sha256") != build_hash
+                or receipt.get("marker_revision") != expected_revision
+                or receipt.get("claim_id") != claim_id
+                or db_receipt.get("verdict") != "pass"
+                or db_receipt.get("authority_sha256") != build_hash
+                or db_receipt.get("marker_revision") != expected_revision
+                or db_receipt.get("claim_id") != claim_id
+            ):
+                return json.dumps(
+                    {
+                        "status": "blocked",
+                        "stage": stage,
+                        "reason": "trusted gate receipt for build_to_qa is required",
+                    },
+                    ensure_ascii=False,
+                )
+        if stage == "samvil-qa":
+            gate_for_route = {
+                "samvil-evolve": "qa_to_evolve",
+                "samvil-retro": "any_to_retro",
+                "samvil-deploy": "qa_to_deploy",
+            }.get(next_skill, "")
+            receipt_path = (
+                Path(project_root).expanduser().resolve(strict=False)
+                / ".samvil"
+                / "gate-receipts"
+                / f"{gate_for_route}.json"
+            )
+            qa_path = Path(project_root).expanduser().resolve(strict=False) / ".samvil" / "qa-results.json"
+            receipt = controller._read_json(receipt_path) if gate_for_route else {}
+            qa_hash = hashlib.sha256(qa_path.read_bytes()).hexdigest() if qa_path.is_file() else ""
+            db_receipt = await controller.store.get_gate_receipt(
+                run_id, gate_for_route
+            ) or {}
+            if (
+                not gate_for_route
+                or receipt.get("gate") != gate_for_route
+                or receipt.get("verdict") != "pass"
+                or receipt.get("qa_results_sha256") != qa_hash
+                or receipt.get("marker_revision") != expected_revision
+                or receipt.get("claim_id") != claim_id
+                or db_receipt.get("verdict") != "pass"
+                or db_receipt.get("qa_results_sha256") != qa_hash
+                or db_receipt.get("marker_revision") != expected_revision
+                or db_receipt.get("claim_id") != claim_id
+            ):
+                return json.dumps(
+                    {
+                        "status": "blocked",
+                        "stage": stage,
+                        "reason": f"trusted gate receipt for {gate_for_route or 'QA route'} is required",
+                    },
+                    ensure_ascii=False,
+                )
+        result = await controller.commit_stage_transition(
+            project_root, run_id, claim_id, stage, next_skill, expected_revision,
+            data={"verdict": verdict, "evidence": evidence, "user_choice": bool(requested_next_skill)},
+            transition_id=transition_id or None,
+        )
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as exc:
+        _log_mcp_health("fail", "commit_stage_transition", str(exc))
+        return json.dumps({"status": "blocked", "error": str(exc)})
+
+
+@mcp.tool()
 async def complete_stage(
     session_id: str,
     stage: str,
@@ -1284,6 +1601,66 @@ async def complete_stage(
         )
         event_data = dict(plan["event_data"])
         event_data["trusted_transition"] = True
+
+        # Codex-native callers begin a v1.1 claim before invoking this legacy
+        # compatibility tool. In that case use the shared controller as the
+        # single persistence boundary; the historical path below remains only
+        # for Claude/older hosts that have not established a driver claim.
+        from .chain_markers import inspect_chain_marker
+        from .transition_controller import TransitionController
+
+        marker_inspection = inspect_chain_marker(str(project_path))
+        from_skill = f"samvil-{stage}"
+        active_driver_claim = await store.get_active_stage_claim(
+            session_id, from_skill
+        )
+        marker_owns_active_claim = bool(
+            active_driver_claim is not None
+            and marker_inspection.classification == "valid"
+            and marker_inspection.marker.get("run_id") == session_id
+            and marker_inspection.marker.get("status") == "in_progress"
+            and marker_inspection.marker.get("from_stage") == from_skill
+            and int(marker_inspection.marker.get("revision", -1))
+            == active_driver_claim["marker_revision"]
+        )
+        if active_driver_claim is not None and not marker_owns_active_claim:
+            raise OrchestratorError(
+                "active driver claim requires its valid in-progress marker"
+            )
+        if (
+            verdict in ("pass", "complete")
+            and marker_owns_active_claim
+        ):
+            controller = TransitionController(store)
+            expected_revision = int(marker_inspection.marker.get("revision", 0))
+            next_stage = plan.get("next_stage")
+            if not next_stage:
+                raise OrchestratorError(f"stage {stage!r} has no shared-controller next stage")
+            to_skill = f"samvil-{next_stage}"
+            claim = active_driver_claim
+            event_data["event_type_raw"] = plan["event_type"]
+            receipt = await controller.commit_stage_transition(
+                str(project_path),
+                session_id,
+                claim["claim_id"],
+                from_skill,
+                to_skill,
+                expected_revision,
+                event_type="stage_change",
+                data=event_data,
+                transition_id=f"legacy-{session_id}-{stage}-{expected_revision}",
+            )
+            if receipt.get("status") == "blocked":
+                return json.dumps({"status": "error", "error": receipt.get("reason", "transition blocked")})
+            return json.dumps({
+                "status": "ok",
+                "event_id": receipt.get("event_id"),
+                "claim_id": receipt.get("claim_id"),
+                "claim_saved": True,
+                "next_stage": next_stage,
+                "shared_controller": True,
+            })
+
         try:
             event_type_enum = EventType(plan["event_type"])
         except ValueError:
@@ -1291,65 +1668,58 @@ async def complete_stage(
             event_data.setdefault("event_type_raw", plan["event_type"])
         stage_enum = Stage(plan["event_stage"])
 
-        transition_lock = _stage_transition_locks.setdefault(
-            session_id,
-            asyncio.Lock(),
-        )
-        async with transition_lock:
-            async with _AsyncFileLock(
-                _stage_transition_lock_path(store, session_id)
-            ):
-                transition = await store.save_event_and_update_stage(
+        async with stage_transition_lock(store, session_id):
+            transition = await store.save_event_and_update_stage(
+                session_id=session_id,
+                data=event_data,
+                event_type=event_type_enum,
+                stage=stage_enum,
+                expected_stage=Stage(stage),
+            )
+            event = transition.event
+            try:
+                await asyncio.to_thread(
+                    _append_project_event,
+                    project_path,
+                    timestamp=event.timestamp,
+                    event_type=plan["event_type"],
+                    stage=_canonical_stage_for_event(
+                        plan["event_type"], stage_enum.value
+                    ),
                     session_id=session_id,
                     data=event_data,
-                    event_type=event_type_enum,
-                    stage=stage_enum,
-                    expected_stage=Stage(stage),
+                    event_id=event.id,
                 )
-                event = transition.event
+            except Exception as exc:
+                _log_mcp_health("fail", "complete_stage.events_ssot", str(exc))
+                db_rolled_back = False
+                rollback_error = ""
                 try:
-                    await asyncio.to_thread(
-                        _append_project_event,
-                        project_path,
-                        timestamp=event.timestamp,
-                        event_type=plan["event_type"],
-                        stage=_canonical_stage_for_event(
-                            plan["event_type"], stage_enum.value
+                    db_rolled_back = await store.delete_event_and_restore_stage(
+                        transition
+                    )
+                except Exception as rollback_exc:
+                    rollback_error = str(rollback_exc)
+                    _log_mcp_health(
+                        "fail",
+                        "complete_stage.events_ssot_rollback",
+                        rollback_error,
+                    )
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "event_id": event.id,
+                        "canonical_saved": False,
+                        "db_rolled_back": db_rolled_back,
+                        "partial_persistence": not db_rolled_back,
+                        "error": str(exc),
+                        **(
+                            {"rollback_error": rollback_error}
+                            if rollback_error
+                            else {}
                         ),
-                        session_id=session_id,
-                        data=event_data,
-                        event_id=event.id,
-                    )
-                except Exception as exc:
-                    _log_mcp_health("fail", "complete_stage.events_ssot", str(exc))
-                    db_rolled_back = False
-                    rollback_error = ""
-                    try:
-                        db_rolled_back = await store.delete_event_and_restore_stage(
-                            transition
-                        )
-                    except Exception as rollback_exc:
-                        rollback_error = str(rollback_exc)
-                        _log_mcp_health(
-                            "fail",
-                            "complete_stage.events_ssot_rollback",
-                            rollback_error,
-                        )
-                    return json.dumps(
-                        {
-                            "status": "error",
-                            "event_id": event.id,
-                            "canonical_saved": False,
-                            "db_rolled_back": db_rolled_back,
-                            "partial_persistence": not db_rolled_back,
-                            "error": str(exc),
-                            **(
-                                {"rollback_error": rollback_error}
-                                if rollback_error
-                                else {}
-                            ),
-                        }
-                    )
+                    }
+                )
 
         try:
             await store.acknowledge_pending_project_event(event.id)
@@ -3535,30 +3905,44 @@ def _config_path_for(project_root: str) -> str | None:
 
 
 def _mechanical_gate_evidence(
-    project_root: str, gate_name: str
+    project_root: str,
+    gate_name: str,
+    trusted_receipt: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Return mechanical metrics, required thresholds, and source evidence."""
     from .stage_evidence import collect_stage_evidence as _collect
 
     if gate_name == "build_to_qa":
-        evidence = _collect(project_root, "build")
+        evidence = _collect(
+            project_root, "build", trusted_receipt=trusted_receipt
+        )
+        phase_z = _finalize_build_phase_z(project_root)
+        implementation_rate = float(
+            (phase_z.get("metrics") or {}).get("implementation_rate", 0.0)
+        )
         return (
             {
                 "build_ok": bool(
                     evidence["build"]["runtime_verified"]
                     and evidence["build"]["exit_code"] == 0
-                )
+                ),
+                "implementation_rate": implementation_rate,
             },
             {"build_ok": True},
-            evidence,
+            {**evidence, "build_phase_z": phase_z},
         )
     if gate_name == "qa_to_deploy":
-        evidence = _collect(project_root, "qa")
+        evidence = _collect(
+            project_root, "qa", trusted_receipt=trusted_receipt
+        )
         npm_test = evidence["qa"]["npm_test"]
         decided = npm_test["passed"] + npm_test["failed"]
-        pass_rate = npm_test["passed"] / decided if decided else 0.0
+        tests_ran = bool(npm_test["ran"] and decided > 0)
+        pass_rate = npm_test["passed"] / decided if tests_ran else 0.0
         runtime_verified = bool(
-            evidence["qa"]["runtime_verified"] and npm_test["exit_code"] is not None
+            evidence["qa"]["runtime_verified"]
+            and tests_ran
+            and npm_test["exit_code"] is not None
         )
         return (
             {
@@ -3573,9 +3957,1382 @@ def _mechanical_gate_evidence(
             },
             evidence,
         )
+    if gate_name == "qa_to_evolve":
+        root = Path(project_root).expanduser().resolve(strict=False)
+        evidence = _collect(
+            project_root, "qa", trusted_receipt=trusted_receipt
+        )
+        qa_path = root / ".samvil" / "qa-results.json"
+        qa = json.loads(qa_path.read_text(encoding="utf-8")) if qa_path.is_file() else {}
+        synthesis = qa.get("synthesis") if isinstance(qa, dict) else {}
+        if not isinstance(synthesis, dict):
+            synthesis = {}
+        pass1_status = str((synthesis.get("pass1") or {}).get("status") or "").upper()
+        pass3_verdict = str((synthesis.get("pass3") or {}).get("verdict") or "").upper()
+        counts = (synthesis.get("pass2") or {}).get("counts") or {}
+        fail_count = int(counts.get("FAIL", 0) or 0)
+        unimplemented_count = int(counts.get("UNIMPLEMENTED", 0) or 0)
+        three_pass_pass = (
+            str(synthesis.get("verdict") or "").upper() == "PASS"
+            and pass1_status == "PASS"
+            and pass3_verdict == "PASS"
+            and fail_count == 0
+            and unimplemented_count == 0
+        )
+        return (
+            {
+                "three_pass_pass": three_pass_pass,
+                "zero_stubs": unimplemented_count == 0,
+                "runtime_verified": evidence["qa"]["runtime_verified"],
+            },
+            {},
+            {
+                **evidence,
+                "qa_results": str(qa_path),
+                "synthesis": synthesis,
+            },
+        )
     raise ValueError(
         f"evidence_mode='mechanical' is unsupported for gate {gate_name!r}"
     )
+
+
+def _evaluate_captured_gate_inputs(
+    gate_inputs: GateInputBundle,
+    gate_name: str,
+    trusted_runtime_receipt: dict[str, Any] | None,
+    evidence_mode: str,
+    display_root: Path,
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+]:
+    """Evaluate only the immutable bytes represented by a gate snapshot."""
+    with materialized_gate_input_bundle(gate_inputs) as captured_root:
+        cfg_path = _config_path_for(str(captured_root))
+        cfg = _load_gate_config(cfg_path) if cfg_path else _load_gate_config(None)
+        if not evidence_mode:
+            return cfg, {}, {}, {}
+        metrics, thresholds, evidence = _mechanical_gate_evidence(
+            str(captured_root),
+            gate_name,
+            trusted_runtime_receipt,
+        )
+
+        def restore_display_paths(value: Any) -> Any:
+            if isinstance(value, str):
+                return value.replace(str(captured_root), str(display_root))
+            if isinstance(value, list):
+                return [restore_display_paths(item) for item in value]
+            if isinstance(value, dict):
+                return {
+                    key: restore_display_paths(item)
+                    for key, item in value.items()
+                }
+            return value
+
+        return cfg, metrics, thresholds, restore_display_paths(evidence)
+
+
+async def _active_session_for_project(store: EventStore, root: Path):
+    inspection = inspect_chain_marker(str(root))
+    if inspection.classification == "valid":
+        run_id = str(inspection.marker.get("run_id") or "")
+        session = await store.get_session(run_id)
+        if (
+            session is not None
+            and Path(session.project_root).expanduser().resolve(strict=False) == root
+        ):
+            return session
+    return await store.find_session_by_root(str(root))
+
+
+async def _active_claim_context(
+    store: EventStore,
+    root: Path,
+    session: Any,
+    *,
+    expected_stage: str = "",
+) -> tuple[int, dict[str, Any]] | None:
+    inspection = inspect_chain_marker(str(root))
+    if inspection.classification != "valid":
+        return None
+    marker = inspection.marker or {}
+    marker_stage = str(marker.get("from_stage") or "")
+    if (
+        marker.get("run_id") != session.id
+        or marker.get("status") != "in_progress"
+        or (expected_stage and marker_stage != expected_stage)
+    ):
+        return None
+    revision = int(marker["revision"])
+    claim = await store.get_stage_claim(session.id, marker_stage, revision)
+    if claim is None or claim.get("status") != "in_progress":
+        return None
+    return revision, claim
+
+
+def _receipt_matches_claim(
+    receipt: dict[str, Any] | None,
+    context: tuple[int, dict[str, Any]] | None,
+) -> bool:
+    if not isinstance(receipt, dict) or context is None:
+        return False
+    revision, claim = context
+    return (
+        receipt.get("marker_revision") == revision
+        and receipt.get("claim_id") == claim.get("claim_id")
+    )
+
+
+class _DarwinProcCoalitionInfo(ctypes.Structure):
+    _fields_ = [
+        ("coalition_id", ctypes.c_uint64 * 2),
+        ("reserved", ctypes.c_uint64 * 3),
+    ]
+
+
+def _verification_environment(root: Path, token: str) -> dict[str, str]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        in {
+            "PATH",
+            "HOME",
+            "TMPDIR",
+            "TMP",
+            "TEMP",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "TZ",
+            "SYSTEMROOT",
+            "COMSPEC",
+            "PATHEXT",
+            "WINDIR",
+        }
+    }
+    environment.update(
+        {
+            "PWD": str(root),
+            "CI": "1",
+            "SAMVIL_VERIFICATION_TOKEN": token,
+        }
+    )
+    return environment
+
+
+def _darwin_process_coalition_ids(pid: int) -> tuple[int, int] | None:
+    global _DARWIN_LIBPROC
+    try:
+        _direct_child_pids(pid)
+        if _DARWIN_LIBPROC is None:
+            return None
+        info = _DarwinProcCoalitionInfo()
+        size = ctypes.sizeof(info)
+        result = _DARWIN_LIBPROC.proc_pidinfo(
+            pid, 20, 0, ctypes.byref(info), size
+        )
+        if result != size:
+            return None
+        identifiers = tuple(int(value) for value in info.coalition_id)
+        if not all(identifiers):
+            return None
+        return identifiers
+    except (AttributeError, OSError):
+        return None
+
+
+def _darwin_coalition_member_pids(
+    coalition_ids: tuple[int, int],
+) -> set[int]:
+    return {
+        pid
+        for pid in _all_process_pids()
+        if _darwin_process_coalition_ids(pid) == coalition_ids
+    }
+
+
+def _terminate_darwin_verification_coalition(
+    coalition_ids: tuple[int, int],
+) -> None:
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        members = _darwin_coalition_member_pids(coalition_ids) - {os.getpid()}
+        if not members:
+            return
+        for pid in members:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (PermissionError, ProcessLookupError):
+                pass
+        time.sleep(0.01)
+    survivors = _darwin_coalition_member_pids(coalition_ids) - {os.getpid()}
+    if survivors:
+        raise RuntimeError("verification coalition cleanup did not converge")
+
+
+def _run_quiet_process(command: list[str], timeout: float) -> int:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        return process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        raise RuntimeError("verification control command timed out")
+
+
+def _run_darwin_verification_command(
+    root: Path,
+    command: list[str],
+    timeout_seconds: float,
+) -> tuple[int, str]:
+    launchctl = shutil.which("launchctl")
+    if launchctl is None:
+        raise RuntimeError("trusted macOS verification requires launchctl")
+    maximum = 2_000_000
+    token = secrets.token_hex(24)
+    environment = _verification_environment(root, token)
+    runtime_root = Path(tempfile.mkdtemp(prefix="samvil-verification-"))
+    status_path = runtime_root / "status.fifo"
+    release_path = runtime_root / "release"
+    supervisor_log = runtime_root / "supervisor.log"
+    os.mkfifo(status_path, 0o600)
+    os.mkfifo(release_path, 0o600)
+    label = f"com.samvil.verification.{os.getpid()}.{secrets.token_hex(8)}"
+    supervisor = Path(__file__).with_name("verification_supervisor.py")
+    submitted = False
+    coalition_ids: tuple[int, int] | None = None
+    status_fd = os.open(status_path, os.O_RDONLY | os.O_NONBLOCK)
+    release_fd = -1
+    protocol_buffer = bytearray()
+
+    def read_protocol_bytes(size: int, deadline: float) -> bytes:
+        while len(protocol_buffer) < size:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("verification coalition protocol timed out")
+            readable, _, _ = select.select([status_fd], [], [], 0.02)
+            if not readable:
+                continue
+            try:
+                chunk = os.read(status_fd, max(65_536, size - len(protocol_buffer)))
+            except BlockingIOError:
+                continue
+            if chunk:
+                protocol_buffer.extend(chunk)
+        result = bytes(protocol_buffer[:size])
+        del protocol_buffer[:size]
+        return result
+
+    def read_protocol_line(deadline: float) -> bytes:
+        while b"\n" not in protocol_buffer:
+            if len(protocol_buffer) > 4096:
+                raise RuntimeError("verification coalition protocol header is invalid")
+            if time.monotonic() >= deadline:
+                raise RuntimeError("verification coalition protocol timed out")
+            readable, _, _ = select.select([status_fd], [], [], 0.02)
+            if not readable:
+                continue
+            try:
+                chunk = os.read(status_fd, 65_536)
+            except BlockingIOError:
+                continue
+            if chunk:
+                protocol_buffer.extend(chunk)
+        line, _, remainder = protocol_buffer.partition(b"\n")
+        protocol_buffer.clear()
+        protocol_buffer.extend(remainder)
+        return bytes(line)
+
+    try:
+        arguments = [
+            sys.executable,
+            str(supervisor),
+            "darwin",
+            str(root),
+            str(release_path),
+            str(timeout_seconds),
+            json.dumps(environment, separators=(",", ":")),
+            json.dumps(command, separators=(",", ":")),
+        ]
+        submission_code = _run_quiet_process(
+            [
+                launchctl,
+                "submit",
+                "-l",
+                label,
+                "-o",
+                str(status_path),
+                "-e",
+                str(supervisor_log),
+                "--",
+                *arguments,
+            ],
+            5,
+        )
+        if submission_code != 0:
+            raise RuntimeError(
+                "cannot create isolated macOS verification coalition"
+            )
+        submitted = True
+        ready_deadline = time.monotonic() + 2
+        ready = json.loads(read_protocol_line(ready_deadline))
+        if ready.get("type") != "ready" or not isinstance(ready.get("pid"), int):
+            raise RuntimeError("verification coalition supervisor did not become ready")
+        supervisor_pid = int(ready["pid"])
+        coalition_ids = _darwin_process_coalition_ids(supervisor_pid)
+        parent_coalition = _darwin_process_coalition_ids(os.getpid())
+        if coalition_ids is None or coalition_ids == parent_coalition:
+            raise RuntimeError("verification coalition identity is unavailable")
+        release_deadline = time.monotonic() + 2
+        while release_fd < 0:
+            try:
+                release_fd = os.open(release_path, os.O_WRONLY | os.O_NONBLOCK)
+            except OSError:
+                if time.monotonic() >= release_deadline:
+                    raise RuntimeError(
+                        "verification coalition release channel is unavailable"
+                    )
+                time.sleep(0.005)
+        status_path.unlink()
+        release_path.unlink()
+        os.write(release_fd, b"1")
+        os.close(release_fd)
+        release_fd = -1
+        deadline = time.monotonic() + timeout_seconds + 3
+        result = json.loads(read_protocol_line(deadline))
+        if (
+            result.get("type") != "result"
+            or not isinstance(result.get("exit_code"), int)
+            or not isinstance(result.get("output_bytes"), int)
+        ):
+            raise RuntimeError("verification coalition result is invalid")
+        output_bytes = int(result["output_bytes"])
+        if output_bytes < 0 or output_bytes > maximum:
+            raise RuntimeError("verification coalition output length is invalid")
+        exit_code = int(result["exit_code"])
+        output_payload = read_protocol_bytes(output_bytes, deadline)
+    finally:
+        cleanup_error: Exception | None = None
+        if submitted:
+            try:
+                removal_code = _run_quiet_process(
+                    [launchctl, "remove", label], 5
+                )
+            except RuntimeError as exc:
+                cleanup_error = exc
+                removal_code = -1
+            if removal_code != 0 and cleanup_error is None:
+                cleanup_error = RuntimeError(
+                    "cannot remove isolated macOS verification job"
+                )
+        try:
+            if coalition_ids is not None:
+                _terminate_darwin_verification_coalition(coalition_ids)
+        except RuntimeError as exc:
+            cleanup_error = cleanup_error or exc
+        finally:
+            for fd in (release_fd, status_fd):
+                if fd >= 0:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            status_path.unlink(missing_ok=True)
+            release_path.unlink(missing_ok=True)
+            shutil.rmtree(runtime_root, ignore_errors=True)
+        if cleanup_error is not None:
+            raise cleanup_error
+
+    output = output_payload.decode("utf-8", errors="replace")
+    encoded = output.encode("utf-8")
+    if len(encoded) > maximum:
+        output = encoded[-maximum:].decode("utf-8", errors="ignore")
+    return exit_code, output
+
+
+def _run_verification_command(
+    root: Path,
+    command: list[str],
+    timeout_seconds: float,
+) -> tuple[int, str]:
+    if os.name != "posix":
+        raise RuntimeError(
+            "trusted verification process containment requires a POSIX host"
+        )
+    if sys.platform == "darwin":
+        return _run_darwin_verification_command(root, command, timeout_seconds)
+    if sys.platform.startswith("linux"):
+        supervisor = Path(__file__).with_name("verification_supervisor.py")
+        command = [
+            sys.executable,
+            str(supervisor),
+            "linux",
+            str(timeout_seconds),
+            json.dumps(command, separators=(",", ":")),
+        ]
+        timeout_seconds += 3
+    else:
+        raise RuntimeError(
+            "trusted verification process containment requires macOS or Linux"
+        )
+    max_output_bytes = 2_000_000
+    chunks: deque[bytes] = deque()
+    output_size = 0
+    timed_out = False
+    process: subprocess.Popen[bytes] | None = None
+    tracker_stop = threading.Event()
+    tracker_ready = threading.Event()
+    tracked_descendants: dict[int, str] = {}
+    tracker: threading.Thread | None = None
+    leader_identity: str | None = None
+    exit_observer: tuple[str, Any] | None = None
+    release_read = -1
+    release_write = -1
+    sentinel_file: Any | None = None
+    sentinel_path: Path | None = None
+    lsof_path = shutil.which("lsof")
+    sentinel_inspection_error: Exception | None = None
+    verification_token = secrets.token_hex(24)
+    baseline_process_identities = {
+        identity
+        for pid in _all_process_pids()
+        if (identity := _process_identity(pid)) is not None
+    }
+
+    def append_output(chunk: bytes) -> None:
+        nonlocal output_size
+        chunks.append(chunk)
+        output_size += len(chunk)
+        while output_size > max_output_bytes and chunks:
+            overflow = output_size - max_output_bytes
+            first = chunks[0]
+            if overflow >= len(first):
+                output_size -= len(chunks.popleft())
+            else:
+                chunks[0] = first[overflow:]
+                output_size -= overflow
+
+    def drain_available(fd: int) -> bool:
+        reached_eof = False
+        while True:
+            try:
+                chunk = os.read(fd, 65_536)
+            except BlockingIOError:
+                break
+            except OSError:
+                reached_eof = True
+                break
+            if not chunk:
+                reached_eof = True
+                break
+            append_output(chunk)
+        return reached_eof
+
+    def track_sentinel_holders() -> None:
+        nonlocal sentinel_inspection_error
+        if sentinel_path is None or process is None:
+            return
+        try:
+            holders = _sentinel_holder_pids(lsof_path, sentinel_path)
+        except Exception as exc:
+            if sentinel_inspection_error is None:
+                sentinel_inspection_error = exc
+            return
+        for pid in holders:
+            if pid in {os.getpid(), process.pid}:
+                continue
+            identity = _process_identity(pid)
+            if identity is not None:
+                tracked_descendants[pid] = identity
+
+    def track_token_holders() -> None:
+        if process is None:
+            return
+        for pid in _verification_token_holder_pids(
+            verification_token,
+            baseline_process_identities,
+        ):
+            if pid in {os.getpid(), process.pid}:
+                continue
+            identity = _process_identity(pid)
+            if identity is not None:
+                tracked_descendants[pid] = identity
+
+    try:
+        launch_command = command
+        popen_options: dict[str, Any] = {}
+        if os.name == "posix":
+            sentinel_file = tempfile.NamedTemporaryFile(
+                mode="w+b",
+                dir=root,
+                prefix=".samvil-verification-",
+                delete=False,
+            )
+            sentinel_path = Path(sentinel_file.name)
+            release_read, release_write = os.pipe()
+            launcher = (
+                "import os,sys; "
+                "fd=int(sys.argv[1]); os.read(fd,1); os.close(fd); "
+                "os.execvpe(sys.argv[2], sys.argv[2:], os.environ)"
+            )
+            launch_command = [
+                sys.executable,
+                "-c",
+                launcher,
+                str(release_read),
+                *command,
+            ]
+            popen_options["pass_fds"] = (release_read, sentinel_file.fileno())
+        verification_env = _verification_environment(root, verification_token)
+        process = subprocess.Popen(
+            launch_command,
+            cwd=root,
+            env=verification_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=os.name == "posix",
+            bufsize=0,
+            **popen_options,
+        )
+        if process.stdout is None:
+            raise RuntimeError("verification output pipe is unavailable")
+        leader_identity = _process_identity(process.pid)
+        if os.name == "posix" and leader_identity is None:
+            raise RuntimeError("verification process identity is unavailable")
+        exit_observer = _open_process_exit_observer(process.pid)
+        output_fd = process.stdout.fileno()
+        os.set_blocking(output_fd, False)
+        if os.name == "posix":
+            os.close(release_read)
+            release_read = -1
+            tracker = threading.Thread(
+                target=_track_verification_descendants,
+                args=(
+                    process.pid,
+                    leader_identity,
+                    tracker_stop,
+                    tracker_ready,
+                    tracked_descendants,
+                ),
+                name="samvil-verification-process-tracker",
+                daemon=True,
+            )
+            tracker.start()
+            if not tracker_ready.wait(timeout=1):
+                raise RuntimeError("verification process tracker did not become ready")
+            os.write(release_write, b"1")
+            os.close(release_write)
+            release_write = -1
+
+        deadline = time.monotonic() + timeout_seconds
+        reached_eof = False
+        while True:
+            reached_eof = drain_available(output_fd) or reached_eof
+            if _process_exit_observed(exit_observer):
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                exit_code = 124
+                break
+            select.select([output_fd], [], [], min(remaining, 0.05))
+
+        tracker_stop.set()
+        if tracker is not None:
+            tracker.join(timeout=1)
+        track_sentinel_holders()
+        track_token_holders()
+        _refresh_tracked_descendants(
+            process.pid, leader_identity, tracked_descendants
+        )
+        _terminate_verification_processes(
+            process,
+            _live_tracked_pids(tracked_descendants),
+            leader_identity,
+            leader_unreaped=True,
+        )
+        return_code = process.wait(timeout=5)
+        if not timed_out:
+            exit_code = return_code
+
+        drain_deadline = time.monotonic() + 0.5
+        while not reached_eof and time.monotonic() < drain_deadline:
+            reached_eof = drain_available(output_fd)
+            if not reached_eof:
+                select.select([output_fd], [], [], 0.02)
+        process.stdout.close()
+    finally:
+        tracker_stop.set()
+        if tracker is not None and tracker.is_alive():
+            tracker.join(timeout=1)
+        _close_process_exit_observer(exit_observer)
+        for fd in (release_read, release_write):
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        try:
+            if process is not None:
+                track_sentinel_holders()
+                track_token_holders()
+                _terminate_verification_processes(
+                    process,
+                    _live_tracked_pids(tracked_descendants),
+                    leader_identity,
+                    leader_unreaped=process.returncode is None,
+                )
+                if process.returncode is None:
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+        finally:
+            if sentinel_file is not None:
+                sentinel_file.close()
+            if sentinel_path is not None:
+                sentinel_path.unlink(missing_ok=True)
+
+    if sentinel_inspection_error is not None:
+        raise RuntimeError("verification sentinel inspection failed") from sentinel_inspection_error
+
+    output = b"".join(chunks).decode("utf-8", errors="replace")
+    if timed_out:
+        output = f"{output}\nverification timed out\n"
+    encoded_output = output.encode("utf-8")
+    if len(encoded_output) > max_output_bytes:
+        output = encoded_output[-max_output_bytes:].decode("utf-8", errors="ignore")
+    return exit_code, output
+
+
+def _sentinel_holder_pids(
+    lsof_path: str | None,
+    sentinel_path: Path,
+    *,
+    proc_root: Path = Path("/proc"),
+) -> set[int]:
+    """Return only PIDs holding the inherited verification sentinel file."""
+    if lsof_path is None:
+        try:
+            sentinel_stat = sentinel_path.stat()
+            process_dirs = tuple(proc_root.iterdir())
+        except OSError as exc:
+            raise RuntimeError(
+                "verification sentinel inspection requires lsof or /proc"
+            ) from exc
+        holders: set[int] = set()
+        for process_dir in process_dirs:
+            if not process_dir.name.isdigit():
+                continue
+            try:
+                descriptors = tuple((process_dir / "fd").iterdir())
+            except OSError:
+                continue
+            for descriptor in descriptors:
+                try:
+                    descriptor_stat = descriptor.stat()
+                except OSError:
+                    continue
+                if (
+                    descriptor_stat.st_dev == sentinel_stat.st_dev
+                    and descriptor_stat.st_ino == sentinel_stat.st_ino
+                ):
+                    holders.add(int(process_dir.name))
+                    break
+        return holders
+    process = subprocess.Popen(
+        [lsof_path, "-t", "--", str(sentinel_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")},
+    )
+    try:
+        output, _ = process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        raise RuntimeError("verification sentinel inspection timed out")
+    holders: set[int] = set()
+    for value in output.split():
+        try:
+            holders.add(int(value))
+        except ValueError:
+            continue
+    return holders
+
+
+def _mechanical_verification_command(
+    root: Path,
+    stage: str,
+) -> tuple[list[str], dict[str, str]]:
+    """Resolve a stage command from the project-owned mechanical SSOT."""
+    from .mechanical_toml import read_mechanical_toml
+
+    field = {"samvil-build": "build", "samvil-qa": "test"}[stage]
+    contract = read_mechanical_toml(root)
+    if not contract.get("ok"):
+        raise ValueError("mechanical contract is unreadable")
+    if not contract.get("exists"):
+        raise ValueError("mechanical contract is required for trusted verification")
+    command_text = str((contract.get("commands") or {}).get(field) or "").strip()
+    if not command_text:
+        raise ValueError(f"mechanical contract has no {field} command")
+    try:
+        argv = shlex.split(command_text)
+    except ValueError as exc:
+        raise ValueError(f"mechanical contract command cannot be parsed: {exc}") from exc
+    if not argv or any(not item or "\x00" in item for item in argv):
+        raise ValueError("mechanical contract command is invalid")
+    return argv, {
+        "field": field,
+        "source": ".samvil/mechanical.toml",
+        "sha256": hashlib.sha256(command_text.encode("utf-8")).hexdigest(),
+    }
+
+
+def _open_process_exit_observer(pid: int) -> tuple[str, Any]:
+    """Create a non-reaping process exit observer for supported POSIX hosts."""
+    if sys.platform == "darwin" and hasattr(select, "kqueue"):
+        queue = select.kqueue()
+        event = select.kevent(
+            pid,
+            filter=select.KQ_FILTER_PROC,
+            flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE | select.KQ_EV_ONESHOT,
+            fflags=select.KQ_NOTE_EXIT,
+        )
+        queue.control([event], 0, 0)
+        return ("kqueue", queue)
+    if sys.platform.startswith("linux") and hasattr(os, "pidfd_open"):
+        return ("pidfd", os.pidfd_open(pid, 0))
+    raise RuntimeError("non-reaping process exit observation is unavailable")
+
+
+def _process_exit_observed(observer: tuple[str, Any]) -> bool:
+    """Return whether the observed process exited without consuming its PID."""
+    kind, handle = observer
+    if kind == "kqueue":
+        return bool(handle.control(None, 1, 0))
+    readable, _, _ = select.select([handle], [], [], 0)
+    return bool(readable)
+
+
+def _close_process_exit_observer(observer: tuple[str, Any] | None) -> None:
+    if observer is None:
+        return
+    _, handle = observer
+    try:
+        handle.close() if hasattr(handle, "close") else os.close(handle)
+    except OSError:
+        pass
+
+
+def _descendant_pids(parent_pid: int) -> set[int]:
+    """Return the currently visible descendants of one process."""
+    if os.name != "posix":
+        return set()
+    if sys.platform == "darwin" or sys.platform.startswith("linux"):
+        descendants: set[int] = set()
+        pending = list(_direct_child_pids(parent_pid))
+        while pending:
+            pid = pending.pop()
+            if pid in descendants:
+                continue
+            descendants.add(pid)
+            pending.extend(_direct_child_pids(pid))
+        return descendants
+    ps = subprocess.Popen(
+        ["ps", "-axo", "pid=,ppid="],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    try:
+        output, _ = ps.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        ps.kill()
+        ps.communicate()
+        return set()
+    children: dict[int, set[int]] = {}
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        try:
+            pid, ppid = (int(field) for field in fields)
+        except ValueError:
+            continue
+        children.setdefault(ppid, set()).add(pid)
+    descendants: set[int] = set()
+    pending = list(children.get(parent_pid, set()))
+    while pending:
+        pid = pending.pop()
+        if pid in descendants:
+            continue
+        descendants.add(pid)
+        pending.extend(children.get(pid, set()))
+    return descendants
+
+
+_DARWIN_LIBPROC: Any | None = None
+_VERIFICATION_TRACK_INTERVAL_SECONDS = 0.02
+
+
+class _DarwinProcBSDInfo(ctypes.Structure):
+    _fields_ = [
+        ("pbi_flags", ctypes.c_uint32),
+        ("pbi_status", ctypes.c_uint32),
+        ("pbi_xstatus", ctypes.c_uint32),
+        ("pbi_pid", ctypes.c_uint32),
+        ("pbi_ppid", ctypes.c_uint32),
+        ("pbi_uid", ctypes.c_uint32),
+        ("pbi_gid", ctypes.c_uint32),
+        ("pbi_ruid", ctypes.c_uint32),
+        ("pbi_rgid", ctypes.c_uint32),
+        ("pbi_svuid", ctypes.c_uint32),
+        ("pbi_svgid", ctypes.c_uint32),
+        ("rfu_1", ctypes.c_uint32),
+        ("pbi_comm", ctypes.c_char * 16),
+        ("pbi_name", ctypes.c_char * 32),
+        ("pbi_nfiles", ctypes.c_uint32),
+        ("pbi_pgid", ctypes.c_uint32),
+        ("pbi_pjobc", ctypes.c_uint32),
+        ("e_tdev", ctypes.c_uint32),
+        ("e_tpgid", ctypes.c_uint32),
+        ("pbi_nice", ctypes.c_int32),
+        ("pbi_start_tvsec", ctypes.c_uint64),
+        ("pbi_start_tvusec", ctypes.c_uint64),
+    ]
+
+
+def _direct_child_pids(parent_pid: int) -> set[int]:
+    """Read direct children without spawning a helper on supported POSIX hosts."""
+    global _DARWIN_LIBPROC
+    if sys.platform == "darwin":
+        try:
+            if _DARWIN_LIBPROC is None:
+                _DARWIN_LIBPROC = ctypes.CDLL("/usr/lib/libproc.dylib")
+                _DARWIN_LIBPROC.proc_listchildpids.argtypes = [
+                    ctypes.c_int,
+                    ctypes.c_void_p,
+                    ctypes.c_int,
+                ]
+                _DARWIN_LIBPROC.proc_listchildpids.restype = ctypes.c_int
+                _DARWIN_LIBPROC.proc_pidinfo.argtypes = [
+                    ctypes.c_int,
+                    ctypes.c_int,
+                    ctypes.c_uint64,
+                    ctypes.c_void_p,
+                    ctypes.c_int,
+                ]
+                _DARWIN_LIBPROC.proc_pidinfo.restype = ctypes.c_int
+            capacity = 64
+            while capacity <= 4096:
+                buffer = (ctypes.c_int * capacity)()
+                count = _DARWIN_LIBPROC.proc_listchildpids(
+                    parent_pid, buffer, ctypes.sizeof(buffer)
+                )
+                if count < 0:
+                    return set()
+                if count < capacity:
+                    return {int(buffer[index]) for index in range(count)}
+                capacity *= 2
+        except (AttributeError, OSError):
+            return set()
+        return set()
+    if sys.platform.startswith("linux"):
+        children: set[int] = set()
+        task_root = Path(f"/proc/{parent_pid}/task")
+        try:
+            task_dirs = tuple(task_root.iterdir())
+        except OSError:
+            return set()
+        for task_dir in task_dirs:
+            try:
+                text = (task_dir / "children").read_text(encoding="ascii")
+            except OSError:
+                continue
+            for value in text.split():
+                try:
+                    children.add(int(value))
+                except ValueError:
+                    continue
+        return children
+    return set()
+
+
+def _process_identity(pid: int) -> str | None:
+    """Return a PID-reuse-safe process identity for supported hosts."""
+    if sys.platform == "darwin":
+        try:
+            _direct_child_pids(pid)
+            if _DARWIN_LIBPROC is None:
+                return None
+            info = _DarwinProcBSDInfo()
+            size = ctypes.sizeof(info)
+            result = _DARWIN_LIBPROC.proc_pidinfo(
+                pid, 3, 0, ctypes.byref(info), size
+            )
+            if result != size or int(info.pbi_pid) != pid:
+                return None
+            return f"{pid}:{info.pbi_start_tvsec}:{info.pbi_start_tvusec}"
+        except (AttributeError, OSError):
+            return None
+    if sys.platform.startswith("linux"):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+            fields = stat.rsplit(")", 1)[1].split()
+            return f"{pid}:{fields[19]}"
+        except (IndexError, OSError):
+            return None
+    try:
+        ps = subprocess.Popen(
+            ["ps", "-p", str(pid), "-o", "lstart="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        output, _ = ps.communicate(timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        if "ps" in locals() and ps.poll() is None:
+            ps.kill()
+            ps.communicate()
+        return None
+    started_at = output.strip()
+    return f"{pid}:{started_at}" if started_at else None
+
+
+def _process_parent_pid(pid: int) -> int | None:
+    """Return the current parent PID on supported verification hosts."""
+    if sys.platform == "darwin":
+        try:
+            _direct_child_pids(pid)
+            if _DARWIN_LIBPROC is None:
+                return None
+            info = _DarwinProcBSDInfo()
+            size = ctypes.sizeof(info)
+            result = _DARWIN_LIBPROC.proc_pidinfo(
+                pid, 3, 0, ctypes.byref(info), size
+            )
+            return int(info.pbi_ppid) if result == size else None
+        except (AttributeError, OSError):
+            return None
+    if sys.platform.startswith("linux"):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+            fields = stat.rsplit(")", 1)[1].split()
+            return int(fields[1])
+        except (IndexError, OSError, ValueError):
+            return None
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "ppid="],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        return int(result.stdout.strip()) if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def _all_process_pids() -> set[int]:
+    """List process IDs without exposing command arguments or environments."""
+    global _DARWIN_LIBPROC
+    if sys.platform == "darwin":
+        try:
+            _direct_child_pids(os.getpid())
+            if _DARWIN_LIBPROC is None:
+                return set()
+            _DARWIN_LIBPROC.proc_listallpids.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_int,
+            ]
+            _DARWIN_LIBPROC.proc_listallpids.restype = ctypes.c_int
+            capacity = 4096
+            while capacity <= 65536:
+                buffer = (ctypes.c_int * capacity)()
+                count = _DARWIN_LIBPROC.proc_listallpids(
+                    buffer,
+                    ctypes.sizeof(buffer),
+                )
+                if count < 0:
+                    return set()
+                if count < capacity:
+                    return {int(buffer[index]) for index in range(count)}
+                capacity *= 2
+        except (AttributeError, OSError):
+            return set()
+        return set()
+    if sys.platform.startswith("linux"):
+        try:
+            return {
+                int(path.name)
+                for path in Path("/proc").iterdir()
+                if path.name.isdigit()
+            }
+        except OSError:
+            return set()
+    return set()
+
+
+def _darwin_process_environment(pid: int) -> tuple[bytes, ...]:
+    """Read one same-user process environment through KERN_PROCARGS2."""
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        sysctl = libc.sysctl
+        sysctl.argtypes = [
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_uint,
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.c_void_p,
+            ctypes.c_size_t,
+        ]
+        sysctl.restype = ctypes.c_int
+        mib = (ctypes.c_int * 3)(1, 49, pid)
+        size = ctypes.c_size_t()
+        if sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0 or size.value < 4:
+            return ()
+        buffer = ctypes.create_string_buffer(size.value)
+        if sysctl(
+            mib,
+            3,
+            ctypes.byref(buffer),
+            ctypes.byref(size),
+            None,
+            0,
+        ) != 0:
+            return ()
+        raw = buffer.raw[: size.value]
+        argument_count = int.from_bytes(
+            raw[:4],
+            byteorder=sys.byteorder,
+            signed=True,
+        )
+        if argument_count < 0:
+            return ()
+        offset = 4
+
+        def skip_string(position: int) -> int:
+            end = raw.find(b"\0", position)
+            return len(raw) if end < 0 else end + 1
+
+        offset = skip_string(offset)
+        while offset < len(raw) and raw[offset] == 0:
+            offset += 1
+        for _ in range(argument_count):
+            offset = skip_string(offset)
+        values: list[bytes] = []
+        while offset < len(raw):
+            end = raw.find(b"\0", offset)
+            if end < 0:
+                break
+            value = raw[offset:end]
+            offset = end + 1
+            if not value:
+                break
+            values.append(value)
+        return tuple(values)
+    except (AttributeError, OSError, OverflowError, ValueError):
+        return ()
+
+
+def _process_has_verification_token(pid: int, token: str) -> bool:
+    expected = f"SAMVIL_VERIFICATION_TOKEN={token}".encode()
+    if sys.platform == "darwin":
+        return expected in _darwin_process_environment(pid)
+    if sys.platform.startswith("linux"):
+        try:
+            environment = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+        except OSError:
+            return False
+        return expected in environment
+    return False
+
+
+def _verification_token_holder_pids(
+    token: str,
+    baseline_identities: set[str],
+) -> set[int]:
+    """Find newly started descendants that retained the per-run token."""
+    holders: set[int] = set()
+    for pid in _all_process_pids():
+        identity = _process_identity(pid)
+        if identity is None or identity in baseline_identities:
+            continue
+        if _process_has_verification_token(pid, token):
+            holders.add(pid)
+    return holders
+
+
+def _live_tracked_pids(tracked: dict[int, str]) -> set[int]:
+    """Filter tracked PIDs by their original process identity."""
+    return {
+        pid
+        for pid, identity in tracked.items()
+        if _process_identity(pid) == identity
+    }
+
+
+def _refresh_tracked_descendants(
+    parent_pid: int,
+    parent_identity: str | None,
+    tracked: dict[int, str],
+) -> None:
+    """Prune reused PIDs before using them as ancestry roots."""
+    for pid, identity in tuple(tracked.items()):
+        if _process_identity(pid) != identity:
+            tracked.pop(pid, None)
+    roots = set(tracked)
+    if _process_identity(parent_pid) == parent_identity:
+        roots.add(parent_pid)
+    roots = {
+        pid
+        for pid in roots
+        if _process_parent_pid(pid) not in roots
+    }
+    discovered: set[int] = set()
+    for root_pid in roots:
+        discovered.update(_descendant_pids(root_pid))
+    for pid in discovered:
+        identity = _process_identity(pid)
+        if identity is not None:
+            tracked[pid] = identity
+
+
+def _track_verification_descendants(
+    parent_pid: int,
+    parent_identity: str | None,
+    stopped: threading.Event,
+    ready: threading.Event,
+    tracked: dict[int, str],
+) -> None:
+    """Continuously retain descendants even when they detach and get reparented."""
+    _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
+    ready.set()
+    while not stopped.is_set():
+        _refresh_tracked_descendants(parent_pid, parent_identity, tracked)
+        stopped.wait(_VERIFICATION_TRACK_INTERVAL_SECONDS)
+
+
+def _terminate_verification_processes(
+    process: subprocess.Popen[Any],
+    descendants: set[int],
+    leader_identity: str | None = None,
+    *,
+    leader_unreaped: bool = False,
+) -> None:
+    """Kill the verification group and any already-detached descendants."""
+    if os.name == "posix":
+        for pid in descendants:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (PermissionError, ProcessLookupError):
+                pass
+        group_is_owned = leader_unreaped or (
+            _process_identity(process.pid) == leader_identity
+        )
+        if not group_is_owned:
+            for pid in descendants:
+                try:
+                    if os.getpgid(pid) == process.pid:
+                        group_is_owned = True
+                        break
+                except (PermissionError, ProcessLookupError):
+                    continue
+        if group_is_owned:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (PermissionError, ProcessLookupError):
+                pass
+    elif process.poll() is None:
+        process.kill()
+
+
+def _canonical_json_hash(value: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+async def _await_verification_command(
+    command_task: asyncio.Task[tuple[int, str]],
+) -> tuple[int, str]:
+    """Retrieve the runner result before propagating caller cancellation."""
+    caller_cancelled = False
+    while True:
+        try:
+            await asyncio.shield(command_task)
+        except asyncio.CancelledError:
+            if command_task.cancelled():
+                break
+            caller_cancelled = True
+            if command_task.done():
+                break
+            continue
+        except BaseException:
+            break
+        else:
+            break
+    try:
+        result = command_task.result()
+    except asyncio.CancelledError:
+        raise
+    except BaseException:
+        if caller_cancelled:
+            raise asyncio.CancelledError from None
+        raise
+    if caller_cancelled:
+        raise asyncio.CancelledError
+    return result
+
+
+@mcp.tool()
+async def run_stage_verification(
+    project_root: str,
+    run_id: str,
+    stage: str,
+    command_json: str = "",
+    timeout_seconds: float = 300,
+) -> str:
+    """Execute the Build/QA command bound to the mechanical project SSOT."""
+    try:
+        root = Path(project_root).expanduser().resolve(strict=False)
+        normalized = stage if stage.startswith("samvil-") else f"samvil-{stage}"
+        if normalized not in {"samvil-build", "samvil-qa"}:
+            raise ValueError("stage must be samvil-build or samvil-qa")
+        requested_command = json.loads(command_json or "[]")
+        if not isinstance(requested_command, list):
+            raise ValueError("command_json must encode an array")
+        timeout = min(max(float(timeout_seconds), 1.0), 900.0)
+        store = await get_store()
+        async with verification_execution_lock(store, run_id, normalized):
+            try:
+                samvil_root = safe_child_directory(root, ".samvil", label=".samvil")
+                receipt_root = safe_child_directory(
+                    root, ".samvil/runtime-receipts", label="runtime receipts"
+                )
+            except RuntimeLayoutError as exc:
+                raise ValueError(str(exc)) from exc
+            async with stage_transition_lock(store, run_id):
+                command, command_profile = _mechanical_verification_command(
+                    root, normalized
+                )
+                if requested_command and requested_command != command:
+                    raise ValueError("requested command does not match mechanical contract")
+                session = await store.get_session(run_id)
+                if (
+                    session is None
+                    or Path(session.project_root).expanduser().resolve(strict=False) != root
+                    or session.current_stage.value != normalized.removeprefix("samvil-")
+                ):
+                    raise ValueError("run_id does not own the requested project stage")
+                claim_context = await _active_claim_context(
+                    store, root, session, expected_stage=normalized
+                )
+                if claim_context is None:
+                    raise ValueError(
+                        "runtime verification requires the active stage claim"
+                    )
+                marker_revision, claim = claim_context
+                await store.mark_runtime_verification_required(
+                    run_id,
+                    normalized,
+                    str(claim["claim_id"]),
+                    marker_revision,
+                )
+
+            command_task = asyncio.create_task(
+                asyncio.to_thread(_run_verification_command, root, command, timeout)
+            )
+            exit_code, output = await _await_verification_command(command_task)
+            output = redact_sensitive_text(output)
+            async with stage_transition_lock(store, run_id):
+                try:
+                    samvil_root = safe_child_directory(root, ".samvil", label=".samvil")
+                    receipt_root = safe_child_directory(
+                        root, ".samvil/runtime-receipts", label="runtime receipts"
+                    )
+                except RuntimeLayoutError as exc:
+                    raise ValueError(str(exc)) from exc
+                current_session = await store.get_session(run_id)
+                current_context = (
+                    await _active_claim_context(
+                        store, root, current_session, expected_stage=normalized
+                    )
+                    if current_session is not None
+                    else None
+                )
+                try:
+                    current_command, current_profile = (
+                        _mechanical_verification_command(root, normalized)
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        "stale runtime verification: mechanical contract changed"
+                    ) from exc
+                if (
+                    current_session is None
+                    or Path(current_session.project_root).expanduser().resolve(strict=False) != root
+                    or current_session.current_stage.value != normalized.removeprefix("samvil-")
+                    or current_context is None
+                    or current_context[0] != marker_revision
+                    or current_context[1].get("claim_id") != claim.get("claim_id")
+                    or current_command != command
+                    or current_profile != command_profile
+                ):
+                    raise ValueError(
+                        "stale runtime verification: ownership or mechanical "
+                        "contract changed"
+                    )
+                log_name = "build.log" if normalized == "samvil-build" else "qa.log"
+                log_path = samvil_root / log_name
+                atomic_write_text(log_path, f"{output}\nSAMVIL_EXIT:{exit_code}\n")
+                receipt = {
+                    "kind": "runtime_receipt",
+                    "stage": normalized,
+                    "status": "passed" if exit_code == 0 else "failed",
+                    "trusted_by": "samvil_mcp_subprocess",
+                    "command_profile": command_profile,
+                    "exit_code": exit_code,
+                    "authority_path": f".samvil/{log_name}",
+                    "authority_sha256": hashlib.sha256(
+                        log_path.read_bytes()
+                    ).hexdigest(),
+                    "marker_revision": marker_revision,
+                    "claim_id": claim["claim_id"],
+                }
+                projected_receipt = {
+                    **receipt,
+                    "session_id": run_id,
+                    "stage": normalized,
+                }
+                atomic_write_text(
+                    receipt_root / f"{normalized.removeprefix('samvil-')}.json",
+                    json.dumps(projected_receipt, indent=2, ensure_ascii=False),
+                )
+                receipt = await store.save_runtime_receipt(run_id, normalized, receipt)
+        _log_mcp_health("ok" if exit_code == 0 else "fail", "run_stage_verification")
+        return json.dumps(receipt, ensure_ascii=False)
+    except Exception as exc:
+        _log_mcp_health("fail", "run_stage_verification", str(exc))
+        return json.dumps({"status": "blocked", "error": str(exc)}, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -3588,7 +5345,56 @@ async def gate_check(
     allow_warn: bool = False,
     evidence_mode: str = "",
 ) -> str:
-    """Evaluate a stage gate. Returns the verdict as JSON.
+    """Evaluate and publish a gate against one serialized runtime snapshot."""
+    try:
+        root = Path(project_root).expanduser().resolve(strict=False)
+        store = await get_store()
+        session = await _active_session_for_project(store, root)
+        runtime_stage = {
+            "build_to_qa": "samvil-build",
+            "qa_to_evolve": "samvil-qa",
+            "qa_to_deploy": "samvil-qa",
+            "any_to_retro": "samvil-qa",
+        }.get(gate_name, "")
+        if session is not None and runtime_stage:
+            async with verification_execution_lock(store, session.id, runtime_stage):
+                async with stage_transition_lock(store, session.id):
+                    current_session = await _active_session_for_project(store, root)
+                    if current_session is None or current_session.id != session.id:
+                        raise ValueError("stale gate evaluation: active session changed")
+                    return await _gate_check_with_snapshot(
+                        gate_name,
+                        samvil_tier,
+                        metrics_json,
+                        project_root,
+                        subject,
+                        allow_warn,
+                        evidence_mode,
+                    )
+        return await _gate_check_with_snapshot(
+            gate_name,
+            samvil_tier,
+            metrics_json,
+            project_root,
+            subject,
+            allow_warn,
+            evidence_mode,
+        )
+    except Exception as exc:
+        _log_mcp_health("fail", "gate_check", str(exc))
+        return json.dumps({"error": str(exc)})
+
+
+async def _gate_check_with_snapshot(
+    gate_name: str,
+    samvil_tier: str,
+    metrics_json: str,
+    project_root: str = ".",
+    subject: str = "",
+    allow_warn: bool = False,
+    evidence_mode: str = "",
+) -> str:
+    """Evaluate a stage gate while the caller owns any required locks.
 
     Verdict schema:
       {
@@ -3607,20 +5413,113 @@ async def gate_check(
         reported_metrics = json.loads(metrics_json or "{}")
         if not isinstance(reported_metrics, dict):
             raise ValueError("metrics_json must decode to an object")
+        if gate_name in {"build_to_qa", "qa_to_evolve", "qa_to_deploy"}:
+            evidence_mode = "mechanical"
         metrics = dict(reported_metrics)
-        cfg_path = _config_path_for(project_root)
-        cfg = _load_gate_config(cfg_path) if cfg_path else _load_gate_config(None)
+        root = Path(project_root).expanduser().resolve(strict=False)
+        gate_inputs = await asyncio.to_thread(
+            capture_gate_input_bundle,
+            root,
+            gate_name,
+        )
+        gate_input_snapshot = gate_inputs.snapshot
         mechanical_metrics: dict[str, Any] = {}
         metric_mismatches: list[dict[str, Any]] = []
         stage_evidence: dict[str, Any] = {}
-        if evidence_mode:
-            if evidence_mode != "mechanical":
-                raise ValueError("evidence_mode must be empty or 'mechanical'")
-            mechanical_metrics, mechanical_thresholds, stage_evidence = (
-                await asyncio.to_thread(
-                    _mechanical_gate_evidence, project_root, gate_name
+        store = await get_store()
+        session = await _active_session_for_project(store, root)
+        claim_context = (
+            await _active_claim_context(store, root, session)
+            if session is not None
+            else None
+        )
+        runtime_stage = {
+            "build_to_qa": "samvil-build",
+            "qa_to_evolve": "samvil-qa",
+            "qa_to_deploy": "samvil-qa",
+            "any_to_retro": "samvil-qa",
+        }.get(gate_name, "")
+        persisted_runtime_receipt = (
+            await store.get_runtime_receipt(session.id, runtime_stage)
+            if session is not None and runtime_stage
+            else None
+        )
+        runtime_verification_started = bool(
+            session is not None
+            and runtime_stage
+            and await store.has_runtime_verification_requirement(
+                session.id,
+                runtime_stage,
+            )
+        )
+        runtime_receipt_required = bool(
+            session is not None and gate_requires_runtime_receipt(gate_name)
+        )
+        runtime_projection_relative = (
+            f".samvil/runtime-receipts/"
+            f"{runtime_stage.removeprefix('samvil-')}.json"
+        )
+        projection_exists, projected_runtime_receipt = (
+            json_projection_from_bundle(gate_inputs, runtime_projection_relative)
+            if runtime_stage
+            else (False, None)
+        )
+        runtime_receipt_inconsistent = bool(
+            runtime_stage
+            and (
+                (persisted_runtime_receipt is None) != (not projection_exists)
+                or (
+                    (runtime_receipt_required or runtime_verification_started)
+                    and persisted_runtime_receipt is None
+                    and not projection_exists
+                )
+                or (
+                    persisted_runtime_receipt is not None
+                    and (
+                        projected_runtime_receipt is None
+                        or _canonical_json_hash(persisted_runtime_receipt)
+                        != _canonical_json_hash(projected_runtime_receipt)
+                        or not _receipt_matches_claim(
+                            persisted_runtime_receipt,
+                            claim_context,
+                        )
+                    )
                 )
             )
+        )
+        trusted_runtime_receipt = (
+            persisted_runtime_receipt
+            if not runtime_receipt_inconsistent
+            and _receipt_matches_claim(persisted_runtime_receipt, claim_context)
+            else None
+        )
+        if evidence_mode and evidence_mode != "mechanical":
+            raise ValueError("evidence_mode must be empty or 'mechanical'")
+        (
+            cfg,
+            captured_mechanical_metrics,
+            mechanical_thresholds,
+            stage_evidence,
+        ) = await asyncio.to_thread(
+            _evaluate_captured_gate_inputs,
+            gate_inputs,
+            gate_name,
+            trusted_runtime_receipt,
+            evidence_mode,
+            root,
+        )
+        gate_config_sha256 = _canonical_json_hash(cfg)
+        if evidence_mode:
+            mechanical_metrics = captured_mechanical_metrics
+            if (
+                trusted_runtime_receipt is not None
+                and trusted_runtime_receipt.get("status") != "passed"
+            ):
+                mechanical_metrics["current_runtime_passed"] = False
+                mechanical_thresholds["current_runtime_passed"] = True
+            if runtime_receipt_inconsistent:
+                mechanical_metrics["runtime_receipt_consistent"] = False
+                mechanical_thresholds["runtime_receipt_consistent"] = True
             for key, mechanical in mechanical_metrics.items():
                 if key in reported_metrics and reported_metrics[key] != mechanical:
                     metric_mismatches.append(
@@ -3638,6 +5537,11 @@ async def gate_check(
                 .setdefault(samvil_tier, {})
             )
             tier_thresholds.update(mechanical_thresholds)
+        elif runtime_receipt_inconsistent:
+            metrics["runtime_receipt_consistent"] = False
+            cfg.setdefault("gates", {}).setdefault(gate_name, {}).setdefault(
+                "thresholds", {}
+            ).setdefault(samvil_tier, {})["runtime_receipt_consistent"] = True
         verdict = _gate_check_core(
             gate_name,
             samvil_tier=samvil_tier,
@@ -3665,6 +5569,94 @@ async def gate_check(
                     "gate_check.metric_mismatch",
                     json.dumps(metric_mismatches, ensure_ascii=False),
                 )
+        qa_path = root / ".samvil" / "qa-results.json"
+        authority_paths = {
+            "build_to_qa": root / ".samvil" / "build.log",
+            "qa_to_evolve": qa_path,
+            "qa_to_deploy": qa_path,
+            "any_to_retro": qa_path,
+        }
+        authority_path = authority_paths.get(gate_name)
+        current_gate_input_snapshot = await asyncio.to_thread(
+            capture_gate_input_snapshot,
+            root,
+            gate_name,
+        )
+        if current_gate_input_snapshot != gate_input_snapshot:
+            raise ValueError("gate authority changed during evaluation")
+        qa_results_sha256 = snapshot_sha256(
+            gate_input_snapshot,
+            ".samvil/qa-results.json",
+        )
+        authority_relative = (
+            str(authority_path.relative_to(root))
+            if authority_path is not None
+            else ""
+        )
+        receipt = {
+            "kind": "gate_receipt",
+            "gate": gate_name,
+            "verdict": result.get("verdict"),
+            "samvil_tier": samvil_tier,
+            "qa_results_sha256": qa_results_sha256,
+            "authority_path": authority_relative,
+            "authority_sha256": snapshot_sha256(
+                gate_input_snapshot,
+                authority_relative,
+            ),
+            "gate_input_snapshot": gate_input_snapshot,
+            "gate_input_snapshot_sha256": _canonical_json_hash(
+                gate_input_snapshot
+            ),
+            "gate_config_sha256": gate_config_sha256,
+            "result_sha256": hashlib.sha256(
+                json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest(),
+            "trusted_by": "samvil_mcp_gate_check",
+            "marker_revision": claim_context[0] if claim_context is not None else -1,
+            "claim_id": (
+                str(claim_context[1]["claim_id"])
+                if claim_context is not None
+                else ""
+            ),
+            "runtime_receipt_sha256": _canonical_json_hash(
+                trusted_runtime_receipt
+            )
+            if trusted_runtime_receipt is not None
+            else "",
+            "runtime_authority_path": str(
+                (trusted_runtime_receipt or {}).get("authority_path") or ""
+            ),
+            "runtime_authority_sha256": str(
+                (trusted_runtime_receipt or {}).get("authority_sha256") or ""
+            ),
+            "runtime_claim_id": str(
+                (trusted_runtime_receipt or {}).get("claim_id") or ""
+            ),
+            "runtime_stage": str(
+                (trusted_runtime_receipt or {}).get("stage") or runtime_stage
+            )
+            if trusted_runtime_receipt is not None
+            else "",
+        }
+        try:
+            receipt_root = safe_child_directory(
+                root, ".samvil/gate-receipts", label="gate receipts"
+            )
+        except RuntimeLayoutError as exc:
+            raise ValueError(str(exc)) from exc
+        receipt_path = receipt_root / f"{gate_name}.json"
+        projected_receipt = (
+            {**receipt, "session_id": session.id, "gate": gate_name}
+            if session is not None
+            else receipt
+        )
+        atomic_write_text(
+            receipt_path,
+            json.dumps(projected_receipt, indent=2, ensure_ascii=False),
+        )
+        if session is not None:
+            receipt = await store.save_gate_receipt(session.id, gate_name, receipt)
         _log_mcp_health("ok", "gate_check")
         return json.dumps(result)
     except Exception as e:
@@ -5888,7 +7880,30 @@ async def collect_stage_evidence(project_root: str, stage: str) -> str:
     try:
         from .stage_evidence import collect_stage_evidence as _collect
 
-        result = await asyncio.to_thread(_collect, project_root, stage)
+        root = Path(project_root).expanduser().resolve(strict=False)
+        store = await get_store()
+        session = await _active_session_for_project(store, root)
+        normalized = stage if stage.startswith("samvil-") else f"samvil-{stage}"
+        trusted_receipt = (
+            await store.get_runtime_receipt(session.id, normalized)
+            if session is not None and normalized in {"samvil-build", "samvil-qa"}
+            else None
+        )
+        claim_context = (
+            await _active_claim_context(
+                store, root, session, expected_stage=normalized
+            )
+            if session is not None
+            else None
+        )
+        if not _receipt_matches_claim(trusted_receipt, claim_context):
+            trusted_receipt = None
+        result = await asyncio.to_thread(
+            _collect,
+            project_root,
+            normalized.removeprefix("samvil-"),
+            trusted_receipt=trusted_receipt,
+        )
         _log_mcp_health("ok", "collect_stage_evidence")
         return json.dumps(result)
     except Exception as e:

@@ -15,11 +15,67 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SAMVIL_ROOT="$(dirname "$SCRIPT_DIR")"
 MCP_DIR="$SAMVIL_ROOT/mcp"
 HOST="${1:-codex}"
+MODE="${2:-install}"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " SAMVIL 자동 설치 (v$(grep -o '"version": "[^"]*"' "$SAMVIL_ROOT/.claude-plugin/plugin.json" | grep -o '[0-9][^"]*'))"
 echo " 대상 호스트: $HOST"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+_setup_codex_native() {
+  local requested_mode="$1"
+  local codex_profile_root="${CODEX_HOME:-$HOME/.codex}"
+  local installer_mode="--install"
+  case "$requested_mode" in
+    --check) installer_mode="--check" ;;
+    install|--install) installer_mode="--install" ;;
+    migrate|--migrate) installer_mode="--migrate" ;;
+    *)
+      echo "❌ Codex mode must be --check, --install, or --migrate."
+      return 2
+      ;;
+  esac
+  echo ""
+  echo "Codex native plugin activation (${installer_mode})..."
+  if [[ "$installer_mode" == "--migrate" ]]; then
+    local migration_plan_file
+    local expected_plan_sha256
+    migration_plan_file="$(umask 077 && mktemp "${TMPDIR:-/tmp}/samvil-migration-plan.XXXXXX")"
+    if ! "$PYTHON_BIN" -P -m samvil_mcp.codex_installer \
+        --migrate \
+        --dry-run \
+        --repo-root "$SAMVIL_ROOT" \
+        --codex-home "$codex_profile_root" \
+        --json >"$migration_plan_file"; then
+      cat "$migration_plan_file" >&2
+      rm -f "$migration_plan_file"
+      echo "❌ Legacy Codex profile is not safe to migrate automatically." >&2
+      return 1
+    fi
+    if ! expected_plan_sha256="$(
+      "$PYTHON_BIN" -c \
+        'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["plan_sha256"])' \
+        "$migration_plan_file"
+    )"; then
+      rm -f "$migration_plan_file"
+      echo "❌ Migration dry-run did not produce a valid plan hash." >&2
+      return 1
+    fi
+    rm -f "$migration_plan_file"
+    "$PYTHON_BIN" -P -m samvil_mcp.codex_installer \
+      --migrate \
+      --expected-plan-sha256 "$expected_plan_sha256" \
+      --repo-root "$SAMVIL_ROOT" \
+      --codex-home "$codex_profile_root" \
+      --json
+    return
+  fi
+  "$PYTHON_BIN" -P -m samvil_mcp.codex_installer \
+    "$installer_mode" \
+    --repo-root "$SAMVIL_ROOT" \
+    --codex-home "$codex_profile_root" \
+    --json
+}
 
 # ── Step 1. uv ──────────────────────────────────────────────────────────────
 echo ""
@@ -66,6 +122,15 @@ else
   echo "      ⚠️  임포트 실패 — 설치 후 'samvil-doctor'로 진단하세요"
 fi
 
+if [[ "$HOST" == "codex" ]]; then
+  _setup_codex_native "$MODE"
+  exit 0
+fi
+
+if [[ "$HOST" == "all" ]]; then
+  _setup_codex_native "$MODE"
+fi
+
 # ── Step 4. AGENTS.md 전역 설치 ────────────────────────────────────────────
 echo ""
 echo "[4/5] AGENTS.md 전역 등록..."
@@ -83,9 +148,6 @@ _install_agents() {
   echo "      ✓ $dest (paths → ${SAMVIL_ROOT})"
 }
 
-if [[ "$HOST" == "codex" || "$HOST" == "all" ]]; then
-  _install_agents "$HOME/.codex"
-fi
 if [[ "$HOST" == "opencode" || "$HOST" == "all" ]]; then
   _install_agents "$HOME/.opencode"
 fi
@@ -96,27 +158,6 @@ fi
 # ── Step 5. MCP config 자동 등록 ────────────────────────────────────────────
 echo ""
 echo "[5/5] 호스트 MCP 설정 자동 등록..."
-
-# ── Codex CLI ────────────────────────────────────────────────────────────────
-_setup_codex() {
-  local cfg="$HOME/.codex/config.toml"
-  mkdir -p "$HOME/.codex"
-
-  if [ -f "$cfg" ] && grep -q "samvil-mcp" "$cfg" 2>/dev/null; then
-    echo "      ✓ Codex CLI: 이미 등록됨 ($cfg)"
-    return
-  fi
-
-  # Append block (file may or may not exist)
-  cat >> "$cfg" <<TOML
-
-[mcp_servers.samvil-mcp]
-command = "$PYTHON_BIN"
-args    = ["-m", "samvil_mcp.server"]
-env     = {}
-TOML
-  echo "      ✓ Codex CLI: $cfg 에 등록 완료"
-}
 
 # ── OpenCode ─────────────────────────────────────────────────────────────────
 _setup_opencode() {
@@ -196,7 +237,6 @@ PY
   echo "      ✓ Gemini CLI: $cfg 에 등록 완료"
 }
 
-if [[ "$HOST" == "codex"    || "$HOST" == "all" ]]; then _setup_codex;    fi
 if [[ "$HOST" == "opencode" || "$HOST" == "all" ]]; then _setup_opencode; fi
 if [[ "$HOST" == "gemini"   || "$HOST" == "all" ]]; then _setup_gemini;   fi
 

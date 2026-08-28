@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .host import HostCapability, chain_strategy, resolve_host_capability
+from .stage_catalog import get_stage_spec
 
 
 # ── Adapter data classes ─────────────────────────────────────────
@@ -116,15 +117,15 @@ _GENERIC_ALIASES: dict[str, str] = {
 
 _SKILL_CHAIN: list[dict[str, str]] = [
     {"name": "samvil", "next": "samvil-interview"},
-    {"name": "samvil-interview", "next": "samvil-seed"},
-    {"name": "samvil-pm-interview", "next": "samvil-design"},
+    {"name": "samvil-interview", "next": get_stage_spec("samvil-interview").valid_next[0]},
+    {"name": "samvil-pm-interview", "next": get_stage_spec("samvil-pm-interview").valid_next[0]},
     {"name": "samvil-seed", "next": "samvil-design"},
-    {"name": "samvil-council", "next": "samvil-design"},
-    {"name": "samvil-design", "next": "samvil-scaffold"},
-    {"name": "samvil-scaffold", "next": "samvil-build"},
-    {"name": "samvil-build", "next": "samvil-qa"},
+    {"name": "samvil-council", "next": get_stage_spec("samvil-council").valid_next[0]},
+    {"name": "samvil-design", "next": get_stage_spec("samvil-design").valid_next[0]},
+    {"name": "samvil-scaffold", "next": get_stage_spec("samvil-scaffold").valid_next[0]},
+    {"name": "samvil-build", "next": get_stage_spec("samvil-build").valid_next[0]},
     {"name": "samvil-qa", "next": "samvil-deploy"},
-    {"name": "samvil-deploy", "next": "samvil-retro"},
+    {"name": "samvil-deploy", "next": get_stage_spec("samvil-deploy").valid_next[0]},
     {"name": "samvil-evolve", "next": "samvil-retro"},
     {"name": "samvil-retro", "next": ""},
     {"name": "samvil-analyze", "next": ""},

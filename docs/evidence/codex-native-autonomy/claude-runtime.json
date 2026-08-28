@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "verification_level": "runtime_smoke",
+  "host": "claude_code",
+  "tested_commit": "a513a9bf2b2a9b605f0aa821e288fccc4b0ddc61",
+  "tested_tree": "a4cd64dd48f22bce7805d28dd4384d62c5408181",
+  "host_version": "2.1.207",
+  "command": "claude -p --bare --no-session-persistence --add-dir <temporary-git-project> --output-format json <read-only runtime smoke prompt>",
+  "exit_code": 0,
+  "plugin_loaded": true,
+  "mcp_tool_search": true,
+  "observed": [
+    "Claude initialized in the temporary git project with the samvil plugin in its actual plugin list.",
+    "SAMVIL MCP ToolSearch returned get_pipeline_status, session_status, complete_stage, and resume_session.",
+    "The read-only smoke read project.state.json at current_stage=interview and made no file changes."
+  ],
+  "pass": true,
+  "blockers": ["Full Interview-to-Seed/Build-to-QA stage execution remains unverified."]
+}

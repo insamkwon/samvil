@@ -12,21 +12,16 @@ from pathlib import Path
 from typing import Any
 
 from .ssot_io import atomic_write_text
+from .stage_catalog import iter_stage_specs
 
 _LEAF_CHECKPOINT_FILENAME = "leaf-checkpoint.json"
 _SAMVIL_DIR = ".samvil"
 
+# Compatibility view: state-to-skill mapping is owned by stage_catalog.
 _STAGE_NEXT_SKILL: dict[str, str] = {
-    "interview": "samvil-interview",
-    "seed": "samvil-seed",
-    "council": "samvil-council",
-    "design": "samvil-design",
-    "scaffold": "samvil-scaffold",
-    "build": "samvil-build",
-    "qa": "samvil-qa",
-    "deploy": "samvil-deploy",
-    "evolve": "samvil-evolve",
-    "retro": "samvil-retro",
+    spec.state_stage: spec.skill_name
+    for spec in iter_stage_specs()
+    if spec.state_stage is not None
 }
 
 
@@ -173,6 +168,10 @@ def resume_session(project_root: str) -> dict[str, Any]:
             "project_name": "",
             "in_progress_leaf": None,
             "chain_marker": None,
+            "status": "fresh",
+            "marker_revision": 0,
+            "stop_reason": "",
+            "recovery_recommendation": "begin interview",
         }
 
     current_stage = state.get("current_stage", "")
@@ -189,9 +188,25 @@ def resume_session(project_root: str) -> dict[str, Any]:
     # Trust it only when the state shows the marker's stage actually
     # completed — otherwise a mid-stage crash would skip the unfinished
     # stage (e.g. half-built project sent straight to QA).
-    from .chain_markers import read_chain_marker
+    from .chain_markers import inspect_chain_marker, read_chain_marker
 
     chain_marker = read_chain_marker(str(root))
+    marker_inspection = inspect_chain_marker(str(root))
+    status = "ready"
+    stop_reason = ""
+    recovery_recommendation = "continue current stage"
+    if marker_inspection.classification in {"corrupt", "unsupported"}:
+        status = "blocked"
+        stop_reason = marker_inspection.reason or marker_inspection.classification
+        recovery_recommendation = "repair or reconstruct the chain marker"
+    elif marker_inspection.classification == "valid":
+        marker_status = str((marker_inspection.marker or {}).get("status") or "")
+        if marker_status == "terminal":
+            status = "complete"
+            recovery_recommendation = "no further stage"
+        elif marker_status == "in_progress":
+            status = "in_progress"
+            recovery_recommendation = "resume the same stage claim"
     marker_next = ""
     if chain_marker and chain_marker.get("next_skill"):
         marker_stage = str(chain_marker.get("from_stage", "")).replace("samvil-", "")
@@ -230,4 +245,8 @@ def resume_session(project_root: str) -> dict[str, Any]:
         "samvil_tier": tier,
         "project_name": project_name,
         "in_progress_leaf": leaf,
+        "status": status,
+        "marker_revision": int((marker_inspection.marker or {}).get("revision", 0) or 0),
+        "stop_reason": stop_reason,
+        "recovery_recommendation": recovery_recommendation,
     }

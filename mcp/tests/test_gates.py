@@ -427,10 +427,14 @@ def test_mcp_build_gate_overwrites_reported_build_ok(tmp_path: Path, monkeypatch
     assert result["verdict"] == "block"
     assert result["metrics"]["build_ok"] is False
     assert result["reported_metrics"]["build_ok"] is True
-    assert result["mechanical_metrics"] == {"build_ok": False}
+    assert result["mechanical_metrics"] == {
+        "build_ok": False,
+        "implementation_rate": 0.0,
+    }
     assert result["allow_warn_ignored"] is True
     assert result["metric_mismatches"] == [
-        {"metric": "build_ok", "reported": True, "mechanical": False}
+        {"metric": "build_ok", "reported": True, "mechanical": False},
+        {"metric": "implementation_rate", "reported": 1.0, "mechanical": 0.0},
     ]
     assert "build_ok" in result["failed_checks"]
     assert any(item[:2] == ("warn", "gate_check.metric_mismatch") for item in health)
@@ -459,7 +463,10 @@ def test_mcp_build_gate_rejects_model_writable_success_log(tmp_path: Path) -> No
 
     assert result["verdict"] == "block"
     assert result["metrics"]["build_ok"] is False
-    assert result["mechanical_metrics"] == {"build_ok": False}
+    assert result["mechanical_metrics"] == {
+        "build_ok": False,
+        "implementation_rate": 0.0,
+    }
     assert result["stage_evidence"]["build"]["artifact_build_passed"] is True
     assert result["stage_evidence"]["build"]["runtime_verified"] is False
     assert "build_ok" in result["failed_checks"]
@@ -567,3 +574,72 @@ def test_mcp_qa_gate_rejects_model_writable_runtime_evidence(tmp_path: Path) -> 
     assert result["metrics"]["runtime_verified"] is False
     assert result["metrics"]["verification_mode"] == "static"
     assert result["stage_evidence"]["qa"]["artifact_runtime_passed"] is True
+
+
+def test_qa_to_deploy_zero_decided_tests_never_count_as_full_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import samvil_mcp.stage_evidence as stage_evidence
+    from samvil_mcp.server import _mechanical_gate_evidence
+
+    monkeypatch.setattr(
+        stage_evidence,
+        "collect_stage_evidence",
+        lambda *_args, **_kwargs: {
+            "qa": {
+                "runtime_verified": True,
+                "npm_test": {
+                    "ran": False,
+                    "passed": 0,
+                    "failed": 0,
+                    "exit_code": 0,
+                },
+            }
+        },
+    )
+
+    metrics, _thresholds, _evidence = _mechanical_gate_evidence(
+        str(tmp_path),
+        "qa_to_deploy",
+        trusted_receipt={"status": "passed"},
+    )
+
+    assert metrics["test_pass_rate"] == 0.0
+    assert metrics["runtime_verified"] is False
+
+
+def test_qa_to_evolve_uses_file_synthesis_without_driver_runtime_receipt(
+    tmp_path: Path,
+) -> None:
+    from samvil_mcp.server import gate_check as gate_check_tool
+
+    samvil = tmp_path / ".samvil"
+    samvil.mkdir()
+    (samvil / "qa-results.json").write_text(
+        json.dumps(
+            {
+                "synthesis": {
+                    "verdict": "PASS",
+                    "pass1": {"status": "PASS"},
+                    "pass2": {"counts": {"FAIL": 0, "UNIMPLEMENTED": 0}},
+                    "pass3": {"verdict": "PASS"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = json.loads(
+        asyncio.run(
+            gate_check_tool(
+                gate_name="qa_to_evolve",
+                samvil_tier="minimal",
+                metrics_json="{}",
+                project_root=str(tmp_path),
+            )
+        )
+    )
+
+    assert result["verdict"] == "pass"
+    assert result["mechanical_metrics"]["three_pass_pass"] is True
+    assert result["mechanical_metrics"]["runtime_verified"] is False

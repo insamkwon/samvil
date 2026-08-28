@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from contextlib import ExitStack
@@ -15,6 +16,7 @@ from .chain_markers import _build_chain_marker
 from .claim_ledger import _locked
 from .models import Event, EventType, Session, SeedVersion, Stage, StageTransition
 from .ssot_io import atomic_write_text_unlocked
+from .stage_catalog import get_stage_spec
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -23,6 +25,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     project_root TEXT DEFAULT '',
     seed_version INTEGER DEFAULT 1,
     current_stage TEXT DEFAULT 'interview',
+    active_skill TEXT DEFAULT '',
     stage_transition_id TEXT DEFAULT '',
     samvil_tier TEXT DEFAULT 'standard',
     created_at TEXT NOT NULL,
@@ -68,6 +71,75 @@ CREATE TABLE IF NOT EXISTS pending_project_events (
 
 CREATE INDEX IF NOT EXISTS idx_pending_project_events_session
 ON pending_project_events(session_id, timestamp);
+
+CREATE TABLE IF NOT EXISTS stage_claims (
+    session_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    marker_revision INTEGER NOT NULL,
+    claim_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_transition_id TEXT DEFAULT '',
+    UNIQUE(session_id, stage, marker_revision),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stage_claims_session
+ON stage_claims(session_id, marker_revision);
+
+CREATE TABLE IF NOT EXISTS transition_receipts (
+    transition_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transition_receipts_session
+ON transition_receipts(session_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS runtime_receipts (
+    session_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, stage),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_verification_requirements (
+    session_id TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    claim_id TEXT NOT NULL,
+    marker_revision INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, stage, claim_id, marker_revision),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_runtime_verification_requirements_session
+ON runtime_verification_requirements(session_id, stage, marker_revision);
+
+CREATE TABLE IF NOT EXISTS event_store_migrations (
+    migration_key TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gate_receipts (
+    session_id TEXT NOT NULL,
+    gate TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, gate),
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gate_receipts_session
+ON gate_receipts(session_id, updated_at);
 """
 
 # In-place migrations for already-initialized DBs. Initialization first
@@ -90,6 +162,9 @@ PROJECT_ROOT_MIGRATION = (
 STAGE_TRANSITION_ID_MIGRATION = (
     "ALTER TABLE sessions ADD COLUMN stage_transition_id TEXT DEFAULT ''"
 )
+ACTIVE_SKILL_MIGRATION = (
+    "ALTER TABLE sessions ADD COLUMN active_skill TEXT DEFAULT ''"
+)
 TRUSTED_TRANSITION_MIGRATION = (
     "ALTER TABLE events ADD COLUMN trusted_transition INTEGER NOT NULL DEFAULT 0"
 )
@@ -97,6 +172,12 @@ TRUSTED_TRANSITION_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_events_trusted_transition
 ON events(session_id, trusted_transition, timestamp DESC)
 """
+PROJECT_ROOT_UPDATED_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_sessions_project_root_updated
+ON sessions(project_root, updated_at DESC)
+"""
+RUNTIME_REQUIREMENTS_BACKFILL = "runtime_verification_requirements_v1"
+RUNTIME_REQUIREMENT_UNKNOWN_CLAIM = "receipt-backfill-unverified"
 
 
 def _migration_plan(
@@ -117,6 +198,8 @@ def _migration_plan(
         plan.append(PROJECT_ROOT_MIGRATION)
     if "stage_transition_id" not in sessions_columns:
         plan.append(STAGE_TRANSITION_ID_MIGRATION)
+    if "active_skill" not in sessions_columns:
+        plan.append(ACTIVE_SKILL_MIGRATION)
     return plan
 
 
@@ -131,6 +214,37 @@ def _now() -> str:
 
 def _uuid() -> str:
     return uuid.uuid4().hex[:12]
+
+
+def _runtime_requirement_identity(
+    receipt: dict[str, Any] | None,
+) -> tuple[str, int]:
+    """Extract audit metadata without weakening the stage-level requirement."""
+    claim_id = RUNTIME_REQUIREMENT_UNKNOWN_CLAIM
+    marker_revision: Any = None
+    if isinstance(receipt, dict):
+        if str(receipt.get("claim_id") or ""):
+            claim_id = str(receipt["claim_id"])
+        marker_revision = receipt.get("marker_revision")
+    return claim_id, marker_revision if type(marker_revision) is int else -1
+
+
+async def _persist_runtime_requirement(
+    db: aiosqlite.Connection,
+    *,
+    session_id: str,
+    stage: str,
+    claim_id: str,
+    marker_revision: int,
+    created_at: str,
+) -> None:
+    """Record one audit identity without weakening the sticky stage lookup."""
+    await db.execute(
+        """INSERT OR IGNORE INTO runtime_verification_requirements
+        (session_id, stage, claim_id, marker_revision, created_at)
+        VALUES (?, ?, ?, ?, ?)""",
+        (session_id, stage, claim_id, marker_revision, created_at),
+    )
 
 
 def _restore_legacy_recovery_files(
@@ -255,6 +369,37 @@ class EventStore:
                 trusted_transition_added = TRUSTED_TRANSITION_MIGRATION in migrations
                 for migration in migrations:
                     await db.execute(migration)
+                backfill_cursor = await db.execute(
+                    """SELECT 1 FROM event_store_migrations
+                    WHERE migration_key = ?""",
+                    (RUNTIME_REQUIREMENTS_BACKFILL,),
+                )
+                if await backfill_cursor.fetchone() is None:
+                    receipt_cursor = await db.execute(
+                        """SELECT session_id, stage, receipt_json, created_at
+                        FROM runtime_receipts"""
+                    )
+                    async for receipt_row in receipt_cursor:
+                        try:
+                            receipt = json.loads(str(receipt_row[2]))
+                        except (json.JSONDecodeError, TypeError, UnicodeError):
+                            receipt = None
+                        claim_id, marker_revision = _runtime_requirement_identity(
+                            receipt
+                        )
+                        await _persist_runtime_requirement(
+                            db,
+                            session_id=str(receipt_row[0]),
+                            stage=str(receipt_row[1]),
+                            claim_id=claim_id,
+                            marker_revision=marker_revision,
+                            created_at=str(receipt_row[3]),
+                        )
+                    await db.execute(
+                        """INSERT INTO event_store_migrations
+                        (migration_key, applied_at) VALUES (?, ?)""",
+                        (RUNTIME_REQUIREMENTS_BACKFILL, _now()),
+                    )
                 if trusted_transition_added:
                     # Legacy JSON flags cannot prove provenance. Rewind only
                     # once, while adding the provenance column, so existing
@@ -274,7 +419,8 @@ class EventStore:
                     )
                     await db.execute(
                         """UPDATE sessions
-                        SET current_stage = 'interview', stage_transition_id = ''
+                        SET current_stage = 'interview', active_skill = '',
+                            stage_transition_id = ''
                         WHERE current_stage != 'interview' AND project_root != ''"""
                     )
                 index_cursor = await db.execute(
@@ -285,9 +431,10 @@ class EventStore:
                 if index_row is not None and "json_extract" in str(index_row[0]):
                     await db.execute("DROP INDEX idx_events_trusted_transition")
                 await db.execute(TRUSTED_TRANSITION_INDEX)
+                await db.execute(PROJECT_ROOT_UPDATED_INDEX)
                 await db.commit()
-            except Exception:
-                await db.rollback()
+            except BaseException:
+                await asyncio.shield(db.rollback())
                 try:
                     if legacy_recovery_backups:
                         _restore_legacy_recovery_files(legacy_recovery_backups)
@@ -384,7 +531,7 @@ class EventStore:
                     await db.execute(
                         """UPDATE sessions
                         SET project_root = ?, current_stage = 'interview',
-                            stage_transition_id = '', updated_at = ?
+                            active_skill = '', stage_transition_id = '', updated_at = ?
                         WHERE id = ? AND project_root = ''""",
                         (normalized_root, _now(), session_id),
                     )
@@ -396,8 +543,8 @@ class EventStore:
                     )
                 await db.commit()
                 return needs_revalidation
-            except Exception:
-                await db.rollback()
+            except BaseException:
+                await asyncio.shield(db.rollback())
                 if backups:
                     _restore_legacy_recovery_files(backups)
                 raise
@@ -411,7 +558,15 @@ class EventStore:
         project_name: str,
         samvil_tier: str = "standard",
         project_root: str = "",
+        initial_skill: str = "samvil-interview",
     ) -> Session:
+        spec = get_stage_spec(initial_skill)
+        if spec.state_stage is None and initial_skill not in {
+            "samvil-pm-interview",
+            "samvil-analyze",
+        }:
+            raise ValueError(f"unsupported initial_skill: {initial_skill}")
+        initial_stage = Stage(spec.state_stage or Stage.INTERVIEW.value)
         normalized_root = (
             str(Path(project_root).expanduser().resolve()) if project_root else ""
         )
@@ -419,6 +574,8 @@ class EventStore:
             id=_uuid(),
             project_name=project_name,
             project_root=normalized_root,
+            current_stage=initial_stage,
+            active_skill=initial_skill,
             samvil_tier=samvil_tier,
             created_at=_now(),
             updated_at=_now(),
@@ -426,11 +583,393 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("BEGIN")
             await db.execute(
-                "INSERT INTO sessions (id, project_name, project_root, seed_version, current_stage, samvil_tier, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (session.id, session.project_name, session.project_root, session.seed_version, session.current_stage, session.samvil_tier, session.created_at, session.updated_at),
+                "INSERT INTO sessions (id, project_name, project_root, seed_version, current_stage, active_skill, samvil_tier, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (session.id, session.project_name, session.project_root, session.seed_version, session.current_stage, session.active_skill, session.samvil_tier, session.created_at, session.updated_at),
             )
             await db.commit()
         return session
+
+    async def get_stage_claim(
+        self,
+        session_id: str,
+        stage: str,
+        marker_revision: int,
+    ) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT session_id, stage, marker_revision, claim_id, status,
+                   created_at, updated_at, completed_transition_id
+                   FROM stage_claims
+                   WHERE session_id = ? AND stage = ? AND marker_revision = ?""",
+                (session_id, stage, marker_revision),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return dict(
+            zip(
+                (
+                    "session_id",
+                    "stage",
+                    "marker_revision",
+                    "claim_id",
+                    "status",
+                    "created_at",
+                    "updated_at",
+                    "completed_transition_id",
+                ),
+                row,
+            )
+        )
+
+    async def get_active_stage_claim(
+        self,
+        session_id: str,
+        stage: str,
+    ) -> dict[str, Any] | None:
+        """Return the sole in-progress claim for a stage, or fail on ambiguity."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT session_id, stage, marker_revision, claim_id, status,
+                   created_at, updated_at, completed_transition_id
+                   FROM stage_claims
+                   WHERE session_id = ? AND stage = ? AND status = 'in_progress'
+                   ORDER BY marker_revision DESC LIMIT 2""",
+                (session_id, stage),
+            )
+            rows = await cursor.fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise ValueError("multiple active stage claims")
+        keys = (
+            "session_id",
+            "stage",
+            "marker_revision",
+            "claim_id",
+            "status",
+            "created_at",
+            "updated_at",
+            "completed_transition_id",
+        )
+        return dict(zip(keys, rows[0]))
+
+    async def get_stage_claims_for_revision(
+        self,
+        session_id: str,
+        marker_revision: int,
+    ) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT session_id, stage, marker_revision, claim_id, status,
+                   created_at, updated_at, completed_transition_id
+                   FROM stage_claims
+                   WHERE session_id = ? AND marker_revision = ?""",
+                (session_id, marker_revision),
+            )
+            rows = await cursor.fetchall()
+        keys = (
+            "session_id",
+            "stage",
+            "marker_revision",
+            "claim_id",
+            "status",
+            "created_at",
+            "updated_at",
+            "completed_transition_id",
+        )
+        return [dict(zip(keys, row)) for row in rows]
+
+    async def create_stage_claim(
+        self,
+        session_id: str,
+        stage: str,
+        marker_revision: int,
+        *,
+        claim_id: str | None = None,
+    ) -> dict[str, Any]:
+        claim_id = claim_id or f"claim-{_uuid()}"
+        now = _now()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                """SELECT session_id, stage, marker_revision, claim_id, status,
+                   created_at, updated_at, completed_transition_id
+                   FROM stage_claims
+                   WHERE session_id = ? AND stage = ? AND marker_revision = ?""",
+                (session_id, stage, marker_revision),
+            )
+            existing = await cursor.fetchone()
+            if existing is not None:
+                await db.commit()
+                return dict(
+                    zip(
+                        (
+                            "session_id",
+                            "stage",
+                            "marker_revision",
+                            "claim_id",
+                            "status",
+                            "created_at",
+                            "updated_at",
+                            "completed_transition_id",
+                        ),
+                        existing,
+                    )
+                )
+            await db.execute(
+                """INSERT INTO stage_claims
+                (session_id, stage, marker_revision, claim_id, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'in_progress', ?, ?)""",
+                (session_id, stage, marker_revision, claim_id, now, now),
+            )
+            await db.commit()
+        return {
+            "session_id": session_id,
+            "stage": stage,
+            "marker_revision": marker_revision,
+            "claim_id": claim_id,
+            "status": "in_progress",
+            "created_at": now,
+            "updated_at": now,
+            "completed_transition_id": "",
+        }
+
+    async def delete_stage_claim(self, claim_id: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM stage_claims WHERE claim_id = ?", (claim_id,))
+            await db.commit()
+
+    async def get_transition_receipt(self, transition_id: str) -> dict[str, Any] | None:
+        record = await self.get_transition_receipt_record(transition_id)
+        return record[1] if record is not None else None
+
+    async def get_event_by_id(self, event_id: str) -> Event | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM events WHERE id = ?", (event_id,))
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return Event(
+            id=row["id"],
+            session_id=row["session_id"],
+            event_type=EventType(row["event_type"]),
+            stage=Stage(row["stage"]),
+            data=json.loads(row["data"]),
+            token_count=row["token_count"],
+            timestamp=row["timestamp"],
+        )
+
+    async def get_session_transition_state(self, session_id: str) -> tuple[str, str] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT current_stage, stage_transition_id FROM sessions WHERE id = ?",
+                (session_id,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return str(row[0]), str(row[1] or "")
+
+    async def get_transition_receipt_record(
+        self,
+        transition_id: str,
+    ) -> tuple[str, dict[str, Any]] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT session_id, receipt_json FROM transition_receipts WHERE transition_id = ?",
+                (transition_id,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return str(row[0]), json.loads(str(row[1]))
+
+    async def save_transition_receipt(
+        self,
+        transition_id: str,
+        session_id: str,
+        receipt: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            cursor = await db.execute(
+                "SELECT receipt_json FROM transition_receipts WHERE transition_id = ?",
+                (transition_id,),
+            )
+            existing = await cursor.fetchone()
+            if existing is not None:
+                owner_cursor = await db.execute(
+                    "SELECT session_id FROM transition_receipts WHERE transition_id = ?",
+                    (transition_id,),
+                )
+                owner = await owner_cursor.fetchone()
+                if owner is None or str(owner[0]) != session_id:
+                    await db.rollback()
+                    raise ValueError("transition receipt belongs to another run")
+                await db.commit()
+                return json.loads(str(existing[0]))
+            await db.execute(
+                """INSERT INTO transition_receipts
+                (transition_id, session_id, receipt_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)""",
+                (transition_id, session_id, json.dumps(receipt, ensure_ascii=False), now, now),
+            )
+            await db.commit()
+        return receipt
+
+    async def save_runtime_receipt(
+        self,
+        session_id: str,
+        stage: str,
+        receipt: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        payload = {**receipt, "session_id": session_id, "stage": stage}
+        claim_id, marker_revision = _runtime_requirement_identity(payload)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await _persist_runtime_requirement(
+                db,
+                session_id=session_id,
+                stage=stage,
+                claim_id=claim_id,
+                marker_revision=marker_revision,
+                created_at=now,
+            )
+            await db.execute(
+                """INSERT INTO runtime_receipts
+                (session_id, stage, receipt_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, stage) DO UPDATE SET
+                    receipt_json = excluded.receipt_json,
+                    updated_at = excluded.updated_at""",
+                (session_id, stage, json.dumps(payload, ensure_ascii=False), now, now),
+            )
+            await db.commit()
+        return payload
+
+    async def get_runtime_receipt(
+        self,
+        session_id: str,
+        stage: str,
+    ) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT receipt_json FROM runtime_receipts WHERE session_id = ? AND stage = ?",
+                (session_id, stage),
+            )
+            row = await cursor.fetchone()
+        return json.loads(str(row[0])) if row is not None else None
+
+    async def mark_runtime_verification_required(
+        self,
+        session_id: str,
+        stage: str,
+        claim_id: str,
+        marker_revision: int,
+    ) -> None:
+        """Begin native verification and invalidate any older stage receipt."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            claim_cursor = await db.execute(
+                """SELECT 1 FROM stage_claims
+                WHERE session_id = ? AND stage = ? AND claim_id = ?
+                  AND marker_revision = ? AND status = 'in_progress'
+                LIMIT 1""",
+                (session_id, stage, claim_id, marker_revision),
+            )
+            if await claim_cursor.fetchone() is None:
+                await db.rollback()
+                raise ValueError(
+                    "runtime verification requires the active stage claim"
+                )
+            await _persist_runtime_requirement(
+                db,
+                session_id=session_id,
+                stage=stage,
+                claim_id=claim_id,
+                marker_revision=marker_revision,
+                created_at=_now(),
+            )
+            await db.execute(
+                "DELETE FROM runtime_receipts WHERE session_id = ? AND stage = ?",
+                (session_id, stage),
+            )
+            await db.commit()
+
+    async def has_runtime_verification_requirement(
+        self,
+        session_id: str,
+        stage: str,
+    ) -> bool:
+        """Return whether this stage ever entered native verification.
+
+        The requirement is deliberately monotonic across replacement claims. Once
+        native verification starts, missing receipts can never be reinterpreted as
+        a legacy absence by issuing a new claim or marker revision.
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT 1 FROM runtime_verification_requirements
+                WHERE session_id = ? AND stage = ?
+                LIMIT 1""",
+                (session_id, stage),
+            )
+            row = await cursor.fetchone()
+        return row is not None
+
+    async def save_gate_receipt(
+        self,
+        session_id: str,
+        gate: str,
+        receipt: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = _now()
+        payload = {**receipt, "session_id": session_id, "gate": gate}
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            await db.execute(
+                """INSERT INTO gate_receipts
+                (session_id, gate, receipt_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, gate) DO UPDATE SET
+                    receipt_json = excluded.receipt_json,
+                    updated_at = excluded.updated_at""",
+                (session_id, gate, json.dumps(payload, ensure_ascii=False), now, now),
+            )
+            await db.commit()
+        return payload
+
+    async def get_gate_receipt(
+        self,
+        session_id: str,
+        gate: str,
+    ) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT receipt_json FROM gate_receipts WHERE session_id = ? AND gate = ?",
+                (session_id, gate),
+            )
+            row = await cursor.fetchone()
+        return json.loads(str(row[0])) if row is not None else None
+
+    async def mark_stage_claim_completed(
+        self,
+        claim_id: str,
+        transition_id: str,
+    ) -> bool:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """UPDATE stage_claims SET status = 'completed',
+                   completed_transition_id = ?, updated_at = ?
+                   WHERE claim_id = ?""",
+                (transition_id, _now(), claim_id),
+            )
+            await db.commit()
+            return cursor.rowcount == 1
 
     async def get_session(self, session_id: str) -> Session | None:
         async with aiosqlite.connect(self.db_path) as db:
@@ -445,6 +984,7 @@ class EventStore:
                 project_root=row["project_root"],
                 seed_version=row["seed_version"],
                 current_stage=Stage(row["current_stage"]),
+                active_skill=row["active_skill"],
                 samvil_tier=row["samvil_tier"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
@@ -479,10 +1019,35 @@ class EventStore:
                 project_root=row["project_root"],
                 seed_version=row["seed_version"],
                 current_stage=Stage(row["current_stage"]),
+                active_skill=row["active_skill"],
                 samvil_tier=row["samvil_tier"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
+
+    async def find_session_by_root(self, project_root: str) -> Session | None:
+        """Find the newest session by canonical root, independent of display name."""
+        normalized_root = str(Path(project_root).expanduser().resolve())
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM sessions WHERE project_root = ? ORDER BY updated_at DESC LIMIT 1",
+                (normalized_root,),
+            )
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        return Session(
+            id=row["id"],
+            project_name=row["project_name"],
+            project_root=row["project_root"],
+            seed_version=row["seed_version"],
+            current_stage=Stage(row["current_stage"]),
+            active_skill=row["active_skill"],
+            samvil_tier=row["samvil_tier"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     async def list_sessions(self, limit: int = 10) -> list[Session]:
         async with aiosqlite.connect(self.db_path) as db:
@@ -498,6 +1063,7 @@ class EventStore:
                     project_root=r["project_root"],
                     seed_version=r["seed_version"],
                     current_stage=Stage(r["current_stage"]),
+                    active_skill=r["active_skill"],
                     samvil_tier=r["samvil_tier"],
                     created_at=r["created_at"],
                     updated_at=r["updated_at"],
@@ -509,7 +1075,7 @@ class EventStore:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("BEGIN")
             await db.execute(
-                "UPDATE sessions SET current_stage = ?, stage_transition_id = '', updated_at = ? WHERE id = ?",
+                "UPDATE sessions SET current_stage = ?, active_skill = '', stage_transition_id = '', updated_at = ? WHERE id = ?",
                 (stage.value, _now(), session_id),
             )
             await db.commit()
@@ -558,13 +1124,16 @@ class EventStore:
         data: dict | None = None,
         token_count: int | None = None,
         expected_stage: Stage | None = None,
+        event_id: str | None = None,
+        transition_id: str | None = None,
+        active_skill: str = "",
     ) -> StageTransition:
         """Persist an event and its session-stage transition atomically."""
         async with aiosqlite.connect(self.db_path) as db:
             try:
                 await db.execute("BEGIN IMMEDIATE")
                 event = Event(
-                    id=_uuid(),
+                    id=event_id or _uuid(),
                     session_id=session_id,
                     event_type=event_type,
                     stage=stage,
@@ -572,14 +1141,15 @@ class EventStore:
                     timestamp=_now(),
                 )
                 session_cursor = await db.execute(
-                    "SELECT current_stage, stage_transition_id FROM sessions WHERE id = ?",
+                    "SELECT current_stage, active_skill, stage_transition_id FROM sessions WHERE id = ?",
                     (session_id,),
                 )
                 session_row = await session_cursor.fetchone()
                 if session_row is None:
                     raise ValueError(f"session {session_id} not found")
                 previous_stage = Stage(str(session_row[0]))
-                previous_transition_id = str(session_row[1] or "")
+                previous_active_skill = str(session_row[1] or "")
+                previous_transition_id = str(session_row[2] or "")
                 if expected_stage is not None and previous_stage != expected_stage:
                     raise ValueError(
                         "stage transition conflict: "
@@ -611,8 +1181,14 @@ class EventStore:
                     ),
                 )
                 cursor = await db.execute(
-                    "UPDATE sessions SET current_stage = ?, stage_transition_id = ?, updated_at = ? WHERE id = ?",
-                    (stage.value, event.id, event.timestamp, session_id),
+                    "UPDATE sessions SET current_stage = ?, active_skill = ?, stage_transition_id = ?, updated_at = ? WHERE id = ?",
+                    (
+                        stage.value,
+                        active_skill,
+                        transition_id or event.id,
+                        event.timestamp,
+                        session_id,
+                    ),
                 )
                 if cursor.rowcount != 1:
                     raise ValueError(f"session {session_id} not found")
@@ -623,8 +1199,147 @@ class EventStore:
         return StageTransition(
             event=event,
             previous_stage=previous_stage,
+            previous_active_skill=previous_active_skill,
             previous_transition_id=previous_transition_id,
         )
+
+    async def reconstruct_committed_transition(
+        self,
+        *,
+        project_root: str,
+        session_snapshot: dict[str, Any],
+        claim_snapshot: dict[str, Any],
+        event_id: str,
+        event_type: str,
+        event_stage: str,
+        event_data: dict[str, Any],
+        event_timestamp: str,
+        transition_id: str,
+        active_skill: str,
+        runtime_receipt: dict[str, Any] | None = None,
+        gate_receipt: dict[str, Any] | None = None,
+    ) -> None:
+        """Recreate only one journal-proven committed transition after DB loss."""
+        session_id = str(session_snapshot["id"])
+        claim_id = str(claim_snapshot["claim_id"])
+        normalized_root = str(Path(project_root).expanduser().resolve(strict=False))
+        if str(session_snapshot.get("project_root") or "") != normalized_root:
+            raise ValueError("reconstructed session root does not match journal")
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                conflicts = (
+                    ("sessions", "id = ? OR project_root = ?", (session_id, normalized_root)),
+                    ("events", "id = ?", (event_id,)),
+                    ("stage_claims", "claim_id = ?", (claim_id,)),
+                    ("transition_receipts", "transition_id = ?", (transition_id,)),
+                )
+                for table, predicate, parameters in conflicts:
+                    cursor = await db.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE {predicate}", parameters
+                    )
+                    if int((await cursor.fetchone())[0]) != 0:
+                        raise ValueError("lost DB recovery conflicts with persisted rows")
+                await db.execute(
+                    """INSERT INTO sessions
+                    (id, project_name, project_root, seed_version, current_stage,
+                     active_skill, stage_transition_id, samvil_tier, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        session_id,
+                        str(session_snapshot["project_name"]),
+                        normalized_root,
+                        int(session_snapshot["seed_version"]),
+                        event_stage,
+                        active_skill,
+                        transition_id,
+                        str(session_snapshot["samvil_tier"]),
+                        str(session_snapshot["created_at"]),
+                        event_timestamp,
+                    ),
+                )
+                encoded_data = json.dumps(event_data)
+                await db.execute(
+                    """INSERT INTO events
+                    (id, session_id, event_type, stage, data, trusted_transition, timestamp)
+                    VALUES (?, ?, ?, ?, ?, 1, ?)""",
+                    (
+                        event_id,
+                        session_id,
+                        event_type,
+                        event_stage,
+                        encoded_data,
+                        event_timestamp,
+                    ),
+                )
+                await db.execute(
+                    """INSERT INTO pending_project_events
+                    (event_id, session_id, event_type, stage, data, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        event_id,
+                        session_id,
+                        event_type,
+                        event_stage,
+                        encoded_data,
+                        event_timestamp,
+                    ),
+                )
+                await db.execute(
+                    """INSERT INTO stage_claims
+                    (session_id, stage, marker_revision, claim_id, status,
+                     created_at, updated_at, completed_transition_id)
+                    VALUES (?, ?, ?, ?, 'in_progress', ?, ?, '')""",
+                    (
+                        session_id,
+                        str(claim_snapshot["stage"]),
+                        int(claim_snapshot["marker_revision"]),
+                        claim_id,
+                        str(claim_snapshot["created_at"]),
+                        str(claim_snapshot["updated_at"]),
+                    ),
+                )
+                if runtime_receipt is not None:
+                    runtime_claim_id, runtime_revision = (
+                        _runtime_requirement_identity(runtime_receipt)
+                    )
+                    await _persist_runtime_requirement(
+                        db,
+                        session_id=session_id,
+                        stage=str(runtime_receipt["stage"]),
+                        claim_id=runtime_claim_id,
+                        marker_revision=runtime_revision,
+                        created_at=event_timestamp,
+                    )
+                    await db.execute(
+                        """INSERT INTO runtime_receipts
+                        (session_id, stage, receipt_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?)""",
+                        (
+                            session_id,
+                            str(runtime_receipt["stage"]),
+                            json.dumps(runtime_receipt, ensure_ascii=False),
+                            event_timestamp,
+                            event_timestamp,
+                        ),
+                    )
+                if gate_receipt is not None:
+                    await db.execute(
+                        """INSERT INTO gate_receipts
+                        (session_id, gate, receipt_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?)""",
+                        (
+                            session_id,
+                            str(gate_receipt["gate"]),
+                            json.dumps(gate_receipt, ensure_ascii=False),
+                            event_timestamp,
+                            event_timestamp,
+                        ),
+                    )
+                await db.commit()
+            except BaseException:
+                await asyncio.shield(db.rollback())
+                raise
 
     async def get_pending_project_events(self, session_id: str) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
@@ -686,7 +1401,7 @@ class EventStore:
                 )
                 event_row = await event_cursor.fetchone()
                 session_cursor = await db.execute(
-                    "SELECT current_stage, stage_transition_id FROM sessions WHERE id = ?",
+                    "SELECT current_stage, active_skill, stage_transition_id FROM sessions WHERE id = ?",
                     (event.session_id,),
                 )
                 session_row = await session_cursor.fetchone()
@@ -694,7 +1409,7 @@ class EventStore:
                     await db.rollback()
                     return False
                 current_stage = str(session_row[0])
-                current_transition_id = str(session_row[1] or "")
+                current_transition_id = str(session_row[2] or "")
                 if (
                     current_stage != event.stage.value
                     or current_transition_id != event.id
@@ -714,10 +1429,11 @@ class EventStore:
                 )
                 restored = await db.execute(
                     """UPDATE sessions
-                    SET current_stage = ?, stage_transition_id = ?, updated_at = ?
+                    SET current_stage = ?, active_skill = ?, stage_transition_id = ?, updated_at = ?
                     WHERE id = ? AND current_stage = ? AND stage_transition_id = ?""",
                     (
                         transition.previous_stage.value,
+                        transition.previous_active_skill,
                         transition.previous_transition_id,
                         _now(),
                         event.session_id,

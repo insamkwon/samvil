@@ -167,10 +167,25 @@ def test_codex_build_command_gets_gate_input_from_phase_z() -> None:
     text = (repo / "references" / "codex-commands" / "samvil-build.md").read_text()
 
     phase_z_index = text.index("finalize_build_phase_z")
+    runtime_index = text.index("run_stage_verification")
     gate_index = text.index('gate_check(gate_name="build_to_qa"')
-    assert phase_z_index < gate_index
+    assert runtime_index < phase_z_index < gate_index
     assert "metrics_json=<phase_z.gate_input.metrics>" in text
     assert "metrics_json=<gate_input>" not in text
+    assert "complete_stage(" not in text
+    assert "write_chain_marker(" not in text
+
+
+def test_codex_qa_command_returns_dynamic_route_to_native_driver() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    text = (repo / "references" / "codex-commands" / "samvil-qa.md").read_text()
+
+    assert "run_stage_verification" in text
+    assert "commit_stage_transition(" not in text
+    assert "complete_stage(" not in text
+    assert "write_chain_marker(" not in text
+    assert "return `requested_next_skill=" in text
+    assert "native run driver" in text
 
 
 def test_all_stage_skills_fail_closed_without_trusted_gate_override() -> None:
@@ -276,12 +291,14 @@ def test_pm_and_codex_seed_paths_keep_council_opt_in_only() -> None:
     assert "interview-summary.md" in pm
     assert skill_interview in pm and skill_seed in pm
     assert pm.index("gate_check") < pm.index(skill_interview) < pm.index(skill_seed)
-    for command in (pm_codex, pm_gemini):
-        assert "interview-summary.md" in command
-        assert host_interview in command and host_seed in command
-        assert command.index("gate_check") < command.index(host_interview)
-        assert command.index(host_interview) < command.index(host_seed)
-        assert command.index(host_seed) < command.index("write_chain_marker")
+    assert "interview-summary.md" in pm_gemini
+    assert host_interview in pm_gemini and host_seed in pm_gemini
+    assert pm_gemini.index("gate_check") < pm_gemini.index(host_interview)
+    assert pm_gemini.index(host_interview) < pm_gemini.index(host_seed)
+    assert "interview-summary.md" in pm_codex
+    assert pm_codex.index("gate_check") < pm_codex.index("native run driver")
+    assert "complete_stage(" not in pm_codex
+    assert "write_chain_marker(" not in pm_codex
 
 
 def test_codex_orchestrator_initializes_the_selected_stage() -> None:
@@ -301,7 +318,8 @@ def test_codex_build_uses_mechanical_build_gate_before_chain() -> None:
     assert 'evidence_mode="mechanical"' in codex
     assert "Any tool error or non-`pass` verdict halts" in codex
     assert codex.index("collect_stage_evidence") < codex.index("gate_check")
-    assert codex.index("gate_check") < codex.index("write_chain_marker")
+    assert codex.index("gate_check") < codex.index("native run driver")
+    assert "write_chain_marker(" not in codex
 
 
 def test_scaffold_and_build_skills_complete_trusted_stage_before_chain() -> None:
@@ -349,17 +367,13 @@ def test_codex_qa_uses_dynamic_finalize_route() -> None:
     assert "metrics_json=<finalize.gate_input.metrics>" in codex
     assert "three_pass_pass" in codex
     assert "Only after materialize + gate PASS" in codex
-    assert 'next_skill="<finalize.next_skill_decision.suggested>"' in codex
+    assert "requested_next_skill=<finalize.next_skill_decision.suggested>" in codex
     assert "Deploy/Evolve/Retro" in codex
     assert "samvil-qa" in codex
     assert "no cross-stage gate" in codex
-    complete_call = (
-        'complete_stage(session_id=<sid>, stage="qa", '
-        'verdict="<pass|fail|blocked>")'
-    )
-    assert complete_call in codex
-    assert codex.index("gate_check") < codex.index(complete_call)
-    assert codex.index(complete_call) < codex.index("write_chain_marker")
+    assert "complete_stage(" not in codex
+    assert "write_chain_marker(" not in codex
+    assert codex.index("gate_check") < codex.index("native run driver")
 
 
 def test_qa_skill_records_trusted_completion_before_host_chain() -> None:

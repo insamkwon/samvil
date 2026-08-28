@@ -38,6 +38,28 @@ def _isolated_server(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(srv, "_store", None)
 
 
+def test_create_session_tool_preserves_native_entry_skill(
+    tmp_path, monkeypatch
+) -> None:
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "pm-entry"
+    project_root.mkdir()
+
+    created = json.loads(
+        _run(
+            create_session(
+                "pm-entry",
+                "standard",
+                project_root=str(project_root),
+                initial_skill="samvil-pm-interview",
+            )
+        )
+    )
+
+    assert created["initial_skill"] == "samvil-pm-interview"
+    assert created["current_stage"] == "interview"
+
+
 def test_read_chain_marker_recovers_rootless_legacy_session_before_read(
     tmp_path,
     monkeypatch,
@@ -412,6 +434,78 @@ def test_stage_history_is_not_truncated_by_large_telemetry_volume(
         allowed = json.loads(await stage_can_proceed(sess["session_id"], "seed"))
         assert allowed["can_proceed"] is True
         assert loaded_counts == [1]
+
+    _run(runner())
+
+
+def test_complete_stage_delegates_codex_claims_to_shared_controller(tmp_path, monkeypatch) -> None:
+    from samvil_mcp import server as srv
+    from samvil_mcp.transition_controller import TransitionController
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "shared-controller"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+
+    async def runner():
+        session = json.loads(await create_session("shared-controller", "standard", project_root=str(project_root)))
+        sid = session["session_id"]
+        controller = TransitionController(await srv.get_store())
+        claim = await controller.begin_stage(str(project_root), sid, "samvil-interview", 0)
+        result = json.loads(await complete_stage(sid, "interview", "pass"))
+        assert result["status"] == "ok"
+        assert result["shared_controller"] is True
+        assert result["claim_id"] == claim["claim_id"]
+        assert result["next_stage"] == "seed"
+
+    _run(runner())
+
+
+def test_complete_stage_rejects_marker_downgrade_with_active_driver_claim(
+    tmp_path, monkeypatch
+) -> None:
+    from samvil_mcp import server as srv
+    from samvil_mcp.transition_controller import TransitionController
+
+    _isolated_server(monkeypatch, tmp_path)
+    project_root = tmp_path / "downgraded-marker"
+    project_root.mkdir()
+    _prepare_interview_exit(project_root)
+
+    async def runner():
+        session = json.loads(
+            await create_session(
+                "downgraded-marker", "standard", project_root=str(project_root)
+            )
+        )
+        sid = session["session_id"]
+        store = await srv.get_store()
+        controller = TransitionController(store)
+        claim = await controller.begin_stage(
+            str(project_root), sid, "samvil-interview", 0
+        )
+        marker_path = project_root / ".samvil" / "next-skill.json"
+        marker_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "chain_via": "file_marker",
+                    "next_skill": "samvil-interview",
+                    "from_stage": "samvil",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = json.loads(await complete_stage(sid, "interview", "pass"))
+        persisted_claim = await store.get_stage_claim(sid, "samvil-interview", 0)
+        persisted_session = await store.get_session(sid)
+
+        assert result["status"] == "error"
+        assert "active driver claim" in result["error"]
+        assert persisted_claim == claim
+        assert persisted_claim["status"] == "in_progress"
+        assert persisted_session.current_stage.value == "interview"
 
     _run(runner())
 
@@ -2009,7 +2103,11 @@ def test_save_event_uses_valid_line_index_without_rescanning_jsonl(
     def unexpected_scan(_handle):
         raise AssertionError("valid line index must avoid a full JSONL scan")
 
+    def unexpected_validation(_path):
+        raise AssertionError("valid fingerprinted index must avoid full validation")
+
     monkeypatch.setattr(srv, "_scan_event_line_count", unexpected_scan)
+    monkeypatch.setattr(srv, "_validate_existing_event_log", unexpected_validation)
     second = srv._append_project_event(
         project_root,
         timestamp="2026-07-25T00:00:01Z",

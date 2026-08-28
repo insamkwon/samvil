@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -166,13 +167,43 @@ def _collect_qa(root: Path) -> tuple[dict[str, Any], list[str], list[str]]:
     )
 
 
-def collect_stage_evidence(project_root: str | Path, stage: str) -> dict[str, Any]:
+def _trusted_runtime_matches(
+    root: Path,
+    stage: str,
+    evidence: dict[str, Any],
+    receipt: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(receipt, dict):
+        return False
+    expected_path = f".samvil/{'build' if stage == 'build' else 'qa'}.log"
+    authority = root / expected_path
+    if (
+        receipt.get("trusted_by") != "samvil_mcp_subprocess"
+        or receipt.get("stage") != f"samvil-{stage}"
+        or receipt.get("authority_path") != expected_path
+        or not authority.is_file()
+    ):
+        return False
+    authority_hash = hashlib.sha256(authority.read_bytes()).hexdigest()
+    return (
+        receipt.get("authority_sha256") == authority_hash
+        and receipt.get("exit_code") == evidence.get("exit_code")
+        and evidence.get("exit_code") == 0
+    )
+
+
+def collect_stage_evidence(
+    project_root: str | Path,
+    stage: str,
+    *,
+    trusted_receipt: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return artifact-derived observations for ``build`` or ``qa``.
 
     Missing or malformed artifacts are reported explicitly and never inferred as
-    successful from caller-provided prose or metrics. Build and QA artifacts
-    remain untrusted because the model can write them; only a future trusted
-    host receipt may set ``runtime_verified``.
+    successful from caller-provided prose or metrics. A receipt produced by the
+    MCP subprocess runner is accepted only when it matches the current log hash
+    and exit code.
     """
 
     normalized_stage = stage.strip().casefold()
@@ -184,6 +215,21 @@ def collect_stage_evidence(project_root: str | Path, stage: str) -> dict[str, An
         evidence, evidence_files, missing = _collect_build(root)
     else:
         evidence, evidence_files, missing = _collect_qa(root)
+
+    runtime_verified = _trusted_runtime_matches(
+        root,
+        normalized_stage,
+        evidence if normalized_stage == "build" else {
+            "exit_code": (evidence.get("npm_test") or {}).get("exit_code")
+        },
+        trusted_receipt,
+    )
+    evidence["runtime_verified"] = runtime_verified
+    evidence["static_only"] = not runtime_verified
+    if runtime_verified:
+        evidence["trust_reason"] = "verified by samvil_mcp subprocess receipt"
+        if normalized_stage == "qa":
+            evidence["artifact_runtime_passed"] = True
 
     return {
         normalized_stage: evidence,

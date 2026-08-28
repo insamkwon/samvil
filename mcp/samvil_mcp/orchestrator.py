@@ -14,19 +14,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-PIPELINE_STAGES: tuple[str, ...] = (
-    "interview",
-    "seed",
-    "council",
-    "design",
-    "scaffold",
-    "build",
-    "qa",
-    "deploy",
-    "retro",
-    "evolve",
-    "complete",
-)
+from .stage_catalog import PIPELINE_STATE_STAGES
+
+# Compatibility view: stage order is owned by stage_catalog.
+PIPELINE_STAGES: tuple[str, ...] = PIPELINE_STATE_STAGES
 
 SAMVIL_TIERS: tuple[str, ...] = (
     "minimal",

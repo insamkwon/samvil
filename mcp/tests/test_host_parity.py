@@ -59,6 +59,7 @@ def test_fresh_codex_boot_creates_and_persists_session_before_chaining() -> None
 
     assert "create_session(" in command
     assert 'project_root="${PWD}"' in command
+    assert 'initial_skill="<chain.next_skill>"' in command
     assert '"session_id":"<returned session_id>"' in command
     assert command.index("create_session(") < command.index("write_chain_marker(")
 
@@ -79,6 +80,12 @@ def test_codex_stage_commands_complete_trusted_stage_before_marker(
     command = (
         REPO_ROOT / "references" / "codex-commands" / command_name
     ).read_text(encoding="utf-8")
+    if stage == "build":
+        assert "run_stage_verification" in command
+        assert "native run driver" in command
+        assert "complete_stage(" not in command
+        assert "write_chain_marker(" not in command
+        return
     complete_call = f'complete_stage(session_id=<sid>, stage="{stage}", verdict="pass"'
 
     assert complete_call in command

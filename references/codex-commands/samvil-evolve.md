@@ -35,7 +35,9 @@ Ensure root `project.seed.json` exists and QA/deploy is complete.
 7. If `similarity >= 0.95` and no regressions, convergence achieved.
 8. Run MCP tool `check_convergence_gates(eval_result_json=<json>, history_json=<json>)` for 5-gate check.
 9. Save evolved seed to root `project.seed.json`.
-10. Run MCP tool `write_chain_marker(project_root="${PWD}", host_name="codex_cli", current_skill="samvil-evolve")`.
+10. Do not call `write_chain_marker` or clear the chain marker. The native host
+    driver owns the `samvil-evolve` transition and will commit it after this
+    instruction returns.
 
 ## Chain
 

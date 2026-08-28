@@ -11,9 +11,171 @@ from samvil_mcp.chain_markers import (
     clear_chain_marker,
     advance_chain,
     get_pipeline_status,
+    build_driver_marker,
+    inspect_chain_marker,
+    write_driver_marker,
+    _validate_driver_marker,
     MARKER_FILENAME,
     SAMVIL_DIR,
 )
+
+
+class TestDriverMarkerV11:
+    @pytest.mark.parametrize("next_skill", [None, False, 0, [], {}, pytest.param("__missing__")])
+    def test_v11_rejects_non_string_next_skill(self, next_skill):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=0,
+            status="in_progress",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="samvil-qa",
+            reason="stage started",
+        )
+        if next_skill == "__missing__":
+            del marker["next_skill"]
+        else:
+            marker["next_skill"] = next_skill
+
+        with pytest.raises(ValueError, match="^next_skill must be a string$"):
+            _validate_driver_marker(marker)
+
+    def test_v10_reader_remains_compatible(self, project_root):
+        write_chain_marker(project_root, "codex_cli", "samvil-build")
+        inspection = inspect_chain_marker(project_root)
+        assert inspection.classification == "legacy"
+        assert inspection.marker["schema_version"] == "1.0"
+
+    def test_v11_requires_revision_status_and_host_driver(self):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=3,
+            status="ready",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="samvil-qa",
+            reason="build gate passed",
+        )
+        assert marker["schema_version"] == "1.1"
+        assert marker["chain_via"] == "host_driver"
+        assert marker["revision"] == 3
+
+    def test_legacy_writer_preserves_completed_driver_marker(self, project_root):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=4,
+            status="ready",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="samvil-qa",
+            reason="build completed",
+        )
+        write_driver_marker(project_root, marker)
+
+        result = write_chain_marker(
+            project_root,
+            "codex_cli",
+            "samvil-build",
+            next_skill="samvil-qa",
+        )
+
+        assert result == marker
+        assert inspect_chain_marker(project_root).classification == "valid"
+
+    def test_legacy_writer_cannot_bypass_in_progress_driver_claim(self, project_root):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=4,
+            status="in_progress",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="",
+            reason="build started",
+        )
+        write_driver_marker(project_root, marker)
+
+        with pytest.raises(ValueError, match="host driver owns transition"):
+            write_chain_marker(
+                project_root,
+                "codex_cli",
+                "samvil-build",
+                next_skill="samvil-qa",
+            )
+
+    @pytest.mark.parametrize("host_name", ["claude_code", "gemini_cli", "generic"])
+    def test_any_host_preserves_driver_owned_marker(self, project_root, host_name):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=4,
+            status="ready",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="samvil-qa",
+            reason="build completed",
+        )
+        write_driver_marker(project_root, marker)
+
+        assert write_chain_marker(
+            project_root,
+            host_name,
+            "samvil-build",
+            next_skill="samvil-qa",
+        ) == marker
+        with pytest.raises(ValueError, match="host driver owns transition"):
+            write_chain_marker(
+                project_root,
+                host_name,
+                "samvil-qa",
+                next_skill="samvil-retro",
+            )
+
+    @pytest.mark.parametrize("revision", [True, False, -1, "3"])
+    def test_v11_rejects_invalid_revision(self, revision):
+        with pytest.raises(ValueError):
+            build_driver_marker(
+                run_id="run-1",
+                revision=revision,
+                status="ready",
+                host_name="codex_cli",
+                from_stage="samvil-build",
+                next_skill="samvil-qa",
+                reason="build gate passed",
+            )
+
+    def test_inspection_classifies_missing_corrupt_and_unknown(self, project_root):
+        assert inspect_chain_marker(project_root).classification == "missing"
+        path = Path(project_root) / SAMVIL_DIR / MARKER_FILENAME
+        path.parent.mkdir(parents=True)
+        path.write_text("{broken", encoding="utf-8")
+        assert inspect_chain_marker(project_root).classification == "corrupt"
+        path.write_text(json.dumps({"schema_version": "9.9"}), encoding="utf-8")
+        assert inspect_chain_marker(project_root).classification == "unsupported"
+
+    def test_v11_writer_is_atomic_and_catalog_validates_stages(self, project_root):
+        marker = build_driver_marker(
+            run_id="run-1",
+            revision=0,
+            status="in_progress",
+            host_name="codex_cli",
+            from_stage="samvil-build",
+            next_skill="samvil-qa",
+            reason="stage started",
+        )
+        written = write_driver_marker(project_root, marker)
+        assert written == marker
+        inspection = inspect_chain_marker(project_root)
+        assert inspection.classification == "valid"
+        assert inspection.marker["run_id"] == "run-1"
+        with pytest.raises(ValueError):
+            build_driver_marker(
+                run_id="run-1",
+                revision=1,
+                status="ready",
+                host_name="codex_cli",
+                from_stage="samvil-design",
+                next_skill="samvil-interview",
+                reason="invalid backwards route",
+            )
 
 
 @pytest.fixture

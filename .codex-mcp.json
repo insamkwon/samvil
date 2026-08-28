@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "samvil-mcp": {
+      "cwd": ".",
+      "command": "bash",
+      "args": ["./scripts/start-codex-mcp.sh"]
+    }
+  }
+}
