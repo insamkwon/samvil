@@ -3258,6 +3258,51 @@ def test_isolated_migrate_preserves_escaped_triple_quotes_in_multiline_strings(
     assert config.read_text(encoding="utf-8") == instructions
 
 
+def test_isolated_migrate_handles_literal_triple_quotes_without_escape_rules(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    instructions = (
+        "developer_instructions = '''before\n"
+        "backslash delimiter: " "\\'''" "\n"
+        "[mcp_servers.samvil-mcp.tools.DO_NOT_CHANGE]\n"
+        'approval_mode = "approve"\n'
+        "notes = '''after\n"
+        "[mcp_servers.samvil-mcp.tools.KEEP_TEXT]\n"
+        "still text\n"
+        "'''\n\n"
+    )
+    original = (
+        instructions
+        + "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        instructions.replace(
+            "[mcp_servers.samvil-mcp.tools.DO_NOT_CHANGE]",
+            '[plugins."samvil@samvil-codex".tools.DO_NOT_CHANGE]',
+        )
+    )
+
+
 def test_isolated_migrate_moves_quoted_normalized_mcp_tool_overrides(
     tmp_path: Path,
 ) -> None:
