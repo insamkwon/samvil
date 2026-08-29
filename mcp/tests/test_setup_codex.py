@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -2335,6 +2336,42 @@ def test_isolated_migrate_applies_only_rebuilt_generated_actions_and_keeps_backu
     assert commands
 
 
+def test_isolated_migrate_moves_canonical_link_tree_to_reversible_backup(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    canonical = repo / "skills" / "samvil-resume"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    legacy_root = codex_home / "skills" / canonical.name
+    legacy_root.mkdir(parents=True)
+    for entry in canonical.iterdir():
+        (legacy_root / entry.name).symlink_to(entry)
+
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    receipt = execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert not legacy_root.exists()
+    backup = next(
+        path
+        for path in receipt.backup_paths
+        if path.name.startswith("legacy-skill-")
+    )
+    assert all(path.is_symlink() for path in backup.iterdir())
+    assert all(
+        path.resolve(strict=False) == canonical / path.name
+        for path in backup.iterdir()
+    )
+
+
 def test_isolated_migrate_exact_retry_returns_byte_identical_receipt_without_commands(
     tmp_path: Path,
 ) -> None:
@@ -2378,6 +2415,80 @@ def test_isolated_migrate_exact_retry_returns_byte_identical_receipt_without_com
     )
     assert len(journals) == 1
     assert json.loads(journals[0].read_text(encoding="utf-8"))["state"] == "committed"
+
+
+def test_isolated_migrate_fresh_postcondition_retry_reuses_committed_receipt(
+    tmp_path: Path,
+) -> None:
+    """A new dry-run hash after a successful migration must still replay safely."""
+
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    legacy_root = codex_home / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy_root)
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    first = execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=lambda command, env: commands.append((command, env)),
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+    first_commands = tuple(commands)
+    backups_before = tuple(
+        sorted(
+            path.relative_to(codex_home / "backups").as_posix()
+            for path in (codex_home / "backups").rglob("*")
+            if path.is_file()
+        )
+    )
+    postcondition = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    assert not postcondition.blockers
+    assert not postcondition.actions
+    assert postcondition.to_dict()["plan_sha256"] != first.legacy_plan_sha256
+
+    second = execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=lambda command, env: commands.append((command, env)),
+        migrate=True,
+        expected_legacy_plan_sha256=postcondition.to_dict()["plan_sha256"],
+    )
+
+    assert second.to_dict() == first.to_dict()
+    assert tuple(commands) == first_commands
+    transactions = list(
+        (codex_home / "backups" / "legacy-migrations").iterdir()
+    )
+    assert len(transactions) == 1
+    backups_after = tuple(
+        sorted(path.relative_to(codex_home / "backups").as_posix()
+               for path in (codex_home / "backups").rglob("*")
+               if path.is_file())
+    )
+    assert backups_after == backups_before
+
+    with pytest.raises(InstallBlocked, match="profile changed"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: pytest.fail(
+                "arbitrary replay hash must not activate"
+            ),
+            migrate=True,
+            expected_legacy_plan_sha256="0" * 64,
+        )
+    assert tuple(commands) == first_commands
+    assert len(list((codex_home / "backups" / "legacy-migrations").iterdir())) == 1
 
 
 def test_committed_migration_replay_rejects_canonical_contract_drift(
@@ -3029,6 +3140,270 @@ def test_isolated_migrate_preserves_unrelated_config_bytes_and_crlf(
     assert backup.read_bytes() == original
 
 
+def test_isolated_migrate_moves_normalized_mcp_tool_overrides_to_native_plugin(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args = ["-m", "samvil_mcp.server"]\n\n'
+        "[mcp_servers.samvil-mcp.tools.begin_stage]\n"
+        'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        '[plugins."samvil@samvil-codex".tools.begin_stage]\n'
+        'approval_mode = "approve"\n'
+    )
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert "mcp_servers" not in parsed
+    assert (
+        parsed["plugins"]["samvil@samvil-codex"]["tools"]["begin_stage"]
+        == {"approval_mode": "approve"}
+    )
+
+
+def test_isolated_migrate_preserves_multiline_strings_that_resemble_tool_tables(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    instructions = (
+        "developer_instructions = \"\"\"\n"
+        "[mcp_servers.samvil-mcp.tools.begin_stage]\n"
+        "Keep this documentation unchanged.\n"
+        "\"\"\"\n\n"
+    )
+    original = (
+        instructions
+        + "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n\n'
+        + "[mcp_servers.samvil-mcp.tools.begin_stage]\n"
+        + 'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        instructions
+        + '[plugins."samvil@samvil-codex".tools.begin_stage]\n'
+        + 'approval_mode = "approve"\n'
+    )
+
+
+def test_isolated_migrate_preserves_escaped_triple_quotes_in_multiline_strings(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    instructions = (
+        "developer_instructions = \"\"\"before\n"
+        "escaped quotes: \\\"\"\"\n"
+        "[mcp_servers.samvil-mcp.tools.DO_NOT_CHANGE]\n"
+        "after\n\"\"\"\n\n"
+    )
+    original = (
+        instructions
+        + "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == instructions
+
+
+def test_isolated_migrate_handles_literal_triple_quotes_without_escape_rules(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    instructions = (
+        "developer_instructions = '''before\n"
+        "backslash delimiter: " "\\'''" "\n"
+        "[mcp_servers.samvil-mcp.tools.DO_NOT_CHANGE]\n"
+        'approval_mode = "approve"\n'
+        "notes = '''after\n"
+        "[mcp_servers.samvil-mcp.tools.KEEP_TEXT]\n"
+        "still text\n"
+        "'''\n\n"
+    )
+    original = (
+        instructions
+        + "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        instructions.replace(
+            "[mcp_servers.samvil-mcp.tools.DO_NOT_CHANGE]",
+            '[plugins."samvil@samvil-codex".tools.DO_NOT_CHANGE]',
+        )
+    )
+
+
+def test_isolated_migrate_moves_quoted_normalized_mcp_tool_overrides(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n\n'
+        + '[mcp_servers."samvil-mcp".tools.begin_stage]\n'
+        + 'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        '[plugins."samvil@samvil-codex".tools.begin_stage]\n'
+        + 'approval_mode = "approve"\n'
+    )
+
+
+def test_isolated_migrate_preserves_comments_on_normalized_tool_headers(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n\n'
+        + "[mcp_servers.samvil-mcp.tools.begin_stage] # keep approval note\n"
+        + 'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        '[plugins."samvil@samvil-codex".tools.begin_stage] # keep approval note\n'
+        + 'approval_mode = "approve"\n'
+    )
+
+
+def test_isolated_migrate_blocks_unrewritable_quoted_tool_key(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n\n'
+        + '[mcp_servers.samvil-mcp.tools."begin]stage"]\n'
+        + 'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert checked.to_dict()["ready"] is True
+    with pytest.raises(InstallBlocked, match="ambiguous"):
+        execute_isolated_install(
+            CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: None,
+            migrate=True,
+            expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+        )
+
+    assert config.read_text(encoding="utf-8") == original
+
+
 def test_isolated_migrate_never_overwrites_a_concurrent_user_file_during_rollback(
     tmp_path: Path,
 ) -> None:
@@ -3474,6 +3849,59 @@ def test_legacy_migration_dry_run_matches_historical_repo_skill_tree(
     assert artifact.classification == "generated_legacy"
     assert artifact.expected_hash == artifact.content_hash
     assert plan.to_dict()["ready"] is True
+
+
+def test_legacy_migration_dry_run_recognizes_canonical_skill_file_links(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    canonical = repo / "skills" / "samvil-example"
+    canonical.mkdir(parents=True)
+    (canonical / "SKILL.md").write_text("canonical\n", encoding="utf-8")
+    (canonical / "SKILL.legacy.md").write_text("legacy\n", encoding="utf-8")
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-example"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").symlink_to(canonical / "SKILL.md")
+    (legacy / "SKILL.legacy.md").symlink_to(canonical / "SKILL.legacy.md")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = plan.artifacts[0]
+    assert plan.to_dict()["ready"] is True
+    assert artifact.classification == "generated_legacy"
+    assert artifact.reason == "legacy skill tree links exactly to canonical source"
+    assert len(plan.actions) == 1
+
+
+def test_legacy_migration_dry_run_blocks_canonical_link_tree_after_target_drift(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    canonical = repo / "skills" / "samvil-example"
+    canonical.mkdir(parents=True)
+    manifest = canonical / "SKILL.md"
+    manifest.write_text("canonical\n", encoding="utf-8")
+    foreign = tmp_path / "foreign" / "SKILL.md"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("foreign\n", encoding="utf-8")
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-example"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").symlink_to(foreign)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = plan.artifacts[0]
+    assert artifact.classification == "user_modified"
+    assert artifact.blocks_mutation is True
+    assert plan.to_dict()["ready"] is False
 
 
 @pytest.mark.parametrize(
@@ -3943,6 +4371,72 @@ def test_legacy_migration_dry_run_recognizes_exact_direct_mcp_table(
         and action.expected_hash == artifact["content_hash"]
         for action in plan.actions
     )
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_legacy_migration_dry_run_recognizes_codex_normalized_mcp_table_and_preserves_tools(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args = ["-m", "samvil_mcp.server"]\n\n'
+        "[mcp_servers.samvil-mcp.tools.begin_stage]\n"
+        'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item
+        for item in plan.to_dict()["artifacts"]
+        if item["artifact_kind"] == "direct_mcp_table"
+    )
+    assert artifact["classification"] == "generated_legacy"
+    assert not artifact["blocks_mutation"]
+    assert any(action.kind == "remove_generated_mcp_table" for action in plan.actions)
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_legacy_migration_dry_run_blocks_array_mcp_tool_overrides(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args = ["-m", "samvil_mcp.server"]\n\n'
+        "[[mcp_servers.samvil-mcp.tools.begin_stage]]\n"
+        'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item
+        for item in plan.artifacts
+        if item.artifact_kind == "direct_mcp_table"
+    )
+    assert artifact.classification == "user_modified"
+    assert artifact.blocks_mutation is True
+    assert "not TOML tables" in artifact.reason
+    assert plan.to_dict()["ready"] is False
     assert config.read_text(encoding="utf-8") == original
 
 

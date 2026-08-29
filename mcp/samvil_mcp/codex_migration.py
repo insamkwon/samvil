@@ -673,7 +673,7 @@ def _profile_lock(root: Path) -> Iterator[ProfileIdentity]:
 
 
 def _remove_generated_direct_mcp_table(content: bytes) -> bytes:
-    """Remove only the four exact generated lines, preserving all other bytes."""
+    """Remove the exact generated block while preserving all other bytes."""
 
     installer = _installer()
     try:
@@ -688,32 +688,161 @@ def _remove_generated_direct_mcp_table(content: bytes) -> bytes:
     command = table.get("command") if isinstance(table, dict) else None
     if not isinstance(command, str):
         raise installer.InstallBlocked("generated direct MCP table disappeared")
+    if isinstance(table, dict):
+        tools = table.get("tools")
+        if tools is not None and (
+            not isinstance(tools, dict)
+            or any(not isinstance(value, dict) for value in tools.values())
+        ):
+            raise installer.InstallBlocked(
+                "legacy MCP tool overrides are not TOML tables"
+            )
     lines = text.splitlines(keepends=True)
 
     def body(line: str) -> str:
         return line.removesuffix("\n").removesuffix("\r")
 
-    expected = (
-        "[mcp_servers.samvil-mcp]",
-        f'command = "{command}"',
-        'args    = ["-m", "samvil_mcp.server"]',
-        "env     = {}",
-    )
-    for index in range(max(0, len(lines) - 3)):
-        if tuple(body(line) for line in lines[index : index + 4]) == expected:
-            result = "".join((*lines[:index], *lines[index + 4 :])).encode("utf-8")
-            try:
-                post = tomllib.loads(result.decode("utf-8"))
-            except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-                raise installer.InstallBlocked(
-                    "removing generated direct MCP table would invalidate config"
-                ) from exc
-            post_servers = post.get("mcp_servers")
-            if isinstance(post_servers, dict) and "samvil-mcp" in post_servers:
-                raise installer.InstallBlocked(
-                    "generated direct MCP table removal is ambiguous"
-                )
-            return result
+    for index, line in enumerate(lines):
+        if body(line).strip() != "[mcp_servers.samvil-mcp]":
+            continue
+        end_index = len(lines)
+        for candidate_index in range(index + 1, len(lines)):
+            if body(lines[candidate_index]).startswith("["):
+                end_index = candidate_index
+                break
+        block = lines[index:end_index]
+        while block and not body(block[-1]).strip():
+            block.pop()
+        assignments: dict[str, str] = {}
+        for entry in block[1:]:
+            stripped = body(entry).strip()
+            if not stripped or "=" not in stripped:
+                assignments = {}
+                break
+            key, _, value = stripped.partition("=")
+            key = key.strip()
+            if key in assignments:
+                assignments = {}
+                break
+            assignments[key] = value.strip()
+        expected_assignments = {
+            "command": f'"{command}"',
+            "args": '["-m", "samvil_mcp.server"]',
+        }
+        if isinstance(table, dict) and "env" in table:
+            expected_assignments["env"] = "{}"
+        if assignments != expected_assignments:
+            continue
+        # Codex normalizes per-tool approval settings into nested tables.  Move
+        # those tables to the native plugin namespace while removing only the
+        # legacy server parent; leaving them under mcp_servers would make the
+        # resulting config fail Codex's transport parser.
+        transformed_lines: list[str] = []
+        legacy_tools_headers = (
+            "[mcp_servers.samvil-mcp.tools.",
+            '[mcp_servers."samvil-mcp".tools.',
+        )
+        native_tools_header = '[plugins."samvil@samvil-codex".tools.'
+        multiline_delimiter: str | None = None
+
+        def update_multiline_state(candidate: str) -> None:
+            """Track TOML multiline strings so their contents are not rewritten."""
+
+            nonlocal multiline_delimiter
+            index = 0
+            while index < len(candidate):
+                if multiline_delimiter is not None:
+                    if candidate.startswith(multiline_delimiter, index):
+                        if multiline_delimiter == '"""':
+                            backslash_count = 0
+                            preceding = index - 1
+                            while preceding >= 0 and candidate[preceding] == "\\":
+                                backslash_count += 1
+                                preceding -= 1
+                            if backslash_count % 2:
+                                index += 1
+                                continue
+                        multiline_delimiter = None
+                        index += 3
+                    else:
+                        index += 1
+                    continue
+                if candidate[index] == "#":
+                    break
+                if candidate.startswith('"""', index):
+                    multiline_delimiter = '"""'
+                    index += 3
+                    continue
+                if candidate.startswith("'''", index):
+                    multiline_delimiter = "'''"
+                    index += 3
+                    continue
+                if candidate[index] == '"':
+                    index += 1
+                    while index < len(candidate):
+                        if candidate[index] == "\\":
+                            index += 2
+                        elif candidate[index] == '"':
+                            index += 1
+                            break
+                        else:
+                            index += 1
+                    continue
+                if candidate[index] == "'":
+                    index += 1
+                    while index < len(candidate) and candidate[index] != "'":
+                        index += 1
+                    if index < len(candidate):
+                        index += 1
+                    continue
+                index += 1
+
+        for candidate in lines:
+            candidate_body = body(candidate)
+            stripped = candidate_body.strip()
+            if multiline_delimiter is None:
+                for legacy_tools_header in legacy_tools_headers:
+                    if not stripped.startswith(legacy_tools_header):
+                        continue
+                    closing_index = stripped.find("]", len(legacy_tools_header))
+                    if closing_index < 0:
+                        continue
+                    trailing = stripped[closing_index + 1 :].strip()
+                    if trailing and not trailing.startswith("#"):
+                        continue
+                    start = candidate_body.index(legacy_tools_header)
+                    candidate_body = (
+                        candidate_body[:start]
+                        + native_tools_header
+                        + candidate_body[
+                            start + len(legacy_tools_header) :
+                        ]
+                    )
+                    newline = candidate[len(body(candidate)) :]
+                    candidate = candidate_body + newline
+                    break
+            transformed_lines.append(candidate)
+            update_multiline_state(body(candidate))
+        result = "".join(
+            (*transformed_lines[:index], *transformed_lines[end_index:])
+        ).encode("utf-8")
+        try:
+            post = tomllib.loads(result.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            raise installer.InstallBlocked(
+                "removing generated direct MCP table would invalidate config"
+            ) from exc
+        post_servers = post.get("mcp_servers")
+        post_table = (
+            post_servers.get("samvil-mcp")
+            if isinstance(post_servers, dict)
+            else None
+        )
+        if post_table is not None:
+            raise installer.InstallBlocked(
+                "generated direct MCP table removal is ambiguous"
+            )
+        return result
     raise installer.InstallBlocked(
         "generated direct MCP text block changed before migration"
     )
@@ -739,7 +868,7 @@ def _action_identity(action: Any) -> tuple[int, int, int, int, int, int, int]:
 def _revalidate_action(action: Any, *, root: Path, canonical_root: Path) -> Any:
     installer = _installer()
     source = installer._lexical_absolute(action.path)
-    if action.artifact_kind == "legacy_skill_tree":
+    if action.artifact_kind in {"legacy_skill_tree", "legacy_skill_link_tree"}:
         if (
             action.kind != "migrate_generated"
             or source.parent != root / "skills"
@@ -776,6 +905,7 @@ def _revalidate_action(action: Any, *, root: Path, canonical_root: Path) -> Any:
         artifact is None
         or artifact.classification != "generated_legacy"
         or artifact.blocks_mutation
+        or artifact.artifact_kind != action.artifact_kind
         or artifact.content_hash != action.expected_hash
     ):
         raise installer.InstallBlocked(
@@ -800,15 +930,21 @@ def _artifact_hash(path: Path, artifact_kind: str) -> str:
     installer = _installer()
     metadata = path.lstat()
     if (stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode)) and (
-        artifact_kind != "legacy_skill_tree" or not stat.S_ISDIR(metadata.st_mode)
+        artifact_kind not in {"legacy_skill_tree", "legacy_skill_link_tree"}
+        or not stat.S_ISDIR(metadata.st_mode)
     ):
         raise installer.InstallBlocked(f"unsafe migration backup artifact: {path}")
     if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1:
         raise installer.InstallBlocked(f"hard-linked migration backup artifact: {path}")
-    if artifact_kind == "legacy_skill_tree":
-        unsafe = installer._unsafe_tree_reason(path)
-        if unsafe is not None:
+    if artifact_kind in {"legacy_skill_tree", "legacy_skill_link_tree"}:
+        if path.is_symlink() or not path.is_dir():
             raise installer.InstallBlocked(f"unsafe migration backup artifact: {path}")
+        if artifact_kind == "legacy_skill_tree":
+            unsafe = installer._unsafe_tree_reason(path)
+            if unsafe is not None:
+                raise installer.InstallBlocked(
+                    f"unsafe migration backup artifact: {path}"
+                )
         return installer._skill_tree_hash(path)
     return installer._bytes_sha256(path.read_bytes())
 
@@ -956,7 +1092,7 @@ def _receipt_from_payload(payload: dict[str, Any], *, root: Path) -> Any:
 def _journal_actions(plan: Any, transaction: Path) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     for index, action in enumerate(plan.actions):
-        if action.artifact_kind == "legacy_skill_tree":
+        if action.artifact_kind in {"legacy_skill_tree", "legacy_skill_link_tree"}:
             backup = transaction / f"legacy-skill-{index:03d}-{action.path.name}"
         elif action.artifact_kind == "global_agents":
             backup = transaction / "global-AGENTS.md"
@@ -1249,7 +1385,7 @@ def _validate_journal(
             )
         source_allowed = (
             (
-                kind == "legacy_skill_tree"
+                kind in {"legacy_skill_tree", "legacy_skill_link_tree"}
                 and source.parent == root / "skills"
                 and installer._is_samvil_prefixed(source.name)
             )
@@ -1266,7 +1402,7 @@ def _validate_journal(
             )
         expected_backup_name = (
             f"legacy-skill-{expected_index:03d}-{source.name}"
-            if kind == "legacy_skill_tree"
+            if kind in {"legacy_skill_tree", "legacy_skill_link_tree"}
             else "global-AGENTS.md"
             if kind == "global_agents"
             else "config.toml.before"
@@ -1337,10 +1473,14 @@ def _load_committed_receipt(
     *,
     root: Path,
     expected_plan_sha256: str,
+    allow_completed_replay: bool,
     canonical_root: Path,
     registry_reader: Any | None,
     profile_identity: ProfileIdentity,
 ) -> Any | None:
+    # A fresh post-migration dry-run intentionally has a different plan hash
+    # because the legacy artifacts are gone.  Only the caller may enable this
+    # relaxed hash match after proving that the current plan is fully clean.
     installer = _installer()
     _assert_profile_identity(root, profile_identity)
     for transaction_name in sorted(os.listdir(profile_identity.migrations_descriptor)):
@@ -1444,7 +1584,10 @@ def _load_committed_receipt(
                 )
             if (
                 state != "committed"
-                or journal.get("legacy_plan_sha256") != expected_plan_sha256
+                or (
+                    not allow_completed_replay
+                    and journal.get("legacy_plan_sha256") != expected_plan_sha256
+                )
             ):
                 continue
             if journal_canonical_root != canonical_root:
@@ -1483,7 +1626,10 @@ def _load_committed_receipt(
                 raise installer.InstallBlocked(
                     "stored migration receipt canonical root changed"
                 )
-            if receipt.legacy_plan_sha256 != expected_plan_sha256:
+            if (
+                not allow_completed_replay
+                and receipt.legacy_plan_sha256 != expected_plan_sha256
+            ):
                 raise installer.InstallBlocked(
                     "stored migration receipt plan hash changed"
                 )
@@ -1698,6 +1844,7 @@ def _run_locked_migration(
     command_runner: Any,
     registry_reader: Any | None,
     expected_plan_sha256: str,
+    allow_completed_replay: bool,
     profile_identity: ProfileIdentity,
 ) -> Any:
     installer = _installer()
@@ -1714,6 +1861,7 @@ def _run_locked_migration(
         migrations_root,
         root=root,
         expected_plan_sha256=expected_plan_sha256,
+        allow_completed_replay=allow_completed_replay,
         canonical_root=plan.canonical_root,
         registry_reader=registry_reader,
         profile_identity=profile_identity,
@@ -2058,6 +2206,16 @@ def execute_legacy_migration(
         repo_root=plan.canonical_root,
         codex_home=root,
     )
+    # A completed migration has a different hash once legacy artifacts are
+    # gone.  Relax the receipt's historical hash check only when the caller's
+    # newly checked hash exactly describes this clean postcondition; an
+    # arbitrary hash must still fail closed.
+    allow_completed_replay = (
+        not preflight.blockers
+        and not preflight.actions
+        and not preflight.native_registry_actions
+        and preflight.to_dict()["plan_sha256"] == expected_plan_sha256
+    )
     migrations_root = root / "backups" / "legacy-migrations"
     if not migrations_root.exists():
         if preflight.blockers:
@@ -2079,6 +2237,7 @@ def execute_legacy_migration(
             command_runner=command_runner,
             registry_reader=registry_reader,
             expected_plan_sha256=expected_plan_sha256,
+            allow_completed_replay=allow_completed_replay,
             profile_identity=profile_identity,
         )
 
