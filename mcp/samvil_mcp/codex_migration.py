@@ -753,6 +753,14 @@ def _remove_generated_direct_mcp_table(content: bytes) -> bytes:
             while index < len(candidate):
                 if multiline_delimiter is not None:
                     if candidate.startswith(multiline_delimiter, index):
+                        backslash_count = 0
+                        preceding = index - 1
+                        while preceding >= 0 and candidate[preceding] == "\\":
+                            backslash_count += 1
+                            preceding -= 1
+                        if backslash_count % 2:
+                            index += 1
+                            continue
                         multiline_delimiter = None
                         index += 3
                     else:
