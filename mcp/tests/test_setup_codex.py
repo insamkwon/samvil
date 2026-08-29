@@ -3216,6 +3216,39 @@ def test_isolated_migrate_preserves_comments_on_normalized_tool_headers(
     )
 
 
+def test_isolated_migrate_blocks_unrewritable_quoted_tool_key(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n\n'
+        + '[mcp_servers.samvil-mcp.tools."begin]stage"]\n'
+        + 'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert checked.to_dict()["ready"] is True
+    with pytest.raises(InstallBlocked, match="ambiguous"):
+        execute_isolated_install(
+            CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: None,
+            migrate=True,
+            expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+        )
+
+    assert config.read_text(encoding="utf-8") == original
+
+
 def test_isolated_migrate_never_overwrites_a_concurrent_user_file_during_rollback(
     tmp_path: Path,
 ) -> None:

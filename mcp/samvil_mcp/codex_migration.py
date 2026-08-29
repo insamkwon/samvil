@@ -824,10 +824,12 @@ def _remove_generated_direct_mcp_table(content: bytes) -> bytes:
                 "removing generated direct MCP table would invalidate config"
             ) from exc
         post_servers = post.get("mcp_servers")
-        post_table = post_servers.get("samvil-mcp") if isinstance(post_servers, dict) else None
-        if isinstance(post_table, dict) and any(
-            key in post_table for key in ("command", "args", "env")
-        ):
+        post_table = (
+            post_servers.get("samvil-mcp")
+            if isinstance(post_servers, dict)
+            else None
+        )
+        if post_table is not None:
             raise installer.InstallBlocked(
                 "generated direct MCP table removal is ambiguous"
             )
