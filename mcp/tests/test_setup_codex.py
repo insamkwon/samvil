@@ -2417,6 +2417,80 @@ def test_isolated_migrate_exact_retry_returns_byte_identical_receipt_without_com
     assert json.loads(journals[0].read_text(encoding="utf-8"))["state"] == "committed"
 
 
+def test_isolated_migrate_fresh_postcondition_retry_reuses_committed_receipt(
+    tmp_path: Path,
+) -> None:
+    """A new dry-run hash after a successful migration must still replay safely."""
+
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    legacy_root = codex_home / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy_root)
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    first = execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=lambda command, env: commands.append((command, env)),
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+    first_commands = tuple(commands)
+    backups_before = tuple(
+        sorted(
+            path.relative_to(codex_home / "backups").as_posix()
+            for path in (codex_home / "backups").rglob("*")
+            if path.is_file()
+        )
+    )
+    postcondition = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    assert not postcondition.blockers
+    assert not postcondition.actions
+    assert postcondition.to_dict()["plan_sha256"] != first.legacy_plan_sha256
+
+    second = execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=lambda command, env: commands.append((command, env)),
+        migrate=True,
+        expected_legacy_plan_sha256=postcondition.to_dict()["plan_sha256"],
+    )
+
+    assert second.to_dict() == first.to_dict()
+    assert tuple(commands) == first_commands
+    transactions = list(
+        (codex_home / "backups" / "legacy-migrations").iterdir()
+    )
+    assert len(transactions) == 1
+    backups_after = tuple(
+        sorted(path.relative_to(codex_home / "backups").as_posix()
+               for path in (codex_home / "backups").rglob("*")
+               if path.is_file())
+    )
+    assert backups_after == backups_before
+
+    with pytest.raises(InstallBlocked, match="profile changed"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: pytest.fail(
+                "arbitrary replay hash must not activate"
+            ),
+            migrate=True,
+            expected_legacy_plan_sha256="0" * 64,
+        )
+    assert tuple(commands) == first_commands
+    assert len(list((codex_home / "backups" / "legacy-migrations").iterdir())) == 1
+
+
 def test_committed_migration_replay_rejects_canonical_contract_drift(
     tmp_path: Path,
 ) -> None:

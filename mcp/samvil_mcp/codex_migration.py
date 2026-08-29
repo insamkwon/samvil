@@ -673,7 +673,7 @@ def _profile_lock(root: Path) -> Iterator[ProfileIdentity]:
 
 
 def _remove_generated_direct_mcp_table(content: bytes) -> bytes:
-    """Remove only the four exact generated lines, preserving all other bytes."""
+    """Remove the exact generated block while preserving all other bytes."""
 
     installer = _installer()
     try:
@@ -1464,10 +1464,14 @@ def _load_committed_receipt(
     *,
     root: Path,
     expected_plan_sha256: str,
+    allow_completed_replay: bool,
     canonical_root: Path,
     registry_reader: Any | None,
     profile_identity: ProfileIdentity,
 ) -> Any | None:
+    # A fresh post-migration dry-run intentionally has a different plan hash
+    # because the legacy artifacts are gone.  Only the caller may enable this
+    # relaxed hash match after proving that the current plan is fully clean.
     installer = _installer()
     _assert_profile_identity(root, profile_identity)
     for transaction_name in sorted(os.listdir(profile_identity.migrations_descriptor)):
@@ -1571,7 +1575,10 @@ def _load_committed_receipt(
                 )
             if (
                 state != "committed"
-                or journal.get("legacy_plan_sha256") != expected_plan_sha256
+                or (
+                    not allow_completed_replay
+                    and journal.get("legacy_plan_sha256") != expected_plan_sha256
+                )
             ):
                 continue
             if journal_canonical_root != canonical_root:
@@ -1610,7 +1617,10 @@ def _load_committed_receipt(
                 raise installer.InstallBlocked(
                     "stored migration receipt canonical root changed"
                 )
-            if receipt.legacy_plan_sha256 != expected_plan_sha256:
+            if (
+                not allow_completed_replay
+                and receipt.legacy_plan_sha256 != expected_plan_sha256
+            ):
                 raise installer.InstallBlocked(
                     "stored migration receipt plan hash changed"
                 )
@@ -1825,6 +1835,7 @@ def _run_locked_migration(
     command_runner: Any,
     registry_reader: Any | None,
     expected_plan_sha256: str,
+    allow_completed_replay: bool,
     profile_identity: ProfileIdentity,
 ) -> Any:
     installer = _installer()
@@ -1841,6 +1852,7 @@ def _run_locked_migration(
         migrations_root,
         root=root,
         expected_plan_sha256=expected_plan_sha256,
+        allow_completed_replay=allow_completed_replay,
         canonical_root=plan.canonical_root,
         registry_reader=registry_reader,
         profile_identity=profile_identity,
@@ -2185,6 +2197,16 @@ def execute_legacy_migration(
         repo_root=plan.canonical_root,
         codex_home=root,
     )
+    # A completed migration has a different hash once legacy artifacts are
+    # gone.  Relax the receipt's historical hash check only when the caller's
+    # newly checked hash exactly describes this clean postcondition; an
+    # arbitrary hash must still fail closed.
+    allow_completed_replay = (
+        not preflight.blockers
+        and not preflight.actions
+        and not preflight.native_registry_actions
+        and preflight.to_dict()["plan_sha256"] == expected_plan_sha256
+    )
     migrations_root = root / "backups" / "legacy-migrations"
     if not migrations_root.exists():
         if preflight.blockers:
@@ -2206,6 +2228,7 @@ def execute_legacy_migration(
             command_runner=command_runner,
             registry_reader=registry_reader,
             expected_plan_sha256=expected_plan_sha256,
+            allow_completed_replay=allow_completed_replay,
             profile_identity=profile_identity,
         )
 
