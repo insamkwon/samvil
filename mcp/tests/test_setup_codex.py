@@ -946,8 +946,95 @@ def test_direct_executor_admits_legacy_inventory_before_writes(
         )
 
     assert personal.read_text(encoding="utf-8").endswith("keep\n")
-    assert commands == []
-    assert not (codex_home / "marketplaces").exists()
+
+
+@pytest.mark.parametrize("entry_kind", ("file", "empty_dir", "manifest_symlink"))
+def test_legacy_migration_blocks_unsupported_personal_top_level_entries(
+    tmp_path: Path, entry_kind: str
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "profile" / ".codex"
+    repo.mkdir()
+    candidate = codex_home / "skills" / "personal-entry"
+    candidate.parent.mkdir(parents=True)
+    if entry_kind == "file":
+        candidate.write_text("not a skill directory\n", encoding="utf-8")
+    elif entry_kind == "empty_dir":
+        candidate.mkdir()
+    else:
+        candidate.mkdir()
+        target = tmp_path / "manifest-target.md"
+        target.write_text("---\nname: personal-entry\n---\n", encoding="utf-8")
+        (candidate / "SKILL.md").symlink_to(target)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item for item in plan.artifacts if item.path == candidate.absolute()
+    )
+    assert artifact.artifact_kind == "personal_skill_tree"
+    assert artifact.classification == "user_modified"
+    assert artifact.blocks_mutation is True
+    assert artifact.status == "blocked"
+    assert plan.to_dict()["ready"] is False
+    assert any(str(candidate.absolute()) in blocker for blocker in plan.blockers)
+
+
+def test_legacy_migration_converts_personal_symlink_read_race_to_blocker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "profile" / ".codex"
+    repo.mkdir()
+    candidate = codex_home / "skills" / "session-monitor"
+    target = tmp_path / "personal-source"
+    target.mkdir()
+    (target / "SKILL.md").write_text(
+        "---\nname: session-monitor\n---\nkeep\n", encoding="utf-8"
+    )
+    candidate.parent.mkdir(parents=True)
+    candidate.symlink_to(target, target_is_directory=True)
+    original_readlink = installer.os.readlink
+
+    def racing_readlink(path: object) -> str:
+        if Path(path) == candidate:
+            raise OSError("simulated concurrent unlink")
+        return original_readlink(path)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(installer.os, "readlink", racing_readlink)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is False
+    assert any("cannot be inspected safely" in blocker for blocker in plan.blockers)
+
+
+def test_legacy_migration_ignores_codex_owned_system_skill_namespace(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    system_root = codex_home / "skills" / ".system"
+    system_root.mkdir(parents=True)
+    (system_root / ".codex-system-skills.marker").write_text("owned\n")
+    (system_root / "review-agent" / "SKILL.md").parent.mkdir()
+    (system_root / "review-agent" / "SKILL.md").write_text(
+        "---\nname: review-agent\n---\nowned\n", encoding="utf-8"
+    )
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert not any(item.path == system_root.absolute() for item in plan.artifacts)
+    assert not any(str(system_root.absolute()) in blocker for blocker in plan.blockers)
 
 
 def test_public_executor_requires_native_readback_before_any_write(
@@ -1967,6 +2054,40 @@ def test_isolated_executor_blocks_symlink_inside_personal_skill_tree(
     assert outside.read_text(encoding="utf-8") == "before\n"
 
 
+def test_isolated_executor_migration_preserves_explicit_personal_symlink(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    personal_source = tmp_path / "personal-source"
+    personal_link = codex_home / "skills" / "session-monitor"
+    personal_source.mkdir()
+    (personal_source / "SKILL.md").write_text(
+        "---\nname: session-monitor\n---\nkeep\n", encoding="utf-8"
+    )
+    personal_link.parent.mkdir(parents=True)
+    personal_link.symlink_to(personal_source, target_is_directory=True)
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    receipt = execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert personal_link.is_symlink()
+    assert personal_link.readlink() == personal_source
+    expected_snapshot = installer.snapshot_preserved_path(personal_link).to_dict()
+    assert receipt.to_dict()["preserved_paths_before"] == [expected_snapshot]
+    assert receipt.to_dict()["preserved_paths_after"] == [expected_snapshot]
+    assert receipt.to_dict()["preserved_paths_unchanged"] is True
+
+
 def test_isolated_executor_preserves_snapshot_when_restore_copy_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2369,6 +2490,125 @@ def test_isolated_migrate_moves_canonical_link_tree_to_reversible_backup(
     assert all(
         path.resolve(strict=False) == canonical / path.name
         for path in backup.iterdir()
+    )
+
+
+def test_isolated_migrate_preserves_personal_symlink_in_receipt(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    legacy_root = codex_home / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy_root)
+    personal_source = tmp_path / "personal-source"
+    personal_source.mkdir()
+    (personal_source / "SKILL.md").write_text(
+        "---\nname: session-monitor\n---\nkeep\n", encoding="utf-8"
+    )
+    personal_link = codex_home / "skills" / "session-monitor"
+    personal_link.symlink_to(personal_source, target_is_directory=True)
+    agents = codex_home / "AGENTS.md"
+    agents.write_text("# Personal instructions\nKeep me.\n", encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    receipt = execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    expected_snapshots = [
+        installer.snapshot_preserved_path(personal_link).to_dict(),
+        installer.snapshot_preserved_path(agents).to_dict(),
+    ]
+    assert personal_link.is_symlink()
+    assert agents.read_text(encoding="utf-8") == "# Personal instructions\nKeep me.\n"
+    assert receipt.to_dict()["preserved_paths_before"] == expected_snapshots
+    assert receipt.to_dict()["preserved_paths_after"] == expected_snapshots
+    assert receipt.to_dict()["preserved_paths_unchanged"] is True
+
+    postcondition = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    replay = execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda command, _env: pytest.fail(
+            f"replay must not execute native command: {command}"
+        ),
+        migrate=True,
+        expected_legacy_plan_sha256=postcondition.to_dict()["plan_sha256"],
+    )
+    assert replay.to_dict() == receipt.to_dict()
+
+
+def test_isolated_migrate_fails_closed_when_preserved_symlink_changes(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    first_target = tmp_path / "personal-one"
+    second_target = tmp_path / "personal-two"
+    repo.mkdir()
+    first_target.mkdir()
+    second_target.mkdir()
+    (first_target / "USER-DATA.txt").write_text("keep-one\n", encoding="utf-8")
+    (second_target / "USER-DATA.txt").write_text("keep-two\n", encoding="utf-8")
+    personal_link = codex_home / "skills" / "session-monitor"
+    personal_link.parent.mkdir(parents=True)
+    personal_link.symlink_to(first_target, target_is_directory=True)
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    def retarget(_command, _env):
+        personal_link.unlink()
+        personal_link.symlink_to(second_target, target_is_directory=True)
+
+    with pytest.raises(installer.NativeRecoveryRequired, match="preserved"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=retarget,
+            preserved_paths=(personal_link,),
+        )
+
+    assert (first_target / "USER-DATA.txt").read_text(encoding="utf-8") == "keep-one\n"
+    assert (second_target / "USER-DATA.txt").read_text(encoding="utf-8") == "keep-two\n"
+
+
+def test_isolated_install_fails_closed_when_preserved_agents_changes(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    agents = codex_home / "AGENTS.md"
+    replacement = tmp_path / "replacement-agents.md"
+    agents.parent.mkdir(parents=True)
+    agents.write_text("# personal instructions\n", encoding="utf-8")
+    replacement.write_text("# replacement must remain untouched\n", encoding="utf-8")
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    def retarget(_command: tuple[str, ...], _env: dict[str, str]) -> None:
+        agents.unlink()
+        agents.symlink_to(replacement)
+
+    with pytest.raises(installer.NativeRecoveryRequired, match="preserved"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=retarget,
+            preserved_paths=(agents,),
+        )
+
+    assert agents.is_symlink()
+    assert agents.readlink() == replacement
+    assert replacement.read_text(encoding="utf-8") == (
+        "# replacement must remain untouched\n"
     )
 
 
@@ -4062,6 +4302,77 @@ def test_legacy_migration_dry_run_blocks_unsafe_personal_skill_links(
     assert outside.read_text(encoding="utf-8") == "keep outside\n"
 
 
+def test_legacy_migration_dry_run_preserves_top_level_personal_symlink(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    skills_root = codex_home / "skills"
+    skills_root.mkdir(parents=True)
+    target = tmp_path / "personal-source"
+    target.mkdir()
+    (target / "SKILL.md").write_text(
+        "---\nname: personal-review\n---\nkeep\n", encoding="utf-8"
+    )
+    personal = skills_root / "personal-review"
+    personal.symlink_to(target, target_is_directory=True)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item
+        for item in plan.to_dict()["artifacts"]
+        if item["artifact_kind"] == "personal_skill_tree"
+    )
+    payload = plan.to_dict()
+    assert artifact["classification"] == "user_modified"
+    assert artifact["status"] == "preserved"
+    assert artifact["preserve_only"] is True
+    assert artifact["blocks_mutation"] is False
+    assert payload["ready"] is True
+    assert payload["status_counts"] == {
+        "migrated": 0,
+        "preserved": 1,
+        "blocked": 0,
+    }
+    assert payload["preserved_artifacts"] == [artifact]
+    assert personal.is_symlink()
+    assert personal.readlink() == target
+
+
+def test_legacy_migration_plan_hash_seals_preserved_symlink_target(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    personal_root = codex_home / "skills"
+    personal_root.mkdir(parents=True)
+    first_target = tmp_path / "personal-one"
+    second_target = tmp_path / "personal-two"
+    first_target.mkdir()
+    second_target.mkdir()
+    personal = personal_root / "session-monitor"
+    personal.symlink_to(first_target, target_is_directory=True)
+
+    first = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    personal.unlink()
+    personal.symlink_to(second_target, target_is_directory=True)
+    second = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert first.to_dict()["plan_sha256"] != second.to_dict()["plan_sha256"]
+
+
 @pytest.mark.parametrize(
     "claimed_name",
     (
@@ -4282,7 +4593,7 @@ def test_legacy_migration_dry_run_recognizes_generated_global_agents(
     assert agents.read_bytes() == before
 
 
-def test_legacy_migration_dry_run_blocks_global_agents_with_mixed_roots(
+def test_legacy_migration_dry_run_preserves_global_agents_with_mixed_roots(
     tmp_path: Path,
 ) -> None:
     repo = Path(__file__).resolve().parents[2]
@@ -4306,12 +4617,14 @@ def test_legacy_migration_dry_run_blocks_global_agents_with_mixed_roots(
         item for item in plan.artifacts if item.artifact_kind == "global_agents"
     )
     assert artifact.classification == "user_modified"
-    assert artifact.blocks_mutation is True
-    assert plan.to_dict()["ready"] is False
+    assert artifact.blocks_mutation is False
+    assert artifact.status == "preserved"
+    assert plan.to_dict()["ready"] is True
+    assert plan.to_dict()["status_counts"]["preserved"] == 1
     assert agents.read_text(encoding="utf-8") == original
 
 
-def test_legacy_migration_dry_run_blocks_modified_global_agents(
+def test_legacy_migration_dry_run_preserves_modified_global_agents(
     tmp_path: Path,
 ) -> None:
     repo = Path(__file__).resolve().parents[2]
@@ -4334,7 +4647,9 @@ def test_legacy_migration_dry_run_blocks_modified_global_agents(
         if item["artifact_kind"] == "global_agents"
     )
     assert artifact["classification"] == "user_modified"
-    assert artifact["blocks_mutation"] is True
+    assert artifact["blocks_mutation"] is False
+    assert artifact["status"] == "preserved"
+    assert plan.to_dict()["ready"] is True
     assert agents.read_text(encoding="utf-8") == original
 
 

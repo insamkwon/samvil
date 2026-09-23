@@ -1019,6 +1019,61 @@ def _receipt_from_payload(payload: dict[str, Any], *, root: Path) -> Any:
             )
         return tuple(result)
 
+    def preserved_paths(key: str) -> tuple[Any, ...]:
+        raw = payload.get(key, [])
+        if not isinstance(raw, list):
+            raise installer.InstallBlocked("stored migration receipt has invalid preserved paths")
+        result = []
+        skills_root = root / "skills"
+        for item in raw:
+            if not isinstance(item, dict):
+                raise installer.InstallBlocked("stored migration receipt has invalid preserved paths")
+            path = installer._lexical_absolute(Path(str(item.get("path", ""))))
+            if not (
+                path == root / "AGENTS.md"
+                or (path.parent == skills_root and not installer._is_samvil_prefixed(path.name))
+            ):
+                raise installer.InstallBlocked(
+                    "stored migration receipt has an unsafe preserved path"
+                )
+            kind = item.get("kind")
+            numeric = (
+                item.get("device"),
+                item.get("inode"),
+                item.get("mode"),
+                item.get("size"),
+                item.get("nlink"),
+                item.get("uid"),
+                item.get("ctime_ns"),
+            )
+            if kind not in {"symlink", "regular_file"} or not all(
+                isinstance(value, int) and value >= 0 for value in numeric
+            ):
+                raise installer.InstallBlocked(
+                    "stored migration receipt has invalid preserved path evidence"
+                )
+            target = item.get("target")
+            content_hash = item.get("content_hash")
+            if kind == "symlink":
+                if not isinstance(target, str) or content_hash is not None:
+                    raise installer.InstallBlocked(
+                        "stored migration receipt has invalid preserved symlink evidence"
+                    )
+            elif target is not None or not isinstance(content_hash, str) or _PLAN_SHA256.fullmatch(content_hash) is None:
+                raise installer.InstallBlocked(
+                    "stored migration receipt has invalid preserved file evidence"
+                )
+            result.append(
+                installer.PreservedPathSnapshot(
+                    path,
+                    kind,
+                    *numeric,
+                    target=target,
+                    content_hash=content_hash,
+                )
+            )
+        return tuple(result)
+
     raw_backups = payload.get("backup_paths")
     raw_commands = payload.get("commands")
     if not isinstance(raw_backups, list) or not isinstance(raw_commands, list):
@@ -1080,6 +1135,8 @@ def _receipt_from_payload(payload: dict[str, Any], *, root: Path) -> Any:
         commands=tuple(commands),
         personal_skills_before=entries("personal_skills_before"),
         personal_skills_after=entries("personal_skills_after"),
+        preserved_paths_before=preserved_paths("preserved_paths_before"),
+        preserved_paths_after=preserved_paths("preserved_paths_after"),
         native_registry_before=registry_before,
         native_registry_after=registry_after,
         canonical_contract=canonical_contract,
@@ -1729,6 +1786,17 @@ def _load_committed_receipt(
                 raise installer.InstallBlocked(
                     "personal Codex skills changed since the stored migration receipt"
                 )
+            current_preserved = tuple(
+                installer.snapshot_preserved_path(item.path)
+                for item in receipt.preserved_paths_after
+            )
+            if (
+                receipt.preserved_paths_before != receipt.preserved_paths_after
+                or current_preserved != receipt.preserved_paths_after
+            ):
+                raise installer.InstallBlocked(
+                    "preserved user-owned paths changed since the stored migration receipt"
+                )
             readiness = installer.validate_activation_readiness(canonical_root)
             if not readiness["ready"]:
                 raise installer.InstallBlocked(
@@ -1996,6 +2064,11 @@ def _run_locked_migration(
             migrate=False,
             expected_legacy_plan_sha256=clean_plan.to_dict()["plan_sha256"],
             allow_legacy_registry_migration=True,
+            preserved_paths=tuple(
+                artifact.path
+                for artifact in authoritative.artifacts
+                if artifact.status == "preserved"
+            ),
         )
         native_completed = True
         journal["native_backups"] = _native_backup_evidence(native_receipt.backup_paths)
@@ -2018,6 +2091,19 @@ def _run_locked_migration(
         ):
             raise installer.InstallBlocked(
                 "personal Codex skills changed during legacy migration"
+            )
+        if (
+            native_receipt.preserved_paths_before
+            != native_receipt.preserved_paths_after
+            or native_receipt.preserved_paths_after
+            != tuple(
+                installer.snapshot_preserved_path(artifact.path)
+                for artifact in authoritative.artifacts
+                if artifact.status == "preserved"
+            )
+        ):
+            raise installer.InstallBlocked(
+                "preserved user-owned paths changed during legacy migration"
             )
         if (
             native_receipt.canonical_contract != authoritative.canonical_contract
@@ -2046,6 +2132,8 @@ def _run_locked_migration(
             personal_skills_after=native_receipt.personal_skills_after,
             native_registry_before=native_receipt.native_registry_before,
             native_registry_after=native_receipt.native_registry_after,
+            preserved_paths_before=native_receipt.preserved_paths_before,
+            preserved_paths_after=native_receipt.preserved_paths_after,
             canonical_contract=authoritative.canonical_contract,
             legacy_plan_sha256=expected_plan_sha256,
             migration_transition_id=transition_id,

@@ -47,6 +47,7 @@ _LEGACY_AGENTS_TEMPLATE_SHA256 = frozenset(
 _LEGACY_AGENTS_ABSOLUTE_ROOT = re.compile(
     r"(?P<root>/[^\n`|]*?)/(?=(?:references|scripts)/)"
 )
+_CODEX_SYSTEM_SKILL_ROOT = ".system"
 
 
 def _json_object(raw: str, label: str, blockers: list[str]) -> dict[str, Any]:
@@ -245,6 +246,163 @@ class SkillInventoryEntry:
             "name": self.name,
             "content_hash": self.content_hash,
         }
+
+
+@dataclass(frozen=True)
+class PreservedPathSnapshot:
+    """No-follow evidence for a user-owned path left untouched by migration."""
+
+    path: Path
+    kind: str
+    device: int
+    inode: int
+    mode: int
+    size: int
+    nlink: int
+    uid: int
+    ctime_ns: int
+    target: str | None = None
+    content_hash: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": str(self.path),
+            "kind": self.kind,
+            "device": self.device,
+            "inode": self.inode,
+            "mode": self.mode,
+            "size": self.size,
+            "nlink": self.nlink,
+            "uid": self.uid,
+            "ctime_ns": self.ctime_ns,
+            "target": self.target,
+            "content_hash": self.content_hash,
+        }
+
+
+def snapshot_preserved_path(path: Path) -> PreservedPathSnapshot:
+    """Capture lstat evidence without following a user-owned symlink."""
+
+    candidate = _lexical_absolute(path)
+    try:
+        return _snapshot_preserved_path(candidate)
+    except InstallBlocked:
+        raise
+    except OSError as exc:
+        raise InstallBlocked(
+            f"preserved path cannot be inspected safely: {candidate}"
+        ) from exc
+
+
+def _snapshot_preserved_path(candidate: Path) -> PreservedPathSnapshot:
+    metadata = candidate.lstat()
+    identity = (
+        int(metadata.st_dev),
+        int(metadata.st_ino),
+        int(stat.S_IMODE(metadata.st_mode)),
+        int(metadata.st_size),
+        int(metadata.st_nlink),
+        int(metadata.st_uid),
+        int(metadata.st_ctime_ns),
+    )
+    if stat.S_ISLNK(metadata.st_mode):
+        target = os.readlink(candidate)
+        after = candidate.lstat()
+        if (
+            identity
+            != (
+                int(after.st_dev),
+                int(after.st_ino),
+                int(stat.S_IMODE(after.st_mode)),
+                int(after.st_size),
+                int(after.st_nlink),
+                int(after.st_uid),
+                int(after.st_ctime_ns),
+            )
+        ):
+            raise InstallBlocked(f"preserved symlink changed while being inspected: {candidate}")
+        return PreservedPathSnapshot(
+            candidate,
+            "symlink",
+            identity[0],
+            identity[1],
+            identity[2],
+            identity[3],
+            identity[4],
+            identity[5],
+            identity[6],
+            target=target,
+        )
+    if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1:
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if nofollow is None:
+            raise InstallBlocked("preserved regular file requires O_NOFOLLOW support")
+        try:
+            descriptor = os.open(
+                candidate,
+                os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0),
+            )
+        except OSError as exc:
+            raise InstallBlocked(f"preserved regular file cannot be opened safely: {candidate}") from exc
+        try:
+            opened = os.fstat(descriptor)
+            opened_identity = (
+                int(opened.st_dev),
+                int(opened.st_ino),
+                int(stat.S_IMODE(opened.st_mode)),
+                int(opened.st_size),
+                int(opened.st_nlink),
+                int(opened.st_uid),
+                int(opened.st_ctime_ns),
+            )
+            if opened_identity != identity:
+                raise InstallBlocked(f"preserved regular file changed while being inspected: {candidate}")
+            content = bytearray()
+            while True:
+                chunk = os.read(descriptor, 1024 * 1024)
+                if not chunk:
+                    break
+                content.extend(chunk)
+            closed = os.fstat(descriptor)
+            closed_identity = (
+                int(closed.st_dev),
+                int(closed.st_ino),
+                int(stat.S_IMODE(closed.st_mode)),
+                int(closed.st_size),
+                int(closed.st_nlink),
+                int(closed.st_uid),
+                int(closed.st_ctime_ns),
+            )
+            if closed_identity != identity:
+                raise InstallBlocked(f"preserved regular file changed while being read: {candidate}")
+        finally:
+            os.close(descriptor)
+        return PreservedPathSnapshot(
+            candidate,
+            "regular_file",
+            identity[0],
+            identity[1],
+            identity[2],
+            identity[3],
+            identity[4],
+            identity[5],
+            identity[6],
+            content_hash=_bytes_sha256(bytes(content)),
+        )
+    raise InstallBlocked(f"preserved path is not a safe regular file or symlink: {candidate}")
+
+
+def preserved_path_snapshot_matches(
+    snapshots: tuple[PreservedPathSnapshot, ...],
+) -> bool:
+    try:
+        for expected in snapshots:
+            current = snapshot_preserved_path(expected.path)
+            if current != expected:
+                return False
+    except (FileNotFoundError, OSError, InstallBlocked):
+        return False
+    return True
 
 
 def inventory_personal_skills(skills_root: Path) -> tuple[SkillInventoryEntry, ...]:
@@ -507,6 +665,29 @@ class LegacyArtifact:
     expected_hash: str | None
     blocks_mutation: bool
     reason: str
+    preserved_target: str | None = None
+
+    @property
+    def status(self) -> str:
+        """Return the planner disposition without implying a write.
+
+        ``migrated`` means this artifact is proven generated and has a sealed
+        action.  ``preserved`` is a known user-owned path which the migration
+        deliberately leaves untouched.  Anything that cannot be classified
+        safely remains ``blocked`` and keeps the fail-closed admission gate.
+        """
+
+        if self.classification == "generated_legacy" and not self.blocks_mutation:
+            return "migrated"
+        if self.classification == "user_modified" and not self.blocks_mutation:
+            return "preserved"
+        return "blocked"
+
+    @property
+    def preserve_only(self) -> bool:
+        """Whether this artifact is intentionally left untouched."""
+
+        return self.status == "preserved"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -517,6 +698,9 @@ class LegacyArtifact:
             "expected_hash": self.expected_hash,
             "blocks_mutation": self.blocks_mutation,
             "reason": self.reason,
+            "status": self.status,
+            "preserve_only": self.preserve_only,
+            "preserved_target": self.preserved_target,
         }
 
 
@@ -565,6 +749,26 @@ class LegacyMigrationPlan:
             "blockers": list(self.blockers),
             "ready": not self.blockers,
         }
+        status_counts = {"migrated": 0, "preserved": 0, "blocked": 0}
+        for artifact in self.artifacts:
+            status_counts[artifact.status] += 1
+        payload["status_counts"] = status_counts
+        payload["artifact_counts"] = dict(status_counts)
+        payload["migrated_artifacts"] = [
+            artifact.to_dict()
+            for artifact in self.artifacts
+            if artifact.status == "migrated"
+        ]
+        payload["preserved_artifacts"] = [
+            artifact.to_dict()
+            for artifact in self.artifacts
+            if artifact.status == "preserved"
+        ]
+        payload["blocked_artifacts"] = [
+            artifact.to_dict()
+            for artifact in self.artifacts
+            if artifact.status == "blocked"
+        ]
         canonical = json.dumps(
             payload,
             ensure_ascii=False,
@@ -1045,16 +1249,28 @@ def _personal_skill_inventory_reason(candidate: Path) -> str | None:
     """Return a blocker when a personal skill cannot be hashed/read safely."""
 
     path = _lexical_absolute(candidate)
-    if path.is_symlink():
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        return f"personal skill cannot be inspected safely: {exc}"
+    if stat.S_ISLNK(metadata.st_mode):
         return "personal skill tree is a symbolic link"
-    if not path.is_dir():
-        return None
+    if not stat.S_ISDIR(metadata.st_mode):
+        return "personal skill candidate is not a directory"
     unsafe = _unsafe_tree_reason(path)
     if unsafe is not None:
         return unsafe.replace("legacy skill", "personal skill")
     manifest = path / "SKILL.md"
-    if manifest.is_symlink() or not manifest.is_file():
-        return None
+    try:
+        manifest_metadata = manifest.lstat()
+    except FileNotFoundError:
+        return "personal skill tree is missing a regular SKILL.md"
+    except OSError as exc:
+        return f"personal skill manifest cannot be inspected safely: {exc}"
+    if stat.S_ISLNK(manifest_metadata.st_mode):
+        return "personal skill manifest is a symbolic link"
+    if not stat.S_ISREG(manifest_metadata.st_mode):
+        return "personal skill manifest is not a regular file"
     try:
         declared_name = _frontmatter_name(manifest)
         _skill_tree_hash(path)
@@ -1270,8 +1486,8 @@ def _global_agents_artifact(path: Path) -> LegacyArtifact | None:
             "user_modified",
             content_hash,
             normalized_hash,
-            True,
-            "global_agents content is not an exact known generated template",
+            False,
+            "global_agents content is user-modified and will be preserved",
         )
     return LegacyArtifact(
         "global_agents",
@@ -1545,9 +1761,75 @@ def build_legacy_migration_plan(
                     )
                 )
             for candidate in sorted(
-                (entry for entry in entries if not _is_samvil_prefixed(entry.name)),
+                (
+                    entry
+                    for entry in entries
+                    if not _is_samvil_prefixed(entry.name)
+                    # Codex owns this hidden namespace; it is not a user
+                    # skill and must not be treated as migration input.
+                    and entry.name != _CODEX_SYSTEM_SKILL_ROOT
+                ),
                 key=lambda entry: entry.name,
             ):
+                # A top-level personal symlink is user-owned by definition.
+                # Record it as preserve-only without resolving or traversing
+                # its target; nested links inside a regular personal tree are
+                # still handled by ``_personal_skill_inventory_reason`` and
+                # remain blocking ambiguity.
+                try:
+                    candidate_metadata = candidate.lstat()
+                except OSError as exc:
+                    artifacts.append(
+                        _artifact(
+                            "personal_skill_tree",
+                            _lexical_absolute(candidate),
+                            f"personal skill candidate cannot be inspected safely: {exc}",
+                        )
+                    )
+                    continue
+                if stat.S_ISLNK(candidate_metadata.st_mode):
+                    try:
+                        preserved_target = os.readlink(candidate)
+                        after_metadata = candidate.lstat()
+                    except OSError as exc:
+                        artifacts.append(
+                            _artifact(
+                                "personal_skill_tree",
+                                _lexical_absolute(candidate),
+                                f"personal skill symlink cannot be inspected safely: {exc}",
+                            )
+                        )
+                        continue
+                    if (
+                        int(after_metadata.st_dev),
+                        int(after_metadata.st_ino),
+                        int(after_metadata.st_ctime_ns),
+                    ) != (
+                        int(candidate_metadata.st_dev),
+                        int(candidate_metadata.st_ino),
+                        int(candidate_metadata.st_ctime_ns),
+                    ):
+                        artifacts.append(
+                            _artifact(
+                                "personal_skill_tree",
+                                _lexical_absolute(candidate),
+                                "personal skill symlink changed while being inspected",
+                            )
+                        )
+                        continue
+                    artifacts.append(
+                        LegacyArtifact(
+                            "personal_skill_tree",
+                            _lexical_absolute(candidate),
+                            "user_modified",
+                            None,
+                            None,
+                            False,
+                            "personal skill tree is a top-level symbolic link and will be preserved",
+                            preserved_target,
+                        )
+                    )
+                    continue
                 unsafe_personal_reason = _personal_skill_inventory_reason(candidate)
                 if unsafe_personal_reason is not None:
                     artifacts.append(
@@ -1832,6 +2114,8 @@ class InstallReceipt:
     legacy_plan_sha256: str | None = None
     migration_transition_id: str | None = None
     migration_receipt_sha256: str | None = None
+    preserved_paths_before: tuple[PreservedPathSnapshot, ...] = ()
+    preserved_paths_after: tuple[PreservedPathSnapshot, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -1861,6 +2145,16 @@ class InstallReceipt:
             payload["migration_transition_id"] = self.migration_transition_id
         if self.migration_receipt_sha256 is not None:
             payload["migration_receipt_sha256"] = self.migration_receipt_sha256
+        if self.preserved_paths_before or self.preserved_paths_after:
+            payload["preserved_paths_before"] = [
+                item.to_dict() for item in self.preserved_paths_before
+            ]
+            payload["preserved_paths_after"] = [
+                item.to_dict() for item in self.preserved_paths_after
+            ]
+            payload["preserved_paths_unchanged"] = (
+                self.preserved_paths_before == self.preserved_paths_after
+            )
         return payload
 
 
@@ -2567,6 +2861,7 @@ def _execute_isolated_install_impl(
     migrate: bool = False,
     expected_legacy_plan_sha256: str | None = None,
     allow_legacy_registry_migration: bool = False,
+    preserved_paths: tuple[Path, ...] = (),
 ) -> InstallReceipt:
     """Internal executor retained for filesystem-focused unit tests.
 
@@ -2628,8 +2923,31 @@ def _execute_isolated_install_impl(
         raise InstallBlocked(
             f"skills path escapes isolated profile: {root / 'skills'}"
         ) from exc
-    if _unsafe_personal_skill_links(personal_root):
+    preserved_path_candidates = tuple(_lexical_absolute(path) for path in preserved_paths)
+    for path in preserved_path_candidates:
+        if not (
+            path == root / "AGENTS.md"
+            or (
+                path.parent == personal_root
+                and not _is_samvil_prefixed(path.name)
+            )
+        ):
+            raise InstallBlocked(f"preserved path is outside the supported user-owned surface: {path}")
+    preserved_path_snapshots = tuple(
+        snapshot_preserved_path(path) for path in preserved_path_candidates
+    )
+    preserved_personal_paths = {
+        snapshot.path
+        for snapshot in preserved_path_snapshots
+        if snapshot.path.parent == personal_root and snapshot.kind == "symlink"
+    }
+    unsafe_personal_paths = set(_unsafe_personal_skill_links(personal_root))
+    if unsafe_personal_paths - preserved_personal_paths:
         raise InstallBlocked("unsafe personal skill symlink blocks isolated install")
+    if preserved_personal_paths - unsafe_personal_paths:
+        raise InstallBlocked("preserved personal skill symlink disappeared")
+    if not preserved_path_snapshot_matches(preserved_path_snapshots):
+        raise InstallBlocked("preserved user-owned path changed before install")
     config = root / "config.toml"
     if config.is_symlink():
         raise InstallBlocked(f"Codex config symlink is not safe to mutate: {config}")
@@ -2707,8 +3025,13 @@ def _execute_isolated_install_impl(
             raise InstallBlocked(
                 f"skills path escapes isolated profile: {personal_root}"
             ) from exc
-        if _unsafe_personal_skill_links(personal_root):
+        current_unsafe = set(_unsafe_personal_skill_links(personal_root))
+        if current_unsafe - preserved_personal_paths:
             raise InstallBlocked("unsafe personal skill symlink detected")
+        if preserved_personal_paths - current_unsafe:
+            raise InstallBlocked("preserved personal skill symlink changed")
+        if not preserved_path_snapshot_matches(preserved_path_snapshots):
+            raise InstallBlocked("preserved user-owned path changed during install")
         return inventory_personal_skills(personal_root)
 
     def quarantine_root() -> Path:
@@ -2732,6 +3055,8 @@ def _execute_isolated_install_impl(
                 ) from exc
             personal_root.mkdir(parents=True, exist_ok=True)
         for unsafe in _unsafe_personal_skill_links(personal_root):
+            if unsafe in preserved_personal_paths:
+                continue
             unsafe.replace(quarantine_root() / unsafe.name)
         protected_paths = {entry.path for entry in protected_before}
         unexpected = tuple(
@@ -2902,6 +3227,10 @@ def _execute_isolated_install_impl(
             raise NativeRecoveryRequired(
                 "personal Codex skill inventory differs after native rollback"
             )
+        if not preserved_path_snapshot_matches(preserved_path_snapshots):
+            raise NativeRecoveryRequired(
+                "preserved user-owned path differs after native rollback"
+            )
         record_native_event("rollback_verified", snapshot=restored.to_dict())
         return restored
 
@@ -3019,6 +3348,8 @@ def _execute_isolated_install_impl(
             raise InstallBlocked(
                 "personal Codex skill inventory changed during isolated install"
             )
+        if not preserved_path_snapshot_matches(preserved_path_snapshots):
+            raise InstallBlocked("preserved user-owned path changed during install")
         registry_after = _read_native_registry(
             effective_registry_reader,
             command_env,
@@ -3076,6 +3407,10 @@ def _execute_isolated_install_impl(
         commands=tuple(commands),
         personal_skills_before=protected_before,
         personal_skills_after=protected_after,
+        preserved_paths_before=preserved_path_snapshots,
+        preserved_paths_after=tuple(
+            snapshot_preserved_path(path) for path in preserved_path_candidates
+        ),
         native_registry_before=registry_before,
         native_registry_after=registry_after,
         canonical_contract=canonical_contract,
@@ -3092,6 +3427,7 @@ def execute_isolated_install(
     migrate: bool = False,
     expected_legacy_plan_sha256: str | None = None,
     allow_legacy_registry_migration: bool = False,
+    preserved_paths: tuple[Path, ...] = (),
 ) -> InstallReceipt:
     """Execute inside an explicit profile with Codex CLI readback proof."""
 
@@ -3119,6 +3455,7 @@ def execute_isolated_install(
         migrate=migrate,
         expected_legacy_plan_sha256=expected_legacy_plan_sha256,
         allow_legacy_registry_migration=allow_legacy_registry_migration,
+        preserved_paths=preserved_paths,
     )
 
 
@@ -3321,6 +3658,7 @@ __all__ = [
     "MigrationAction",
     "NativeRecoveryRequired",
     "NativeRegistrySnapshot",
+    "PreservedPathSnapshot",
     "SkillInventoryEntry",
     "build_install_plan",
     "build_legacy_migration_plan",
@@ -3330,6 +3668,8 @@ __all__ = [
     "execute_isolated_install",
     "inventory_personal_skills",
     "parse_capability_probe",
+    "preserved_path_snapshot_matches",
+    "snapshot_preserved_path",
     "validate_cli_environment",
     "validate_marketplace_root",
 ]
