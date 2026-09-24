@@ -32,6 +32,12 @@ All notable changes to SAMVIL are documented here.
   as deployment/approval authority. Council remains exact opt-in on every host,
   and QA chooses Deploy, Evolve, or Retro gates only after routing is known.
 
+## v4.33.1 — 2026-08-29
+
+- 기존 Codex 심볼릭 링크 스킬 트리를 출처가 확인된 경우에만 되돌릴 수 있는 백업으로 이전
+- Codex가 정규화한 MCP 도구 승인 설정을 네이티브 플러그인 네임스페이스로 보존
+- 사용자 설정의 멀티라인 문자열과 인용된 TOML 테이블 표기를 안전하게 보존
+
 ---
 
 ## v4.33.0 — 2026-07-26

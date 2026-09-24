@@ -13,11 +13,12 @@ import json
 import os
 import re
 import shutil
+import secrets
 import stat
 import subprocess
 import tempfile
 import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,7 @@ _LEGACY_AGENTS_TEMPLATE_SHA256 = frozenset(
 _LEGACY_AGENTS_ABSOLUTE_ROOT = re.compile(
     r"(?P<root>/[^\n`|]*?)/(?=(?:references|scripts)/)"
 )
+_CODEX_SYSTEM_SKILL_ROOT = ".system"
 
 
 def _json_object(raw: str, label: str, blockers: list[str]) -> dict[str, Any]:
@@ -247,6 +249,170 @@ class SkillInventoryEntry:
         }
 
 
+@dataclass(frozen=True)
+class PreservedPathSnapshot:
+    """No-follow evidence for a user-owned path left untouched by migration."""
+
+    path: Path
+    kind: str
+    device: int
+    inode: int
+    mode: int
+    size: int
+    nlink: int
+    uid: int
+    ctime_ns: int
+    target: str | None = None
+    content_hash: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "path": str(self.path),
+            "kind": self.kind,
+            "device": self.device,
+            "inode": self.inode,
+            "mode": self.mode,
+            "size": self.size,
+            "nlink": self.nlink,
+            "uid": self.uid,
+            "ctime_ns": self.ctime_ns,
+            "target": self.target,
+            "content_hash": self.content_hash,
+        }
+
+
+def snapshot_preserved_path(path: Path) -> PreservedPathSnapshot:
+    """Capture lstat evidence without following a user-owned symlink."""
+
+    candidate = _lexical_absolute(path)
+    try:
+        return _snapshot_preserved_path(candidate)
+    except InstallBlocked:
+        raise
+    except OSError as exc:
+        raise InstallBlocked(
+            f"preserved path cannot be inspected safely: {candidate}"
+        ) from exc
+
+
+def _snapshot_preserved_path(candidate: Path) -> PreservedPathSnapshot:
+    metadata = candidate.lstat()
+    identity = (
+        int(metadata.st_dev),
+        int(metadata.st_ino),
+        int(stat.S_IMODE(metadata.st_mode)),
+        int(metadata.st_size),
+        int(metadata.st_nlink),
+        int(metadata.st_uid),
+        int(metadata.st_ctime_ns),
+    )
+    if stat.S_ISLNK(metadata.st_mode):
+        target = os.readlink(candidate)
+        after = candidate.lstat()
+        if (
+            identity
+            != (
+                int(after.st_dev),
+                int(after.st_ino),
+                int(stat.S_IMODE(after.st_mode)),
+                int(after.st_size),
+                int(after.st_nlink),
+                int(after.st_uid),
+                int(after.st_ctime_ns),
+            )
+        ):
+            raise InstallBlocked(f"preserved symlink changed while being inspected: {candidate}")
+        return PreservedPathSnapshot(
+            candidate,
+            "symlink",
+            identity[0],
+            identity[1],
+            identity[2],
+            identity[3],
+            identity[4],
+            identity[5],
+            identity[6],
+            target=target,
+        )
+    if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1:
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if nofollow is None:
+            raise InstallBlocked("preserved regular file requires O_NOFOLLOW support")
+        try:
+            descriptor = os.open(
+                candidate,
+                os.O_RDONLY
+                | nofollow
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NONBLOCK", 0),
+            )
+        except OSError as exc:
+            raise InstallBlocked(f"preserved regular file cannot be opened safely: {candidate}") from exc
+        try:
+            opened = os.fstat(descriptor)
+            opened_identity = (
+                int(opened.st_dev),
+                int(opened.st_ino),
+                int(stat.S_IMODE(opened.st_mode)),
+                int(opened.st_size),
+                int(opened.st_nlink),
+                int(opened.st_uid),
+                int(opened.st_ctime_ns),
+            )
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+                raise InstallBlocked(
+                    f"preserved regular file opened as a non-regular path: {candidate}"
+                )
+            if opened_identity != identity:
+                raise InstallBlocked(f"preserved regular file changed while being inspected: {candidate}")
+            content = bytearray()
+            while True:
+                chunk = os.read(descriptor, 1024 * 1024)
+                if not chunk:
+                    break
+                content.extend(chunk)
+            closed = os.fstat(descriptor)
+            closed_identity = (
+                int(closed.st_dev),
+                int(closed.st_ino),
+                int(stat.S_IMODE(closed.st_mode)),
+                int(closed.st_size),
+                int(closed.st_nlink),
+                int(closed.st_uid),
+                int(closed.st_ctime_ns),
+            )
+            if closed_identity != identity:
+                raise InstallBlocked(f"preserved regular file changed while being read: {candidate}")
+        finally:
+            os.close(descriptor)
+        return PreservedPathSnapshot(
+            candidate,
+            "regular_file",
+            identity[0],
+            identity[1],
+            identity[2],
+            identity[3],
+            identity[4],
+            identity[5],
+            identity[6],
+            content_hash=_bytes_sha256(bytes(content)),
+        )
+    raise InstallBlocked(f"preserved path is not a safe regular file or symlink: {candidate}")
+
+
+def preserved_path_snapshot_matches(
+    snapshots: tuple[PreservedPathSnapshot, ...],
+) -> bool:
+    try:
+        for expected in snapshots:
+            current = snapshot_preserved_path(expected.path)
+            if current != expected:
+                return False
+    except (FileNotFoundError, OSError, InstallBlocked):
+        return False
+    return True
+
+
 def inventory_personal_skills(skills_root: Path) -> tuple[SkillInventoryEntry, ...]:
     root = _lexical_absolute(Path(skills_root).expanduser())
     if (
@@ -257,6 +423,8 @@ def inventory_personal_skills(skills_root: Path) -> tuple[SkillInventoryEntry, .
         return ()
     entries: list[SkillInventoryEntry] = []
     for skill_root in sorted(root.iterdir()):
+        if skill_root.name == _CODEX_SYSTEM_SKILL_ROOT:
+            continue
         skill_file = skill_root / "SKILL.md"
         if (
             not skill_root.is_symlink()
@@ -281,6 +449,8 @@ def _unsafe_personal_skill_links(skills_root: Path) -> tuple[Path, ...]:
         return ()
     unsafe: list[Path] = []
     for skill_root in sorted(root.iterdir()):
+        if skill_root.name == _CODEX_SYSTEM_SKILL_ROOT:
+            continue
         contains_symlink = skill_root.is_symlink()
         if skill_root.is_dir() and not contains_symlink:
             for current_root, directory_names, file_names in os.walk(
@@ -507,6 +677,29 @@ class LegacyArtifact:
     expected_hash: str | None
     blocks_mutation: bool
     reason: str
+    preserved_target: str | None = None
+
+    @property
+    def status(self) -> str:
+        """Return the planner disposition without implying a write.
+
+        ``migrated`` means this artifact is proven generated and has a sealed
+        action.  ``preserved`` is a known user-owned path which the migration
+        deliberately leaves untouched.  Anything that cannot be classified
+        safely remains ``blocked`` and keeps the fail-closed admission gate.
+        """
+
+        if self.classification == "generated_legacy" and not self.blocks_mutation:
+            return "migrated"
+        if self.classification == "user_modified" and not self.blocks_mutation:
+            return "preserved"
+        return "blocked"
+
+    @property
+    def preserve_only(self) -> bool:
+        """Whether this artifact is intentionally left untouched."""
+
+        return self.status == "preserved"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -517,6 +710,9 @@ class LegacyArtifact:
             "expected_hash": self.expected_hash,
             "blocks_mutation": self.blocks_mutation,
             "reason": self.reason,
+            "status": self.status,
+            "preserve_only": self.preserve_only,
+            "preserved_target": self.preserved_target,
         }
 
 
@@ -565,6 +761,26 @@ class LegacyMigrationPlan:
             "blockers": list(self.blockers),
             "ready": not self.blockers,
         }
+        status_counts = {"migrated": 0, "preserved": 0, "blocked": 0}
+        for artifact in self.artifacts:
+            status_counts[artifact.status] += 1
+        payload["status_counts"] = status_counts
+        payload["artifact_counts"] = dict(status_counts)
+        payload["migrated_artifacts"] = [
+            artifact.to_dict()
+            for artifact in self.artifacts
+            if artifact.status == "migrated"
+        ]
+        payload["preserved_artifacts"] = [
+            artifact.to_dict()
+            for artifact in self.artifacts
+            if artifact.status == "preserved"
+        ]
+        payload["blocked_artifacts"] = [
+            artifact.to_dict()
+            for artifact in self.artifacts
+            if artifact.status == "blocked"
+        ]
         canonical = json.dumps(
             payload,
             ensure_ascii=False,
@@ -824,7 +1040,7 @@ def _native_registry_profile_contract(
             (f"Codex registry config is unsafe: {config_path}",),
         )
     try:
-        content = config_path.read_bytes()
+        content = _read_regular_file_bytes(config_path)
         parsed = tomllib.loads(content.decode("utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
         return (
@@ -897,6 +1113,12 @@ def _native_registry_profile_contract(
         if not isinstance(raw_entry, dict):
             blockers.append(f"Codex plugin entry is not a table: {label}")
             continue
+        # During migration, legacy per-tool approval tables are rewritten into
+        # the native plugin namespace before the CLI registers the plugin.  A
+        # tools-only table is an intentional pending fragment, not a registry
+        # entry that can be judged enabled/disabled yet.
+        if label == "samvil@samvil-codex" and set(raw_entry) == {"tools"}:
+            continue
         contract.append((f"plugin:{label}", _canonical_entry_json(raw_entry)))
         if label == "samvil@samvil":
             if not legacy_marketplace_owned:
@@ -962,20 +1184,105 @@ def _unsafe_tree_reason(root: Path) -> str | None:
     return None
 
 
+def _canonical_link_skill_tree_matches(path: Path, canonical: Path) -> bool:
+    """Recognize a legacy skill tree made only of exact canonical file links.
+
+    Older local setups sometimes represented the generated skill files as links
+    back into the checked-out SAMVIL repository.  Such a tree is safe to retire
+    only when its complete lexical shape matches the canonical tree and every
+    linked file points directly at its corresponding canonical file.  A link
+    to another location, an extra entry, or a canonical link is ambiguous.
+    """
+
+    legacy = _lexical_absolute(path)
+    source = _lexical_absolute(canonical)
+    if (
+        legacy.is_symlink()
+        or not legacy.is_dir()
+        or source.is_symlink()
+        or not source.is_dir()
+    ):
+        return False
+
+    def lexical_target(link: Path) -> Path:
+        try:
+            target = Path(os.readlink(link))
+        except OSError as exc:
+            raise ValueError(f"cannot read symbolic link: {link}") from exc
+        if not target.is_absolute():
+            target = link.parent / target
+        return Path(os.path.abspath(os.fspath(target)))
+
+    def matches(legacy_root: Path, source_root: Path) -> bool:
+        try:
+            legacy_entries = {
+                entry.name: entry for entry in legacy_root.iterdir()
+            }
+            source_entries = {
+                entry.name: entry for entry in source_root.iterdir()
+            }
+        except OSError:
+            return False
+        if set(legacy_entries) != set(source_entries):
+            return False
+        for name, source_entry in source_entries.items():
+            legacy_entry = legacy_entries[name]
+            try:
+                source_metadata = source_entry.lstat()
+                legacy_metadata = legacy_entry.lstat()
+            except OSError:
+                return False
+            if stat.S_ISDIR(source_metadata.st_mode):
+                if (
+                    stat.S_ISLNK(legacy_metadata.st_mode)
+                    or not stat.S_ISDIR(legacy_metadata.st_mode)
+                    or not matches(legacy_entry, source_entry)
+                ):
+                    return False
+                continue
+            if not stat.S_ISREG(source_metadata.st_mode):
+                return False
+            if source_metadata.st_nlink != 1:
+                return False
+            if not stat.S_ISLNK(legacy_metadata.st_mode):
+                return False
+            try:
+                target = lexical_target(legacy_entry)
+            except ValueError:
+                return False
+            if target != _lexical_absolute(source_entry):
+                return False
+        return True
+
+    return matches(legacy, source)
+
+
 def _personal_skill_inventory_reason(candidate: Path) -> str | None:
     """Return a blocker when a personal skill cannot be hashed/read safely."""
 
     path = _lexical_absolute(candidate)
-    if path.is_symlink():
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        return f"personal skill cannot be inspected safely: {exc}"
+    if stat.S_ISLNK(metadata.st_mode):
         return "personal skill tree is a symbolic link"
-    if not path.is_dir():
-        return None
+    if not stat.S_ISDIR(metadata.st_mode):
+        return "personal skill candidate is not a directory"
     unsafe = _unsafe_tree_reason(path)
     if unsafe is not None:
         return unsafe.replace("legacy skill", "personal skill")
     manifest = path / "SKILL.md"
-    if manifest.is_symlink() or not manifest.is_file():
-        return None
+    try:
+        manifest_metadata = manifest.lstat()
+    except FileNotFoundError:
+        return "personal skill tree is missing a regular SKILL.md"
+    except OSError as exc:
+        return f"personal skill manifest cannot be inspected safely: {exc}"
+    if stat.S_ISLNK(manifest_metadata.st_mode):
+        return "personal skill manifest is a symbolic link"
+    if not stat.S_ISREG(manifest_metadata.st_mode):
+        return "personal skill manifest is not a regular file"
     try:
         declared_name = _frontmatter_name(manifest)
         _skill_tree_hash(path)
@@ -994,6 +1301,27 @@ def _legacy_skill_artifact(candidate: Path, canonical: Path) -> LegacyArtifact:
         return _artifact("legacy_skill_tree", path, unsafe_parent)
     unsafe_reason = _unsafe_tree_reason(path)
     if unsafe_reason is not None:
+        if (
+            "symbolic link" in unsafe_reason
+            and _canonical_link_skill_tree_matches(path, canonical)
+        ):
+            try:
+                content_hash = _skill_tree_hash(path)
+            except (OSError, UnicodeError) as exc:
+                return _artifact(
+                    "legacy_skill_link_tree",
+                    path,
+                    f"legacy skill link tree cannot be hashed safely: {exc}",
+                )
+            return LegacyArtifact(
+                "legacy_skill_link_tree",
+                path,
+                "generated_legacy",
+                content_hash,
+                content_hash,
+                False,
+                "legacy skill tree links exactly to canonical source",
+            )
         return _artifact("legacy_skill_tree", path, unsafe_reason)
     skill_manifest = path / "SKILL.md"
     if skill_manifest.is_symlink() or not skill_manifest.is_file():
@@ -1170,8 +1498,8 @@ def _global_agents_artifact(path: Path) -> LegacyArtifact | None:
             "user_modified",
             content_hash,
             normalized_hash,
-            True,
-            "global_agents content is not an exact known generated template",
+            False,
+            "global_agents content is user-modified and will be preserved",
         )
     return LegacyArtifact(
         "global_agents",
@@ -1254,6 +1582,26 @@ def _direct_mcp_artifact(config_path: Path) -> LegacyArtifact | None:
     if not isinstance(servers, dict) or "samvil-mcp" not in servers:
         return None
     table = servers.get("samvil-mcp")
+    # An orphaned nested table is not a valid Codex server definition.  It can
+    # only be observed after an interrupted/manual edit, so leave it as an
+    # explicit blocker instead of silently accepting an invalid config.
+    if isinstance(table, dict) and set(table) == {"tools"}:
+        return _artifact(
+            "direct_mcp_table",
+            path,
+            "legacy MCP tool overrides have no server parent",
+        )
+    if isinstance(table, dict):
+        tools = table.get("tools")
+        if tools is not None and (
+            not isinstance(tools, dict)
+            or any(not isinstance(value, dict) for value in tools.values())
+        ):
+            return _artifact(
+                "direct_mcp_table",
+                path,
+                "legacy MCP tool overrides are not TOML tables",
+            )
     normalized_expected = {
         "command": "{{SAMVIL_ROOT}}/mcp/.venv/bin/python",
         "args": ["-m", "samvil_mcp.server"],
@@ -1275,9 +1623,9 @@ def _direct_mcp_artifact(config_path: Path) -> LegacyArtifact | None:
     )
     table_has_generated_shape = (
         isinstance(table, dict)
-        and set(table) == {"command", "args", "env"}
+        and set(table).issubset({"command", "args", "env", "tools"})
         and table.get("args") == ["-m", "samvil_mcp.server"]
-        and table.get("env") == {}
+        and ("env" not in table or table.get("env") == {})
         and command_has_generated_shape
     )
     exact_table_text = False
@@ -1294,16 +1642,32 @@ def _direct_mcp_artifact(config_path: Path) -> LegacyArtifact | None:
                     end_index = index
                     break
             command_text = str(table["command"])
-            expected_lines = (
-                "[mcp_servers.samvil-mcp]",
-                f'command = "{command_text}"',
-                'args    = ["-m", "samvil_mcp.server"]',
-                "env     = {}",
-            )
             block_lines = lines[header_index:end_index]
             while block_lines and not block_lines[-1]:
                 block_lines.pop()
-            exact_table_text = tuple(block_lines) == expected_lines
+            assignments: dict[str, str] = {}
+            for line in block_lines[1:]:
+                stripped = line.strip()
+                if not stripped or "=" not in stripped:
+                    exact_table_text = False
+                    break
+                key, _, value = stripped.partition("=")
+                key = key.strip()
+                if key in assignments:
+                    exact_table_text = False
+                    break
+                assignments[key] = value.strip()
+            else:
+                expected_assignments = {
+                    "command": f'"{command_text}"',
+                    "args": '["-m", "samvil_mcp.server"]',
+                }
+                if "env" in table:
+                    expected_assignments["env"] = "{}"
+                exact_table_text = (
+                    set(assignments) == set(expected_assignments)
+                    and assignments == expected_assignments
+                )
     if not exact_table_text:
         return LegacyArtifact(
             "direct_mcp_table",
@@ -1409,9 +1773,75 @@ def build_legacy_migration_plan(
                     )
                 )
             for candidate in sorted(
-                (entry for entry in entries if not _is_samvil_prefixed(entry.name)),
+                (
+                    entry
+                    for entry in entries
+                    if not _is_samvil_prefixed(entry.name)
+                    # Codex owns this hidden namespace; it is not a user
+                    # skill and must not be treated as migration input.
+                    and entry.name != _CODEX_SYSTEM_SKILL_ROOT
+                ),
                 key=lambda entry: entry.name,
             ):
+                # A top-level personal symlink is user-owned by definition.
+                # Record it as preserve-only without resolving or traversing
+                # its target; nested links inside a regular personal tree are
+                # still handled by ``_personal_skill_inventory_reason`` and
+                # remain blocking ambiguity.
+                try:
+                    candidate_metadata = candidate.lstat()
+                except OSError as exc:
+                    artifacts.append(
+                        _artifact(
+                            "personal_skill_tree",
+                            _lexical_absolute(candidate),
+                            f"personal skill candidate cannot be inspected safely: {exc}",
+                        )
+                    )
+                    continue
+                if stat.S_ISLNK(candidate_metadata.st_mode):
+                    try:
+                        preserved_target = os.readlink(candidate)
+                        after_metadata = candidate.lstat()
+                    except OSError as exc:
+                        artifacts.append(
+                            _artifact(
+                                "personal_skill_tree",
+                                _lexical_absolute(candidate),
+                                f"personal skill symlink cannot be inspected safely: {exc}",
+                            )
+                        )
+                        continue
+                    if (
+                        int(after_metadata.st_dev),
+                        int(after_metadata.st_ino),
+                        int(after_metadata.st_ctime_ns),
+                    ) != (
+                        int(candidate_metadata.st_dev),
+                        int(candidate_metadata.st_ino),
+                        int(candidate_metadata.st_ctime_ns),
+                    ):
+                        artifacts.append(
+                            _artifact(
+                                "personal_skill_tree",
+                                _lexical_absolute(candidate),
+                                "personal skill symlink changed while being inspected",
+                            )
+                        )
+                        continue
+                    artifacts.append(
+                        LegacyArtifact(
+                            "personal_skill_tree",
+                            _lexical_absolute(candidate),
+                            "user_modified",
+                            None,
+                            None,
+                            False,
+                            "personal skill tree is a top-level symbolic link and will be preserved",
+                            preserved_target,
+                        )
+                    )
+                    continue
                 unsafe_personal_reason = _personal_skill_inventory_reason(candidate)
                 if unsafe_personal_reason is not None:
                     artifacts.append(
@@ -1476,6 +1906,38 @@ def build_legacy_migration_plan(
                 identity[6],
             )
         )
+
+    generated_legacy_paths = tuple(action.path for action in actions)
+    for index, artifact in enumerate(artifacts):
+        if (
+            artifact.status != "preserved"
+            or artifact.preserved_target is None
+            or not generated_legacy_paths
+        ):
+            continue
+        target = _lexical_absolute(artifact.path.parent / artifact.preserved_target)
+        overlap = next(
+            (
+                legacy_path
+                for legacy_path in generated_legacy_paths
+                if target == legacy_path
+                or target in legacy_path.parents
+                or legacy_path in target.parents
+            ),
+            None,
+        )
+        if overlap is None:
+            continue
+        blocked = replace(
+            artifact,
+            blocks_mutation=True,
+            reason=(
+                "preserved personal symlink target overlaps generated legacy "
+                f"source: {overlap}"
+            ),
+        )
+        artifacts[index] = blocked
+        blockers.append(f"{blocked.path}: {blocked.reason}")
 
     personal = ()
     if (
@@ -1696,6 +2158,8 @@ class InstallReceipt:
     legacy_plan_sha256: str | None = None
     migration_transition_id: str | None = None
     migration_receipt_sha256: str | None = None
+    preserved_paths_before: tuple[PreservedPathSnapshot, ...] = ()
+    preserved_paths_after: tuple[PreservedPathSnapshot, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -1725,6 +2189,16 @@ class InstallReceipt:
             payload["migration_transition_id"] = self.migration_transition_id
         if self.migration_receipt_sha256 is not None:
             payload["migration_receipt_sha256"] = self.migration_receipt_sha256
+        if self.preserved_paths_before or self.preserved_paths_after:
+            payload["preserved_paths_before"] = [
+                item.to_dict() for item in self.preserved_paths_before
+            ]
+            payload["preserved_paths_after"] = [
+                item.to_dict() for item in self.preserved_paths_after
+            ]
+            payload["preserved_paths_unchanged"] = (
+                self.preserved_paths_before == self.preserved_paths_after
+            )
         return payload
 
 
@@ -1738,11 +2212,260 @@ def _atomic_copy(source: Path, destination: Path) -> None:
     Path(temporary.name).replace(destination)
 
 
+def _read_regular_file_bytes(path: Path) -> bytes:
+    """Read a regular file without following a replacement or blocking FIFO."""
+
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        raise InstallBlocked(f"file is not an independent regular file: {path}")
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise InstallBlocked(f"file requires O_NOFOLLOW support: {path}")
+    flags = os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+        ):
+            raise InstallBlocked(f"file changed while being opened: {path}")
+        content = bytearray()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            content.extend(chunk)
+        after = os.fstat(descriptor)
+        if (
+            (after.st_dev, after.st_ino) != (opened.st_dev, opened.st_ino)
+            or after.st_size != len(content)
+            or after.st_ctime_ns != opened.st_ctime_ns
+            or after.st_mtime_ns != opened.st_mtime_ns
+        ):
+            raise InstallBlocked(f"file changed while being read: {path}")
+        return bytes(content)
+    except OSError as exc:
+        raise InstallBlocked(f"file cannot be read safely: {path}") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_copy_at(
+    source: Path,
+    destination_name: str,
+    destination_parent_descriptor: int,
+    *,
+    source_parent_descriptor: int | None = None,
+    replace_existing: bool = False,
+    expected_destination_digest: str | None = None,
+) -> None:
+    """Copy a file while resolving the destination only through a pinned FD."""
+
+    source_descriptor: int | None = None
+    temporary_name = f".{destination_name}.migration-{os.getpid()}-{secrets.token_hex(8)}"
+    destination_linked = False
+    try:
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if nofollow is None:
+            raise InstallBlocked("atomic copy requires O_NOFOLLOW support")
+        source_flags = os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0)
+        if source_parent_descriptor is None:
+            source_descriptor = os.open(source, source_flags)
+        else:
+            source_descriptor = os.open(
+                source.name,
+                source_flags,
+                dir_fd=source_parent_descriptor,
+            )
+        source_metadata = os.fstat(source_descriptor)
+        if not stat.S_ISREG(source_metadata.st_mode) or source_metadata.st_nlink != 1:
+            raise InstallBlocked(f"atomic copy source is not an independent file: {source}")
+        destination_flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            destination_flags |= os.O_NOFOLLOW
+        destination_descriptor = os.open(
+            temporary_name,
+            destination_flags,
+            stat.S_IMODE(source_metadata.st_mode),
+            dir_fd=destination_parent_descriptor,
+        )
+        try:
+            os.fchmod(destination_descriptor, stat.S_IMODE(source_metadata.st_mode))
+            bytes_copied = 0
+            while True:
+                chunk = os.read(source_descriptor, 1024 * 1024)
+                if not chunk:
+                    break
+                bytes_copied += len(chunk)
+                view = memoryview(chunk)
+                while view:
+                    written = os.write(destination_descriptor, view)
+                    view = view[written:]
+            os.fsync(destination_descriptor)
+        finally:
+            os.close(destination_descriptor)
+        source_after = os.fstat(source_descriptor)
+        if (
+            source_after.st_dev != source_metadata.st_dev
+            or source_after.st_ino != source_metadata.st_ino
+            or source_after.st_size != source_metadata.st_size
+            or source_after.st_ctime_ns != source_metadata.st_ctime_ns
+            or source_after.st_mtime_ns != source_metadata.st_mtime_ns
+            or bytes_copied != source_after.st_size
+        ):
+            raise InstallBlocked(f"atomic copy source changed while being read: {source}")
+        if replace_existing:
+            if expected_destination_digest is None:
+                raise InstallBlocked("atomic replacement requires a sealed destination digest")
+            from .codex_migration import _remove_regular_file_no_replace_at
+
+            _remove_regular_file_no_replace_at(
+                destination_parent_descriptor,
+                destination_name,
+                expected_digest=expected_destination_digest,
+                label=f"atomic copy destination {destination_name}",
+            )
+        os.link(
+            temporary_name,
+            destination_name,
+            src_dir_fd=destination_parent_descriptor,
+            dst_dir_fd=destination_parent_descriptor,
+            follow_symlinks=False,
+        )
+        destination_linked = True
+        os.unlink(temporary_name, dir_fd=destination_parent_descriptor)
+        os.fsync(destination_parent_descriptor)
+    except FileExistsError as exc:
+        raise InstallBlocked(
+            f"atomic copy destination already exists: {destination_name}"
+        ) from exc
+    finally:
+        if source_descriptor is not None:
+            os.close(source_descriptor)
+        if not destination_linked:
+            try:
+                os.unlink(temporary_name, dir_fd=destination_parent_descriptor)
+            except (FileNotFoundError, OSError):
+                pass
+
+
+def _mkdir_unique_at(parent_descriptor: int, prefix: str) -> tuple[str, int]:
+    """Create and open a private temporary directory below a pinned FD."""
+
+    for _attempt in range(8):
+        name = f"{prefix}{os.getpid()}.{secrets.token_hex(8)}"
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_descriptor)
+            descriptor = os.open(name, _directory_flags(), dir_fd=parent_descriptor)
+            return name, descriptor
+        except FileExistsError:
+            continue
+        except OSError as exc:
+            raise InstallBlocked(f"temporary migration directory cannot be created: {name}") from exc
+    raise InstallBlocked("temporary migration directory name collision")
+
+
+def _copy_entry_at(
+    source_parent_descriptor: int,
+    source_name: str,
+    destination_parent_descriptor: int,
+    destination_name: str,
+) -> None:
+    """Copy one tree entry using directory descriptors for every destination."""
+
+    source_metadata = os.stat(
+        source_name,
+        dir_fd=source_parent_descriptor,
+        follow_symlinks=False,
+    )
+    if stat.S_ISLNK(source_metadata.st_mode):
+        target = os.readlink(source_name, dir_fd=source_parent_descriptor)
+        os.symlink(target, destination_name, dir_fd=destination_parent_descriptor)
+        return
+    if stat.S_ISDIR(source_metadata.st_mode):
+        os.mkdir(destination_name, 0o700, dir_fd=destination_parent_descriptor)
+        source_descriptor = os.open(
+            source_name,
+            _directory_flags(),
+            dir_fd=source_parent_descriptor,
+        )
+        destination_descriptor = os.open(
+            destination_name,
+            _directory_flags(),
+            dir_fd=destination_parent_descriptor,
+        )
+        try:
+            for child in os.listdir(source_descriptor):
+                _copy_entry_at(
+                    source_descriptor,
+                    child,
+                    destination_descriptor,
+                    child,
+                )
+        finally:
+            os.close(destination_descriptor)
+            os.close(source_descriptor)
+        return
+    if not stat.S_ISREG(source_metadata.st_mode) or source_metadata.st_nlink != 1:
+        raise InstallBlocked(f"unsupported personal skill entry: {source_name}")
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        raise InstallBlocked("personal skill snapshot requires O_NOFOLLOW support")
+    source_descriptor = os.open(
+        source_name,
+        os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0),
+        dir_fd=source_parent_descriptor,
+    )
+    opened = os.fstat(source_descriptor)
+    if (
+        not stat.S_ISREG(opened.st_mode)
+        or opened.st_nlink != 1
+        or (opened.st_dev, opened.st_ino) != (source_metadata.st_dev, source_metadata.st_ino)
+    ):
+        os.close(source_descriptor)
+        raise InstallBlocked(f"personal skill changed while being opened: {source_name}")
+    try:
+        destination_descriptor = os.open(
+            destination_name,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY | nofollow,
+            stat.S_IMODE(source_metadata.st_mode),
+            dir_fd=destination_parent_descriptor,
+        )
+    except BaseException:
+        os.close(source_descriptor)
+        raise
+    try:
+        os.fchmod(destination_descriptor, stat.S_IMODE(source_metadata.st_mode))
+        while True:
+            chunk = os.read(source_descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            view = memoryview(chunk)
+            while view:
+                written = os.write(destination_descriptor, view)
+                view = view[written:]
+        os.fsync(destination_descriptor)
+        closed = os.fstat(source_descriptor)
+        if (
+            closed.st_dev != opened.st_dev
+            or closed.st_ino != opened.st_ino
+            or closed.st_size != opened.st_size
+            or closed.st_ctime_ns != opened.st_ctime_ns
+            or closed.st_mtime_ns != opened.st_mtime_ns
+        ):
+            raise InstallBlocked(f"personal skill changed while being copied: {source_name}")
+    finally:
+        os.close(destination_descriptor)
+        os.close(source_descriptor)
+
+
 def _configured_marketplace_root(config_path: Path, name: str) -> Path | None:
     if not config_path.exists():
         return None
     try:
-        parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        parsed = tomllib.loads(_read_regular_file_bytes(config_path).decode("utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise InstallBlocked(f"invalid Codex config TOML: {config_path}") from exc
     marketplaces = parsed.get("marketplaces")
@@ -1758,7 +2481,7 @@ def _configured_plugin_enabled(config_path: Path, plugin_id: str) -> bool:
     if not config_path.exists():
         return False
     try:
-        parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        parsed = tomllib.loads(_read_regular_file_bytes(config_path).decode("utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise InstallBlocked(f"invalid Codex config TOML: {config_path}") from exc
     plugins = parsed.get("plugins")
@@ -1774,7 +2497,7 @@ def _config_registry_snapshot(config_path: Path) -> NativeRegistrySnapshot:
     if not config_path.exists():
         return NativeRegistrySnapshot("config", (), ())
     try:
-        parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        parsed = tomllib.loads(_read_regular_file_bytes(config_path).decode("utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise InstallBlocked(f"invalid Codex config TOML: {config_path}") from exc
     marketplaces = parsed.get("marketplaces", {})
@@ -1809,9 +2532,11 @@ def _unrelated_config_projection(config_path: Path) -> str:
 
     if not config_path.exists():
         parsed: dict[str, Any] = {}
+        raw = b""
     else:
         try:
-            value = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            raw = _read_regular_file_bytes(config_path)
+            value = tomllib.loads(raw.decode("utf-8"))
         except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
             raise NativeRecoveryRequired(
                 f"cannot verify unrelated Codex config state: {config_path}"
@@ -1841,7 +2566,7 @@ def _unrelated_config_projection(config_path: Path) -> str:
             parsed[table_name] = unrelated
         else:
             parsed.pop(table_name, None)
-    raw_projection = _unrelated_config_raw_projection(config_path)
+    raw_projection = _unrelated_config_raw_projection_bytes(raw)
     return _canonical_entry_json(
         {
             "semantic": parsed,
@@ -1861,11 +2586,15 @@ def _unrelated_config_raw_projection(config_path: Path) -> bytes:
     if not config_path.exists():
         return b""
     try:
-        raw = config_path.read_bytes()
-    except OSError as exc:
+        raw = _read_regular_file_bytes(config_path)
+    except (OSError, InstallBlocked) as exc:
         raise NativeRecoveryRequired(
             f"cannot read unrelated Codex config state: {config_path}"
         ) from exc
+    return _unrelated_config_raw_projection_bytes(raw)
+
+
+def _unrelated_config_raw_projection_bytes(raw: bytes) -> bytes:
     normalized = _normalize_text_newlines(raw)
     lines = normalized.splitlines(keepends=True)
     section_re = re.compile(rb"^[ \t]*\[\[?([^\]\r\n]+)\]\]?[^\r\n]*(?:\n|$)")
@@ -2382,7 +3111,88 @@ def _owned_marketplace_wrapper_matches(wrapper: Path, canonical_root: Path) -> b
         return False
 
 
-def _codex_marketplace_wrapper(root: Path, canonical_root: Path) -> tuple[Path, bool]:
+def _directory_flags() -> int:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return flags
+
+
+def _marketplace_wrapper_matches_at(
+    marketplaces_descriptor: int,
+    name: str,
+    canonical_root: Path,
+) -> bool:
+    """Validate a wrapper through an already pinned marketplaces directory."""
+
+    expected, expected_plugin_root = _codex_marketplace_wrapper_content(canonical_root)
+    try:
+        wrapper = os.open(name, _directory_flags(), dir_fd=marketplaces_descriptor)
+    except OSError:
+        return False
+    try:
+        wrapper_metadata = os.fstat(wrapper)
+        if not stat.S_ISDIR(wrapper_metadata.st_mode):
+            return False
+        entries = set(os.listdir(wrapper))
+        if entries != {".claude-plugin", "samvil"}:
+            return False
+        manifest_root = os.open(
+            ".claude-plugin", _directory_flags(), dir_fd=wrapper
+        )
+        try:
+            manifest_entries = set(os.listdir(manifest_root))
+            if manifest_entries not in ({"marketplace.json"}, {"marketplace.json", "marketplace.json.lock"}):
+                return False
+            manifest_fd = os.open(
+                "marketplace.json",
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=manifest_root,
+            )
+            try:
+                metadata = os.fstat(manifest_fd)
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                    return False
+                if os.read(manifest_fd, metadata.st_size) != expected.encode("utf-8"):
+                    return False
+            finally:
+                os.close(manifest_fd)
+            if "marketplace.json.lock" in manifest_entries:
+                lock_fd = os.open(
+                    "marketplace.json.lock",
+                    os.O_RDONLY
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_NONBLOCK", 0),
+                    dir_fd=manifest_root,
+                )
+                try:
+                    lock_metadata = os.fstat(lock_fd)
+                    if not stat.S_ISREG(lock_metadata.st_mode) or lock_metadata.st_nlink != 1 or lock_metadata.st_size != 0:
+                        return False
+                finally:
+                    os.close(lock_fd)
+        finally:
+            os.close(manifest_root)
+        plugin_metadata = os.stat("samvil", dir_fd=wrapper, follow_symlinks=False)
+        if not stat.S_ISLNK(plugin_metadata.st_mode):
+            return False
+        return Path(os.readlink("samvil", dir_fd=wrapper)).resolve(strict=False) == expected_plugin_root
+    except (OSError, UnicodeError):
+        return False
+    finally:
+        os.close(wrapper)
+
+
+def _codex_marketplace_wrapper(
+    root: Path,
+    canonical_root: Path,
+    *,
+    marketplaces_parent_descriptor: int | None = None,
+) -> tuple[Path, bool]:
     marketplaces_root = root / "marketplaces"
     resolved_marketplaces = marketplaces_root.resolve(strict=False)
     if marketplaces_root.is_symlink() or (
@@ -2393,6 +3203,96 @@ def _codex_marketplace_wrapper(root: Path, canonical_root: Path) -> tuple[Path, 
         )
     wrapper = marketplaces_root / "samvil-codex"
     expected, _expected_plugin_root = _codex_marketplace_wrapper_content(canonical_root)
+    if marketplaces_parent_descriptor is not None:
+        wrapper_fd: int | None = None
+        manifest_root_fd: int | None = None
+        created_wrapper = False
+        try:
+            existing = os.stat("samvil-codex", dir_fd=marketplaces_parent_descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
+        except OSError as exc:
+            raise InstallBlocked(f"Codex marketplace wrapper cannot be inspected: {wrapper}") from exc
+        if existing is not None:
+            if not _marketplace_wrapper_matches_at(
+                marketplaces_parent_descriptor, "samvil-codex", canonical_root
+            ):
+                raise InstallBlocked(f"ambiguous Codex marketplace wrapper: {wrapper}")
+            return wrapper, False
+        try:
+            # Create the final directory with O_EXCL-equivalent mkdir. A
+            # temp-dir-then-rename sequence would replace a concurrent user
+            # placeholder because POSIX rename overwrites directory entries.
+            os.mkdir("samvil-codex", 0o700, dir_fd=marketplaces_parent_descriptor)
+            created_wrapper = True
+            wrapper_fd = os.open(
+                "samvil-codex", _directory_flags(), dir_fd=marketplaces_parent_descriptor
+            )
+            os.mkdir(".claude-plugin", 0o700, dir_fd=wrapper_fd)
+            manifest_root_fd = os.open(
+                ".claude-plugin", _directory_flags(), dir_fd=wrapper_fd
+            )
+            manifest_fd = os.open(
+                "marketplace.json",
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=manifest_root_fd,
+            )
+            try:
+                os.write(manifest_fd, expected.encode("utf-8"))
+                os.fsync(manifest_fd)
+            finally:
+                os.close(manifest_fd)
+                os.close(manifest_root_fd)
+                manifest_root_fd = None
+            os.symlink(str(canonical_root), "samvil", dir_fd=wrapper_fd)
+            os.close(wrapper_fd)
+            wrapper_fd = None
+        except BaseException:
+            if not created_wrapper:
+                raise InstallBlocked(
+                    f"Codex marketplace wrapper appeared during install: {wrapper}"
+                )
+            cleanup_fd: int | None = wrapper_fd
+            cleanup_identity: tuple[int, int] | None = None
+            try:
+                if cleanup_fd is not None:
+                    try:
+                        metadata = os.fstat(cleanup_fd)
+                        cleanup_identity = (int(metadata.st_dev), int(metadata.st_ino))
+                    except OSError:
+                        cleanup_identity = None
+                    try:
+                        os.unlink("samvil", dir_fd=cleanup_fd)
+                        cleanup_manifest_fd = os.open(
+                            ".claude-plugin", _directory_flags(), dir_fd=cleanup_fd
+                        )
+                        try:
+                            os.unlink("marketplace.json", dir_fd=cleanup_manifest_fd)
+                        finally:
+                            os.close(cleanup_manifest_fd)
+                        os.rmdir(".claude-plugin", dir_fd=cleanup_fd)
+                    except OSError:
+                        pass
+            finally:
+                if manifest_root_fd is not None:
+                    os.close(manifest_root_fd)
+                if cleanup_fd is not None:
+                    os.close(cleanup_fd)
+                    wrapper_fd = None
+            if cleanup_fd is not None:
+                try:
+                    current = os.stat(
+                        "samvil-codex",
+                        dir_fd=marketplaces_parent_descriptor,
+                        follow_symlinks=False,
+                    )
+                    if cleanup_identity == (current.st_dev, current.st_ino):
+                        os.rmdir("samvil-codex", dir_fd=marketplaces_parent_descriptor)
+                except OSError:
+                    pass
+            raise
+        return wrapper, True
     if wrapper.exists():
         if not _owned_marketplace_wrapper_matches(wrapper, canonical_root):
             raise InstallBlocked(f"ambiguous Codex marketplace wrapper: {wrapper}")
@@ -2431,6 +3331,13 @@ def _execute_isolated_install_impl(
     migrate: bool = False,
     expected_legacy_plan_sha256: str | None = None,
     allow_legacy_registry_migration: bool = False,
+    preserved_paths: tuple[Path, ...] = (),
+    boundary_callback: Any | None = None,
+    backups_parent_descriptor: int | None = None,
+    marketplaces_parent_descriptor: int | None = None,
+    root_parent_descriptor: int | None = None,
+    snapshot_personal_paths: bool = True,
+    skills_parent_descriptor: int | None = None,
 ) -> InstallReceipt:
     """Internal executor retained for filesystem-focused unit tests.
 
@@ -2492,8 +3399,32 @@ def _execute_isolated_install_impl(
         raise InstallBlocked(
             f"skills path escapes isolated profile: {root / 'skills'}"
         ) from exc
-    if _unsafe_personal_skill_links(personal_root):
+    preserved_path_candidates = tuple(_lexical_absolute(path) for path in preserved_paths)
+    for path in preserved_path_candidates:
+        if not (
+            path == root / "AGENTS.md"
+            or (
+                path.parent == personal_root
+                and not _is_samvil_prefixed(path.name)
+                and path.name != _CODEX_SYSTEM_SKILL_ROOT
+            )
+        ):
+            raise InstallBlocked(f"preserved path is outside the supported user-owned surface: {path}")
+    preserved_path_snapshots = tuple(
+        snapshot_preserved_path(path) for path in preserved_path_candidates
+    )
+    preserved_personal_paths = {
+        snapshot.path
+        for snapshot in preserved_path_snapshots
+        if snapshot.path.parent == personal_root and snapshot.kind == "symlink"
+    }
+    unsafe_personal_paths = set(_unsafe_personal_skill_links(personal_root))
+    if unsafe_personal_paths - preserved_personal_paths:
         raise InstallBlocked("unsafe personal skill symlink blocks isolated install")
+    if preserved_personal_paths - unsafe_personal_paths:
+        raise InstallBlocked("preserved personal skill symlink disappeared")
+    if not preserved_path_snapshot_matches(preserved_path_snapshots):
+        raise InstallBlocked("preserved user-owned path changed before install")
     config = root / "config.toml"
     if config.is_symlink():
         raise InstallBlocked(f"Codex config symlink is not safe to mutate: {config}")
@@ -2505,7 +3436,11 @@ def _execute_isolated_install_impl(
     )
     wrapper_path = root / "marketplaces" / "samvil-codex"
     if wrapper_path.exists():
-        _codex_marketplace_wrapper(root, plan.canonical_root)
+        _codex_marketplace_wrapper(
+            root,
+            plan.canonical_root,
+            marketplaces_parent_descriptor=marketplaces_parent_descriptor,
+        )
     legacy_admission = build_legacy_migration_plan(
         repo_root=plan.canonical_root,
         codex_home=codex_home,
@@ -2548,6 +3483,8 @@ def _execute_isolated_install_impl(
     backup_paths: list[Path] = []
     commands: list[tuple[str, ...]] = []
     personal_snapshot_root: Path | None = None
+    personal_snapshot_name: str | None = None
+    personal_snapshot_descriptor: int | None = None
     config_backup: Path | None = None
     wrapper = wrapper_path
     wrapper_created = False
@@ -2571,8 +3508,13 @@ def _execute_isolated_install_impl(
             raise InstallBlocked(
                 f"skills path escapes isolated profile: {personal_root}"
             ) from exc
-        if _unsafe_personal_skill_links(personal_root):
+        current_unsafe = set(_unsafe_personal_skill_links(personal_root))
+        if current_unsafe - preserved_personal_paths:
             raise InstallBlocked("unsafe personal skill symlink detected")
+        if preserved_personal_paths - current_unsafe:
+            raise InstallBlocked("preserved personal skill symlink changed")
+        if not preserved_path_snapshot_matches(preserved_path_snapshots):
+            raise InstallBlocked("preserved user-owned path changed during install")
         return inventory_personal_skills(personal_root)
 
     def quarantine_root() -> Path:
@@ -2584,6 +3526,17 @@ def _execute_isolated_install_impl(
         return unexpected_quarantine
 
     def restore_personal_skills() -> None:
+        if (
+            not snapshot_personal_paths
+            or (
+                backups_parent_descriptor is not None
+                and skills_parent_descriptor is not None
+            )
+        ):
+            raise NativeRecoveryRequired(
+                "automatic personal-skill rollback was disabled for the "
+                "descriptor-pinned migration; the snapshot was preserved"
+            )
         if personal_root.is_symlink():
             personal_root.replace(quarantine_root() / "skills-symlink")
             personal_root.mkdir(parents=True, exist_ok=False)
@@ -2596,6 +3549,8 @@ def _execute_isolated_install_impl(
                 ) from exc
             personal_root.mkdir(parents=True, exist_ok=True)
         for unsafe in _unsafe_personal_skill_links(personal_root):
+            if unsafe in preserved_personal_paths:
+                continue
             unsafe.replace(quarantine_root() / unsafe.name)
         protected_paths = {entry.path for entry in protected_before}
         unexpected = tuple(
@@ -2671,43 +3626,182 @@ def _execute_isolated_install_impl(
             record_native_event("rollback_applied", argv=list(inverse))
         if not strict_registry_proof:
             if config_backup is not None:
-                _atomic_copy(config_backup, config)
+                if (
+                    backups_parent_descriptor is not None
+                    and root_parent_descriptor is not None
+                ):
+                    _atomic_copy_at(
+                        config_backup,
+                        config.name,
+                        root_parent_descriptor,
+                        source_parent_descriptor=backups_parent_descriptor,
+                        replace_existing=config.exists(),
+                        expected_destination_digest=(
+                            _bytes_sha256(_read_regular_file_bytes(config))
+                            if config.exists()
+                            else None
+                        ),
+                    )
+                else:
+                    _atomic_copy(config_backup, config)
             elif not config_existed:
-                config.unlink(missing_ok=True)
+                if root_parent_descriptor is not None:
+                    try:
+                        os.unlink(config.name, dir_fd=root_parent_descriptor)
+                    except FileNotFoundError:
+                        pass
+                else:
+                    config.unlink(missing_ok=True)
         if wrapper_created:
             if wrapper_created_identity is None:
                 raise NativeRecoveryRequired(
                     "created Codex marketplace wrapper has no sealed identity"
                 )
-            wrapper_quarantine = Path(
-                tempfile.mkdtemp(prefix=".rollback-marketplace.", dir=backups_root)
-            )
-            quarantined_wrapper = wrapper_quarantine / wrapper.name
+            wrapper_quarantine: Path | None = None
+            wrapper_quarantine_name: str | None = None
+            wrapper_quarantine_descriptor: int | None = None
+            if (
+                marketplaces_parent_descriptor is not None
+                and backups_parent_descriptor is not None
+            ):
+                wrapper_quarantine_name = (
+                    f".rollback-marketplace.{os.getpid()}.{secrets.token_hex(8)}"
+                )
+                os.mkdir(
+                    wrapper_quarantine_name,
+                    0o700,
+                    dir_fd=backups_parent_descriptor,
+                )
+                wrapper_quarantine_descriptor = os.open(
+                    wrapper_quarantine_name,
+                    _directory_flags(),
+                    dir_fd=backups_parent_descriptor,
+                )
+                quarantined_wrapper = None
+            else:
+                wrapper_quarantine = Path(
+                    tempfile.mkdtemp(prefix=".rollback-marketplace.", dir=backups_root)
+                )
+                quarantined_wrapper = wrapper_quarantine / wrapper.name
             try:
-                wrapper.replace(quarantined_wrapper)
-                metadata = quarantined_wrapper.lstat()
-                current_identity = (int(metadata.st_dev), int(metadata.st_ino))
                 if (
-                    current_identity != wrapper_created_identity
-                    or not _owned_marketplace_wrapper_matches(
+                    marketplaces_parent_descriptor is not None
+                    and backups_parent_descriptor is not None
+                    and wrapper_quarantine_descriptor is not None
+                    and wrapper_quarantine_name is not None
+                ):
+                    current = os.stat(
+                        wrapper.name,
+                        dir_fd=marketplaces_parent_descriptor,
+                        follow_symlinks=False,
+                    )
+                    if (int(current.st_dev), int(current.st_ino)) != wrapper_created_identity:
+                        raise NativeRecoveryRequired(
+                            "Codex marketplace wrapper changed concurrently; user data was preserved"
+                        )
+                    os.rename(
+                        wrapper.name,
+                        wrapper_quarantine_name,
+                        src_dir_fd=marketplaces_parent_descriptor,
+                        dst_dir_fd=backups_parent_descriptor,
+                    )
+                    metadata = os.stat(
+                        wrapper_quarantine_name,
+                        dir_fd=backups_parent_descriptor,
+                        follow_symlinks=False,
+                    )
+                    current_identity = (int(metadata.st_dev), int(metadata.st_ino))
+                    wrapper_matches = _marketplace_wrapper_matches_at(
+                        backups_parent_descriptor,
+                        wrapper_quarantine_name,
+                        plan.canonical_root,
+                    )
+                else:
+                    assert quarantined_wrapper is not None
+                    current = wrapper.lstat()
+                    if (int(current.st_dev), int(current.st_ino)) != wrapper_created_identity:
+                        raise NativeRecoveryRequired(
+                            "Codex marketplace wrapper changed concurrently; user data was preserved"
+                        )
+                    wrapper.replace(quarantined_wrapper)
+                    metadata = quarantined_wrapper.lstat()
+                    current_identity = (int(metadata.st_dev), int(metadata.st_ino))
+                    wrapper_matches = _owned_marketplace_wrapper_matches(
                         quarantined_wrapper,
                         plan.canonical_root,
                     )
+                if (
+                    current_identity != wrapper_created_identity
+                    or not wrapper_matches
                 ):
-                    if not wrapper.exists() and not wrapper.is_symlink():
-                        quarantined_wrapper.replace(wrapper)
+                    if (
+                        marketplaces_parent_descriptor is not None
+                        and backups_parent_descriptor is not None
+                        and wrapper_quarantine_name is not None
+                    ):
+                        try:
+                            from .codex_migration import _rename_no_replace_at
+
+                            _rename_no_replace_at(
+                                wrapper_quarantine_name,
+                                wrapper.name,
+                                source_parent=backups_parent_descriptor,
+                                destination_parent=marketplaces_parent_descriptor,
+                            )
+                        except BaseException:
+                            pass
+                    elif quarantined_wrapper is not None and wrapper_quarantine is not None:
+                        try:
+                            from .codex_migration import _rename_no_replace_at
+
+                            source_parent = os.open(
+                                quarantined_wrapper.parent,
+                                _directory_flags(),
+                            )
+                            destination_parent = os.open(
+                                wrapper.parent,
+                                _directory_flags(),
+                            )
+                            try:
+                                _rename_no_replace_at(
+                                    quarantined_wrapper.name,
+                                    wrapper.name,
+                                    source_parent=source_parent,
+                                    destination_parent=destination_parent,
+                                )
+                            finally:
+                                os.close(destination_parent)
+                                os.close(source_parent)
+                        except BaseException:
+                            pass
                     raise NativeRecoveryRequired(
                         "Codex marketplace wrapper changed concurrently; user data was preserved"
                     )
-                shutil.rmtree(quarantined_wrapper)
-                wrapper_quarantine.rmdir()
+                if not (
+                    marketplaces_parent_descriptor is not None
+                    and backups_parent_descriptor is not None
+                ):
+                    assert quarantined_wrapper is not None
+                    shutil.rmtree(quarantined_wrapper)
+                    assert wrapper_quarantine is not None
+                    wrapper_quarantine.rmdir()
             except NativeRecoveryRequired:
                 raise
             except OSError as exc:
                 raise NativeRecoveryRequired(
                     f"Codex marketplace wrapper changed during rollback: {exc}"
                 ) from exc
-        restore_personal_skills()
+            finally:
+                if wrapper_quarantine_descriptor is not None:
+                    os.close(wrapper_quarantine_descriptor)
+        if (
+            backups_parent_descriptor is not None
+            and skills_parent_descriptor is not None
+        ):
+            if not compare_skill_inventories(protected_before, protected_inventory()):
+                restore_personal_skills()
+        else:
+            restore_personal_skills()
         restored = _read_native_registry(
             effective_registry_reader,
             command_env,
@@ -2729,13 +3823,26 @@ def _execute_isolated_install_impl(
                         "native registry was restored but its original Codex config "
                         "cannot be proven; available state was preserved"
                     )
-                current_config = config.read_bytes()
-                original_config = config_backup.read_bytes()
+                current_config = _read_regular_file_bytes(config)
+                original_config = _read_regular_file_bytes(config_backup)
                 if current_config != original_config:
                     if _normalize_text_newlines(
                         current_config
                     ) == _normalize_text_newlines(original_config):
-                        _atomic_copy(config_backup, config)
+                        if (
+                            backups_parent_descriptor is not None
+                            and root_parent_descriptor is not None
+                        ):
+                            _atomic_copy_at(
+                                config_backup,
+                                config.name,
+                                root_parent_descriptor,
+                                source_parent_descriptor=backups_parent_descriptor,
+                                replace_existing=True,
+                                expected_destination_digest=_bytes_sha256(current_config),
+                            )
+                        else:
+                            _atomic_copy(config_backup, config)
                     else:
                         raise NativeRecoveryRequired(
                             "native registry was restored semantically but Codex config "
@@ -2743,12 +3850,23 @@ def _execute_isolated_install_impl(
                             "and the original backup were preserved"
                         )
             elif config.exists():
-                if config.read_bytes().strip():
+                current_config = _read_regular_file_bytes(config)
+                if current_config.strip():
                     raise NativeRecoveryRequired(
                         "native registry was restored semantically but Codex created a "
                         "non-empty config file; current content was preserved"
                     )
-                config.unlink()
+                if root_parent_descriptor is not None:
+                    from .codex_migration import _remove_regular_file_no_replace_at
+
+                    _remove_regular_file_no_replace_at(
+                        root_parent_descriptor,
+                        config.name,
+                        expected_digest=_bytes_sha256(current_config),
+                        label="Codex config",
+                    )
+                else:
+                    config.unlink()
         else:
             if config_existed:
                 if (
@@ -2766,32 +3884,81 @@ def _execute_isolated_install_impl(
             raise NativeRecoveryRequired(
                 "personal Codex skill inventory differs after native rollback"
             )
+        if not preserved_path_snapshot_matches(preserved_path_snapshots):
+            raise NativeRecoveryRequired(
+                "preserved user-owned path differs after native rollback"
+            )
         record_native_event("rollback_verified", snapshot=restored.to_dict())
         return restored
 
     try:
-        backups_root.mkdir(parents=True, exist_ok=True)
-        if protected_before:
-            personal_snapshot_root = Path(
-                tempfile.mkdtemp(prefix=".personal-skills.", dir=backups_root)
-            )
-            for entry in protected_before:
-                shutil.copytree(
-                    entry.path,
-                    personal_snapshot_root / entry.path.name,
-                    symlinks=True,
+        if boundary_callback is not None:
+            boundary_callback()
+        if backups_parent_descriptor is None:
+            backups_root.mkdir(parents=True, exist_ok=True)
+        if protected_before and snapshot_personal_paths:
+            if boundary_callback is not None:
+                boundary_callback()
+            if backups_parent_descriptor is not None and skills_parent_descriptor is not None:
+                personal_snapshot_name, personal_snapshot_descriptor = _mkdir_unique_at(
+                    backups_parent_descriptor,
+                    ".personal-skills.",
                 )
+                personal_snapshot_root = backups_root / personal_snapshot_name
+                # If copying fails, retain the partially written evidence rather
+                # than recursively deleting through a path that may have raced.
+                preserve_personal_snapshot = True
+                for entry in protected_before:
+                    _copy_entry_at(
+                        skills_parent_descriptor,
+                        entry.path.name,
+                        personal_snapshot_descriptor,
+                        entry.path.name,
+                    )
+            else:
+                personal_snapshot_root = Path(
+                    tempfile.mkdtemp(prefix=".personal-skills.", dir=backups_root)
+                )
+                for entry in protected_before:
+                    shutil.copytree(
+                        entry.path,
+                        personal_snapshot_root / entry.path.name,
+                        symlinks=True,
+                    )
             personal_snapshot_ready = True
         if config_existed:
+            if boundary_callback is not None:
+                boundary_callback()
             stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
             backup = backups_root / f"config-{stamp}.toml"
-            _atomic_copy(config, backup)
+            if backups_parent_descriptor is None:
+                _atomic_copy(config, backup)
+            else:
+                _atomic_copy_at(
+                    config,
+                    backup.name,
+                    backups_parent_descriptor,
+                    source_parent_descriptor=root_parent_descriptor,
+                )
             backup_paths.append(backup)
             config_backup = backup
         verify_canonical_contract()
-        wrapper, wrapper_created = _codex_marketplace_wrapper(root, plan.canonical_root)
+        if boundary_callback is not None:
+            boundary_callback()
+        wrapper, wrapper_created = _codex_marketplace_wrapper(
+            root,
+            plan.canonical_root,
+            marketplaces_parent_descriptor=marketplaces_parent_descriptor,
+        )
         if wrapper_created:
-            wrapper_metadata = wrapper.lstat()
+            if marketplaces_parent_descriptor is not None:
+                wrapper_metadata = os.stat(
+                    wrapper.name,
+                    dir_fd=marketplaces_parent_descriptor,
+                    follow_symlinks=False,
+                )
+            else:
+                wrapper_metadata = wrapper.lstat()
             wrapper_created_identity = (
                 int(wrapper_metadata.st_dev),
                 int(wrapper_metadata.st_ino),
@@ -2819,6 +3986,8 @@ def _execute_isolated_install_impl(
 
         def run_native_commands(planned_commands: list[tuple[str, ...]]) -> None:
             for command in planned_commands:
+                if boundary_callback is not None:
+                    boundary_callback()
                 if (
                     strict_registry_proof
                     and _unrelated_config_projection(config) != unrelated_config_before
@@ -2883,6 +4052,8 @@ def _execute_isolated_install_impl(
             raise InstallBlocked(
                 "personal Codex skill inventory changed during isolated install"
             )
+        if not preserved_path_snapshot_matches(preserved_path_snapshots):
+            raise InstallBlocked("preserved user-owned path changed during install")
         registry_after = _read_native_registry(
             effective_registry_reader,
             command_env,
@@ -2930,6 +4101,8 @@ def _execute_isolated_install_impl(
             ) from exc
         raise
     finally:
+        if personal_snapshot_descriptor is not None:
+            os.close(personal_snapshot_descriptor)
         if personal_snapshot_root is not None and not preserve_personal_snapshot:
             shutil.rmtree(personal_snapshot_root, ignore_errors=True)
 
@@ -2940,6 +4113,10 @@ def _execute_isolated_install_impl(
         commands=tuple(commands),
         personal_skills_before=protected_before,
         personal_skills_after=protected_after,
+        preserved_paths_before=preserved_path_snapshots,
+        preserved_paths_after=tuple(
+            snapshot_preserved_path(path) for path in preserved_path_candidates
+        ),
         native_registry_before=registry_before,
         native_registry_after=registry_after,
         canonical_contract=canonical_contract,
@@ -2956,6 +4133,13 @@ def execute_isolated_install(
     migrate: bool = False,
     expected_legacy_plan_sha256: str | None = None,
     allow_legacy_registry_migration: bool = False,
+    preserved_paths: tuple[Path, ...] = (),
+    boundary_callback: Any | None = None,
+    backups_parent_descriptor: int | None = None,
+    marketplaces_parent_descriptor: int | None = None,
+    root_parent_descriptor: int | None = None,
+    snapshot_personal_paths: bool = True,
+    skills_parent_descriptor: int | None = None,
 ) -> InstallReceipt:
     """Execute inside an explicit profile with Codex CLI readback proof."""
 
@@ -2983,6 +4167,13 @@ def execute_isolated_install(
         migrate=migrate,
         expected_legacy_plan_sha256=expected_legacy_plan_sha256,
         allow_legacy_registry_migration=allow_legacy_registry_migration,
+        preserved_paths=preserved_paths,
+        boundary_callback=boundary_callback,
+        backups_parent_descriptor=backups_parent_descriptor,
+        marketplaces_parent_descriptor=marketplaces_parent_descriptor,
+        root_parent_descriptor=root_parent_descriptor,
+        snapshot_personal_paths=snapshot_personal_paths,
+        skills_parent_descriptor=skills_parent_descriptor,
     )
 
 
@@ -3185,6 +4376,7 @@ __all__ = [
     "MigrationAction",
     "NativeRecoveryRequired",
     "NativeRegistrySnapshot",
+    "PreservedPathSnapshot",
     "SkillInventoryEntry",
     "build_install_plan",
     "build_legacy_migration_plan",
@@ -3194,6 +4386,8 @@ __all__ = [
     "execute_isolated_install",
     "inventory_personal_skills",
     "parse_capability_probe",
+    "preserved_path_snapshot_matches",
+    "snapshot_preserved_path",
     "validate_cli_environment",
     "validate_marketplace_root",
 ]

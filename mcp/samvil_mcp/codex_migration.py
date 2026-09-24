@@ -14,6 +14,7 @@ import json
 import os
 import re
 import stat
+import ctypes
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -37,6 +38,8 @@ _TRANSITION_ID = re.compile(r"^[0-9]{8}T[0-9]{12}Z-[0-9a-f]{12}-[0-9a-f]{8}$")
 _RECEIPT_SCHEMA = "samvil.codex-legacy-migration-receipt.v1"
 _JOURNAL_SCHEMA = "samvil.codex-legacy-migration-journal.v1"
 _TERMINAL_STATES = frozenset({"committed", "rolled_back"})
+_RENAME_NOREPLACE = 0x00000001
+_RENAME_EXCL = 0x00000004
 
 
 def _installer() -> Any:
@@ -76,6 +79,47 @@ def _fsync_directory(path: Path) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _rename_no_replace_at(
+    source_name: str,
+    destination_name: str,
+    *,
+    source_parent: int,
+    destination_parent: int,
+) -> None:
+    """Atomically move one entry without replacing a concurrent destination."""
+
+    installer = _installer()
+    libc = ctypes.CDLL(None, use_errno=True)
+    if hasattr(libc, "renameatx_np"):
+        function = libc.renameatx_np
+        function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        function.restype = ctypes.c_int
+        flags = _RENAME_EXCL
+    elif hasattr(libc, "renameat2"):
+        function = libc.renameat2
+        function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        function.restype = ctypes.c_int
+        flags = _RENAME_NOREPLACE
+    else:
+        raise installer.InstallBlocked("atomic no-replace rename is unavailable")
+    result = function(
+        source_parent,
+        os.fsencode(source_name),
+        destination_parent,
+        os.fsencode(destination_name),
+        flags,
+    )
+    if result != 0:
+        error = ctypes.get_errno()
+        if error == getattr(os, "EEXIST", 17):
+            raise installer.InstallBlocked(
+                f"migration quarantine destination already exists: {destination_name}"
+            )
+        raise installer.InstallBlocked(
+            f"migration source cannot be quarantined safely: {source_name}"
+        )
 
 
 def _directory_flags() -> int:
@@ -293,6 +337,8 @@ def _move_no_replace(
     *,
     source_parent_descriptor: int | None = None,
     destination_parent_descriptor: int | None = None,
+    expected_hash: str | None = None,
+    expected_artifact_kind: str | None = None,
 ) -> None:
     """Move an owned object without ever replacing an existing destination."""
 
@@ -322,41 +368,207 @@ def _move_no_replace(
                 f"migration destination already exists: {destination}"
             )
         if stat.S_ISREG(metadata.st_mode):
+            # First create an independent recovery copy. The historical
+            # hard-link-then-unlink sequence shared the source inode, so an
+            # in-place writer could mutate both names before the source was
+            # removed. A no-replace link of a private copy keeps the backup
+            # independent and leaves the source in place on any revalidation
+            # failure.
+            nofollow = getattr(os, "O_NOFOLLOW", None)
+            if nofollow is None:
+                raise installer.InstallBlocked("migration source requires O_NOFOLLOW support")
+            source_fd = os.open(
+                source.name,
+                os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=source_parent,
+            )
+            temporary_name = f".{destination.name}.copy-{os.getpid()}-{uuid.uuid4().hex}"
+            temporary_fd: int | None = None
+            quarantine_name = f".{source.name}.quarantine-{os.getpid()}-{uuid.uuid4().hex}"
+            quarantine_kept = False
+
+            def restore_quarantine() -> None:
+                nonlocal quarantine_kept
+                try:
+                    os.link(
+                        quarantine_name,
+                        source.name,
+                        src_dir_fd=destination_parent,
+                        dst_dir_fd=source_parent,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError:
+                    quarantine_kept = True
+                    return
+                os.unlink(quarantine_name, dir_fd=destination_parent)
+                quarantine_kept = False
+
             try:
+                opened = os.fstat(source_fd)
+                if (
+                    not stat.S_ISREG(opened.st_mode)
+                    or opened.st_nlink != 1
+                    or _metadata_identity(opened) != _metadata_identity(metadata)
+                ):
+                    raise installer.InstallBlocked(
+                        f"migration source changed concurrently: {source}"
+                    )
+                temporary_fd = os.open(
+                    temporary_name,
+                    os.O_CREAT
+                    | os.O_EXCL
+                    | os.O_WRONLY
+                    | nofollow,
+                    stat.S_IMODE(opened.st_mode),
+                    dir_fd=destination_parent,
+                )
+                os.fchmod(temporary_fd, stat.S_IMODE(opened.st_mode))
+                bytes_copied = 0
+                source_digest = hashlib.sha256()
+                while True:
+                    chunk = os.read(source_fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    bytes_copied += len(chunk)
+                    source_digest.update(chunk)
+                    view = memoryview(chunk)
+                    while view:
+                        written = os.write(temporary_fd, view)
+                        view = view[written:]
+                os.fsync(temporary_fd)
+                after = os.fstat(source_fd)
+                if (
+                    _metadata_identity(after) != _metadata_identity(opened)
+                    or after.st_size != bytes_copied
+                    or after.st_ctime_ns != opened.st_ctime_ns
+                    or after.st_mtime_ns != opened.st_mtime_ns
+                ):
+                    raise installer.InstallBlocked(
+                        f"migration source changed concurrently: {source}"
+                    )
+                os.lseek(source_fd, 0, os.SEEK_SET)
+                verify_digest = hashlib.sha256()
+                while True:
+                    chunk = os.read(source_fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    verify_digest.update(chunk)
+                if verify_digest.digest() != source_digest.digest():
+                    raise installer.InstallBlocked(
+                        f"migration source changed concurrently: {source}"
+                    )
+                if expected_hash is not None and source_digest.hexdigest() != expected_hash:
+                    raise installer.InstallBlocked(
+                        f"migration source hash changed before move: {source}"
+                    )
                 os.link(
-                    source.name,
+                    temporary_name,
                     destination.name,
-                    src_dir_fd=source_parent,
+                    src_dir_fd=destination_parent,
                     dst_dir_fd=destination_parent,
                     follow_symlinks=False,
                 )
-            except FileExistsError as exc:
-                raise installer.InstallBlocked(
-                    f"migration destination appeared concurrently: {destination}"
-                ) from exc
-            os.fsync(destination_parent)
-            current = os.stat(
-                source.name,
-                dir_fd=source_parent,
-                follow_symlinks=False,
-            )
-            if int(current.st_dev) != int(metadata.st_dev) or int(
-                current.st_ino
-            ) != int(metadata.st_ino):
-                raise installer.InstallBlocked(
-                    f"migration source changed concurrently: {source}"
+                os.unlink(temporary_name, dir_fd=destination_parent)
+                _rename_no_replace_at(
+                    source.name,
+                    quarantine_name,
+                    source_parent=source_parent,
+                    destination_parent=destination_parent,
                 )
-            os.unlink(source.name, dir_fd=source_parent)
+                quarantine_metadata = os.stat(
+                    quarantine_name,
+                    dir_fd=destination_parent,
+                    follow_symlinks=False,
+                )
+                if (
+                    not stat.S_ISREG(quarantine_metadata.st_mode)
+                    or quarantine_metadata.st_nlink != 1
+                    or _metadata_identity(quarantine_metadata)
+                    != _metadata_identity(opened)
+                    or quarantine_metadata.st_mode != opened.st_mode
+                    or quarantine_metadata.st_size != opened.st_size
+                    or quarantine_metadata.st_uid != opened.st_uid
+                ):
+                    quarantine_kept = True
+                    restore_quarantine()
+                    raise installer.InstallBlocked(
+                        f"migration source changed concurrently: {source}"
+                    )
+                current = os.fstat(source_fd)
+                os.lseek(source_fd, 0, os.SEEK_SET)
+                current_digest = hashlib.sha256()
+                while True:
+                    chunk = os.read(source_fd, 1024 * 1024)
+                    if not chunk:
+                        break
+                    current_digest.update(chunk)
+                if (
+                    _metadata_identity(current) != _metadata_identity(opened)
+                    or current.st_mode != opened.st_mode
+                    or current.st_size != bytes_copied
+                    or current.st_nlink != opened.st_nlink
+                    or current.st_uid != opened.st_uid
+                    or current_digest.digest() != source_digest.digest()
+                ):
+                    quarantine_kept = True
+                    restore_quarantine()
+                    raise installer.InstallBlocked(
+                        f"migration source changed concurrently: {source}"
+                    )
+                try:
+                    os.stat(source.name, dir_fd=source_parent, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise installer.InstallBlocked(
+                        f"migration source reappeared during quarantine cleanup: {source}"
+                    )
+                # Keep the quarantined inode as durable recovery evidence until
+                # the surrounding transaction is committed. A caller holding
+                # the old source FD can still write after this check.
+                quarantine_kept = True
+            finally:
+                if temporary_fd is not None:
+                    os.close(temporary_fd)
+                try:
+                    os.unlink(temporary_name, dir_fd=destination_parent)
+                except FileNotFoundError:
+                    pass
+                if not quarantine_kept:
+                    try:
+                        os.unlink(quarantine_name, dir_fd=destination_parent)
+                    except FileNotFoundError:
+                        pass
+                os.close(source_fd)
         elif stat.S_ISDIR(metadata.st_mode):
             # The destination lives in a fresh mode-0700 transaction directory.
             # A pre-existing name is rejected above; moved identity/hash are
             # checked immediately after the rename.
-            os.rename(
+            if expected_hash is not None and expected_artifact_kind is not None:
+                if _artifact_hash(source, expected_artifact_kind) != expected_hash:
+                    raise installer.InstallBlocked(
+                        f"migration source hash changed before move: {source}"
+                    )
+            _rename_no_replace_at(
                 source.name,
                 destination.name,
-                src_dir_fd=source_parent,
-                dst_dir_fd=destination_parent,
+                source_parent=source_parent,
+                destination_parent=destination_parent,
             )
+            if expected_hash is not None and expected_artifact_kind is not None:
+                if _artifact_hash(destination, expected_artifact_kind) != expected_hash:
+                    try:
+                        _rename_no_replace_at(
+                            destination.name,
+                            source.name,
+                            source_parent=destination_parent,
+                            destination_parent=source_parent,
+                        )
+                    except installer.InstallBlocked:
+                        pass
+                    raise installer.InstallBlocked(
+                        f"migration source hash changed before move: {source}"
+                    )
         else:
             raise installer.InstallBlocked(f"unsupported migration source: {source}")
         os.fsync(source_parent)
@@ -408,10 +620,14 @@ class ProfileIdentity:
     """Pinned profile authority held for the lifetime of one migration."""
 
     root_descriptor: int
+    skills_descriptor: int
+    marketplaces_descriptor: int
     backups_descriptor: int
     migrations_descriptor: int
     lock_descriptor: int
     root_identity: tuple[int, int]
+    skills_identity: tuple[int, int]
+    marketplaces_identity: tuple[int, int]
     backups_identity: tuple[int, int]
     migrations_identity: tuple[int, int]
     lock_identity: tuple[int, int]
@@ -514,6 +730,16 @@ def _assert_profile_identity(root: Path, expected: ProfileIdentity) -> None:
             label="Codex backups root",
         )
         _assert_directory_descriptor(
+            expected.skills_descriptor,
+            expected=expected.skills_identity,
+            label="Codex skills root",
+        )
+        _assert_directory_descriptor(
+            expected.marketplaces_descriptor,
+            expected=expected.marketplaces_identity,
+            label="Codex marketplaces root",
+        )
+        _assert_directory_descriptor(
             expected.migrations_descriptor,
             expected=expected.migrations_identity,
             label="legacy migration transaction root",
@@ -527,6 +753,18 @@ def _assert_profile_identity(root: Path, expected: ProfileIdentity) -> None:
             "backups",
             expected.backups_descriptor,
             label="Codex backups root",
+        )
+        _assert_entry_matches_descriptor(
+            expected.root_descriptor,
+            "skills",
+            expected.skills_descriptor,
+            label="Codex skills root",
+        )
+        _assert_entry_matches_descriptor(
+            expected.root_descriptor,
+            "marketplaces",
+            expected.marketplaces_descriptor,
+            label="Codex marketplaces root",
         )
         if _directory_identity(root / "backups") != expected.backups_identity:
             raise installer.InstallBlocked(
@@ -588,6 +826,8 @@ def _profile_lock(root: Path) -> Iterator[ProfileIdentity]:
         os.close(root_descriptor)
         raise
     backups_descriptor: int | None = None
+    skills_descriptor: int | None = None
+    marketplaces_descriptor: int | None = None
     migrations_descriptor: int | None = None
     try:
         metadata = os.fstat(descriptor)
@@ -634,6 +874,20 @@ def _profile_lock(root: Path) -> Iterator[ProfileIdentity]:
             backups_descriptor,
             label="Codex backups root",
         )
+        skills_descriptor = _open_pinned_directory(
+            root_descriptor,
+            "skills",
+            label=f"unsafe Codex skills directory: {root / 'skills'}",
+            create=True,
+        )
+        skills_metadata = os.fstat(skills_descriptor)
+        marketplaces_descriptor = _open_pinned_directory(
+            root_descriptor,
+            "marketplaces",
+            label=f"unsafe Codex marketplaces directory: {root / 'marketplaces'}",
+            create=True,
+        )
+        marketplaces_metadata = os.fstat(marketplaces_descriptor)
         migrations_descriptor = _open_pinned_directory(
             backups_descriptor,
             "legacy-migrations",
@@ -647,10 +901,14 @@ def _profile_lock(root: Path) -> Iterator[ProfileIdentity]:
         fcntl.flock(migrations_descriptor, fcntl.LOCK_EX)
         identity = ProfileIdentity(
             root_descriptor=root_descriptor,
+            skills_descriptor=skills_descriptor,
+            marketplaces_descriptor=marketplaces_descriptor,
             backups_descriptor=backups_descriptor,
             migrations_descriptor=migrations_descriptor,
             lock_descriptor=descriptor,
             root_identity=_metadata_identity(root_metadata),
+            skills_identity=_metadata_identity(skills_metadata),
+            marketplaces_identity=_metadata_identity(marketplaces_metadata),
             backups_identity=_metadata_identity(backups_metadata),
             migrations_identity=_metadata_identity(migrations_metadata),
             lock_identity=_metadata_identity(metadata),
@@ -662,6 +920,12 @@ def _profile_lock(root: Path) -> Iterator[ProfileIdentity]:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
         finally:
             if backups_descriptor is not None:
+                if marketplaces_descriptor is not None:
+                    fcntl.flock(marketplaces_descriptor, fcntl.LOCK_UN)
+                    os.close(marketplaces_descriptor)
+                if skills_descriptor is not None:
+                    fcntl.flock(skills_descriptor, fcntl.LOCK_UN)
+                    os.close(skills_descriptor)
                 if migrations_descriptor is not None:
                     fcntl.flock(migrations_descriptor, fcntl.LOCK_UN)
                     os.close(migrations_descriptor)
@@ -673,7 +937,7 @@ def _profile_lock(root: Path) -> Iterator[ProfileIdentity]:
 
 
 def _remove_generated_direct_mcp_table(content: bytes) -> bytes:
-    """Remove only the four exact generated lines, preserving all other bytes."""
+    """Remove the exact generated block while preserving all other bytes."""
 
     installer = _installer()
     try:
@@ -688,32 +952,161 @@ def _remove_generated_direct_mcp_table(content: bytes) -> bytes:
     command = table.get("command") if isinstance(table, dict) else None
     if not isinstance(command, str):
         raise installer.InstallBlocked("generated direct MCP table disappeared")
+    if isinstance(table, dict):
+        tools = table.get("tools")
+        if tools is not None and (
+            not isinstance(tools, dict)
+            or any(not isinstance(value, dict) for value in tools.values())
+        ):
+            raise installer.InstallBlocked(
+                "legacy MCP tool overrides are not TOML tables"
+            )
     lines = text.splitlines(keepends=True)
 
     def body(line: str) -> str:
         return line.removesuffix("\n").removesuffix("\r")
 
-    expected = (
-        "[mcp_servers.samvil-mcp]",
-        f'command = "{command}"',
-        'args    = ["-m", "samvil_mcp.server"]',
-        "env     = {}",
-    )
-    for index in range(max(0, len(lines) - 3)):
-        if tuple(body(line) for line in lines[index : index + 4]) == expected:
-            result = "".join((*lines[:index], *lines[index + 4 :])).encode("utf-8")
-            try:
-                post = tomllib.loads(result.decode("utf-8"))
-            except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-                raise installer.InstallBlocked(
-                    "removing generated direct MCP table would invalidate config"
-                ) from exc
-            post_servers = post.get("mcp_servers")
-            if isinstance(post_servers, dict) and "samvil-mcp" in post_servers:
-                raise installer.InstallBlocked(
-                    "generated direct MCP table removal is ambiguous"
-                )
-            return result
+    for index, line in enumerate(lines):
+        if body(line).strip() != "[mcp_servers.samvil-mcp]":
+            continue
+        end_index = len(lines)
+        for candidate_index in range(index + 1, len(lines)):
+            if body(lines[candidate_index]).startswith("["):
+                end_index = candidate_index
+                break
+        block = lines[index:end_index]
+        while block and not body(block[-1]).strip():
+            block.pop()
+        assignments: dict[str, str] = {}
+        for entry in block[1:]:
+            stripped = body(entry).strip()
+            if not stripped or "=" not in stripped:
+                assignments = {}
+                break
+            key, _, value = stripped.partition("=")
+            key = key.strip()
+            if key in assignments:
+                assignments = {}
+                break
+            assignments[key] = value.strip()
+        expected_assignments = {
+            "command": f'"{command}"',
+            "args": '["-m", "samvil_mcp.server"]',
+        }
+        if isinstance(table, dict) and "env" in table:
+            expected_assignments["env"] = "{}"
+        if assignments != expected_assignments:
+            continue
+        # Codex normalizes per-tool approval settings into nested tables.  Move
+        # those tables to the native plugin namespace while removing only the
+        # legacy server parent; leaving them under mcp_servers would make the
+        # resulting config fail Codex's transport parser.
+        transformed_lines: list[str] = []
+        legacy_tools_headers = (
+            "[mcp_servers.samvil-mcp.tools.",
+            '[mcp_servers."samvil-mcp".tools.',
+        )
+        native_tools_header = '[plugins."samvil@samvil-codex".tools.'
+        multiline_delimiter: str | None = None
+
+        def update_multiline_state(candidate: str) -> None:
+            """Track TOML multiline strings so their contents are not rewritten."""
+
+            nonlocal multiline_delimiter
+            index = 0
+            while index < len(candidate):
+                if multiline_delimiter is not None:
+                    if candidate.startswith(multiline_delimiter, index):
+                        if multiline_delimiter == '"""':
+                            backslash_count = 0
+                            preceding = index - 1
+                            while preceding >= 0 and candidate[preceding] == "\\":
+                                backslash_count += 1
+                                preceding -= 1
+                            if backslash_count % 2:
+                                index += 1
+                                continue
+                        multiline_delimiter = None
+                        index += 3
+                    else:
+                        index += 1
+                    continue
+                if candidate[index] == "#":
+                    break
+                if candidate.startswith('"""', index):
+                    multiline_delimiter = '"""'
+                    index += 3
+                    continue
+                if candidate.startswith("'''", index):
+                    multiline_delimiter = "'''"
+                    index += 3
+                    continue
+                if candidate[index] == '"':
+                    index += 1
+                    while index < len(candidate):
+                        if candidate[index] == "\\":
+                            index += 2
+                        elif candidate[index] == '"':
+                            index += 1
+                            break
+                        else:
+                            index += 1
+                    continue
+                if candidate[index] == "'":
+                    index += 1
+                    while index < len(candidate) and candidate[index] != "'":
+                        index += 1
+                    if index < len(candidate):
+                        index += 1
+                    continue
+                index += 1
+
+        for candidate in lines:
+            candidate_body = body(candidate)
+            stripped = candidate_body.strip()
+            if multiline_delimiter is None:
+                for legacy_tools_header in legacy_tools_headers:
+                    if not stripped.startswith(legacy_tools_header):
+                        continue
+                    closing_index = stripped.find("]", len(legacy_tools_header))
+                    if closing_index < 0:
+                        continue
+                    trailing = stripped[closing_index + 1 :].strip()
+                    if trailing and not trailing.startswith("#"):
+                        continue
+                    start = candidate_body.index(legacy_tools_header)
+                    candidate_body = (
+                        candidate_body[:start]
+                        + native_tools_header
+                        + candidate_body[
+                            start + len(legacy_tools_header) :
+                        ]
+                    )
+                    newline = candidate[len(body(candidate)) :]
+                    candidate = candidate_body + newline
+                    break
+            transformed_lines.append(candidate)
+            update_multiline_state(body(candidate))
+        result = "".join(
+            (*transformed_lines[:index], *transformed_lines[end_index:])
+        ).encode("utf-8")
+        try:
+            post = tomllib.loads(result.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            raise installer.InstallBlocked(
+                "removing generated direct MCP table would invalidate config"
+            ) from exc
+        post_servers = post.get("mcp_servers")
+        post_table = (
+            post_servers.get("samvil-mcp")
+            if isinstance(post_servers, dict)
+            else None
+        )
+        if post_table is not None:
+            raise installer.InstallBlocked(
+                "generated direct MCP table removal is ambiguous"
+            )
+        return result
     raise installer.InstallBlocked(
         "generated direct MCP text block changed before migration"
     )
@@ -739,7 +1132,7 @@ def _action_identity(action: Any) -> tuple[int, int, int, int, int, int, int]:
 def _revalidate_action(action: Any, *, root: Path, canonical_root: Path) -> Any:
     installer = _installer()
     source = installer._lexical_absolute(action.path)
-    if action.artifact_kind == "legacy_skill_tree":
+    if action.artifact_kind in {"legacy_skill_tree", "legacy_skill_link_tree"}:
         if (
             action.kind != "migrate_generated"
             or source.parent != root / "skills"
@@ -776,6 +1169,7 @@ def _revalidate_action(action: Any, *, root: Path, canonical_root: Path) -> Any:
         artifact is None
         or artifact.classification != "generated_legacy"
         or artifact.blocks_mutation
+        or artifact.artifact_kind != action.artifact_kind
         or artifact.content_hash != action.expected_hash
     ):
         raise installer.InstallBlocked(
@@ -791,26 +1185,262 @@ def _revalidate_action(action: Any, *, root: Path, canonical_root: Path) -> Any:
 def _moved_identity_matches(action: Any, backup: Path) -> bool:
     identity = _installer()._path_identity(backup)
     expected = _action_identity(action)
-    # A rename may update ctime while every authority-bearing identity field
-    # remains stable. Inode/device/mode/size/link-count/uid must still match.
-    return identity is not None and identity[:6] == expected[:6]
+    # Backups are now independent copies, so device/inode may differ from the
+    # source. The authority-bearing shape must still match; ctime is allowed to
+    # change while the copy is published.
+    return identity is not None and identity[2:6] == expected[2:6]
+
+
+def _regular_file_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        int(metadata.st_dev),
+        int(metadata.st_ino),
+        int(metadata.st_mode),
+        int(metadata.st_size),
+        int(metadata.st_nlink),
+        int(metadata.st_uid),
+        int(metadata.st_ctime_ns),
+    )
+
+
+def _read_regular_file_digest(path: Path) -> str:
+    """Read one independent regular file without following a replacement."""
+
+    installer = _installer()
+    lexical = installer._lexical_absolute(path)
+    try:
+        before = lexical.lstat()
+    except OSError as exc:
+        raise installer.InstallBlocked(f"unsafe migration backup regular file: {lexical}") from exc
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        raise installer.InstallBlocked(
+            f"migration backup is not an independent regular file: {lexical}"
+        )
+    flags = os.O_RDONLY
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise installer.InstallBlocked(
+            f"migration backup regular file cannot be read safely: {lexical}"
+        )
+    flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(lexical, flags)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or _regular_file_identity(opened) != _regular_file_identity(before)
+        ):
+            raise installer.InstallBlocked(
+                f"migration backup regular file changed while opening: {lexical}"
+            )
+        digest = hashlib.sha256()
+        bytes_read = 0
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            bytes_read += len(chunk)
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(after.st_mode)
+            or after.st_nlink != 1
+            or _regular_file_identity(after) != _regular_file_identity(opened)
+            or bytes_read != int(after.st_size)
+        ):
+            raise installer.InstallBlocked(
+                f"migration backup regular file changed while reading: {lexical}"
+            )
+        current = lexical.lstat()
+        if _regular_file_identity(current) != _regular_file_identity(after):
+            raise installer.InstallBlocked(
+                f"migration backup path changed while reading: {lexical}"
+            )
+        return digest.hexdigest()
+    except installer.InstallBlocked:
+        raise
+    except OSError as exc:
+        raise installer.InstallBlocked(
+            f"migration backup regular file cannot be read safely: {lexical}"
+        ) from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _read_regular_file_digest_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    label: str,
+) -> tuple[str, tuple[int, int, int, int, int, int, int]]:
+    """Read a regular file relative to a pinned directory descriptor.
+
+    The returned identity is used immediately before a descriptor-relative
+    unlink so rollback cannot delete a replacement that raced with the read.
+    """
+
+    installer = _installer()
+    try:
+        before = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except OSError as exc:
+        raise installer.InstallBlocked(f"{label} cannot be inspected safely") from exc
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        raise installer.InstallBlocked(f"{label} is not an independent regular file")
+    flags = os.O_RDONLY
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise installer.InstallBlocked(f"{label} cannot be read safely")
+    flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or _regular_file_identity(opened) != _regular_file_identity(before)
+        ):
+            raise installer.InstallBlocked(f"{label} changed while opening")
+        digest = hashlib.sha256()
+        bytes_read = 0
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            bytes_read += len(chunk)
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(after.st_mode)
+            or after.st_nlink != 1
+            or _regular_file_identity(after) != _regular_file_identity(opened)
+            or bytes_read != int(after.st_size)
+        ):
+            raise installer.InstallBlocked(f"{label} changed while reading")
+        current = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        if _regular_file_identity(current) != _regular_file_identity(after):
+            raise installer.InstallBlocked(f"{label} path changed while reading")
+        return digest.hexdigest(), _regular_file_identity(after)
+    except installer.InstallBlocked:
+        raise
+    except OSError as exc:
+        raise installer.InstallBlocked(f"{label} cannot be read safely") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _remove_regular_file_no_replace_at(
+    parent_descriptor: int,
+    name: str,
+    *,
+    expected_digest: str,
+    label: str,
+) -> None:
+    """Remove exactly an observed regular file without deleting a replacement."""
+
+    digest, _identity = _read_regular_file_digest_at(
+        parent_descriptor,
+        name,
+        label=label,
+    )
+    if digest != expected_digest:
+        raise _installer().InstallBlocked(f"{label} changed before removal")
+    quarantine_name = f".{name}.quarantine-{os.getpid()}-{uuid.uuid4().hex}"
+    _rename_no_replace_at(
+        name,
+        quarantine_name,
+        source_parent=parent_descriptor,
+        destination_parent=parent_descriptor,
+    )
+    try:
+        quarantined_digest, _ = _read_regular_file_digest_at(
+            parent_descriptor,
+            quarantine_name,
+            label=f"{label} quarantine",
+        )
+        if quarantined_digest != expected_digest:
+            try:
+                os.link(
+                    quarantine_name,
+                    name,
+                    src_dir_fd=parent_descriptor,
+                    dst_dir_fd=parent_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                pass
+            else:
+                os.unlink(quarantine_name, dir_fd=parent_descriptor)
+            raise _installer().InstallBlocked(f"{label} changed during removal")
+        # Keep the quarantined inode as recovery evidence. A process holding
+        # the old descriptor may still write after the digest check.
+        os.fsync(parent_descriptor)
+    except BaseException:
+        # Keep an unexpected quarantine as recovery evidence. It is never
+        # removed through a path that could now name a different user file.
+        raise
+
+
+def _ensure_no_symlink_ancestors(path: Path, *, root: Path) -> None:
+    """Reject existing symlink components before any path-based read."""
+
+    installer = _installer()
+    lexical_root = installer._lexical_absolute(root)
+    lexical_path = installer._lexical_absolute(path)
+    if lexical_path != lexical_root and lexical_root not in lexical_path.parents:
+        raise installer.InstallBlocked(
+            f"migration backup path escapes profile: {lexical_path}"
+        )
+    current = lexical_root
+    components = lexical_path.relative_to(lexical_root).parts
+    for component in ("", *components[:-1]):
+        if component:
+            current /= component
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise installer.InstallBlocked(
+                f"migration backup path cannot be inspected safely: {current}"
+            ) from exc
+        if stat.S_ISLNK(metadata.st_mode):
+            raise installer.InstallBlocked(
+                f"migration backup path contains symbolic-link ancestor: {current}"
+            )
 
 
 def _artifact_hash(path: Path, artifact_kind: str) -> str:
     installer = _installer()
     metadata = path.lstat()
     if (stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode)) and (
-        artifact_kind != "legacy_skill_tree" or not stat.S_ISDIR(metadata.st_mode)
+        artifact_kind not in {"legacy_skill_tree", "legacy_skill_link_tree"}
+        or not stat.S_ISDIR(metadata.st_mode)
     ):
         raise installer.InstallBlocked(f"unsafe migration backup artifact: {path}")
     if stat.S_ISREG(metadata.st_mode) and metadata.st_nlink != 1:
         raise installer.InstallBlocked(f"hard-linked migration backup artifact: {path}")
-    if artifact_kind == "legacy_skill_tree":
-        unsafe = installer._unsafe_tree_reason(path)
-        if unsafe is not None:
+    if artifact_kind in {"legacy_skill_tree", "legacy_skill_link_tree"}:
+        if path.is_symlink() or not path.is_dir():
             raise installer.InstallBlocked(f"unsafe migration backup artifact: {path}")
+        if artifact_kind == "legacy_skill_tree":
+            unsafe = installer._unsafe_tree_reason(path)
+            if unsafe is not None:
+                raise installer.InstallBlocked(
+                    f"unsafe migration backup artifact: {path}"
+                )
         return installer._skill_tree_hash(path)
-    return installer._bytes_sha256(path.read_bytes())
+    return _read_regular_file_digest(path)
 
 
 def _receipt_digest(payload: dict[str, Any]) -> str:
@@ -883,6 +1513,61 @@ def _receipt_from_payload(payload: dict[str, Any], *, root: Path) -> Any:
             )
         return tuple(result)
 
+    def preserved_paths(key: str) -> tuple[Any, ...]:
+        raw = payload.get(key, [])
+        if not isinstance(raw, list):
+            raise installer.InstallBlocked("stored migration receipt has invalid preserved paths")
+        result = []
+        skills_root = root / "skills"
+        for item in raw:
+            if not isinstance(item, dict):
+                raise installer.InstallBlocked("stored migration receipt has invalid preserved paths")
+            path = installer._lexical_absolute(Path(str(item.get("path", ""))))
+            if not (
+                path == root / "AGENTS.md"
+                or (path.parent == skills_root and not installer._is_samvil_prefixed(path.name))
+            ):
+                raise installer.InstallBlocked(
+                    "stored migration receipt has an unsafe preserved path"
+                )
+            kind = item.get("kind")
+            numeric = (
+                item.get("device"),
+                item.get("inode"),
+                item.get("mode"),
+                item.get("size"),
+                item.get("nlink"),
+                item.get("uid"),
+                item.get("ctime_ns"),
+            )
+            if kind not in {"symlink", "regular_file"} or not all(
+                isinstance(value, int) and value >= 0 for value in numeric
+            ):
+                raise installer.InstallBlocked(
+                    "stored migration receipt has invalid preserved path evidence"
+                )
+            target = item.get("target")
+            content_hash = item.get("content_hash")
+            if kind == "symlink":
+                if not isinstance(target, str) or content_hash is not None:
+                    raise installer.InstallBlocked(
+                        "stored migration receipt has invalid preserved symlink evidence"
+                    )
+            elif target is not None or not isinstance(content_hash, str) or _PLAN_SHA256.fullmatch(content_hash) is None:
+                raise installer.InstallBlocked(
+                    "stored migration receipt has invalid preserved file evidence"
+                )
+            result.append(
+                installer.PreservedPathSnapshot(
+                    path,
+                    kind,
+                    *numeric,
+                    target=target,
+                    content_hash=content_hash,
+                )
+            )
+        return tuple(result)
+
     raw_backups = payload.get("backup_paths")
     raw_commands = payload.get("commands")
     if not isinstance(raw_backups, list) or not isinstance(raw_commands, list):
@@ -895,8 +1580,14 @@ def _receipt_from_payload(payload: dict[str, Any], *, root: Path) -> Any:
         raise installer.InstallBlocked(
             "stored migration receipt has an unsafe backup path"
         )
-    if any(not path.exists() for path in backups):
-        raise installer.InstallBlocked("stored migration backup is missing")
+    for path in backups:
+        _ensure_no_symlink_ancestors(path, root=root)
+        try:
+            path.lstat()
+        except FileNotFoundError as exc:
+            raise installer.InstallBlocked("stored migration backup is missing") from exc
+        except OSError as exc:
+            raise installer.InstallBlocked("stored migration backup cannot be inspected") from exc
     for path in backups:
         metadata = path.lstat()
         if stat.S_ISLNK(metadata.st_mode) or not (
@@ -944,6 +1635,8 @@ def _receipt_from_payload(payload: dict[str, Any], *, root: Path) -> Any:
         commands=tuple(commands),
         personal_skills_before=entries("personal_skills_before"),
         personal_skills_after=entries("personal_skills_after"),
+        preserved_paths_before=preserved_paths("preserved_paths_before"),
+        preserved_paths_after=preserved_paths("preserved_paths_after"),
         native_registry_before=registry_before,
         native_registry_after=registry_after,
         canonical_contract=canonical_contract,
@@ -956,7 +1649,7 @@ def _receipt_from_payload(payload: dict[str, Any], *, root: Path) -> Any:
 def _journal_actions(plan: Any, transaction: Path) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     for index, action in enumerate(plan.actions):
-        if action.artifact_kind == "legacy_skill_tree":
+        if action.artifact_kind in {"legacy_skill_tree", "legacy_skill_link_tree"}:
             backup = transaction / f"legacy-skill-{index:03d}-{action.path.name}"
         elif action.artifact_kind == "global_agents":
             backup = transaction / "global-AGENTS.md"
@@ -981,6 +1674,21 @@ def _journal_actions(plan: Any, transaction: Path) -> list[dict[str, Any]]:
     return actions
 
 
+def _source_parent_descriptor(
+    artifact_kind: str,
+    profile_identity: ProfileIdentity,
+) -> int:
+    """Return the already-pinned parent for one legacy source path."""
+
+    if artifact_kind in {"legacy_skill_tree", "legacy_skill_link_tree"}:
+        return profile_identity.skills_descriptor
+    if artifact_kind in {"global_agents", "direct_mcp_table"}:
+        return profile_identity.root_descriptor
+    raise _installer().InstallBlocked(
+        f"unsupported legacy migration artifact kind: {artifact_kind}"
+    )
+
+
 def _write_journal(
     path: Path,
     journal: dict[str, Any],
@@ -996,24 +1704,21 @@ def _write_journal(
         _write_json_at(parent_descriptor, path.name, journal)
 
 
-def _native_backup_evidence(paths: tuple[Path, ...]) -> list[dict[str, str]]:
+def _native_backup_evidence(
+    paths: tuple[Path, ...],
+    *,
+    root: Path | None = None,
+) -> list[dict[str, str]]:
     installer = _installer()
     evidence: list[dict[str, str]] = []
     for path in paths:
         lexical = installer._lexical_absolute(path)
-        metadata = lexical.lstat()
-        if (
-            stat.S_ISLNK(metadata.st_mode)
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_nlink != 1
-        ):
-            raise installer.InstallBlocked(
-                f"native Codex backup is not an independent regular file: {lexical}"
-            )
+        if root is not None:
+            _ensure_no_symlink_ancestors(lexical, root=root)
         evidence.append(
             {
                 "path": str(lexical),
-                "sha256": installer._bytes_sha256(lexical.read_bytes()),
+                "sha256": _read_regular_file_digest(lexical),
             }
         )
     return evidence
@@ -1025,6 +1730,7 @@ def _rollback_actions(
     *,
     transaction_descriptor: int | None = None,
     verify_boundary: Any | None = None,
+    profile_identity: ProfileIdentity | None = None,
 ) -> None:
     installer = _installer()
 
@@ -1087,7 +1793,26 @@ def _rollback_actions(
                 )
             if record["artifact_kind"] == "direct_mcp_table" and source.exists():
                 replacement_hash = record.get("replacement_hash")
-                if (
+                if profile_identity is not None:
+                    digest, source_identity = _read_regular_file_digest_at(
+                        profile_identity.root_descriptor,
+                        source.name,
+                        label="Codex config",
+                    )
+                    if digest != replacement_hash:
+                        raise installer.InstallBlocked(
+                            f"unexpected Codex config blocks rollback: {source}"
+                        )
+                    current = os.stat(
+                        source.name,
+                        dir_fd=profile_identity.root_descriptor,
+                        follow_symlinks=False,
+                    )
+                    if _regular_file_identity(current) != source_identity:
+                        raise installer.InstallBlocked(
+                            f"Codex config changed before rollback: {source}"
+                        )
+                elif (
                     source.is_symlink()
                     or not source.is_file()
                     or installer._bytes_sha256(source.read_bytes()) != replacement_hash
@@ -1097,8 +1822,16 @@ def _rollback_actions(
                     )
                 if verify_boundary is not None:
                     verify_boundary()
-                source.unlink()
-                _fsync_directory(source.parent)
+                if profile_identity is not None:
+                    _remove_regular_file_no_replace_at(
+                        profile_identity.root_descriptor,
+                        source.name,
+                        expected_digest=str(replacement_hash),
+                        label="Codex config",
+                    )
+                else:
+                    source.unlink()
+                    _fsync_directory(source.parent)
             elif source.exists() or source.is_symlink():
                 raise installer.InstallBlocked(
                     f"unexpected path blocks legacy rollback: {source}"
@@ -1109,6 +1842,15 @@ def _rollback_actions(
                 backup,
                 source,
                 source_parent_descriptor=transaction_descriptor,
+                destination_parent_descriptor=(
+                    _source_parent_descriptor(
+                        str(record["artifact_kind"]), profile_identity
+                    )
+                    if profile_identity is not None
+                    else None
+                ),
+                expected_hash=str(record["expected_hash"]),
+                expected_artifact_kind=str(record["artifact_kind"]),
             )
             if (
                 _artifact_hash(source, str(record["artifact_kind"]))
@@ -1231,6 +1973,7 @@ def _validate_journal(
             )
         source = installer._lexical_absolute(Path(str(record.get("source", ""))))
         backup = installer._lexical_absolute(Path(str(record.get("backup", ""))))
+        _ensure_no_symlink_ancestors(backup, root=root / "backups")
         kind = record.get("artifact_kind")
         if record.get("index") != expected_index or not isinstance(
             record.get("staged"), bool
@@ -1249,7 +1992,7 @@ def _validate_journal(
             )
         source_allowed = (
             (
-                kind == "legacy_skill_tree"
+                kind in {"legacy_skill_tree", "legacy_skill_link_tree"}
                 and source.parent == root / "skills"
                 and installer._is_samvil_prefixed(source.name)
             )
@@ -1266,7 +2009,7 @@ def _validate_journal(
             )
         expected_backup_name = (
             f"legacy-skill-{expected_index:03d}-{source.name}"
-            if kind == "legacy_skill_tree"
+            if kind in {"legacy_skill_tree", "legacy_skill_link_tree"}
             else "global-AGENTS.md"
             if kind == "global_agents"
             else "config.toml.before"
@@ -1337,10 +2080,14 @@ def _load_committed_receipt(
     *,
     root: Path,
     expected_plan_sha256: str,
+    allow_completed_replay: bool,
     canonical_root: Path,
     registry_reader: Any | None,
     profile_identity: ProfileIdentity,
 ) -> Any | None:
+    # A fresh post-migration dry-run intentionally has a different plan hash
+    # because the legacy artifacts are gone.  Only the caller may enable this
+    # relaxed hash match after proving that the current plan is fully clean.
     installer = _installer()
     _assert_profile_identity(root, profile_identity)
     for transaction_name in sorted(os.listdir(profile_identity.migrations_descriptor)):
@@ -1388,6 +2135,7 @@ def _load_committed_receipt(
                     journal_path,
                     transaction_descriptor=transaction_descriptor,
                     verify_boundary=verify_boundary,
+                    profile_identity=profile_identity,
                 )
                 continue
             if state == "rolled_back":
@@ -1444,7 +2192,10 @@ def _load_committed_receipt(
                 )
             if (
                 state != "committed"
-                or journal.get("legacy_plan_sha256") != expected_plan_sha256
+                or (
+                    not allow_completed_replay
+                    and journal.get("legacy_plan_sha256") != expected_plan_sha256
+                )
             ):
                 continue
             if journal_canonical_root != canonical_root:
@@ -1483,7 +2234,10 @@ def _load_committed_receipt(
                 raise installer.InstallBlocked(
                     "stored migration receipt canonical root changed"
                 )
-            if receipt.legacy_plan_sha256 != expected_plan_sha256:
+            if (
+                not allow_completed_replay
+                and receipt.legacy_plan_sha256 != expected_plan_sha256
+            ):
                 raise installer.InstallBlocked(
                     "stored migration receipt plan hash changed"
                 )
@@ -1559,11 +2313,12 @@ def _load_committed_receipt(
                     path not in receipt_backup_paths
                     or not isinstance(digest, str)
                     or _PLAN_SHA256.fullmatch(digest) is None
-                    or not path.is_file()
-                    or path.is_symlink()
-                    or path.lstat().st_nlink != 1
-                    or installer._bytes_sha256(path.read_bytes()) != digest
                 ):
+                    raise installer.InstallBlocked(
+                        f"stored native Codex backup evidence changed: {path}"
+                    )
+                _ensure_no_symlink_ancestors(path, root=root)
+                if _read_regular_file_digest(path) != digest:
                     raise installer.InstallBlocked(
                         f"stored native Codex backup evidence changed: {path}"
                     )
@@ -1583,6 +2338,17 @@ def _load_committed_receipt(
                 raise installer.InstallBlocked(
                     "personal Codex skills changed since the stored migration receipt"
                 )
+            current_preserved = tuple(
+                installer.snapshot_preserved_path(item.path)
+                for item in receipt.preserved_paths_after
+            )
+            if (
+                receipt.preserved_paths_before != receipt.preserved_paths_after
+                or current_preserved != receipt.preserved_paths_after
+            ):
+                raise installer.InstallBlocked(
+                    "preserved user-owned paths changed since the stored migration receipt"
+                )
             readiness = installer.validate_activation_readiness(canonical_root)
             if not readiness["ready"]:
                 raise installer.InstallBlocked(
@@ -1594,7 +2360,11 @@ def _load_committed_receipt(
                     "stored migration marketplace wrapper is missing"
                 )
             verify_boundary()
-            installer._codex_marketplace_wrapper(root, canonical_root)
+            installer._codex_marketplace_wrapper(
+                root,
+                canonical_root,
+                marketplaces_parent_descriptor=profile_identity.marketplaces_descriptor,
+            )
             if finalize_commit_decided:
                 verify_boundary()
                 _publish_json_at(
@@ -1636,7 +2406,7 @@ def _stage_actions(
                 f"migration backup destination already exists: {backup}"
             )
         if action.artifact_kind == "direct_mcp_table":
-            original = source.read_bytes()
+            original = installer._read_regular_file_bytes(source)
             replacement = _remove_generated_direct_mcp_table(original)
             record["replacement_hash"] = installer._bytes_sha256(replacement)
         else:
@@ -1652,7 +2422,12 @@ def _stage_actions(
         _move_no_replace(
             source,
             backup,
+            source_parent_descriptor=_source_parent_descriptor(
+                str(action.artifact_kind), profile_identity
+            ),
             destination_parent_descriptor=transaction_descriptor,
+            expected_hash=action.expected_hash,
+            expected_artifact_kind=str(action.artifact_kind),
         )
         verify_boundary()
         if (
@@ -1676,7 +2451,7 @@ def _stage_actions(
                 mode=int(action.expected_mode),
             )
             if (
-                installer._bytes_sha256(source.read_bytes())
+                installer._bytes_sha256(installer._read_regular_file_bytes(source))
                 != record["replacement_hash"]
             ):
                 raise installer.InstallBlocked(
@@ -1698,7 +2473,9 @@ def _run_locked_migration(
     command_runner: Any,
     registry_reader: Any | None,
     expected_plan_sha256: str,
+    allow_completed_replay: bool,
     profile_identity: ProfileIdentity,
+    preflight_registry: Any | None = None,
 ) -> Any:
     installer = _installer()
     _assert_profile_identity(root, profile_identity)
@@ -1714,6 +2491,7 @@ def _run_locked_migration(
         migrations_root,
         root=root,
         expected_plan_sha256=expected_plan_sha256,
+        allow_completed_replay=allow_completed_replay,
         canonical_root=plan.canonical_root,
         registry_reader=registry_reader,
         profile_identity=profile_identity,
@@ -1742,6 +2520,10 @@ def _run_locked_migration(
         mutation_started=False,
     )
     installer._require_cli_registry_evidence(locked_registry)
+    if preflight_registry is not None and locked_registry != preflight_registry:
+        raise installer.InstallBlocked(
+            "Codex native registry changed between preflight and profile lock"
+        )
     sealed_registry_available = True
 
     def activation_registry_reader(env: dict[str, str]) -> Any:
@@ -1773,6 +2555,13 @@ def _run_locked_migration(
             transaction_identity,
             path=transaction,
         )
+
+    def verify_canonical_commit() -> None:
+        current = installer._canonical_activation_contract(plan.canonical_root)
+        if current != authoritative.canonical_contract:
+            raise installer.NativeRecoveryRequired(
+                "canonical SAMVIL activation contract changed at migration commit"
+            )
 
     journal_path = transaction / "journal.json"
     journal: dict[str, Any] = {
@@ -1848,9 +2637,23 @@ def _run_locked_migration(
             migrate=False,
             expected_legacy_plan_sha256=clean_plan.to_dict()["plan_sha256"],
             allow_legacy_registry_migration=True,
+            boundary_callback=verify_boundary,
+            backups_parent_descriptor=profile_identity.backups_descriptor,
+            marketplaces_parent_descriptor=profile_identity.marketplaces_descriptor,
+            root_parent_descriptor=profile_identity.root_descriptor,
+            skills_parent_descriptor=profile_identity.skills_descriptor,
+            snapshot_personal_paths=True,
+            preserved_paths=tuple(
+                artifact.path
+                for artifact in authoritative.artifacts
+                if artifact.status == "preserved"
+            ),
         )
         native_completed = True
-        journal["native_backups"] = _native_backup_evidence(native_receipt.backup_paths)
+        journal["native_backups"] = _native_backup_evidence(
+            native_receipt.backup_paths,
+            root=root,
+        )
         final_plan = installer.build_legacy_migration_plan(
             repo_root=plan.canonical_root,
             codex_home=root,
@@ -1872,6 +2675,19 @@ def _run_locked_migration(
                 "personal Codex skills changed during legacy migration"
             )
         if (
+            native_receipt.preserved_paths_before
+            != native_receipt.preserved_paths_after
+            or native_receipt.preserved_paths_after
+            != tuple(
+                installer.snapshot_preserved_path(artifact.path)
+                for artifact in authoritative.artifacts
+                if artifact.status == "preserved"
+            )
+        ):
+            raise installer.InstallBlocked(
+                "preserved user-owned paths changed during legacy migration"
+            )
+        if (
             native_receipt.canonical_contract != authoritative.canonical_contract
             or installer._canonical_activation_contract(plan.canonical_root)
             != authoritative.canonical_contract
@@ -1886,6 +2702,7 @@ def _run_locked_migration(
             "native_verified",
             parent_descriptor=transaction_descriptor,
         )
+        verify_canonical_commit()
         migration_backups = tuple(
             Path(str(record["backup"])) for record in journal["actions"]
         )
@@ -1898,6 +2715,8 @@ def _run_locked_migration(
             personal_skills_after=native_receipt.personal_skills_after,
             native_registry_before=native_receipt.native_registry_before,
             native_registry_after=native_receipt.native_registry_after,
+            preserved_paths_before=native_receipt.preserved_paths_before,
+            preserved_paths_after=native_receipt.preserved_paths_after,
             canonical_contract=authoritative.canonical_contract,
             legacy_plan_sha256=expected_plan_sha256,
             migration_transition_id=transition_id,
@@ -1908,6 +2727,7 @@ def _run_locked_migration(
         )
         journal["receipt"] = receipt.to_dict()
         verify_boundary()
+        verify_canonical_commit()
         _write_journal(
             journal_path,
             journal,
@@ -1915,6 +2735,7 @@ def _run_locked_migration(
             parent_descriptor=transaction_descriptor,
         )
         verify_boundary()
+        verify_canonical_commit()
         _publish_json_at(
             transaction_descriptor,
             "receipt.json",
@@ -1923,12 +2744,14 @@ def _run_locked_migration(
             display_path=transaction / "receipt.json",
         )
         verify_boundary()
+        verify_canonical_commit()
         _write_journal(
             journal_path,
             journal,
             "committed",
             parent_descriptor=transaction_descriptor,
         )
+        verify_canonical_commit()
         return receipt
     except BaseException as exc:
         native_rollback_uncertain = isinstance(
@@ -1965,6 +2788,7 @@ def _run_locked_migration(
                 journal_path,
                 transaction_descriptor=transaction_descriptor,
                 verify_boundary=verify_boundary,
+                profile_identity=profile_identity,
             )
         except BaseException as rollback_exc:
             if isinstance(rollback_exc, Exception):
@@ -2058,6 +2882,16 @@ def execute_legacy_migration(
         repo_root=plan.canonical_root,
         codex_home=root,
     )
+    # A completed migration has a different hash once legacy artifacts are
+    # gone.  Relax the receipt's historical hash check only when the caller's
+    # newly checked hash exactly describes this clean postcondition; an
+    # arbitrary hash must still fail closed.
+    allow_completed_replay = (
+        not preflight.blockers
+        and not preflight.actions
+        and not preflight.native_registry_actions
+        and preflight.to_dict()["plan_sha256"] == expected_plan_sha256
+    )
     migrations_root = root / "backups" / "legacy-migrations"
     if not migrations_root.exists():
         if preflight.blockers:
@@ -2079,7 +2913,9 @@ def execute_legacy_migration(
             command_runner=command_runner,
             registry_reader=registry_reader,
             expected_plan_sha256=expected_plan_sha256,
+            allow_completed_replay=allow_completed_replay,
             profile_identity=profile_identity,
+            preflight_registry=registry_preflight,
         )
 
 

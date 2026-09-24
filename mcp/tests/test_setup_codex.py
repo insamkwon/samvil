@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -945,8 +946,218 @@ def test_direct_executor_admits_legacy_inventory_before_writes(
         )
 
     assert personal.read_text(encoding="utf-8").endswith("keep\n")
-    assert commands == []
-    assert not (codex_home / "marketplaces").exists()
+
+
+@pytest.mark.parametrize("entry_kind", ("file", "empty_dir", "manifest_symlink"))
+def test_legacy_migration_blocks_unsupported_personal_top_level_entries(
+    tmp_path: Path, entry_kind: str
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "profile" / ".codex"
+    repo.mkdir()
+    candidate = codex_home / "skills" / "personal-entry"
+    candidate.parent.mkdir(parents=True)
+    if entry_kind == "file":
+        candidate.write_text("not a skill directory\n", encoding="utf-8")
+    elif entry_kind == "empty_dir":
+        candidate.mkdir()
+    else:
+        candidate.mkdir()
+        target = tmp_path / "manifest-target.md"
+        target.write_text("---\nname: personal-entry\n---\n", encoding="utf-8")
+        (candidate / "SKILL.md").symlink_to(target)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item for item in plan.artifacts if item.path == candidate.absolute()
+    )
+    assert artifact.artifact_kind == "personal_skill_tree"
+    assert artifact.classification == "user_modified"
+    assert artifact.blocks_mutation is True
+    assert artifact.status == "blocked"
+    assert plan.to_dict()["ready"] is False
+    assert any(str(candidate.absolute()) in blocker for blocker in plan.blockers)
+
+
+def test_legacy_migration_converts_personal_symlink_read_race_to_blocker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "profile" / ".codex"
+    repo.mkdir()
+    candidate = codex_home / "skills" / "session-monitor"
+    target = tmp_path / "personal-source"
+    target.mkdir()
+    (target / "SKILL.md").write_text(
+        "---\nname: session-monitor\n---\nkeep\n", encoding="utf-8"
+    )
+    candidate.parent.mkdir(parents=True)
+    candidate.symlink_to(target, target_is_directory=True)
+    original_readlink = installer.os.readlink
+
+    def racing_readlink(path: object) -> str:
+        if Path(path) == candidate:
+            raise OSError("simulated concurrent unlink")
+        return original_readlink(path)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(installer.os, "readlink", racing_readlink)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is False
+    assert any("cannot be inspected safely" in blocker for blocker in plan.blockers)
+
+
+def test_legacy_migration_ignores_codex_owned_system_skill_namespace(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    system_root = codex_home / "skills" / ".system"
+    system_root.mkdir(parents=True)
+    (system_root / ".codex-system-skills.marker").write_text("owned\n")
+    (system_root / "review-agent" / "SKILL.md").parent.mkdir()
+    (system_root / "review-agent" / "SKILL.md").write_text(
+        "---\nname: review-agent\n---\nowned\n", encoding="utf-8"
+    )
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert not any(item.path == system_root.absolute() for item in plan.artifacts)
+    assert not any(str(system_root.absolute()) in blocker for blocker in plan.blockers)
+
+
+@pytest.mark.parametrize(
+    ("target_kind", "target_builder"),
+    [
+        ("relative_exact", lambda skills, legacy: Path("samvil-resume")),
+        ("absolute_exact", lambda skills, legacy: legacy),
+        ("descendant", lambda skills, legacy: legacy / "nested"),
+        ("ancestor", lambda skills, legacy: Path(".")),
+    ],
+)
+def test_legacy_migration_blocks_preserved_symlink_overlapping_legacy_source(
+    tmp_path: Path,
+    target_kind: str,
+    target_builder: object,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy)
+    preserved = codex_home / "skills" / "personal-link"
+    target = target_builder(codex_home / "skills", legacy)  # type: ignore[operator]
+    preserved.symlink_to(target, target_is_directory=True)
+    before_link = (preserved.lstat(), preserved.readlink())
+    before_legacy = (legacy.lstat(), tuple(sorted(path.relative_to(legacy).as_posix() for path in legacy.rglob("*"))))
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is False, target_kind
+    assert any(
+        str(preserved.absolute()) in blocker and "overlap" in blocker
+        for blocker in plan.blockers
+    )
+    assert (preserved.lstat(), preserved.readlink()) == before_link
+    assert (
+        legacy.lstat(),
+        tuple(sorted(path.relative_to(legacy).as_posix() for path in legacy.rglob("*"))),
+    ) == before_legacy
+
+
+def test_legacy_migration_preserves_unrelated_external_symlink_target(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy)
+    external = tmp_path / "external-skill"
+    external.mkdir()
+    (external / "SKILL.md").write_text(
+        "---\nname: external\n---\nkeep\n", encoding="utf-8"
+    )
+    preserved = codex_home / "skills" / "personal-link"
+    preserved.symlink_to(external, target_is_directory=True)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is True
+    artifact = next(item for item in plan.artifacts if item.path == preserved.absolute())
+    assert artifact.status == "preserved"
+    assert preserved.readlink() == external
+
+
+def test_codex_system_nested_symlink_is_ignored_by_planner_and_executor(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex_home = tmp_path / "profile" / ".codex"
+    system_root = codex_home / "skills" / ".system"
+    outside = tmp_path / "system-target"
+    outside.mkdir()
+    system_root.mkdir(parents=True)
+    nested_link = system_root / "nested-link"
+    nested_link.symlink_to(outside, target_is_directory=True)
+
+    migration_plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    assert migration_plan.to_dict()["ready"] is True
+    assert installer.inventory_personal_skills(codex_home / "skills") == ()
+    assert installer._unsafe_personal_skill_links(codex_home / "skills") == ()
+
+    commands: list[tuple[str, ...]] = []
+    receipt = _execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda command, _env: commands.append(command),
+    )
+
+    assert receipt.to_dict()["personal_skills_unchanged"] is True
+    assert nested_link.is_symlink()
+    assert nested_link.readlink() == outside
+    assert not list((codex_home / "backups").glob("unexpected-personal-skills-*"))
+    assert commands
+
+
+def test_preserved_regular_file_fifo_race_fails_closed_without_blocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preserved = tmp_path / "AGENTS.md"
+    preserved.write_text("personal\n", encoding="utf-8")
+    fifo = tmp_path / "replacement.fifo"
+    os.mkfifo(fifo)
+    original_open = installer.os.open
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+
+    def open_fifo(path: object, flags: int, mode: int = 0o777) -> int:
+        assert nonblock and flags & nonblock
+        return original_open(fifo, os.O_RDONLY | nonblock)
+
+    monkeypatch.setattr(installer.os, "open", open_fifo)
+
+    with pytest.raises(InstallBlocked, match="non-regular"):
+        installer.snapshot_preserved_path(preserved)
 
 
 def test_public_executor_requires_native_readback_before_any_write(
@@ -1966,6 +2177,40 @@ def test_isolated_executor_blocks_symlink_inside_personal_skill_tree(
     assert outside.read_text(encoding="utf-8") == "before\n"
 
 
+def test_isolated_executor_migration_preserves_explicit_personal_symlink(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    personal_source = tmp_path / "personal-source"
+    personal_link = codex_home / "skills" / "session-monitor"
+    personal_source.mkdir()
+    (personal_source / "SKILL.md").write_text(
+        "---\nname: session-monitor\n---\nkeep\n", encoding="utf-8"
+    )
+    personal_link.parent.mkdir(parents=True)
+    personal_link.symlink_to(personal_source, target_is_directory=True)
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    receipt = execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert personal_link.is_symlink()
+    assert personal_link.readlink() == personal_source
+    expected_snapshot = installer.snapshot_preserved_path(personal_link).to_dict()
+    assert receipt.to_dict()["preserved_paths_before"] == [expected_snapshot]
+    assert receipt.to_dict()["preserved_paths_after"] == [expected_snapshot]
+    assert receipt.to_dict()["preserved_paths_unchanged"] is True
+
+
 def test_isolated_executor_preserves_snapshot_when_restore_copy_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2231,6 +2476,43 @@ def test_isolated_executor_blocks_backups_parent_symlink(tmp_path: Path) -> None
     assert list(outside.iterdir()) == []
 
 
+def test_migration_regular_file_reader_rejects_fifo_without_blocking(tmp_path: Path) -> None:
+    fifo = tmp_path / "backup"
+    os.mkfifo(fifo)
+
+    with pytest.raises(InstallBlocked, match="regular file"):
+        migration._read_regular_file_digest(fifo)
+
+
+def test_migration_receipt_backup_path_rejects_symlink_ancestor(tmp_path: Path) -> None:
+    root = tmp_path / "profile"
+    backups = root / "backups"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root.mkdir()
+    backups.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(InstallBlocked, match="symbolic-link ancestor"):
+        migration._ensure_no_symlink_ancestors(backups / "transaction" / "backup", root=root)
+
+
+def test_isolated_executor_invokes_boundary_callback_before_mutation(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    repo.mkdir()
+    calls: list[str] = []
+
+    receipt = _execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        boundary_callback=lambda: calls.append("verified"),
+    )
+
+    assert receipt.commands
+    assert calls
+
+
 def test_isolated_executor_accepts_explicit_custom_codex_home_name(
     tmp_path: Path,
 ) -> None:
@@ -2335,6 +2617,161 @@ def test_isolated_migrate_applies_only_rebuilt_generated_actions_and_keeps_backu
     assert commands
 
 
+def test_isolated_migrate_moves_canonical_link_tree_to_reversible_backup(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    canonical = repo / "skills" / "samvil-resume"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    legacy_root = codex_home / "skills" / canonical.name
+    legacy_root.mkdir(parents=True)
+    for entry in canonical.iterdir():
+        (legacy_root / entry.name).symlink_to(entry)
+
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    receipt = execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert not legacy_root.exists()
+    backup = next(
+        path
+        for path in receipt.backup_paths
+        if path.name.startswith("legacy-skill-")
+    )
+    assert all(path.is_symlink() for path in backup.iterdir())
+    assert all(
+        path.resolve(strict=False) == canonical / path.name
+        for path in backup.iterdir()
+    )
+
+
+def test_isolated_migrate_preserves_personal_symlink_in_receipt(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    legacy_root = codex_home / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy_root)
+    personal_source = tmp_path / "personal-source"
+    personal_source.mkdir()
+    (personal_source / "SKILL.md").write_text(
+        "---\nname: session-monitor\n---\nkeep\n", encoding="utf-8"
+    )
+    personal_link = codex_home / "skills" / "session-monitor"
+    personal_link.symlink_to(personal_source, target_is_directory=True)
+    agents = codex_home / "AGENTS.md"
+    agents.write_text("# Personal instructions\nKeep me.\n", encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    receipt = execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    expected_snapshots = [
+        installer.snapshot_preserved_path(personal_link).to_dict(),
+        installer.snapshot_preserved_path(agents).to_dict(),
+    ]
+    assert personal_link.is_symlink()
+    assert agents.read_text(encoding="utf-8") == "# Personal instructions\nKeep me.\n"
+    assert receipt.to_dict()["preserved_paths_before"] == expected_snapshots
+    assert receipt.to_dict()["preserved_paths_after"] == expected_snapshots
+    assert receipt.to_dict()["preserved_paths_unchanged"] is True
+
+    postcondition = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    replay = execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda command, _env: pytest.fail(
+            f"replay must not execute native command: {command}"
+        ),
+        migrate=True,
+        expected_legacy_plan_sha256=postcondition.to_dict()["plan_sha256"],
+    )
+    assert replay.to_dict() == receipt.to_dict()
+
+
+def test_isolated_migrate_fails_closed_when_preserved_symlink_changes(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    first_target = tmp_path / "personal-one"
+    second_target = tmp_path / "personal-two"
+    repo.mkdir()
+    first_target.mkdir()
+    second_target.mkdir()
+    (first_target / "USER-DATA.txt").write_text("keep-one\n", encoding="utf-8")
+    (second_target / "USER-DATA.txt").write_text("keep-two\n", encoding="utf-8")
+    personal_link = codex_home / "skills" / "session-monitor"
+    personal_link.parent.mkdir(parents=True)
+    personal_link.symlink_to(first_target, target_is_directory=True)
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    def retarget(_command, _env):
+        personal_link.unlink()
+        personal_link.symlink_to(second_target, target_is_directory=True)
+
+    with pytest.raises(installer.NativeRecoveryRequired, match="preserved"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=retarget,
+            preserved_paths=(personal_link,),
+        )
+
+    assert (first_target / "USER-DATA.txt").read_text(encoding="utf-8") == "keep-one\n"
+    assert (second_target / "USER-DATA.txt").read_text(encoding="utf-8") == "keep-two\n"
+
+
+def test_isolated_install_fails_closed_when_preserved_agents_changes(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    agents = codex_home / "AGENTS.md"
+    replacement = tmp_path / "replacement-agents.md"
+    agents.parent.mkdir(parents=True)
+    agents.write_text("# personal instructions\n", encoding="utf-8")
+    replacement.write_text("# replacement must remain untouched\n", encoding="utf-8")
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    def retarget(_command: tuple[str, ...], _env: dict[str, str]) -> None:
+        agents.unlink()
+        agents.symlink_to(replacement)
+
+    with pytest.raises(installer.NativeRecoveryRequired, match="preserved"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=retarget,
+            preserved_paths=(agents,),
+        )
+
+    assert agents.is_symlink()
+    assert agents.readlink() == replacement
+    assert replacement.read_text(encoding="utf-8") == (
+        "# replacement must remain untouched\n"
+    )
+
+
 def test_isolated_migrate_exact_retry_returns_byte_identical_receipt_without_commands(
     tmp_path: Path,
 ) -> None:
@@ -2378,6 +2815,80 @@ def test_isolated_migrate_exact_retry_returns_byte_identical_receipt_without_com
     )
     assert len(journals) == 1
     assert json.loads(journals[0].read_text(encoding="utf-8"))["state"] == "committed"
+
+
+def test_isolated_migrate_fresh_postcondition_retry_reuses_committed_receipt(
+    tmp_path: Path,
+) -> None:
+    """A new dry-run hash after a successful migration must still replay safely."""
+
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    legacy_root = codex_home / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy_root)
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    commands: list[tuple[tuple[str, ...], dict[str, str]]] = []
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+
+    first = execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=lambda command, env: commands.append((command, env)),
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+    first_commands = tuple(commands)
+    backups_before = tuple(
+        sorted(
+            path.relative_to(codex_home / "backups").as_posix()
+            for path in (codex_home / "backups").rglob("*")
+            if path.is_file()
+        )
+    )
+    postcondition = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    assert not postcondition.blockers
+    assert not postcondition.actions
+    assert postcondition.to_dict()["plan_sha256"] != first.legacy_plan_sha256
+
+    second = execute_isolated_install(
+        plan,
+        codex_home=codex_home,
+        command_runner=lambda command, env: commands.append((command, env)),
+        migrate=True,
+        expected_legacy_plan_sha256=postcondition.to_dict()["plan_sha256"],
+    )
+
+    assert second.to_dict() == first.to_dict()
+    assert tuple(commands) == first_commands
+    transactions = list(
+        (codex_home / "backups" / "legacy-migrations").iterdir()
+    )
+    assert len(transactions) == 1
+    backups_after = tuple(
+        sorted(path.relative_to(codex_home / "backups").as_posix()
+               for path in (codex_home / "backups").rglob("*")
+               if path.is_file())
+    )
+    assert backups_after == backups_before
+
+    with pytest.raises(InstallBlocked, match="profile changed"):
+        execute_isolated_install(
+            plan,
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: pytest.fail(
+                "arbitrary replay hash must not activate"
+            ),
+            migrate=True,
+            expected_legacy_plan_sha256="0" * 64,
+        )
+    assert tuple(commands) == first_commands
+    assert len(list((codex_home / "backups" / "legacy-migrations").iterdir())) == 1
 
 
 def test_committed_migration_replay_rejects_canonical_contract_drift(
@@ -3029,6 +3540,270 @@ def test_isolated_migrate_preserves_unrelated_config_bytes_and_crlf(
     assert backup.read_bytes() == original
 
 
+def test_isolated_migrate_moves_normalized_mcp_tool_overrides_to_native_plugin(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args = ["-m", "samvil_mcp.server"]\n\n'
+        "[mcp_servers.samvil-mcp.tools.begin_stage]\n"
+        'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        '[plugins."samvil@samvil-codex".tools.begin_stage]\n'
+        'approval_mode = "approve"\n'
+    )
+    parsed = tomllib.loads(config.read_text(encoding="utf-8"))
+    assert "mcp_servers" not in parsed
+    assert (
+        parsed["plugins"]["samvil@samvil-codex"]["tools"]["begin_stage"]
+        == {"approval_mode": "approve"}
+    )
+
+
+def test_isolated_migrate_preserves_multiline_strings_that_resemble_tool_tables(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    instructions = (
+        "developer_instructions = \"\"\"\n"
+        "[mcp_servers.samvil-mcp.tools.begin_stage]\n"
+        "Keep this documentation unchanged.\n"
+        "\"\"\"\n\n"
+    )
+    original = (
+        instructions
+        + "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n\n'
+        + "[mcp_servers.samvil-mcp.tools.begin_stage]\n"
+        + 'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        instructions
+        + '[plugins."samvil@samvil-codex".tools.begin_stage]\n'
+        + 'approval_mode = "approve"\n'
+    )
+
+
+def test_isolated_migrate_preserves_escaped_triple_quotes_in_multiline_strings(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    instructions = (
+        "developer_instructions = \"\"\"before\n"
+        "escaped quotes: \\\"\"\"\n"
+        "[mcp_servers.samvil-mcp.tools.DO_NOT_CHANGE]\n"
+        "after\n\"\"\"\n\n"
+    )
+    original = (
+        instructions
+        + "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == instructions
+
+
+def test_isolated_migrate_handles_literal_triple_quotes_without_escape_rules(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    instructions = (
+        "developer_instructions = '''before\n"
+        "backslash delimiter: " "\\'''" "\n"
+        "[mcp_servers.samvil-mcp.tools.DO_NOT_CHANGE]\n"
+        'approval_mode = "approve"\n'
+        "notes = '''after\n"
+        "[mcp_servers.samvil-mcp.tools.KEEP_TEXT]\n"
+        "still text\n"
+        "'''\n\n"
+    )
+    original = (
+        instructions
+        + "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        instructions.replace(
+            "[mcp_servers.samvil-mcp.tools.DO_NOT_CHANGE]",
+            '[plugins."samvil@samvil-codex".tools.DO_NOT_CHANGE]',
+        )
+    )
+
+
+def test_isolated_migrate_moves_quoted_normalized_mcp_tool_overrides(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n\n'
+        + '[mcp_servers."samvil-mcp".tools.begin_stage]\n'
+        + 'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        '[plugins."samvil@samvil-codex".tools.begin_stage]\n'
+        + 'approval_mode = "approve"\n'
+    )
+
+
+def test_isolated_migrate_preserves_comments_on_normalized_tool_headers(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n\n'
+        + "[mcp_servers.samvil-mcp.tools.begin_stage] # keep approval note\n"
+        + 'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        migrate=True,
+        expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+    )
+
+    assert config.read_text(encoding="utf-8") == (
+        '[plugins."samvil@samvil-codex".tools.begin_stage] # keep approval note\n'
+        + 'approval_mode = "approve"\n'
+    )
+
+
+def test_isolated_migrate_blocks_unrewritable_quoted_tool_key(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "codex-home" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        + f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        + 'args = ["-m", "samvil_mcp.server"]\n\n'
+        + '[mcp_servers.samvil-mcp.tools."begin]stage"]\n'
+        + 'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+    checked = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert checked.to_dict()["ready"] is True
+    with pytest.raises(InstallBlocked, match="ambiguous"):
+        execute_isolated_install(
+            CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+            codex_home=codex_home,
+            command_runner=lambda _command, _env: None,
+            migrate=True,
+            expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+        )
+
+    assert config.read_text(encoding="utf-8") == original
+
+
 def test_isolated_migrate_never_overwrites_a_concurrent_user_file_during_rollback(
     tmp_path: Path,
 ) -> None:
@@ -3476,6 +4251,59 @@ def test_legacy_migration_dry_run_matches_historical_repo_skill_tree(
     assert plan.to_dict()["ready"] is True
 
 
+def test_legacy_migration_dry_run_recognizes_canonical_skill_file_links(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    canonical = repo / "skills" / "samvil-example"
+    canonical.mkdir(parents=True)
+    (canonical / "SKILL.md").write_text("canonical\n", encoding="utf-8")
+    (canonical / "SKILL.legacy.md").write_text("legacy\n", encoding="utf-8")
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-example"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").symlink_to(canonical / "SKILL.md")
+    (legacy / "SKILL.legacy.md").symlink_to(canonical / "SKILL.legacy.md")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = plan.artifacts[0]
+    assert plan.to_dict()["ready"] is True
+    assert artifact.classification == "generated_legacy"
+    assert artifact.reason == "legacy skill tree links exactly to canonical source"
+    assert len(plan.actions) == 1
+
+
+def test_legacy_migration_dry_run_blocks_canonical_link_tree_after_target_drift(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    canonical = repo / "skills" / "samvil-example"
+    canonical.mkdir(parents=True)
+    manifest = canonical / "SKILL.md"
+    manifest.write_text("canonical\n", encoding="utf-8")
+    foreign = tmp_path / "foreign" / "SKILL.md"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("foreign\n", encoding="utf-8")
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-example"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").symlink_to(foreign)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = plan.artifacts[0]
+    assert artifact.classification == "user_modified"
+    assert artifact.blocks_mutation is True
+    assert plan.to_dict()["ready"] is False
+
+
 @pytest.mark.parametrize(
     "mutation",
     ("content", "file_mode", "directory_mode", "symlink", "hardlink"),
@@ -3632,6 +4460,77 @@ def test_legacy_migration_dry_run_blocks_unsafe_personal_skill_links(
         for artifact in plan.artifacts
     )
     assert outside.read_text(encoding="utf-8") == "keep outside\n"
+
+
+def test_legacy_migration_dry_run_preserves_top_level_personal_symlink(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    skills_root = codex_home / "skills"
+    skills_root.mkdir(parents=True)
+    target = tmp_path / "personal-source"
+    target.mkdir()
+    (target / "SKILL.md").write_text(
+        "---\nname: personal-review\n---\nkeep\n", encoding="utf-8"
+    )
+    personal = skills_root / "personal-review"
+    personal.symlink_to(target, target_is_directory=True)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item
+        for item in plan.to_dict()["artifacts"]
+        if item["artifact_kind"] == "personal_skill_tree"
+    )
+    payload = plan.to_dict()
+    assert artifact["classification"] == "user_modified"
+    assert artifact["status"] == "preserved"
+    assert artifact["preserve_only"] is True
+    assert artifact["blocks_mutation"] is False
+    assert payload["ready"] is True
+    assert payload["status_counts"] == {
+        "migrated": 0,
+        "preserved": 1,
+        "blocked": 0,
+    }
+    assert payload["preserved_artifacts"] == [artifact]
+    assert personal.is_symlink()
+    assert personal.readlink() == target
+
+
+def test_legacy_migration_plan_hash_seals_preserved_symlink_target(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "skills").mkdir(parents=True)
+    codex_home = tmp_path / "profile" / ".codex"
+    personal_root = codex_home / "skills"
+    personal_root.mkdir(parents=True)
+    first_target = tmp_path / "personal-one"
+    second_target = tmp_path / "personal-two"
+    first_target.mkdir()
+    second_target.mkdir()
+    personal = personal_root / "session-monitor"
+    personal.symlink_to(first_target, target_is_directory=True)
+
+    first = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    personal.unlink()
+    personal.symlink_to(second_target, target_is_directory=True)
+    second = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert first.to_dict()["plan_sha256"] != second.to_dict()["plan_sha256"]
 
 
 @pytest.mark.parametrize(
@@ -3854,7 +4753,7 @@ def test_legacy_migration_dry_run_recognizes_generated_global_agents(
     assert agents.read_bytes() == before
 
 
-def test_legacy_migration_dry_run_blocks_global_agents_with_mixed_roots(
+def test_legacy_migration_dry_run_preserves_global_agents_with_mixed_roots(
     tmp_path: Path,
 ) -> None:
     repo = Path(__file__).resolve().parents[2]
@@ -3878,12 +4777,14 @@ def test_legacy_migration_dry_run_blocks_global_agents_with_mixed_roots(
         item for item in plan.artifacts if item.artifact_kind == "global_agents"
     )
     assert artifact.classification == "user_modified"
-    assert artifact.blocks_mutation is True
-    assert plan.to_dict()["ready"] is False
+    assert artifact.blocks_mutation is False
+    assert artifact.status == "preserved"
+    assert plan.to_dict()["ready"] is True
+    assert plan.to_dict()["status_counts"]["preserved"] == 1
     assert agents.read_text(encoding="utf-8") == original
 
 
-def test_legacy_migration_dry_run_blocks_modified_global_agents(
+def test_legacy_migration_dry_run_preserves_modified_global_agents(
     tmp_path: Path,
 ) -> None:
     repo = Path(__file__).resolve().parents[2]
@@ -3906,7 +4807,9 @@ def test_legacy_migration_dry_run_blocks_modified_global_agents(
         if item["artifact_kind"] == "global_agents"
     )
     assert artifact["classification"] == "user_modified"
-    assert artifact["blocks_mutation"] is True
+    assert artifact["blocks_mutation"] is False
+    assert artifact["status"] == "preserved"
+    assert plan.to_dict()["ready"] is True
     assert agents.read_text(encoding="utf-8") == original
 
 
@@ -3943,6 +4846,72 @@ def test_legacy_migration_dry_run_recognizes_exact_direct_mcp_table(
         and action.expected_hash == artifact["content_hash"]
         for action in plan.actions
     )
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_legacy_migration_dry_run_recognizes_codex_normalized_mcp_table_and_preserves_tools(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args = ["-m", "samvil_mcp.server"]\n\n'
+        "[mcp_servers.samvil-mcp.tools.begin_stage]\n"
+        'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item
+        for item in plan.to_dict()["artifacts"]
+        if item["artifact_kind"] == "direct_mcp_table"
+    )
+    assert artifact["classification"] == "generated_legacy"
+    assert not artifact["blocks_mutation"]
+    assert any(action.kind == "remove_generated_mcp_table" for action in plan.actions)
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_legacy_migration_dry_run_blocks_array_mcp_tool_overrides(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    codex_home.mkdir(parents=True)
+    config = codex_home / "config.toml"
+    original = (
+        "[mcp_servers.samvil-mcp]\n"
+        f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+        'args = ["-m", "samvil_mcp.server"]\n\n'
+        "[[mcp_servers.samvil-mcp.tools.begin_stage]]\n"
+        'approval_mode = "approve"\n'
+    )
+    config.write_text(original, encoding="utf-8")
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    artifact = next(
+        item
+        for item in plan.artifacts
+        if item.artifact_kind == "direct_mcp_table"
+    )
+    assert artifact.classification == "user_modified"
+    assert artifact.blocks_mutation is True
+    assert "not TOML tables" in artifact.reason
+    assert plan.to_dict()["ready"] is False
     assert config.read_text(encoding="utf-8") == original
 
 
