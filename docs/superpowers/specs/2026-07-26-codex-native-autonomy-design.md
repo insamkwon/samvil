@@ -4,7 +4,7 @@
 
 **Status:** Approved for implementation planning
 
-**Target release:** v4.33.0 candidate
+**Target release:** v4.33.1 candidate
 
 **Primary host:** Codex CLI and Codex Desktop
 
@@ -130,7 +130,7 @@ native plugin boundary와 agent loop를 사용하는 것이 더 단순하고 정
 | Existing marker | recovery SSOT로 유지, execution mechanism 역할은 제거 |
 | User approval authority | v4.33에서는 trusted gate override를 발급하지 않음 |
 | Multi-agent execution | 이번 release의 실행 목표가 아님; capability foundation만 보존 |
-| Target version | 사용자 경로가 바뀌므로 v4.33.0 후보 |
+| Target version | 사용자 경로가 바뀌므로 v4.33.1 후보 |
 
 ---
 
@@ -213,7 +213,7 @@ Codex plugin registry
 ```json
 {
   "name": "samvil",
-  "version": "4.33.0",
+  "version": "4.33.1",
   "description": "Codex-first trustworthy app-building harness.",
   "skills": "./codex/skills/",
   "mcpServers": "./.codex-mcp.json",
@@ -947,7 +947,7 @@ Each item starts with a failing test and ends with full pre-commit success.
 15. **Clean-commit Codex CLI and Claude Code machine receipts**
 16. **Codex Desktop manual receipt**
 17. **Receipt-backed capability and parity declaration**
-18. **SSOT evidence, docs, changelog, and v4.33.0 release sync**
+18. **SSOT evidence, docs, changelog, and v4.33.1 release sync**
 
 One concern should remain one commit. A later issue discovered by review receives its own
 TDD commit rather than being folded into an unrelated item.

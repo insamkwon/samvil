@@ -1037,6 +1037,129 @@ def test_legacy_migration_ignores_codex_owned_system_skill_namespace(
     assert not any(str(system_root.absolute()) in blocker for blocker in plan.blockers)
 
 
+@pytest.mark.parametrize(
+    ("target_kind", "target_builder"),
+    [
+        ("relative_exact", lambda skills, legacy: Path("samvil-resume")),
+        ("absolute_exact", lambda skills, legacy: legacy),
+        ("descendant", lambda skills, legacy: legacy / "nested"),
+        ("ancestor", lambda skills, legacy: Path(".")),
+    ],
+)
+def test_legacy_migration_blocks_preserved_symlink_overlapping_legacy_source(
+    tmp_path: Path,
+    target_kind: str,
+    target_builder: object,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy)
+    preserved = codex_home / "skills" / "personal-link"
+    target = target_builder(codex_home / "skills", legacy)  # type: ignore[operator]
+    preserved.symlink_to(target, target_is_directory=True)
+    before_link = (preserved.lstat(), preserved.readlink())
+    before_legacy = (legacy.lstat(), tuple(sorted(path.relative_to(legacy).as_posix() for path in legacy.rglob("*"))))
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is False, target_kind
+    assert any(
+        str(preserved.absolute()) in blocker and "overlap" in blocker
+        for blocker in plan.blockers
+    )
+    assert (preserved.lstat(), preserved.readlink()) == before_link
+    assert (
+        legacy.lstat(),
+        tuple(sorted(path.relative_to(legacy).as_posix() for path in legacy.rglob("*"))),
+    ) == before_legacy
+
+
+def test_legacy_migration_preserves_unrelated_external_symlink_target(
+    tmp_path: Path,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    codex_home = tmp_path / "profile" / ".codex"
+    legacy = codex_home / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy)
+    external = tmp_path / "external-skill"
+    external.mkdir()
+    (external / "SKILL.md").write_text(
+        "---\nname: external\n---\nkeep\n", encoding="utf-8"
+    )
+    preserved = codex_home / "skills" / "personal-link"
+    preserved.symlink_to(external, target_is_directory=True)
+
+    plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+
+    assert plan.to_dict()["ready"] is True
+    artifact = next(item for item in plan.artifacts if item.path == preserved.absolute())
+    assert artifact.status == "preserved"
+    assert preserved.readlink() == external
+
+
+def test_codex_system_nested_symlink_is_ignored_by_planner_and_executor(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    codex_home = tmp_path / "profile" / ".codex"
+    system_root = codex_home / "skills" / ".system"
+    outside = tmp_path / "system-target"
+    outside.mkdir()
+    system_root.mkdir(parents=True)
+    nested_link = system_root / "nested-link"
+    nested_link.symlink_to(outside, target_is_directory=True)
+
+    migration_plan = installer.build_legacy_migration_plan(
+        repo_root=repo,
+        codex_home=codex_home,
+    )
+    assert migration_plan.to_dict()["ready"] is True
+    assert installer.inventory_personal_skills(codex_home / "skills") == ()
+    assert installer._unsafe_personal_skill_links(codex_home / "skills") == ()
+
+    commands: list[tuple[str, ...]] = []
+    receipt = _execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda command, _env: commands.append(command),
+    )
+
+    assert receipt.to_dict()["personal_skills_unchanged"] is True
+    assert nested_link.is_symlink()
+    assert nested_link.readlink() == outside
+    assert not list((codex_home / "backups").glob("unexpected-personal-skills-*"))
+    assert commands
+
+
+def test_preserved_regular_file_fifo_race_fails_closed_without_blocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preserved = tmp_path / "AGENTS.md"
+    preserved.write_text("personal\n", encoding="utf-8")
+    fifo = tmp_path / "replacement.fifo"
+    os.mkfifo(fifo)
+    original_open = installer.os.open
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+
+    def open_fifo(path: object, flags: int, mode: int = 0o777) -> int:
+        assert nonblock and flags & nonblock
+        return original_open(fifo, os.O_RDONLY | nonblock)
+
+    monkeypatch.setattr(installer.os, "open", open_fifo)
+
+    with pytest.raises(InstallBlocked, match="non-regular"):
+        installer.snapshot_preserved_path(preserved)
+
+
 def test_public_executor_requires_native_readback_before_any_write(
     tmp_path: Path,
 ) -> None:
@@ -2351,6 +2474,43 @@ def test_isolated_executor_blocks_backups_parent_symlink(tmp_path: Path) -> None
 
     assert commands == []
     assert list(outside.iterdir()) == []
+
+
+def test_migration_regular_file_reader_rejects_fifo_without_blocking(tmp_path: Path) -> None:
+    fifo = tmp_path / "backup"
+    os.mkfifo(fifo)
+
+    with pytest.raises(InstallBlocked, match="regular file"):
+        migration._read_regular_file_digest(fifo)
+
+
+def test_migration_receipt_backup_path_rejects_symlink_ancestor(tmp_path: Path) -> None:
+    root = tmp_path / "profile"
+    backups = root / "backups"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root.mkdir()
+    backups.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(InstallBlocked, match="symbolic-link ancestor"):
+        migration._ensure_no_symlink_ancestors(backups / "transaction" / "backup", root=root)
+
+
+def test_isolated_executor_invokes_boundary_callback_before_mutation(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    codex_home = tmp_path / "codex-home" / ".codex"
+    repo.mkdir()
+    calls: list[str] = []
+
+    receipt = _execute_isolated_install(
+        CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+        codex_home=codex_home,
+        command_runner=lambda _command, _env: None,
+        boundary_callback=lambda: calls.append("verified"),
+    )
+
+    assert receipt.commands
+    assert calls
 
 
 def test_isolated_executor_accepts_explicit_custom_codex_home_name(
