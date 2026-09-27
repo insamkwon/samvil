@@ -1059,7 +1059,20 @@ def test_legacy_migration_blocks_preserved_symlink_overlapping_legacy_source(
     target = target_builder(codex_home / "skills", legacy)  # type: ignore[operator]
     preserved.symlink_to(target, target_is_directory=True)
     before_link = (preserved.lstat(), preserved.readlink())
-    before_legacy = (legacy.lstat(), tuple(sorted(path.relative_to(legacy).as_posix() for path in legacy.rglob("*"))))
+    # Directory traversal may update Linux atime without changing the user's
+    # content or identity.  Compare mutation-relevant metadata only.
+    legacy_metadata = legacy.lstat()
+    before_legacy = (
+        (
+            legacy_metadata.st_dev,
+            legacy_metadata.st_ino,
+            legacy_metadata.st_mode,
+            legacy_metadata.st_size,
+            legacy_metadata.st_mtime_ns,
+            legacy_metadata.st_ctime_ns,
+        ),
+        tuple(sorted(path.relative_to(legacy).as_posix() for path in legacy.rglob("*"))),
+    )
 
     plan = installer.build_legacy_migration_plan(
         repo_root=repo,
@@ -1072,8 +1085,16 @@ def test_legacy_migration_blocks_preserved_symlink_overlapping_legacy_source(
         for blocker in plan.blockers
     )
     assert (preserved.lstat(), preserved.readlink()) == before_link
+    current_legacy_metadata = legacy.lstat()
     assert (
-        legacy.lstat(),
+        (
+            current_legacy_metadata.st_dev,
+            current_legacy_metadata.st_ino,
+            current_legacy_metadata.st_mode,
+            current_legacy_metadata.st_size,
+            current_legacy_metadata.st_mtime_ns,
+            current_legacy_metadata.st_ctime_ns,
+        ),
         tuple(sorted(path.relative_to(legacy).as_posix() for path in legacy.rglob("*"))),
     ) == before_legacy
 
