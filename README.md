@@ -1,8 +1,8 @@
-# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.33.0`
+# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.33.4`
 
 > **코딩 몰라도 괜찮아요. AI가 대신 만들어드려요.**
 
-[![버전](https://img.shields.io/badge/버전-v4.33.0-blue)](CHANGELOG.md)
+[![버전](https://img.shields.io/badge/버전-v4.33.4-blue)](CHANGELOG.md)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-네이티브-green)](https://claude.ai/code)
 [![Codex CLI](https://img.shields.io/badge/Codex_CLI-네이티브_후보-orange)](https://github.com/openai/codex)
 [![Gemini CLI](https://img.shields.io/badge/Gemini_CLI-실험적_stub-lightgrey)](https://github.com/google-gemini/gemini-cli)
@@ -12,7 +12,7 @@
 
 ## 이게 뭐예요?
 
-SAMVIL은 Claude Code와 Codex를 위한 AI 앱 개발 도우미예요. v4.33.0은 Codex
+SAMVIL은 Claude Code와 Codex를 위한 AI 앱 개발 도우미예요. v4.33.1은 Codex
 플러그인, `samvil:run`/`resume`/`status`, 그리고 재시도 가능한 단계 전이
 컨트롤러를 제공합니다. 다만 실제 Codex CLI 전체 시나리오는 로컬 OAuth 재인증이
 필요해 아직 PASS가 아니며, Gemini CLI 어댑터는 실험적 stub 단계입니다.
@@ -86,8 +86,8 @@ npm run dev    # → 브라우저에서 localhost:3000
 ### Codex CLI로 시작하기
 
 > 현재 지원 경계: 설치·공개 스킬·MCP 전이 컨트롤러와 Codex Desktop의 중복 없는
-> transition retry는 검증했습니다. 실제 Codex CLI 전체 stage matrix는 OAuth
-> 재인증 후 별도 runtime receipt가 필요합니다.
+> transition retry는 검증했습니다. 실제 Codex CLI 전체 stage matrix는 아직
+> 미검증이며, 유효한 인증과 별도의 runtime receipt가 필요합니다.
 
 **1단계 — 저장소 받기**
 
@@ -109,12 +109,38 @@ marketplace/plugin만 등록합니다. 전역 `AGENTS.md`를 덮어쓰거나 절
 점검 결과가 기존 SAMVIL 전역 스킬·`AGENTS.md`·직접 MCP 등록을 발견하면 설치 대신
 `bash scripts/setup-codex.sh codex --migrate`를 한 번 실행하세요. 스크립트가 먼저
 읽기 전용 계획 해시를 고정하고, SAMVIL이 생성한 것으로 증명된 항목만 시간 표시
-백업으로 옮긴 뒤 네이티브 플러그인을 설치합니다. 사용자 수정 항목은 건드리지 않고
-차단합니다. 네이티브 활성화가 완료되기 전의 일반적인 설치 실패는 옮긴 항목을 원래
+백업으로 옮긴 뒤 네이티브 플러그인을 설치합니다. 분류할 수 없는 사용자 수정 항목은
+건드리지 않고 차단하며, 지원되는 개인 스킬 링크와 수정된 `AGENTS.md`는 그대로
+보존합니다. 네이티브 활성화가 완료되기 전의 일반적인 설치 실패는 옮긴 항목을 원래
 위치로 복구합니다. 활성화 성공 뒤 최종 검증이 불확실해진 경우에는 중복 등록을 만들 수
 있는 추측성 복구 대신 백업과 복구 저널을 보존하고 안전하게 중단합니다.
 `git pull`만으로 기존 설치가 바뀌지는 않습니다. 위 명령은 명시된 단일 `CODEX_HOME`
 프로필만 점검·전환하며, 다른 프로필을 자동으로 순회하지 않습니다.
+
+기존 항목을 이동할 때 개인 스킬 링크가 또 다른 링크를 거치면 의존 관계를
+확정할 수 없어 전환을 차단합니다. 외부 파일이나 개인 링크를 자동으로 수정하지
+않으므로, 점검 결과의 해당 경로를 확인하고 의존 관계를 정리한 뒤 다시 점검하세요.
+`기존스킬/../개인스킬`처럼 이동할 디렉터리를 경유하거나, 파일시스템상 같은
+디렉터리를 대소문자가 다른 이름으로 가리키는 경우도 이동 전에 차단합니다.
+백업만 생성되고 원본 이동 전에 실패한 경우에는 원본의 식별 정보와 내용이 그대로인지
+확인한 뒤 재시도를 허용합니다. 원본이 편집·교체됐거나 복구 근거가 부족하면 계속
+차단하며, 백업과 저널은 임의로 삭제하지 마세요.
+
+복구 근거를 남기기 위해 전환 성공·실패 뒤에도 숨김 격리본이나
+`backups/.personal-skills.*` 사본이 남을 수 있습니다. 부분 marketplace 생성이
+실패하면 이번 생성물로 확인된 디렉터리는 삭제하지 않고
+`marketplaces/.samvil-codex.partial-*`에 보존해 새 점검 후 재시도할 수 있게 합니다.
+동시 수정·교체가 감지된 사용자 항목은 덮어쓰지 않으며, 복구 확인 전에는 이 사본들을
+자동 또는 수동으로 정리하지 마세요. 현재 영수증이 모든 복구 사본의 위치를 열거하지는
+않습니다.
+
+이전 설치가 canonical SAMVIL 저장소의 파일을 가리키는 심볼릭 링크 형태였더라도
+링크의 전체 구조와 대상이 정확히 일치하면 생성된 legacy 항목으로 판정해 백업으로
+옮길 수 있습니다. 외부·혼합·사용자 수정 링크는 그대로 보존하고 마이그레이션을
+차단하며, 안전하게 판별된 개인 스킬 링크는 보존한 채 진행합니다.
+기존 Codex가 직접 MCP 서버 아래에 저장한 도구별 승인 설정은 네이티브 플러그인
+namespace로 같은 값 그대로 옮겨 설정 유실이나 잘못된 `mcp_servers` 전송 구성을
+남기지 않습니다.
 
 **3단계 — 호스트 재시작 후 시작!**
 
@@ -330,6 +356,14 @@ bash scripts/setup-codex.sh codex --install  # clean profile
 bash scripts/setup-codex.sh codex --migrate
 ```
 
+마이그레이션 완료 후의 업데이트는 `--check` → `--install` 순서입니다.
+`--migrate` 재호출은 이전 전환 결과가 그대로인지 확인하는 재시도이지, 이후의 개인
+스킬 추가나 `AGENTS.md` 편집을 새 전환으로 승인하는 명령이 아닙니다. 개인 변경으로
+이전 receipt 검증이 막히면 백업·저널을 지우지 말고 `--check`에서 기존 전역 설치가
+남아 있지 않은지 확인한 뒤 `--install`을 사용하세요. 점검이 차단되면 적용하지 마세요.
+재시도 영수증은 해당 전환 당시의 기록이므로 이후 추가한 개인 스킬까지 포함하는
+현재 프로필 전체 목록은 아닙니다. 현재 상태는 새 `--check` 결과로 확인하세요.
+
 새 버전이 있으면 자동으로 알려주고, 업데이트할지 물어봐요.
 
 </details>
@@ -401,6 +435,7 @@ bash scripts/pre-commit-check.sh   # 모두 PASS 떠야 정상
 | 버전 | 주요 변경 |
 |---|---|
 | **v4.33.0** | **Codex native autonomy 후보** — run/resume/status, durable transition controller, 안전한 native installer, Desktop idempotency 증거. |
+| **v4.33.1** | 기존 Codex 설치의 심볼릭 링크 스킬 트리와 정규화된 MCP 도구 승인을 보존하며 네이티브 플러그인으로 안전하게 이전. |
 | **v4.9.0** | **딥 인터뷰 엔진** — 10차원 모호함 채점 + tier별 최소 질문 수 (5/10/20/30/40). 수렴 전 무제한 질문. |
 | **v4.8.5** | README에 인터뷰 대화 스니펫·AI 팀 회의 스니펫·수치 비교표 추가. |
 | **v4.8.4** | Claude Code + Codex CLI 동등 지원 명시. README 시작하기 섹션 양분. |

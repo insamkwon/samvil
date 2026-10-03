@@ -32,6 +32,51 @@ All notable changes to SAMVIL are documented here.
   as deployment/approval authority. Council remains exact opt-in on every host,
   and QA chooses Deploy, Evolve, or Retro gates only after routing is known.
 
+## v4.33.4 — 2026-10-04
+
+- Preserve the original inode immediately after quarantine rename, including
+  late inspection errors and concurrent source-name recreation, so an open-FD
+  edit remains recoverable alongside the independent pre-edit backup.
+- Recover a failed pinned marketplace-wrapper creation by retaining its owned
+  partial directory in no-replace quarantine. Revalidate after moving and
+  restore without overwriting concurrent replacements; do not delete recovery
+  evidence or foreign files to make retry succeed.
+- Return structured blocked JSON for unsafe hardlinked config in both migration
+  dry-run and check diagnostics, without relaxing the regular-file safety rule.
+- Add 15 public-boundary filesystem/diagnostic regression cases, including late
+  manifest/directory replacement and read-atime portability. These tests use a
+  native-registry double and do not establish full Codex CLI stage execution.
+- Document retained recovery copies and operation-bound historical receipts;
+  neither a successful retry nor a historical receipt inventories later edits.
+
+## v4.33.3 — 2026-10-03
+
+- Check each preserved-link path component against legacy filesystem identities
+  before normalizing `..`, so traversal through a retiring directory cannot
+  leave a previously readable personal skill link dangling.
+- Detect case-insensitive legacy/ancestor aliases without following external
+  symlinks; keep unrelated `..` paths eligible. Add six temporary-filesystem
+  regression cases (case-alias cases skip on case-sensitive volumes).
+
+## v4.33.2 — 2026-10-03
+
+- Pass planner-approved personal paths through the normal Codex install CLI,
+  preserving personal skill links after check and after legacy migration.
+- Recover the backup-published/source-not-moved failure window only when the
+  source digest and sealed identity still match. Keep recovery copies, and
+  continue blocking concurrent edits or replacements, including after restart.
+- Block indirect personal-link dependencies before moving legacy sources;
+  inspect path components before normalizing `..` and do not follow aliases.
+- Clarify one-time migration versus later check/install updates. Add 18
+  filesystem/CLI-entry regression cases; native commands remain test doubles,
+  so these tests do not establish real Codex CLI runtime parity.
+
+## v4.33.1 — 2026-08-29
+
+- 기존 Codex 심볼릭 링크 스킬 트리를 출처가 확인된 경우에만 되돌릴 수 있는 백업으로 이전
+- Codex가 정규화한 MCP 도구 승인 설정을 네이티브 플러그인 네임스페이스로 보존
+- 사용자 설정의 멀티라인 문자열과 인용된 TOML 테이블 표기를 안전하게 보존
+
 ---
 
 ## v4.33.0 — 2026-07-26
