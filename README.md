@@ -1,8 +1,8 @@
-# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.33.3`
+# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.33.4`
 
 > **코딩 몰라도 괜찮아요. AI가 대신 만들어드려요.**
 
-[![버전](https://img.shields.io/badge/버전-v4.33.3-blue)](CHANGELOG.md)
+[![버전](https://img.shields.io/badge/버전-v4.33.4-blue)](CHANGELOG.md)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-네이티브-green)](https://claude.ai/code)
 [![Codex CLI](https://img.shields.io/badge/Codex_CLI-네이티브_후보-orange)](https://github.com/openai/codex)
 [![Gemini CLI](https://img.shields.io/badge/Gemini_CLI-실험적_stub-lightgrey)](https://github.com/google-gemini/gemini-cli)
@@ -86,8 +86,8 @@ npm run dev    # → 브라우저에서 localhost:3000
 ### Codex CLI로 시작하기
 
 > 현재 지원 경계: 설치·공개 스킬·MCP 전이 컨트롤러와 Codex Desktop의 중복 없는
-> transition retry는 검증했습니다. 실제 Codex CLI 전체 stage matrix는 OAuth
-> 재인증 후 별도 runtime receipt가 필요합니다.
+> transition retry는 검증했습니다. 실제 Codex CLI 전체 stage matrix는 아직
+> 미검증이며, 유효한 인증과 별도의 runtime receipt가 필요합니다.
 
 **1단계 — 저장소 받기**
 
@@ -125,6 +125,14 @@ marketplace/plugin만 등록합니다. 전역 `AGENTS.md`를 덮어쓰거나 절
 백업만 생성되고 원본 이동 전에 실패한 경우에는 원본의 식별 정보와 내용이 그대로인지
 확인한 뒤 재시도를 허용합니다. 원본이 편집·교체됐거나 복구 근거가 부족하면 계속
 차단하며, 백업과 저널은 임의로 삭제하지 마세요.
+
+복구 근거를 남기기 위해 전환 성공·실패 뒤에도 숨김 격리본이나
+`backups/.personal-skills.*` 사본이 남을 수 있습니다. 부분 marketplace 생성이
+실패하면 이번 생성물로 확인된 디렉터리는 삭제하지 않고
+`marketplaces/.samvil-codex.partial-*`에 보존해 새 점검 후 재시도할 수 있게 합니다.
+동시 수정·교체가 감지된 사용자 항목은 덮어쓰지 않으며, 복구 확인 전에는 이 사본들을
+자동 또는 수동으로 정리하지 마세요. 현재 영수증이 모든 복구 사본의 위치를 열거하지는
+않습니다.
 
 이전 설치가 canonical SAMVIL 저장소의 파일을 가리키는 심볼릭 링크 형태였더라도
 링크의 전체 구조와 대상이 정확히 일치하면 생성된 legacy 항목으로 판정해 백업으로
@@ -353,6 +361,8 @@ bash scripts/setup-codex.sh codex --migrate
 스킬 추가나 `AGENTS.md` 편집을 새 전환으로 승인하는 명령이 아닙니다. 개인 변경으로
 이전 receipt 검증이 막히면 백업·저널을 지우지 말고 `--check`에서 기존 전역 설치가
 남아 있지 않은지 확인한 뒤 `--install`을 사용하세요. 점검이 차단되면 적용하지 마세요.
+재시도 영수증은 해당 전환 당시의 기록이므로 이후 추가한 개인 스킬까지 포함하는
+현재 프로필 전체 목록은 아닙니다. 현재 상태는 새 `--check` 결과로 확인하세요.
 
 새 버전이 있으면 자동으로 알려주고, 업데이트할지 물어봐요.
 

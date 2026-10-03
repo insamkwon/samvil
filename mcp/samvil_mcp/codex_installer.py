@@ -1090,6 +1090,12 @@ def _native_registry_profile_contract(
     try:
         content = _read_regular_file_bytes(config_path)
         parsed = tomllib.loads(content.decode("utf-8"))
+    except InstallBlocked as exc:
+        return (
+            (("config_sha256", "unsafe"),),
+            (),
+            (f"Codex registry config is unsafe: {config_path}: {exc}",),
+        )
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
         return (
             (("config_sha256", "invalid"),),
@@ -3256,7 +3262,53 @@ def _codex_marketplace_wrapper(
     if marketplaces_parent_descriptor is not None:
         wrapper_fd: int | None = None
         manifest_root_fd: int | None = None
+        owned_manifest: os.stat_result | None = None
         created_wrapper = False
+
+        def owned_manifest_matches(metadata: os.stat_result) -> bool:
+            # Reading may update atime (notably on Linux); it is not ownership.
+            return owned_manifest is not None and all(
+                getattr(metadata, field) == getattr(owned_manifest, field)
+                for field in (
+                    "st_dev", "st_ino", "st_mode", "st_nlink", "st_uid", "st_gid",
+                    "st_size", "st_mtime_ns", "st_ctime_ns",
+                )
+            )
+
+        def owned_partial_wrapper_matches(descriptor: int) -> bool:
+            # A failed symlink call owns no link. Extra entries belong to an
+            # unproven writer, as do replacements of either pinned directory.
+            if set(os.listdir(descriptor)) != {".claude-plugin"} or manifest_root_fd is None:
+                return False
+            held_root = os.fstat(manifest_root_fd)
+            named_root = os.stat(".claude-plugin", dir_fd=descriptor, follow_symlinks=False)
+            if (named_root.st_dev, named_root.st_ino) != (held_root.st_dev, held_root.st_ino):
+                return False
+            entries = set(os.listdir(manifest_root_fd))
+            if not entries:
+                return owned_manifest is None
+            if entries != {"marketplace.json"} or owned_manifest is None:
+                return False
+            check_fd = os.open(
+                "marketplace.json",
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+                dir_fd=manifest_root_fd,
+            )
+            try:
+                observed = os.fstat(check_fd)
+                return (
+                    stat.S_ISREG(observed.st_mode)
+                    and observed.st_nlink == 1
+                    and owned_manifest_matches(observed)
+                    and os.read(check_fd, observed.st_size + 1) == expected.encode("utf-8")
+                    and owned_manifest_matches(os.fstat(check_fd))
+                    and owned_manifest_matches(os.stat(
+                        "marketplace.json", dir_fd=manifest_root_fd, follow_symlinks=False
+                    ))
+                )
+            finally:
+                os.close(check_fd)
+
         try:
             existing = os.stat("samvil-codex", dir_fd=marketplaces_parent_descriptor, follow_symlinks=False)
         except FileNotFoundError:
@@ -3291,11 +3343,12 @@ def _codex_marketplace_wrapper(
             try:
                 os.write(manifest_fd, expected.encode("utf-8"))
                 os.fsync(manifest_fd)
+                owned_manifest = os.fstat(manifest_fd)
             finally:
                 os.close(manifest_fd)
-                os.close(manifest_root_fd)
-                manifest_root_fd = None
             os.symlink(str(canonical_root), "samvil", dir_fd=wrapper_fd)
+            os.close(manifest_root_fd)
+            manifest_root_fd = None
             os.close(wrapper_fd)
             wrapper_fd = None
         except BaseException:
@@ -3313,15 +3366,39 @@ def _codex_marketplace_wrapper(
                     except OSError:
                         cleanup_identity = None
                     try:
-                        os.unlink("samvil", dir_fd=cleanup_fd)
-                        cleanup_manifest_fd = os.open(
-                            ".claude-plugin", _directory_flags(), dir_fd=cleanup_fd
-                        )
-                        try:
-                            os.unlink("marketplace.json", dir_fd=cleanup_manifest_fd)
-                        finally:
-                            os.close(cleanup_manifest_fd)
-                        os.rmdir(".claude-plugin", dir_fd=cleanup_fd)
+                        if cleanup_identity is not None and owned_partial_wrapper_matches(cleanup_fd):
+                            from .codex_migration import _rename_no_replace_at
+
+                            # Never unlink after checking a mutable name. Move
+                            # the entire partial wrapper to recovery evidence,
+                            # then revalidate; retained FDs may still be written.
+                            quarantine_name = f".samvil-codex.partial-{secrets.token_hex(16)}"
+                            _rename_no_replace_at(
+                                "samvil-codex", quarantine_name,
+                                source_parent=marketplaces_parent_descriptor,
+                                destination_parent=marketplaces_parent_descriptor,
+                            )
+                            accepted = False
+                            try:
+                                moved = os.stat(
+                                    quarantine_name, dir_fd=marketplaces_parent_descriptor,
+                                    follow_symlinks=False,
+                                )
+                                accepted = (
+                                    cleanup_identity == (moved.st_dev, moved.st_ino)
+                                    and owned_partial_wrapper_matches(cleanup_fd)
+                                )
+                                os.fsync(marketplaces_parent_descriptor)
+                            finally:
+                                if not accepted:
+                                    # A concurrent replacement is preserved at
+                                    # its original name, or in quarantine if a
+                                    # newer original name prevents restoration.
+                                    _rename_no_replace_at(
+                                        quarantine_name, "samvil-codex",
+                                        source_parent=marketplaces_parent_descriptor,
+                                        destination_parent=marketplaces_parent_descriptor,
+                                    )
                     except OSError:
                         pass
             finally:
@@ -3330,17 +3407,6 @@ def _codex_marketplace_wrapper(
                 if cleanup_fd is not None:
                     os.close(cleanup_fd)
                     wrapper_fd = None
-            if cleanup_fd is not None:
-                try:
-                    current = os.stat(
-                        "samvil-codex",
-                        dir_fd=marketplaces_parent_descriptor,
-                        follow_symlinks=False,
-                    )
-                    if cleanup_identity == (current.st_dev, current.st_ino):
-                        os.rmdir("samvil-codex", dir_fd=marketplaces_parent_descriptor)
-                except OSError:
-                    pass
             raise
         return wrapper, True
     if wrapper.exists():

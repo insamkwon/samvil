@@ -475,6 +475,11 @@ def _move_no_replace(
                     source_parent=source_parent,
                     destination_parent=destination_parent,
                 )
+                # From this point the quarantine is the original inode's only
+                # durable name. Preserve it on every later error, including
+                # failed inspections and source-name recreation by another
+                # writer. Only a successful no-replace restore may unlink it.
+                quarantine_kept = True
                 quarantine_metadata = os.stat(
                     quarantine_name,
                     dir_fd=destination_parent,

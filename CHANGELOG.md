@@ -32,6 +32,23 @@ All notable changes to SAMVIL are documented here.
   as deployment/approval authority. Council remains exact opt-in on every host,
   and QA chooses Deploy, Evolve, or Retro gates only after routing is known.
 
+## v4.33.4 — 2026-10-04
+
+- Preserve the original inode immediately after quarantine rename, including
+  late inspection errors and concurrent source-name recreation, so an open-FD
+  edit remains recoverable alongside the independent pre-edit backup.
+- Recover a failed pinned marketplace-wrapper creation by retaining its owned
+  partial directory in no-replace quarantine. Revalidate after moving and
+  restore without overwriting concurrent replacements; do not delete recovery
+  evidence or foreign files to make retry succeed.
+- Return structured blocked JSON for unsafe hardlinked config in both migration
+  dry-run and check diagnostics, without relaxing the regular-file safety rule.
+- Add 15 public-boundary filesystem/diagnostic regression cases, including late
+  manifest/directory replacement and read-atime portability. These tests use a
+  native-registry double and do not establish full Codex CLI stage execution.
+- Document retained recovery copies and operation-bound historical receipts;
+  neither a successful retry nor a historical receipt inventories later edits.
+
 ## v4.33.3 — 2026-10-03
 
 - Check each preserved-link path component against legacy filesystem identities
