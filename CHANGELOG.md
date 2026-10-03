@@ -32,6 +32,19 @@ All notable changes to SAMVIL are documented here.
   as deployment/approval authority. Council remains exact opt-in on every host,
   and QA chooses Deploy, Evolve, or Retro gates only after routing is known.
 
+## v4.33.2 — 2026-10-03
+
+- Pass planner-approved personal paths through the normal Codex install CLI,
+  preserving personal skill links after check and after legacy migration.
+- Recover the backup-published/source-not-moved failure window only when the
+  source digest and sealed identity still match. Keep recovery copies, and
+  continue blocking concurrent edits or replacements, including after restart.
+- Block indirect personal-link dependencies before moving legacy sources;
+  inspect path components before normalizing `..` and do not follow aliases.
+- Clarify one-time migration versus later check/install updates. Add 18
+  filesystem/CLI-entry regression cases; native commands remain test doubles,
+  so these tests do not establish real Codex CLI runtime parity.
+
 ## v4.33.1 — 2026-08-29
 
 - 기존 Codex 심볼릭 링크 스킬 트리를 출처가 확인된 경우에만 되돌릴 수 있는 백업으로 이전

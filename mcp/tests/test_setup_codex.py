@@ -1099,6 +1099,47 @@ def test_legacy_migration_blocks_preserved_symlink_overlapping_legacy_source(
     ) == before_legacy
 
 
+@pytest.mark.parametrize("alias_kind", ["exact", "ancestor", "dotdot", "loop"])
+def test_migration_blocks_unproven_indirect_personal_link_dependency(
+    tmp_path: Path, alias_kind: str,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    profile = tmp_path / "profile" / ".codex"
+    legacy = profile / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy)
+    alias = tmp_path / "external-alias"
+    if alias_kind == "ancestor":
+        alias.symlink_to(legacy.parent, target_is_directory=True)
+        target = alias / legacy.name
+    elif alias_kind == "dotdot":
+        alias.symlink_to(legacy, target_is_directory=True)
+        target = alias / ".." / legacy.name
+    elif alias_kind == "loop":
+        alias.symlink_to(alias)
+        target = alias
+    else:
+        alias.symlink_to(legacy, target_is_directory=True)
+        target = alias
+    link = legacy.parent / "personal-link"
+    link.symlink_to(target, target_is_directory=True)
+    before = installer.snapshot_preserved_path(link)
+    original = (legacy / "SKILL.md").read_bytes()
+    plan = installer.build_legacy_migration_plan(repo_root=repo, codex_home=profile)
+    assert plan.to_dict()["ready"] is False
+    assert any(str(link) in blocker for blocker in plan.blockers)
+    with pytest.raises(InstallBlocked):
+        installer.execute_isolated_install(
+            CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+            codex_home=profile, migrate=True,
+            expected_legacy_plan_sha256=plan.to_dict()["plan_sha256"],
+            command_runner=lambda *_: pytest.fail("blocked plan must not activate"),
+            registry_reader=FakeNativeRegistry().read,
+        )
+    assert installer.snapshot_preserved_path(link) == before
+    assert (legacy / "SKILL.md").read_bytes() == original
+    assert not (profile / "backups").exists()
+
+
 def test_legacy_migration_preserves_unrelated_external_symlink_target(
     tmp_path: Path,
 ) -> None:
@@ -2674,6 +2715,45 @@ def test_isolated_migrate_moves_canonical_link_tree_to_reversible_backup(
     )
 
 
+@pytest.mark.parametrize("migrate_first", [False, True])
+def test_cli_install_preserves_personal_link_after_check_or_migration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], migrate_first: bool,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    profile = tmp_path / "profile" / ".codex"
+    link = profile / "skills" / "personal-link"
+    link.parent.mkdir(parents=True)
+    source = tmp_path / "personal-source"
+    source.mkdir()
+    (source / "SKILL.md").write_text("---\nname: personal\n---\nkeep\n")
+    link.symlink_to(source, target_is_directory=True)
+    before = installer.snapshot_preserved_path(link)
+    registry = FakeNativeRegistry()
+    monkeypatch.setattr(installer, "validate_cli_environment", lambda _: {"ready": True, "blockers": []})
+    monkeypatch.setattr(installer, "_subprocess_runner", registry.run)
+    monkeypatch.setattr(installer, "_subprocess_registry_reader", registry.read)
+    arguments = ["--repo-root", str(repo), "--codex-home", str(profile), "--json"]
+    if migrate_first:
+        legacy = profile / "skills" / "samvil-resume"
+        shutil.copytree(repo / "skills" / "samvil-resume", legacy)
+        plan = installer.build_legacy_migration_plan(repo_root=repo, codex_home=profile)
+        assert len(plan.actions) == 1
+        assert installer._main(["--migrate", *arguments, "--expected-plan-sha256", plan.to_dict()["plan_sha256"]]) == 0
+        migrated = json.loads(capsys.readouterr().out)
+        assert not legacy.exists()
+        backup = next(Path(path) for path in migrated["backup_paths"] if Path(path).name.startswith("legacy-skill-"))
+        assert (backup / "SKILL.md").read_bytes() == (repo / "skills" / "samvil-resume" / "SKILL.md").read_bytes()
+    assert installer._main(["--check", *arguments]) == 0
+    assert json.loads(capsys.readouterr().out)["ready"] is True
+    assert installer._main(["--install", *arguments]) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["preserved_paths_unchanged"] is True
+    assert receipt["preserved_paths_before"] == [before.to_dict()]
+    assert installer.snapshot_preserved_path(link) == before
+    assert (link / "SKILL.md").read_text() == "---\nname: personal\n---\nkeep\n"
+
+
 def test_isolated_migrate_preserves_personal_symlink_in_receipt(
     tmp_path: Path,
 ) -> None:
@@ -3265,6 +3345,84 @@ def test_isolated_migrate_refuses_tampered_journal_without_touching_external_pat
         )
 
     assert external.read_text(encoding="utf-8") == "keep\n"
+
+
+@pytest.mark.parametrize("source_name", ["AGENTS.md", "config.toml"])
+@pytest.mark.parametrize("crash", [False, True])
+@pytest.mark.parametrize("source_change", [None, "edit", "replace"])
+def test_migration_recovers_backup_published_before_source_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    source_name: str, crash: bool, source_change: str | None,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    profile = tmp_path / "profile" / ".codex"
+    profile.mkdir(parents=True)
+    source = profile / source_name
+    if source_name == "AGENTS.md":
+        shutil.copyfile(repo / "AGENTS.md", source)
+    else:
+        source.write_text(
+            '[mcp_servers.samvil-mcp]\n'
+            f'command = "{repo / "mcp" / ".venv" / "bin" / "python"}"\n'
+            'args    = ["-m", "samvil_mcp.server"]\n'
+            'env     = {}\n'
+        )
+    original = source.read_bytes()
+    identity = installer._path_identity(source)
+    checked = installer.build_legacy_migration_plan(repo_root=repo, codex_home=profile)
+    assert len(checked.actions) == 1
+    plan = CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True))
+    registry = FakeNativeRegistry()
+
+    def run():
+        return installer.execute_isolated_install(
+            plan, codex_home=profile, command_runner=registry.run,
+            registry_reader=registry.read, migrate=True,
+            expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+        )
+
+    def fail_move(*args, **kwargs):
+        if source_change == "edit":
+            source.write_bytes(b"personal edit\n")
+        elif source_change == "replace":
+            replacement = source.with_name("personal-replacement")
+            replacement.write_bytes(original)
+            replacement.replace(source)
+        raise InstallBlocked("injected source move failure")
+
+    def interrupt_rollback(*args, **kwargs):
+        raise SystemExit("simulated process interruption before rollback")
+
+    with monkeypatch.context() as fault:
+        fault.setattr(migration, "_rename_no_replace_at", fail_move)
+        if crash:
+            fault.setattr(migration, "_rollback_actions", interrupt_rollback)
+        with pytest.raises(SystemExit if crash else InstallBlocked):
+            run()
+    journal_path = next((profile / "backups" / "legacy-migrations").glob("*/journal.json"))
+    journal = json.loads(journal_path.read_text())
+    backup = Path(journal["actions"][0]["backup"])
+    if source_change is not None:
+        changed_identity = installer._path_identity(source)
+        changed_bytes = source.read_bytes()
+        assert changed_bytes == (b"personal edit\n" if source_change == "edit" else original)
+        assert journal["state"] == ("staging" if crash else "rollback_failed")
+        with pytest.raises(InstallBlocked):
+            run()
+        assert source.read_bytes() == changed_bytes
+        assert installer._path_identity(source) == changed_identity
+        assert backup.read_bytes() == original
+        assert registry.commands == []
+        return
+    assert journal["state"] == ("staging" if crash else "rolled_back")
+    assert backup.read_bytes() == original
+    assert source.read_bytes() == original
+    assert installer._path_identity(source) == identity
+    assert registry.commands == []
+    receipt = run()
+    assert receipt.mode == "migrate"
+    assert json.loads(journal_path.read_text())["state"] == "rolled_back"
+    assert backup.read_bytes() == original
 
 
 def test_isolated_migrate_recovers_a_crash_during_legacy_staging_then_retries(

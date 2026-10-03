@@ -1,8 +1,8 @@
-# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.33.1`
+# SAMVIL — 아이디어 한 줄로 앱 만들기 `v4.33.2`
 
 > **코딩 몰라도 괜찮아요. AI가 대신 만들어드려요.**
 
-[![버전](https://img.shields.io/badge/버전-v4.33.1-blue)](CHANGELOG.md)
+[![버전](https://img.shields.io/badge/버전-v4.33.2-blue)](CHANGELOG.md)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-네이티브-green)](https://claude.ai/code)
 [![Codex CLI](https://img.shields.io/badge/Codex_CLI-네이티브_후보-orange)](https://github.com/openai/codex)
 [![Gemini CLI](https://img.shields.io/badge/Gemini_CLI-실험적_stub-lightgrey)](https://github.com/google-gemini/gemini-cli)
@@ -116,6 +116,13 @@ marketplace/plugin만 등록합니다. 전역 `AGENTS.md`를 덮어쓰거나 절
 있는 추측성 복구 대신 백업과 복구 저널을 보존하고 안전하게 중단합니다.
 `git pull`만으로 기존 설치가 바뀌지는 않습니다. 위 명령은 명시된 단일 `CODEX_HOME`
 프로필만 점검·전환하며, 다른 프로필을 자동으로 순회하지 않습니다.
+
+기존 항목을 이동할 때 개인 스킬 링크가 또 다른 링크를 거치면 의존 관계를
+확정할 수 없어 전환을 차단합니다. 외부 파일이나 개인 링크를 자동으로 수정하지
+않으므로, 점검 결과의 해당 경로를 확인하고 의존 관계를 정리한 뒤 다시 점검하세요.
+백업만 생성되고 원본 이동 전에 실패한 경우에는 원본의 식별 정보와 내용이 그대로인지
+확인한 뒤 재시도를 허용합니다. 원본이 편집·교체됐거나 복구 근거가 부족하면 계속
+차단하며, 백업과 저널은 임의로 삭제하지 마세요.
 
 이전 설치가 canonical SAMVIL 저장소의 파일을 가리키는 심볼릭 링크 형태였더라도
 링크의 전체 구조와 대상이 정확히 일치하면 생성된 legacy 항목으로 판정해 백업으로
@@ -338,6 +345,12 @@ bash scripts/setup-codex.sh codex --install  # clean profile
 # 기존 전역 SAMVIL 설치가 감지되면 위 install 대신:
 bash scripts/setup-codex.sh codex --migrate
 ```
+
+마이그레이션 완료 후의 업데이트는 `--check` → `--install` 순서입니다.
+`--migrate` 재호출은 이전 전환 결과가 그대로인지 확인하는 재시도이지, 이후의 개인
+스킬 추가나 `AGENTS.md` 편집을 새 전환으로 승인하는 명령이 아닙니다. 개인 변경으로
+이전 receipt 검증이 막히면 백업·저널을 지우지 말고 `--check`에서 기존 전역 설치가
+남아 있지 않은지 확인한 뒤 `--install`을 사용하세요. 점검이 차단되면 적용하지 마세요.
 
 새 버전이 있으면 자동으로 알려주고, 업데이트할지 물어봐요.
 

@@ -892,6 +892,31 @@ def _unsafe_directory_path_reason(path: Path, *, label: str) -> str | None:
     return None
 
 
+def _indirect_preserved_target_reason(target: Path) -> str | None:
+    """Reject unresolved alias dependencies without traversing external content.
+
+    Inspect components in their original order: normalizing alias/.. first
+    would hide a symlink whose filesystem meaning differs from lexical .. .
+    Called only when legacy sources would move; ordinary installs are unaffected.
+    """
+
+    current = Path(target.anchor)
+    for part in target.parts[1:]:
+        current /= part
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return "preserved personal symlink dependency cannot be inspected safely"
+        if stat.S_ISLNK(metadata.st_mode):
+            return (
+                "preserved personal symlink has an indirect target; legacy source "
+                "overlap cannot be ruled out without following external aliases"
+            )
+    return None
+
+
 def _bytes_sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -1915,7 +1940,9 @@ def build_legacy_migration_plan(
             or not generated_legacy_paths
         ):
             continue
-        target = _lexical_absolute(artifact.path.parent / artifact.preserved_target)
+        raw_target = artifact.path.parent / artifact.preserved_target
+        indirect_reason = _indirect_preserved_target_reason(raw_target)
+        target = _lexical_absolute(raw_target)
         overlap = next(
             (
                 legacy_path
@@ -1926,12 +1953,12 @@ def build_legacy_migration_plan(
             ),
             None,
         )
-        if overlap is None:
+        if overlap is None and indirect_reason is None:
             continue
         blocked = replace(
             artifact,
             blocks_mutation=True,
-            reason=(
+            reason=indirect_reason or (
                 "preserved personal symlink target overlaps generated legacy "
                 f"source: {overlap}"
             ),
@@ -4350,6 +4377,11 @@ def _main(argv: list[str] | None = None) -> int:
         migrate=args.migrate,
         expected_legacy_plan_sha256=(
             args.expected_plan_sha256 if args.migrate else legacy_payload["plan_sha256"]
+        ),
+        preserved_paths=tuple(
+            artifact.path
+            for artifact in legacy_migration.artifacts
+            if artifact.status == "preserved"
         ),
     )
     payload = receipt.to_dict()

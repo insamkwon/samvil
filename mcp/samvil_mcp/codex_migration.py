@@ -1667,6 +1667,7 @@ def _journal_actions(plan: Any, transaction: Path) -> list[dict[str, Any]]:
                 "source": str(action.path),
                 "backup": str(backup),
                 "expected_hash": action.expected_hash,
+                "source_identity": list(_action_identity(action)),
                 "replacement_hash": None,
                 "staged": False,
             }
@@ -1791,6 +1792,27 @@ def _rollback_actions(
                 raise installer.InstallBlocked(
                     f"legacy migration backup changed before rollback: {backup}"
                 )
+            if (
+                not record.get("staged")
+                and record["artifact_kind"] in {"global_agents", "direct_mcp_table"}
+                and record.get("source_identity") is not None
+                and profile_identity is not None
+                and source.exists()
+            ):
+                # A copy may be durable before quarantine rename starts. Only
+                # the sealed, untouched source proves that nothing needs undoing.
+                # Retain both files: recovery must not delete a concurrent edit.
+                digest, identity = _read_regular_file_digest_at(
+                    profile_identity.root_descriptor, source.name,
+                    label="unstaged migration source",
+                )
+                if (
+                    digest == record["expected_hash"]
+                    and [*identity[:2], stat.S_IMODE(identity[2]), *identity[3:]]
+                    == record["source_identity"]
+                ):
+                    persist("rolling_back")
+                    continue
             if record["artifact_kind"] == "direct_mcp_table" and source.exists():
                 replacement_hash = record.get("replacement_hash")
                 if profile_identity is not None:
@@ -2024,6 +2046,15 @@ def _validate_journal(
             )
         expected_hash = record.get("expected_hash")
         replacement_hash = record.get("replacement_hash")
+        source_identity = record.get("source_identity")
+        if source_identity is not None and (
+            not isinstance(source_identity, list)
+            or len(source_identity) != 7
+            or any(type(value) is not int or value < 0 for value in source_identity)
+        ):
+            raise installer.InstallBlocked(
+                f"migration journal contains an invalid source identity: {journal_path}"
+            )
         if (
             not isinstance(expected_hash, str)
             or _PLAN_SHA256.fullmatch(expected_hash) is None
