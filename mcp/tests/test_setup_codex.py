@@ -1140,6 +1140,54 @@ def test_migration_blocks_unproven_indirect_personal_link_dependency(
     assert not (profile / "backups").exists()
 
 
+@pytest.mark.parametrize("target_kind", ["relative", "absolute", "nested", "case", "case_parent", "safe"])
+def test_migration_checks_actual_personal_link_path_dependencies(
+    tmp_path: Path, target_kind: str,
+) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    profile = tmp_path / "profile" / ".codex"
+    legacy = profile / "skills" / "samvil-resume"
+    shutil.copytree(repo / "skills" / "samvil-resume", legacy)
+    personal = legacy.parent / "personal-real"
+    personal.mkdir()
+    (personal / "SKILL.md").write_text("---\nname: personal-real\n---\nkeep\n")
+    targets = {
+        "relative": Path("samvil-resume/../personal-real"),
+        "absolute": legacy / ".." / "personal-real",
+        "nested": Path("samvil-resume/../samvil-resume/../personal-real"),
+        "case": Path("SAMVIL-resume"),
+        "case_parent": Path("../SKILLS"),
+        "safe": Path("../skills/personal-real"),
+    }
+    target = targets[target_kind]
+    if target_kind.startswith("case") and not (legacy.parent / target).exists():
+        pytest.skip("temporary filesystem is case-sensitive")
+    link = legacy.parent / "personal-link"
+    link.symlink_to(target, target_is_directory=True)
+    assert link.exists()
+    before = installer.snapshot_preserved_path(link)
+    original = (legacy / "SKILL.md").read_bytes()
+    checked = installer.build_legacy_migration_plan(repo_root=repo, codex_home=profile)
+    assert len(checked.actions) == 1
+    if target_kind == "safe":
+        assert checked.to_dict()["ready"] is True
+    else:
+        assert checked.to_dict()["ready"] is False
+        assert any(str(link) in reason and "overlap" in reason for reason in checked.blockers)
+        with pytest.raises(InstallBlocked):
+            installer.execute_isolated_install(
+                CodexInstallPlan(repo.resolve(), CodexCapabilityProbe(True, True)),
+                codex_home=profile, migrate=True,
+                expected_legacy_plan_sha256=checked.to_dict()["plan_sha256"],
+                command_runner=lambda *_: pytest.fail("must block before activation"),
+                registry_reader=FakeNativeRegistry().read,
+            )
+        assert not (profile / "backups").exists()
+    assert installer.snapshot_preserved_path(link) == before
+    assert (legacy / "SKILL.md").read_bytes() == original
+    assert (personal / "SKILL.md").read_text() == "---\nname: personal-real\n---\nkeep\n"
+
+
 def test_legacy_migration_preserves_unrelated_external_symlink_target(
     tmp_path: Path,
 ) -> None:

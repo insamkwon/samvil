@@ -32,6 +32,15 @@ All notable changes to SAMVIL are documented here.
   as deployment/approval authority. Council remains exact opt-in on every host,
   and QA chooses Deploy, Evolve, or Retro gates only after routing is known.
 
+## v4.33.3 — 2026-10-03
+
+- Check each preserved-link path component against legacy filesystem identities
+  before normalizing `..`, so traversal through a retiring directory cannot
+  leave a previously readable personal skill link dangling.
+- Detect case-insensitive legacy/ancestor aliases without following external
+  symlinks; keep unrelated `..` paths eligible. Add six temporary-filesystem
+  regression cases (case-alias cases skip on case-sensitive volumes).
+
 ## v4.33.2 — 2026-10-03
 
 - Pass planner-approved personal paths through the normal Codex install CLI,

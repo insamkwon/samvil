@@ -892,7 +892,9 @@ def _unsafe_directory_path_reason(path: Path, *, label: str) -> str | None:
     return None
 
 
-def _indirect_preserved_target_reason(target: Path) -> str | None:
+def _indirect_preserved_target_reason(
+    target: Path, legacy_paths: tuple[Path, ...],
+) -> str | None:
     """Reject unresolved alias dependencies without traversing external content.
 
     Inspect components in their original order: normalizing alias/.. first
@@ -900,8 +902,21 @@ def _indirect_preserved_target_reason(target: Path) -> str | None:
     Called only when legacy sources would move; ordinary installs are unaffected.
     """
 
+    def identity(path: Path) -> tuple[int, int]:
+        metadata = path.lstat()
+        return metadata.st_dev, metadata.st_ino
+
+    try:
+        legacy_identities = {identity(path) for path in legacy_paths}
+        ancestor_identities = {
+            identity(parent) for path in legacy_paths for parent in path.parents
+        }
+    except OSError:
+        return "preserved personal symlink dependency cannot be inspected safely"
+
     current = Path(target.anchor)
-    for part in target.parts[1:]:
+    parts = target.parts[1:]
+    for index, part in enumerate(parts):
         current /= part
         try:
             metadata = current.lstat()
@@ -914,6 +929,14 @@ def _indirect_preserved_target_reason(target: Path) -> str | None:
                 "preserved personal symlink has an indirect target; legacy source "
                 "overlap cannot be ruled out without following external aliases"
             )
+        current_identity = (metadata.st_dev, metadata.st_ino)
+        # A legacy directory is required even in legacy/../personal. Compare
+        # filesystem identity rather than spelling (case-insensitive volumes).
+        # Ancestors overlap only as the final target, not while walking /home/...
+        if current_identity in legacy_identities or (
+            index == len(parts) - 1 and current_identity in ancestor_identities
+        ):
+            return "preserved personal symlink path overlaps generated legacy source"
     return None
 
 
@@ -1941,7 +1964,7 @@ def build_legacy_migration_plan(
         ):
             continue
         raw_target = artifact.path.parent / artifact.preserved_target
-        indirect_reason = _indirect_preserved_target_reason(raw_target)
+        indirect_reason = _indirect_preserved_target_reason(raw_target, generated_legacy_paths)
         target = _lexical_absolute(raw_target)
         overlap = next(
             (
